@@ -1,0 +1,29 @@
+# 工具目录
+AssetStudio*/
+ALPA-*/
+*.zip
+*.7z
+
+# 解包输出
+*.png
+*.jpg
+*.mp3
+*.wav
+*.txt
+*.csv
+*.prefab
+*.anim
+*.controller
+*.mat
+*.shader
+*.asset
+*.fbx
+*.bundle
+
+# 日志
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
