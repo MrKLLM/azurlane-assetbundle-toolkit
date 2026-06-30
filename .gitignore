@@ -1,16 +1,31 @@
-# 工具目录
-AssetStudio*/
-ALPA-*/
+# Keep source and documentation only; ignore game assets and generated outputs
+
+# Large game data and extracted assets
+files/
+Output/
+tools/
+.micode/
+.mimocode/
+
+# Generated metadata and logs
+asset_manifest.json
+paintingface_mapping.json
+ERRORS.log
+*.log
+
+# Archives
 *.zip
 *.7z
 
-# 解包输出
+# Media and Unity asset files
 *.png
 *.jpg
+*.jpeg
+*.webp
 *.mp3
 *.wav
-*.txt
-*.csv
+*.ogg
+*.flac
 *.prefab
 *.anim
 *.controller
@@ -19,11 +34,17 @@ ALPA-*/
 *.asset
 *.fbx
 *.bundle
-
-# 日志
-*.log
+*.bytes
+*.bin
 
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
+venv/
+.env
+
+# Editor / OS noise
+.vscode/
+.DS_Store
+Thumbs.db
