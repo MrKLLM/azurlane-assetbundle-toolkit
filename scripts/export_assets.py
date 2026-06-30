@@ -55,10 +55,10 @@ OUTPUT_ROOT = r"D:\Azur Lane Assets\Output"
 RAW_OUTPUT = os.path.join(OUTPUT_ROOT, "Raw")
 
 # 错误日志
-ERROR_LOG = r"D:\Azur Lane Assets\ERRORS.log"
+ERROR_LOG = r"D:\Azur Lane Assets\docs\ERRORS.log"
 
 # AssetStudioCLI（可选，增强导出能力）
-ASSETSTUDIO_CLI = r"D:\AzurLaneTools\AssetStudioCLI\AssetStudioCLI.exe"
+ASSETSTUDIO_CLI = r"D:\Azur Lane Assets\tools\AssetStudioModGUI.net8.0\AssetStudio.CLI.exe"
 
 # 导出目标配置
 EXPORT_TARGETS = {

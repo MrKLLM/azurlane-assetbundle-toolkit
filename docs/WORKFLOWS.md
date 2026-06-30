@@ -226,3 +226,119 @@
 - 无
 
 **涉及文件**: `TROUBLESHOOTING.md`
+
+---
+
+### WF-9: 立绘合成（Mesh UV 重建算法）
+
+**日期**: 2026-06-20
+**目标**: 从 `_tex` AssetBundle 正确提取并拼合立绘图像
+**适用场景**: Unity AssetBundle 中的立绘使用 Mesh UV 将纹理切割为多个四边形块，需要按 UV 映射重新拼合
+
+**步骤**:
+1. 加载 `_tex` bundle，提取 Texture2D 和独立 Mesh 对象
+2. 用 `MeshHandler` 解析顶点数据（自动处理 channel 描述符和 stride）:
+   ```python
+   from UnityPy.helpers.MeshHelper import MeshHandler
+   handler = MeshHandler(mesh_obj)
+   handler.process()
+   positions = handler.m_Vertices  # List[(x,y,z)]
+   uvs = handler.m_UV0            # List[(u,v)]
+   ```
+3. 获取未翻转纹理（UV 坐标为 bottom-up 设计）:
+   ```python
+   from UnityPy.export.Texture2DConverter import get_image_from_texture2d
+   texture_img = get_image_from_texture2d(data, flip=False)
+   ```
+4. ALPA 算法拼合：每 4 个顶点 = 1 四边形，UV[i] 和 UV[i+2] 定义源纹理矩形，Position[i] 定义粘贴位置，从后向前遍历
+5. 最终输出翻转一次（bottom-up → 标准 top-down）:
+   ```python
+   return Image.fromarray(out_arr).transpose(Image.FLIP_TOP_BOTTOM)
+   ```
+6. 无 Mesh 的 bundle 直接返回纹理（fallback）
+7. 全量运行：multiprocessing 并行，8 进程
+
+**关键决策**:
+- 顶点解析 → `MeshHandler`（而非手动解析 raw bytes），因为不同 bundle 的 stride 和 channel 布局不同
+- 纹理获取 → `flip=False` + 最终翻转输出（而非 `flip=True` 直接用），因为 UV 坐标为 bottom-up 纹理设计
+- 输出目录 → 扁平结构（无子目录），方便批量处理
+
+**踩坑记录**:
+- 手动从 `m_VertexData.m_DataSize` 按固定偏移读 position/UV → 不同 bundle stride 不同，导致全部乱码
+- `data.image` 默认 flip=True → UV 坐标与翻转纹理不匹配，拼出的图倒转
+- 最初方案：翻转纹理 + 翻转 UV V 坐标 → 复杂且易出错
+- 最终方案：unflipped 纹理 + 原始 UV + 最终翻转输出 → 简洁正确
+
+**涉及文件**: `scripts/synthesize_paintings.py`, `TROUBLESHOOTING.md`
+
+---
+
+### WF-10: Spine 动画提取与 WebGL Viewer
+
+**日期**: 2026-06-22
+**目标**: 从 AssetBundle 提取 Spine 骨骼动画数据，构建 WebGL 查看器
+**适用场景**: 游戏资源解包后需要查看/播放 Spine 动画
+
+**步骤**:
+1. 识别 .skel/.atlas/.png 三件套格式（spine 3.8.99 二进制，非标准 4.x）
+2. 编写 `extract_spine.py` 用 UnityPy 提取 TextAsset（.skel/.atlas）和 Texture2D（.png）
+3. 处理多变体命名：`{name}B.skel`、`{name}M.skel`、`{name}T.skel`
+4. 从 GitHub 下载 spine 3.8 runtime 源码（`3.8_spine-core.js` + `3.8_spine-webgl.js`）
+5. 构建 WebGL Viewer：`ManagedWebGLRenderingContext` + `SceneRenderer` + `OrthoCamera`
+6. 生成 `spine_manifest.json` 供前端读取角色列表
+
+**关键决策**:
+- 二进制格式 → spine 3.8（非 4.x），需下载 3.8 分支 runtime
+- 渲染方案 → 最初用 Canvas2D `drawTriangles`（clip-based），三角形缝隙严重 → 切换 WebGL
+- 预乘 Alpha → Unity 导出纹理使用 PMA，需 `premultipliedAlpha=true` + `ONE,ONE_MINUS_SRC_ALPHA` 混合
+- Y 轴方向 → 数据为 Unity Y-up，WebGL camera 默认 Y-up，不需要 `skeleton.scaleY=-1`
+
+**踩坑记录**:
+- `Object.keys(skeletonData.animations)` 返回数组索引 `["0","1",...]`，不是动画名 → 需遍历 `.name` 属性
+- Canvas2D clip-based 三角形渲染产生大量视觉伪影（碎裂效果）→ 改用 WebGL
+- `skeleton.scaleY=-1` 在 Canvas2D 中修正方向，但在 WebGL 中导致上下颠倒 → 坐标系不同
+- 部分 `_hx` 变体无独立 `_res` bundle → 资源在父 bundle 中
+- `talin_4` 只有 png 无 skel/atlas → 异常数据
+
+**涉及文件**: `scripts/extract_spine.py`, `tools/spine-viewer/index.html`, `tools/spine-viewer/spine-runtime/`
+
+---
+
+### WF-11: 子智能体（Subagent）并行策略
+
+**日期**: 2026-06-22
+**目标**: 优化大型任务的执行效率，合理使用 agent 并行能力
+**适用场景**: 耗时操作、多模块并行开发、格式逆向工程
+
+**Agent 类型选择**:
+
+| 类型 | 适用场景 | 特点 |
+|---|---|---|
+| `explore` | 代码探索、格式分析、查找定义 | 只读，快速 |
+| `general` | 实际编码、多步任务、复杂分析 | 可读写，完整能力 |
+| `spawn` (background) | 耗时脚本执行、大批量处理 | 后台运行，父对话继续 |
+| `run` (blocking) | 需要立即拿到结果的短任务 | 阻塞等待，结果内联返回 |
+
+**适合派生子智能体的场景**:
+1. **耗时脚本执行**（>5 分钟）→ spawn background agent 跑，父对话继续做其他事
+2. **格式逆向工程** → explore agent 并行分析多个格式/文件
+3. **大范围代码修改** → 多个 general agent 并行处理不同模块
+4. **调试验证** → 等 subagent 结果回来后再决定下一步
+
+**不适合的场景**:
+- 单文件简单修改
+- 需要频繁交互确认的任务
+- 需要读取父对话上下文的任务（子智能体看不到父对话历史）
+
+**父子通信规则**:
+- `run` 模式：结果直接返回父对话，内联显示
+- `spawn` 模式：子智能体完成后发通知，父对话下次响应时看到
+- 同级子智能体之间**完全隔离**，不能互相读取
+- 工作流总结时，只要把子智能体发现写入主对话文本，workflow-recorder 就能捕获
+
+**本次项目中的应用反思**:
+- `extract_spine.py` 全量运行（15 分钟超时）→ 应 spawn background agent
+- `.skel` 二进制格式分析（多轮手动 Python）→ 应 explore agent 并行
+- Canvas2D→WebGL 切换（读源码+写代码）→ general agent 可并行
+
+**涉及文件**: 无（策略文档）

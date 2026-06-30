@@ -222,3 +222,37 @@ Affected behavior:
 **Status**: Needs further research
 **Reference**: AssetStudio source code at github.com/Perfare/AssetStudio
 **Files**: scripts/extract_motions.py
+
+---
+
+## 11. 立绘合成输出全部乱码/倒转
+
+**Date**: 2026-06-20
+**Symptom**: 合成的立绘图像全部错乱，部件位置不对或上下颠倒
+**Root Cause**: 两个问题叠加：
+
+1. **手动解析顶点数据格式错误** — 脚本直接从 `m_VertexData.m_DataSize` 按固定偏移读取 position/UV，但 Unity 顶点格式由 Channel 描述符定义，不同 bundle 的 stride 和通道布局不同，固定偏移假设不成立
+2. **纹理翻转不匹配** — `data.image` 默认翻转纹理（flip=True），但 Mesh UV 坐标是为 bottom-up 纹理设计的
+
+**Solution**: 使用 UnityPy 内置的正确 API：
+
+```python
+# 正确解析顶点
+from UnityPy.helpers.MeshHelper import MeshHandler
+handler = MeshHandler(mesh_obj)
+handler.process()
+positions = handler.m_Vertices  # List[(x,y,z)]
+uvs = handler.m_UV0            # List[(u,v)]
+
+# 获取未翻转纹理（UV 坐标为 bottom-up 设计）
+from UnityPy.export.Texture2DConverter import get_image_from_texture2d
+texture_img = get_image_from_texture2d(data, flip=False)
+
+# 最终输出翻转一次（从 bottom-up 转为标准 top-down）
+return Image.fromarray(out_arr).transpose(Image.FLIP_TOP_BOTTOM)
+```
+
+**Key insight**: ALPA (AzurLanePaintingAnalysis-Kt) 的 `rebuildPainting()` 使用 `tex.getDecompressedData()`（unflipped BGRAB）+ mesh UV，拼完后再翻转输出。我们的 MeshHandler 方案等价。
+
+**Files**: `scripts/synthesize_paintings.py`
+**Scope**: 5,859 个 _tex bundle，修复后 5,847 个成功（12 个为 UI/背景等非标准格式）

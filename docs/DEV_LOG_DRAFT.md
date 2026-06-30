@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 目录只读审计报告
 
-> **审计时间**: 2026-06-19  
+> **审计时间**: 2026-06-21（工具链更新）  
 > **审计路径**: `D:\Azur Lane Assets\files\AssetBundles`  
 > **审计模式**: 只读（不修改任何源文件）
 
@@ -410,20 +410,28 @@ dorm3d/
 
 ## 4. 工具链缺口评估
 
-### 必须安装的工具
+### 已安装工具
 
-| 工具 | 用途 | 下载地址 | 版本建议 |
+| 工具 | 用途 | 状态 | 位置 |
 |---|---|---|---|
-| **AssetStudio** | 读取/预览/导出 Unity AssetBundle 中的 Texture2D、AudioClip、Mesh、Sprite 等资源。支持批量加载和搜索。 | [GitHub: Anatawa12/AssetStudio](https://github.com/Anatawa12/AssetStudio) | v0.16.0+ |
-| **AssetStudioGUI** | AssetStudio 的 GUI 版本，提供可视化界面进行批量预览、筛选和导出。 | 同 AssetStudio 仓库 | 与 AssetStudio 同版本 |
-| **UABE (Unity Asset Bundle Extractor)** | 直接编辑/导出 AssetBundle 内的资源，支持 .dat 导出和导入。 | [GitHub: SerenityCode/UnityAssetBundleExtractor](https://github.com/SerenityCode/UnityAssetBundleExtractor) | v3.0+ |
-| **AssetRipper** | 自动化拆包工具，可将整个 AssetBundle 目录反向工程为可编辑的 Unity 项目结构。 | [GitHub: AssetRipper/AssetRipper](https://github.com/AssetRipper/AssetRipper) | 最新版 |
-| **UnityPy** | Python 库，用于脚本化批量处理 AssetBundle。适合编写自动化导出脚本。 | [PyPI: UnityPy](https://pypi.org/project/UnityPy/) | v1.10+ |
-| **Python 3.x** | 运行 UnityPy 脚本的运行环境。 | [python.org](https://www.python.org/) | 3.10+ |
-| **Spine Viewer** | 预览和导出 Spine 动画。 | [Esoteric Software](https://esotericsoftware.com/spine-player) | Spine 3.8+ |
-| **Live2D Cubism Viewer** | 预览 Live2D 模型和动作。 | [Live2D 官网](https://www.live2d.com/) | Cubism 4.2+ |
-| **ffmpeg** | 处理 `.cpk` 视频包中的视频流，提取/转换视频。 | [ffmpeg.org](https://ffmpeg.org/download.html) | 最新稳定版 |
-| **7-Zip** | 解压 `.cpk` 封存包（部分 .cpk 可用 7z 打开）。 | [7-zip.org](https://www.7-zip.org/) | 23.01+ |
+| **Python 3.13** | 运行脚本 | ✅ 已安装 | 系统 |
+| **UnityPy 1.25.0** | 读取/导出 AssetBundle | ✅ 已安装 | pip |
+| **Pillow 12.0.0** | 图像处理 | ✅ 已安装 | pip |
+| **AssetStudio v2.4.1** | Unity 资产提取 | ✅ 已安装 | `tools/AssetStudio-v2.4.1/` |
+| **AssetStudioModGUI** | Mod 版（含密钥） | ✅ 已安装 | `tools/AssetStudioModGUI.net8.0/` |
+| **ALPA v1.0.5.1** | 立绘/头像注入 | ✅ 已安装 | `tools/ALPA-1.0.5.1/` |
+| **Java 17.0.19** | ALPA 运行时 | ✅ 已安装 | `%LOCALAPPDATA%\Java\jdk-17.0.19+10` |
+| **ffmpeg 7.1** | 音频/视频处理 | ✅ 已安装 | `%LOCALAPPDATA%\ffmpeg` |
+| **vgmstream v2117** | CRIWARE 音频解码 | ✅ 已安装 | `%LOCALAPPDATA%\vgmstream` |
+| **CriPakTools** | CPK 文件解包 | ✅ 已编译 | `tools/CriPakTools/` |
+| **usmbreak** | CRIWARE USM 解密 | ✅ 已编译 | `%USERPROFILE%\.cargo\bin\usmbreak.exe` |
+| **Rust 1.96.0** | 编译 Rust 工具 | ✅ 已安装 | `%USERPROFILE%\.cargo\bin` |
+
+### 未安装/可选工具
+
+| 工具 | 用途 | 下载地址 | 优先级 |
+|---|---|---|---|
+| **Spine Viewer** | 预览 Spine 动画 | [Esoteric Software](https://esotericsoftware.com/spine-player) | 中 |
 
 ### 工具作用详解
 

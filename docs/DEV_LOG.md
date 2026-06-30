@@ -1,7 +1,7 @@
 # 碧蓝航线 AssetBundles 解包与整理 — 完整操作手册
 
-> **版本**: v1.0  
-> **日期**: 2026-06-19  
+> **版本**: v1.1  
+> **日期**: 2026-06-21  
 > **状态**: 可执行
 
 ---
@@ -119,17 +119,35 @@ Test-Path "D:\AzurLaneTools\AssetStudioCLI\AssetStudioCLI.exe"
 确保以下目录存在：
 ```
 D:\Azur Lane Assets\
-├── files\AssetBundles\      # 源数据（只读）
-├── scripts\                 # 脚本目录
-│   ├── scan_assets.py       # 扫描清单
-│   ├── export_assets.py     # 批量导出
-│   ├── organize.py          # 分类整理
-│   └── synthesize_paintings.py  # 立绘合成
-├── Output\                  # 输出目录（自动创建）
-├── DEV_LOG.md               # 本手册
-├── DEV_LOG_DRAFT.md         # 审计报告
-├── ERRORS.log               # 错误日志
-└── asset_manifest.json      # 资源清单（scan 后生成）
+├── files\AssetBundles\          # 源数据（只读）
+├── scripts\                     # 脚本目录
+│   ├── scan_assets.py           # 扫描清单
+│   ├── export_assets.py         # 批量导出
+│   ├── organize.py              # 分类整理
+│   ├── synthesize_paintings.py  # 立绘合成
+│   ├── reconstruct_live2d.py    # Live2D 还原
+│   ├── fix_model3.py            # model3.json 修复
+│   ├── extract_motions.py       # 动作提取
+│   ├── ship_name_map.py         # 舰名映射
+│   └── debug\                   # 调试/诊断脚本
+├── tools\                       # 工具目录
+│   ├── ALPA-1.0.5.1\           # 立绘注入工具（需 Java 17）
+│   ├── AssetStudio-v2.4.1\     # Unity 资产提取（推荐）
+│   ├── AssetStudioModGUI.net8.0\  # Mod 版（含加密密钥）
+│   └── AssetStudioModGUI_net8_win64\  # 精简版
+├── Output\                      # 输出目录（自动创建）
+├── docs\                        # 文档目录
+│   ├── README.md
+│   ├── PROJECT_STATUS.md        # 进度总结
+│   ├── DEV_LOG.md               # 本手册
+│   ├── DEV_LOG_DRAFT.md         # 审计报告
+│   ├── TROUBLESHOOTING.md       # 踩坑记录
+│   ├── WORKFLOWS.md             # 工作流
+│   ├── ERRORS.log               # 错误日志
+│   ├── ALPA使用说明.md
+│   └── AssetStudio使用说明.md
+├── AGENTS.md                    # Agent 行为规则
+└── asset_manifest.json          # 资源清单（scan 后生成）
 ```
 
 ---
@@ -414,50 +432,113 @@ Get-Content "D:\Azur Lane Assets\ERRORS.log" | Select-Object -Last 20
 
 ### A. 完整文件清单
 
+**核心脚本** (`scripts/`):
+
 | 脚本 | 功能 | 依赖 |
 |---|---|---|
 | `scan_assets.py` | 扫描生成 JSON 清单 | Python 标准库 |
-| `export_assets.py` | 批量导出资源 | AssetStudioCLI / UABE |
+| `export_assets.py` | 批量导出资源 | UnityPy |
 | `synthesize_paintings.py` | 立绘合成 | UnityPy, Pillow |
-| `organize.py` | 分类整理 | Python 标准库, shutil |
+| `organize.py` | 分类整理 | Python 标准库 |
+| `reconstruct_live2d.py` | Live2D 模型还原 | UnityPy |
+| `fix_model3.py` | model3.json 格式修复 | Python 标准库 |
+| `extract_motions.py` | 动作数据提取 | UnityPy |
+| `ship_name_map.py` | 拼音→中文舰名映射 | Python 标准库 |
+| `export_cue_audio.py` | CRIWARE 音频导出 (.b → .wav) | vgmstream |
+| `generate_audio_doc.py` | 生成音频文档（CV 对照表） | Python 标准库 |
+| `extract_cpk.py` | CPK 视频/音频解包（测试中） | CriPakTools, usmbreak, ffmpeg |
 
-### B. 输出目录结构示例
+**调试脚本** (`scripts/debug/`):
+
+| 脚本 | 功能 |
+|---|---|
+| `_compare_extractors.py` | 对比 UnityPy vs AssetStudio |
+| `_diagnose_atlas.py` | 纹理图集诊断 |
+| `_fix_painting.py` | 立绘修复 |
+| `debug_moc3.py` | moc3 格式调试 |
+| `debug_streamed*.py` | StreamedClip 格式调试 (8个) |
+| `check_moc3*.py` | moc3 结构检查 (3个) |
+| `verify_moc3.py` | moc3 验证 |
+| `diagnose_models.py` | 模型还原状态诊断 |
+
+**工具** (`tools/`):
+
+| 工具 | 用途 | 需要运行时 |
+|---|---|---|
+| ALPA v1.0.5.1 | 立绘/头像注入 | Java 17+ |
+| AssetStudio v2.4.1 | 资产提取（推荐） | .NET 8 |
+| AssetStudioModGUI.net8.0 | 资产提取（含密钥） | .NET 8 |
+| AssetStudioModGUI_net8_win64 | 资产提取（精简） | .NET 8 |
+| CriPakTools | CPK 文件解包 | .NET (已编译) |
+| usmbreak | CRIWARE USM 解密 | Rust (已安装) |
+
+**已安装工具** (`其他位置`):
+
+| 工具 | 位置 | 用途 |
+|---|---|---|
+| Java 17.0.19 | `%LOCALAPPDATA%\Java\jdk-17.0.19+10` | ALPA 运行时 |
+| ffmpeg 7.1 | `%LOCALAPPDATA%\ffmpeg` | 音频/视频处理 |
+| vgmstream v2117 | `%LOCALAPPDATA%\vgmstream` | CRIWARE 音频解码 |
+| Rust 1.96.0 | `%USERPROFILE%\.cargo\bin` | 编译 Rust 工具 |
+
+### B. 输出目录结构
 
 ```
 Output/
-├── Paintings_Synthesized/
-│   ├── 企业/
+├── Raw/                         # AssetStudio/UnityPy 原始导出（精简后 ~2 GB）
+│   ├── painting/                # 已清理（保留 Paintings_Synthesized）
+│   ├── paintingface/            # 面部特写
+│   ├── bg/                      # 场景背景（1,254 文件）
+│   ├── helpbg/                  # 帮助背景（353 文件）
+│   ├── commonbg/                # 通用背景（111 文件）
+│   ├── loadingbg/               # 加载背景（48 文件）
+│   └── ...
+├── Paintings_Synthesized/       # 合成后的完整立绘（5,847 文件，~10 GB）
+│   ├── {中文舰名}/
 │   │   ├── 默认.png
 │   │   ├── 2.png
-│   │   └── 3.png
-│   ├── 爱宕/
-│   │   ├── 默认.png
-│   │   └── 2.png
+│   │   └── ...
 │   └── ...
-├── Paintings/
-│   ├── 企业/
-│   │   ├── 默认.png
-│   │   └── 2_誓约.png
+├── Live2D/                      # 还原的 Live2D 模型（256 个，~3.5 GB）
+│   ├── {name}/
+│   │   ├── {name}.model3.json
+│   │   ├── {name}.moc3
+│   │   ├── {name}.physics3.json
+│   │   ├── texture_*.png
+│   │   └── motion/*.motion3.json
 │   └── ...
-├── Backgrounds/
-│   ├── Scene/
-│   │   ├── bg_daofeng_1.png
-│   │   └── star_level_bg_100.png
-│   ├── Common/
-│   ├── Loading/
-│   └── Help/
-├── Audio/
-│   ├── BGM/
-│   ├── SE/
-│   └── CV/
-├── Live2D/
-├── Spine/
-├── UI/
-├── Icons/
-└── Others/
+├── Audio/                       # 音频（4,370 文件，~14 GB）
+│   ├── BGM/                     # 背景音乐（536 文件）
+│   ├── CV/                      # 角色语音（2,696 文件）
+│   ├── Other/                   # 其他音频（1,136 文件）
+│   ├── SE/                      # 音效（2 文件）
+│   └── 音频资源文档.md           # 音频说明文档
+└── ...
 ```
 
-### C. 快速参考
+### C. Spine Viewer 使用说明
+
+**启动 HTTP 服务器**（必须在项目根目录下启动）:
+```powershell
+cd "D:\Azur Lane Assets"
+python -m http.server 5500
+```
+
+**访问地址**: http://localhost:5500/tools/spine-viewer/index.html
+
+**功能**:
+- 选择角色 → 自动加载并播放动画
+- 多变体角色（如 `aijierB/M/T`）显示变体下拉
+- 鼠标滚轮缩放，左键拖动平移
+- 动画下拉切换动画，Pause/Reset/Fit 按钮
+- 底部信息栏显示角色名、骨骼数、插槽数、动画数、缩放比例
+
+**技术栈**: spine 3.8 runtime（从 GitHub 源码下载）+ WebGL 渲染
+**Manifest**: `Output/Spine/spine_manifest.json`（143 角色，185 变体）
+
+---
+
+### D. 快速参考
 
 ```powershell
 # 完整流程（一键执行）
@@ -467,6 +548,18 @@ python export_assets.py --target all
 python synthesize_paintings.py
 python organize.py
 
+# Spine 提取
+python extract_spine.py --target spinepainting
+
+# 启动 Spine Viewer
+cd "D:\Azur Lane Assets"
+python -m http.server 5500
+# 访问 http://localhost:5500/tools/spine-viewer/index.html
+
 # 检查结果
 Get-ChildItem "D:\Azur Lane Assets\Output" -Directory
+
+# 用 AssetStudio CLI 导出
+cd "D:\Azur Lane Assets\tools\AssetStudio-v2.4.1"
+.\AssetStudio.CLI.exe <输出目录> <输入文件或目录>
 ```

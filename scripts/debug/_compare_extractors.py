@@ -8,7 +8,7 @@ import subprocess
 import os
 from PIL import Image
 
-ASSETSTUDIO_CLI = r"D:\Azur Lane Assets\AssetStudioModGUI.net8.0\AssetStudio.CLI.exe"
+ASSETSTUDIO_CLI = r"D:\Azur Lane Assets\tools\AssetStudioModGUI.net8.0\AssetStudio.CLI.exe"
 PAINTING_DIR = r"D:\Azur Lane Assets\files\AssetBundles\painting"
 TEST_OUTPUT = r"D:\Azur Lane Assets\Output\extractor_comparison"
 os.makedirs(TEST_OUTPUT, exist_ok=True)
