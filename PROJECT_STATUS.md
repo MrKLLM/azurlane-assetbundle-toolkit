@@ -401,12 +401,14 @@ D:\Azur Lane Assets\
 3. ✅ **纹理顺序修复** — 已完成
 4. ✅ **动作数据提取** — 已完成（244/256 模型）
 
-5. ⚠️ **立绘合成**（多部件叠加合成，ALPA 算法）— 已完成但有已知问题
-   - 4,307 个 PNG 文件，12 失败（0.28%）
-   - 输出到 `Output/Paintings_Synthesized/`
-   - **已知问题**: AABB 计算错误、Y轴未翻转、名称匹配遗漏、Pivot 未使用
-   - **⚠️ 修复尝试失败**: AABB + Y-flip 修复均导致全量运行后用户反馈更严重问题，已回退
-   - **详细问题清单**: 见 §6.1 多部件立绘合成 — 已知问题清单
+5. ⚠️ **立绘合成**（多部件叠加合成，ALPA 算法）— 脚本已修复，待全量运行
+   - 历史基线: 4,307 个 PNG（12 失败 0.28%），输出到 `Output/Paintings_Synthesized/`
+   - **2026-07-30 修复（样本已验证通过，详见 §6.1 末尾「2026-07-30 修复记录」）**:
+     - 绘制顺序改为 **Unity 层级兄弟顺序**（父在下、子在上；同层后者盖前者），取代原面积排序 → 修复 aersasi_3 蕨叶盖人
+     - 移除 `_bj` 不透明度 >30% 跳过规则 → 恢复 chaijun_4 等被误删的背景内容（马等）
+     - Sprite `_tex`（无 mesh）按 `flip=True` 修正；Mesh `_tex` 用 `flip=False` + `FLIP_TOP_BOTTOM`
+     - 圣光/光效层按内容（纯白像素占比 ≥80%）跳过；AABB 最小角修正；长宽比缩放不拉伸；bbox 裁边
+   - **待办**: 全量运行（约 4300 文件）需用户确认后执行（先备份旧目录到 `_OLD_bak/`）
 
 6. ✅ **表情差分提取** — 已完成
    - 2,160 个 paintingface bundle → 13,120 张表情贴图
@@ -542,8 +544,35 @@ canvas.paste(comp_img, (x, y), comp_img)
 
 - ✅ `get_bundle_info()`: 正确提取 RectTransform 数据和 _tex bundle 对应关系
 - ✅ `calculate_canvas_size()`: 正确计算所有组件的并集边界
-- ✅ 图层排序: 按面积从大到小排序（背景先绘制，角色覆盖在上面）
+- ✅ 图层排序: **按 Unity 层级兄弟顺序**（父在下、子在上；同层后者盖前者），取代原面积排序（见 2026-07-30 修复记录）
 - ✅ 大多数单部件合成: 5,847/5,859 成功（0.2% 失败率）
+
+### 2026-07-30 修复记录（多部件立绘合成）
+
+**脚本**: `scripts/compose_paintings.py`（自包含，FIXTEST 验证用，未动正式 `Output/Paintings_Synthesized/`）
+
+**本轮修复的 7 处问题（样本验证通过）**:
+1. `PAINTING_DIR` 用绝对路径（避免误指向脚本目录）
+2. `find_tex_path` 增加「去下划线」命名变体（`shop_hx`→`shophx` 等）+ 小写变体
+3. 根 RectTransform（bundle 名）不再被跳过（背负主立绘）
+4. 长宽比缩放用 `min(rect/mesh)`，不拉伸变形
+5. 合成后 `crop(getbbox())` 裁掉透明边
+6. Sprite 资源（无 mesh，GPU Y 向下存储）按 `flip=True`；Mesh 资源用 `flip=False` + `FLIP_TOP_BOTTOM`
+7. 移除「`_bj` 不透明度 >30% 跳过」规则（误删了 chaijun_4 的马等真实内容）
+
+**关键架构修正 — 绘制顺序**:
+- 原脚本用「面积从大到小」排序决定 Z 序，导致背景 `bj`（面积大）画在人物 `rw` 之上（aersasi_3 蕨叶盖脸）。
+- 改为 `build_draw_order()`：按 RectTransform 父子 + `m_Children` 兄弟顺序遍历，父先画（底层）、子后画（上层），同层后者盖前者。
+- 这样 `bj`（背景）自然落在 `rw`（人物）之下，无需任何跳过规则；chaijun_4 的马（在 `bj` 内）也得以保留。
+
+**本轮用户报告并修复的 bug**:
+- `feiteliekaer_3.png` 少脸：经像素级诊断，脸在 `rw` 图层内且已正确渲染（中心偏上头部区域肤色占比 12.5%）。`face` 节点是全项目通用的 UI 热区节点（整个 painting 目录无任何 `_face_tex` 包），不含纹理，跳过它不影响脸；脸始终来自 `rw`。
+- `chaijun_4.png` 少马：根因为第 7 条 `_bj` 跳过规则把含马的 `chaijun_4_bj_tex` 整层删掉（bj 不透明率 51.5% > 30%）。移除规则后马恢复（终图彩色像素 45.9%）。
+- `aersasi_3.png` 蕨叶盖脸（连带发现）：根因是绘制顺序错（面积排序把 `bj` 画到 `rw` 上）。改兄弟顺序后蕨叶落人物后（头部区域蕨叶绿占比 0.1%）。
+
+**验证样本（FIXTEST）**: feiteliekaer_3 / chaijun_4 / aersasi_3 / aerbien_2 / adiliao_2 / adaerbote_2 共 6 张，3 处 bug 均修复，3 张回归样本无异常。
+
+**待办**: 全量运行（约 4300 文件）需用户确认（AGENTS.md 先确认后执行）。
 
 ### 修复优先级建议
 
