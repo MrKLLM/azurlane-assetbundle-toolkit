@@ -37,6 +37,12 @@ ERRORS.log
 *.bytes
 *.bin
 
+# Stray game-asset binaries that may land in scripts/debug (Spine/Live2D)
+*.skel
+*.atlas
+*.moc3
+*.moc
+
 # Python
 __pycache__/
 *.py[cod]
