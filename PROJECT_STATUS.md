@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-06-30（已完成仓库忽略规则与资产索引清理）
+> **生成时间**: 2026-07-30（更新项目结构 / 新增执行模式约定）
 > **用途**: 跨会话对接，方便新会话快速了解项目状态
 
 ---
@@ -293,122 +293,40 @@
 | 目录 | 文件数 | 大小 | 说明 |
 |---|---|---|---|
 | files/AssetBundles | 86,849 | 26.62 GB | 源数据（只读） |
-D:\Azur Lane Assets\
-├── files\AssetBundles\          # 源数据（只读，~26.6 GB）
-├── scripts\                     # 脚本目录
-│   ├── scan_assets.py           # 扫描清单
-│   ├── export_assets.py         # 批量导出
-│   ├── compose_paintings.py    # 立绘合成（多部件叠加）
-│   ├── extract_paintingface.py  # 表情差分提取
-│   ├── reconstruct_live2d.py    # Live2D 还原
-│   ├── fix_model3.py            # model3.json 修复
-│   ├── extract_motions.py       # 动作提取
-│   ├── export_cue_audio.py      # 音频导出
-│   ├── ship_name_map.py         # 舰名映射
-│   └── debug\                   # 调试脚本
-├── tools\                       # 工具目录
-│   ├── ALPA-1.0.5.1\           # 立绘注入（需 Java 17）
-│   ├── AssetStudio-v2.4.1\     # 资产提取（推荐）
-│   └── AssetStudioModGUI*\     # Mod 版/精简版
-├── docs\                        # 文档目录
-│   ├── README.md
-│   ├── PROJECT_STATUS.md
-│   ├── DEV_LOG.md
-│   ├── TROUBLESHOOTING.md
-│   ├── WORKFLOWS.md
-│   ├── ERRORS.log
-│   ├── ALPA使用说明.md
-│   └── AssetStudio使用说明.md
-├── Output\                      # 输出目录 (~30 GB)
-│   ├── Raw\                     # 原始导出（精简后）
-│   │   ├── bg/                  # 场景背景（1,254 文件）
-│   │   ├── helpbg/              # 帮助背景（353 文件）
-│   │   ├── commonbg/            # 通用背景（111 文件）
-│   │   ├── loadingbg/           # 加载背景（48 文件）
-│   │   └── ...                  # 其他背景/特殊资源
-│   ├── Live2D\                  # Live2D 模型（256 个，~3.5 GB）
-│   ├── Paintings_Synthesized\   # 合立绘（4,307 文件，~10 GB）
-│   └── Audio\                   # 音频（4,370 文件，~14 GB）
-│       ├── BGM/                 # 背景音乐（536 文件）
-│       ├── CV/                  # 角色语音（2,696 文件）
-│       ├── Other/               # 其他音频（1,136 文件）
-│       └── SE/                  # 音效（2 文件）
-├── AGENTS.md                    # Agent 行为规则
-└── asset_manifest.json          # 资源清单
 ```
 D:\Azur Lane Assets\
-├── files\AssetBundles\          # 源数据（只读）
-├── scripts\                     # 脚本目录
-│   ├── scan_assets.py           # 扫描清单
-│   ├── export_assets.py         # 批量导出
-│   ├── compose_paintings.py    # 立绘合成（多部件叠加）
-│   ├── extract_paintingface.py  # 表情差分提取
-│   ├── reconstruct_live2d.py    # Live2D 还原
-│   ├── fix_model3.py            # model3.json 修复
-│   ├── extract_motions.py       # 动作提取
-│   ├── export_cue_audio.py      # 音频导出
-│   ├── ship_name_map.py         # 舰名映射
-│   └── debug\                   # 调试脚本
-├── tools\                       # 工具目录
-│   ├── ALPA-1.0.5.1\           # 立绘注入（需 Java 17）
-│   ├── AssetStudio-v2.4.1\     # 资产提取（推荐）
-│   └── AssetStudioModGUI*\     # Mod 版/精简版
-├── docs\                        # 文档目录
-│   ├── README.md
-│   ├── PROJECT_STATUS.md
-│   ├── DEV_LOG.md
-│   ├── TROUBLESHOOTING.md
-│   ├── WORKFLOWS.md
-│   ├── ERRORS.log
-│   ├── ALPA使用说明.md
-│   └── AssetStudio使用说明.md
-├── Output\
-│   ├── Raw\                     # 原始导出（已完成）
-│   │   ├── painting/            # 立绘（11,191 文件）
-│   │   ├── paintingface/        # 面部表情（13,120 文件）
-│   │   ├── bg/                  # 场景背景（1,254 文件）
-│   │   └── ...
-│   ├── Live2D\                  # Live2D 模型（256 个）
-│   ├── Paintings_Synthesized\   # 合立绘（4,307 文件）
-│   └── Audio\                   # 音频（4,370 文件，~14 GB）
-│       ├── BGM/                 # 背景音乐（536 文件）
-│       ├── CV/                  # 角色语音（2,696 文件）
-│       ├── Other/               # 其他音频（1,136 文件）
-│       └── SE/                  # 音效（2 文件）
-├── AGENTS.md                    # Agent 行为规则
-└── asset_manifest.json          # 资源清单
-```
-D:\Azur Lane Assets\
-├── files\AssetBundles\          # 源数据（只读）
-├── scripts\                     # 脚本目录
-│   ├── scan_assets.py           # 扫描清单
-│   ├── export_assets.py         # 批量导出
-│   ├── reconstruct_live2d.py    # Live2D 还原
-│   ├── fix_model3.py            # 修复 model3.json
-│   ├── organize.py              # 分类整理
-│   ├── compose_paintings.py    # 立绘合成（多部件叠加）
-│   ├── extract_paintingface.py  # 表情差分提取（Mesh UV 重建）
-│   └── ship_name_map.py         # 拼音→中文舰名映射
-├── Output\
-│   ├── Raw\                     # 原始导出（已完成）
-│   │   ├── painting/            # 立绘（11,191 文件）
-│   │   ├── paintingface/        # 面部表情（13,120 文件）
-│   │   ├── bg/                  # 场景背景（1,254 文件）
-│   │   ├── helpbg/              # 帮助背景（353 文件）
-│   │   ├── commonbg/            # 通用背景（111 文件）
-│   │   ├── loadingbg/           # 加载背景（61 文件）
-│   │   └── ...
-│   ├── Live2D\                  # Live2D 模型（256 个）
-│   │   ├── lingbo/
-│   │   ├── z23/
-│   │   └── ...
-│   ├── Paintings_Synthesized\   # 合成立绘 + 表情（16,588 文件）
-│   ├── Paintingface\            # 表情贴图原件（13,120 文件）
+├── AGENTS.md                    # agent 行为规则（每次对话自动加载）
+├── PROJECT_STATUS.md            # 进度总结 / 跨会话对接
+├── asset_manifest.json          # 资源清单（25MB，86,849 文件）
 ├── paintingface_mapping.json    # 表情映射关系
-├── asset_manifest.json          # 资源清单
-├── DEV_LOG_DRAFT.md             # 审计报告
-├── DEV_LOG.md                   # 操作手册
-└── ERRORS.log                   # 错误日志
+├── ERRORS.log                   # 导出/合成错误日志
+├── files\                       # 源数据（只读）
+│   └── AssetBundles\           # ~26.6GB，86,849 文件，196 子目录
+├── Output\                      # 输出（~30GB）
+│   ├── Raw\                     # 原始导出（bg/helpbg/commonbg/loadingbg/paintingface 等）
+│   ├── Audio\                   # BGM / CV / Other / SE
+│   ├── Live2D\                  # 256 个模型
+│   ├── Paintingface\            # 表情贴图原件（13,120）
+│   ├── Paintings_Synthesized\   # 合成立绘 + 表情差分（16,588）
+│   ├── Spine\                   # spine 提取 + spine_manifest.json + spinepainting/
+│   └── WikiData\                # 舰船 wiki 数据（ship_data.json）
+├── scripts\                     # 87 个 .py（脚本库）+ debug\
+│   ├── scan_assets.py / export_assets.py / export_cue_audio.py
+│   ├── compose_paintings.py / synthesize_paintings.py
+│   ├── reconstruct_live2d.py / fix_model3.py / extract_motions.py
+│   ├── extract_spine.py / extract_paintingface.py / extract_cpk.py
+│   ├── organize.py / scrape_wiki_fast.py / ship_name_map.py
+│   └── debug\                   # 调试脚本
+├── tools\                       # 外部工具
+│   ├── ALPA-1.0.5.1\            # 立绘注入（Java 17）
+│   ├── AssetStudio-v2.4.1\ / AssetStudioModGUI.net8.0\ / AssetStudioModGUI_net8_win64\
+│   ├── CriPakTools\             # CPK 解包
+│   └── spine-viewer\            # WebGL Viewer（index.html + spine-runtime）
+└── docs\                        # 知识库
+    ├── README.md / DEV_LOG.md / DEV_LOG_DRAFT.md
+    ├── WORKFLOWS.md / TROUBLESHOOTING.md
+    ├── SPEINE_VIEWER_HANDOFF.md # Spine 交接文档（文件名原拼写为 SPEINE）
+    └── ALPA使用说明.md / AssetStudio使用说明.md / ERRORS.log
 ```
 
 ---

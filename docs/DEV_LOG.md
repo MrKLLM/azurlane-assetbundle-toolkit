@@ -38,16 +38,14 @@
 ### 输出目录
 ```
 D:\Azur Lane Assets\Output\
-├── Raw/                    # AssetStudio 原始导出
-├── Paintings/              # 整理后的立绘（按舰名/皮肤）
-├── Paintings_Synthesized/  # 合成后的完整立绘
-├── Backgrounds/            # 背景图（场景/通用/加载）
-├── Live2D/                 # Live2D 模型
-├── Spine/                  # Spine 动画
-├── Audio/                  # 音频（BGM/SE/CV）
-├── UI/                     # UI 资源
-├── Icons/                  # 图标资源
-└── Others/                 # 其他资源
+├── Raw/                         # 原始导出（bg/helpbg/commonbg/loadingbg/paintingface 等）
+├── Audio/                       # 音频（BGM/SE/CV/Other）
+├── Live2D/                      # 还原的 Live2D 模型（256 个）
+├── Paintingface/                # 表情贴图原件（13,120）
+├── Paintings_Synthesized/       # 合成立绘 + 表情差分（16,588）
+├── Spine/                       # Spine 提取（spinepainting/ + spine_manifest.json）
+├── WikiData/                    # 舰船 wiki 数据（ship_data.json）
+└── Paintings_Synthesized.rar    # 合成立绘压缩包
 ```
 
 ---
@@ -143,6 +141,7 @@ D:\Azur Lane Assets\
 │   ├── DEV_LOG_DRAFT.md         # 审计报告
 │   ├── TROUBLESHOOTING.md       # 踩坑记录
 │   ├── WORKFLOWS.md             # 工作流
+│   ├── SPEINE_VIEWER_HANDOFF.md # Spine 交接文档
 │   ├── ERRORS.log               # 错误日志
 │   ├── ALPA使用说明.md
 │   └── AssetStudio使用说明.md
@@ -487,13 +486,14 @@ Get-Content "D:\Azur Lane Assets\ERRORS.log" | Select-Object -Last 20
 Output/
 ├── Raw/                         # AssetStudio/UnityPy 原始导出（精简后 ~2 GB）
 │   ├── painting/                # 已清理（保留 Paintings_Synthesized）
-│   ├── paintingface/            # 面部特写
 │   ├── bg/                      # 场景背景（1,254 文件）
 │   ├── helpbg/                  # 帮助背景（353 文件）
 │   ├── commonbg/                # 通用背景（111 文件）
 │   ├── loadingbg/               # 加载背景（48 文件）
 │   └── ...
-├── Paintings_Synthesized/       # 合成后的完整立绘（5,847 文件，~10 GB）
+├── Paintingface/                # 表情贴图原件（13,120，顶层目录）
+├── Paintings_Synthesized/       # 合成立绘 + 表情差分（16,588 文件）
+├── WikiData/                    # 舰船 wiki 数据（ship_data.json）
 │   ├── {中文舰名}/
 │   │   ├── 默认.png
 │   │   ├── 2.png
