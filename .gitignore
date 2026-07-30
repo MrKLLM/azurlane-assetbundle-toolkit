@@ -54,3 +54,15 @@ venv/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# AI agent local state / memory directories (avoid leaking internal agent data)
+.workbuddy/
+.codebuddy/
+.cline/
+.cursor/
+.aider/
+.continue/
+.augment/
+.windsurf/
+.roo/
+.codeium/
