@@ -15,12 +15,14 @@ from UnityPy.export.Texture2DConverter import get_image_from_texture2d
 
 # 真实 painting 资源目录（绝对路径，避免误指向脚本目录）
 PAINTING_DIR = r"D:\Azur Lane Assets\files\AssetBundles\painting"
+# 面部特写资源目录（独立存放，命名约定 = {bundle_name}，无 _tex 后缀）
+PAINTINGFACE_DIR = r"D:\Azur Lane Assets\files\AssetBundles\paintingface"
 
 def find_tex_path(base_bundle, go_name):
     """根据组件名查找对应的 _tex 资源包。
     参数:
         base_bundle: 基础 bundle 名（如 aerbien_2）
-        go_name:     RectTransform 对应的 GameObject 名（如 build / aerbien_2_rw / shop_hx）
+        go_name:     RectTransform 对应的 GameObject 名（如 build / aerbien_2_rw / shop_hx / face）
     返回:
         找到则返回完整路径，否则返回 None
     """
@@ -43,6 +45,14 @@ def find_tex_path(base_bundle, go_name):
         p = os.path.join(PAINTING_DIR, cand)
         if os.path.exists(p):
             return p
+
+    # 兜底：面部特写存放在 paintingface/ 独立目录，命名约定 = {bundle_name}（无 _tex 后缀）
+    # 例如：feiteliekaer_3 的 face 节点引用 paintingface/feiteliekaer_3 包
+    # 注意：只对 `face` 节点应用此兜底，否则其他找不到 _tex 的 UI 热区会被错误匹配到 paintingface/
+    if go_name == 'face':
+        face_p = os.path.join(PAINTINGFACE_DIR, base_bundle)
+        if os.path.exists(face_p):
+            return face_p
     return None
 
 def synthesize_tex_bundle(bundle_path):

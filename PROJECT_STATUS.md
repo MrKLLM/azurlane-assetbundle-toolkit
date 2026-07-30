@@ -574,6 +574,43 @@ canvas.paste(comp_img, (x, y), comp_img)
 
 **待办**: 全量运行（约 4300 文件）需用户确认（AGENTS.md 先确认后执行）。
 
+### 2026-07-31 修复记录（face 纹理目录支持 — 修正上一轮"脸在 rw"误判）
+
+**问题复盘**：
+- 用户用截图再次报告 `feiteliekaer_3.png` 脸没填充 + 身体位置错。
+- 上一轮我**错误诊断**为"脸在 rw 里、face 是 UI 热区无纹理"——因为我只看了 `painting/` 目录的 _tex 文件，**忽略了独立的 `paintingface/` 面部特写目录**。
+
+**真实根因**：
+- 碧蓝航线把面部特写纹理**单独存放在 `paintingface/` 目录**，命名约定为 `{bundle_name}`（无 `_tex` 后缀）。
+- 整个 `paintingface/` 有 2160 个文件，覆盖几乎所有角色。
+- `feiteliekaer_3` 的 `face` RectTransform（229×211）通过 MeshImage 的 `m_Sprite` 引用 `(file6, pid=-5996719416134721951)`，**该 Sprite 就住在 `paintingface/feiteliekaer_3` 包里**。
+- 原脚本 `find_tex_path` 只搜索 `PAINTING_DIR = .../painting`，永远找不到 face 纹理 → `face` RectTransform 加载不到纹理被跳过。
+
+**修复**：
+- `compose_paintings.py::find_tex_path` 增加 `PAINTINGFACE_DIR` 常量与针对 `face` 节点的兜底分支：
+  ```python
+  if go_name == 'face':
+      face_p = os.path.join(PAINTINGFACE_DIR, base_bundle)
+      if os.path.exists(face_p):
+          return face_p
+  ```
+- **关键约束**：兜底仅对 `go_name == 'face'` 生效，不对所有找不到 _tex 的组件兜底（否则 UI 热区会被错误匹配到 paintingface）。
+
+**验证（FIXTEST）**：
+- `feiteliekaer_3`：components 5→6，脸 RectTransform 加载 paintingface/feiteliekaer_3 成功，229×211 脸纹理按 RectTransform 锚点正确覆盖在角色脸上，无重复。
+- `chaijun_4` / `aersasi_3` / `adiliao_2` / `aerbien_2` / `adaerbote_2` / `abuluqi_2`：全部 components +1（多了 face），无回归。
+- 像素核对 feiteliekaer_3 脸区：彩色占比从 78% → 91%；face RectTransform 区域皮肤占比 9.1%（脸纹理确实在画）。
+
+**脚本当前最终修复列表（8 项）**:
+1. PAINTING_DIR 绝对路径化
+2. find_tex_path 重写（去下划线变体 + 修未定义变量崩溃）
+3. root 根节点不再被跳过
+4. 等比缩放 `min(rect/mesh)`（不拉伸）
+5. 画布 bbox 裁剪 + 纯白光效层跳过（按内容判断）
+6. Sprite 资源自动用 flip=True（按是否含 mesh 选择）
+7. 绘制顺序改为 Unity 层级兄弟顺序（`build_draw_order()`）
+8. **face 纹理从 `paintingface/` 目录加载**（针对 `face` 节点的兜底分支）
+
 ### 修复优先级建议
 
 1. **Bug #2 (Y轴翻转)** — 最关键，影响所有多部件合成的位置正确性。⚠️ 但不能简单翻转，需要先分析单部件输出坐标系
