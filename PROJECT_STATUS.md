@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-07-30（更新项目结构 / 新增执行模式约定）
+> **生成时间**: 2026-08-02（调参工具 v4 — 逐层独立调整 + 磁吸对齐）
 > **用途**: 跨会话对接，方便新会话快速了解项目状态
 
 ---
@@ -611,6 +611,67 @@ canvas.paste(comp_img, (x, y), comp_img)
 7. 绘制顺序改为 Unity 层级兄弟顺序（`build_draw_order()`）
 8. **face 纹理从 `paintingface/` 目录加载**（针对 `face` 节点的兜底分支）
 
+### 2026-07-31 续：feiteliekaer_3「相对躺椅错位」根因定位（contain+居中修复）
+
+**用户反馈**：`feiteliekaer_3.png` 身体「相对躺椅错位」（第 2 轮确认）；第 3 轮用户进一步纠正——躺椅应**平移**、不应**拉伸改比例**。
+
+**两轮纠正记录**：
+- 第 3 轮 A：曾误判为「rw 位置写死无法改」 → 推翻。
+- 第 3 轮 B：曾尝试 `fill_rect`（把部件拉伸铺满 rect） → **用户否决**：躺椅比例被横向拉伸，改的不对。
+- 第 3 轮 C（正确）：根因是**粘贴位置**，不是缩放。
+
+**真正根因（contain + 贴左下角 → 应 contain + 居中）**：
+- 旧脚本等比 contain 缩放**保住了部件比例**（正确），但缩放后图像若小于 rect，旧代码把它**贴到 rect 左下角**，而非在 rect 内**居中**。
+- Unity Image「Preserve Aspect」默认在 rect 内居中显示；旧代码漏了居中 → 全幅背景层（如 `feiteliekaer_3_bj` 躺椅，contain 后图宽 4099 < rect 宽 6296）被甩到左侧，身体（画布绝对坐标、本就正确）就"悬"在躺椅右外。
+- 对 mesh≈rect 的部件（rw/face/泳池背景），contain 后图=rect，居中=无偏移 → **不影响已有正确结果**。
+
+**量化（feiteliekaer_3 单部件内容 bbox，`_test_center_align.py`）**：
+| 方案 | 躺椅内容 x | 躺椅中心 | 身体中心−躺椅中心 | 身体右缘 vs 躺椅 | 比例 |
+|---|---|---|---|---|---|
+| contain+左下角（旧bug） | [1,3980] | 1990 | +1093 | 超出 82px | 不变 |
+| fill（被否） | [5,6113] | — | — | 在内 | ✗拉伸 |
+| **contain+居中（采用）** | [1098,5077] | 3087 | **−4px** | 在内 | 不变 |
+
+→ 躺椅右移 ~1097px、比例不变，身体中心几乎正中落在躺椅上（差 4px），错位修复。
+
+**代码改动**（`scripts/compose_paintings.py`，已落地）：
+- 缩放仍为等比 contain（保持比例，`fill_rect` 参数保留仅作对比测试，默认 False）。
+- **粘贴改为 rect 内居中**：
+  ```python
+  off_x = (rect_w - comp_img.width) / 2.0
+  off_y = (rect_h - comp_img.height) / 2.0
+  px = int(round(c['origin'][0] + off_x))
+  py = int(round(canvas_h - (c['origin'][1] + off_y) - comp_img.height))
+  ```
+- 注释说明：对 mesh≈rect 部件 off≈0 无影响；只修正 contain 后小于 rect 的背景层。
+
+**样本验证**（`Output/Paintings_Synthesized_FIXTEST/center`）：
+feiteliekaer_3 / nubiyaren / gubixuefu / aerbien_2 / aerbien_3 / adiliao_2 全部 100% 覆盖。
+其中 aerbien_2/3、adiliao_2 输出尺寸与旧版**完全一致**（居中为 no-op，无回归）；feiteliekaer_3、nubiyaren 等含"背景层 contain<rect"的角色被正确居中。
+
+**次要问题（未改，待用户拍板）**：face 部件 rect/纹理均为 229×211，但 rw 中脸部占位框高 279（短 68px）→ 下半脸（嘴/下巴）缺失。居中/fill 均不改变（face 纹理=rect）。需用户给游戏原图或确认「把 face 拉伸到 279 高覆盖占位」是否可接受。
+
+**待用户确认（按 AGENTS.md 先确认后执行）**：
+1. 查看 FIXTEST/center/feiteliekaer_3.png，确认躺椅错位修复、比例正常；
+2. 是否以此（contain+居中）**全量重跑（约 4300 文件）**？会先备份正式 `Output/Paintings_Synthesized/` 到 `_OLD_bak/`；
+3. face 下半脸缺失是否一并处理。
+
+**临时诊断脚本**（用完待清理）：`_diag_comp_info.py` `_diag_mesh_mapping.py` `_test_fill_align.py` `_test_center_align.py` `_scan_fill_risk.py` `_run_sample_fill.py` 及第 2 轮遗留 `_diag_rt_tree.py` `_diag_face_box3.py` `_diag_black_silhouette.py` `_test_no_face.py` `_test_face_stretched.py`。
+
+### 2026-07-31 定稿：feiteliekaer_3 床层最终参数（S=0.844, dx=160, dy=-190）
+
+**用户反馈链**：0.93 版"床大了一点"→ 0.767 版"偏小了"→ 像素优化 0.844 "仍不太对"→ 目视微调定稿。
+**关键纠错（本轮复盘，避免重蹈）**：
+1. **REF 缩放映射曾被误判**：UI 检测误以为绘画区域 (0,1,1750,1042)，实测为 **(83,33,1690,990)**（截图 1920×1086 内、映射 0.2553）。用 rw 模板匹配验证（score=0.933）暴露映射错误 → 所有旧"对照图"REF 侧缩放错 8%。
+2. **锚点污染**：抱枕连通块米色占比仅 45.9%（严重粘连）→ 0.767 反推偏小；NCC 模板匹配对纯色块有尺度偏向，均不可用。
+3. **最终方案 = 像素网格优化**（`_optimize_bj.py`）：固定非床层，网格搜索 (S,dx,dy) 最小化合成 vs REF 截图亮度中位差 → 起点 S=0.844/dx=370/dy=-270（角色区 median diff=4.2 验证映射正确）。
+4. **用户目视微调定稿**（角色/泳池/脸不动，只动床层）：上移80(dy-190) → 左下120(dx250,dy-230) → 左上40(dx210,dy-190) → 左移40(dx170) → 左移10 → **S=0.844, dx=160, dy=-190**。
+
+**代码**：`BUNDLE_BJ_SCALES={'feiteliekaer_3':0.844}`，`BUNDLE_BJ_OFFSETS={'feiteliekaer_3':(160,-190)}`。三旋钮说明：dx>0 右移 / dy_up>0 上移 / S 相对 contain(3.6585) 缩放，仅 bj 层生效。
+**产物**：`Output/Paintings_Synthesized/feiteliekaer_3.png` 已更新（2026-07-31 20:51，旧版备份 `Output/_OLD_bak/feiteliekaer_3.png_20260624_contain版`）；FIXTEST 留 `feiteliekaer_3_定稿版.png` + `overlay/feiteliekaer_3_定稿对照.png`。
+**待用户确认**：① 定稿版观感 OK？② 是否全量重跑（约 4300 文件，先备份 `_OLD_bak/`）；③ face 下半脸缺失（211<279 短 68px）是否一并处理。
+**临时脚本待清理**：`_diag_bj_scale.py` `_diag_cc_pillow.py` `_solve_bj_params.py` `_match_pillow.py` `_optimize_bj.py` 及早期 `_diag_*`/`_test_*` 系列。
+
 ### 修复优先级建议
 
 1. **Bug #2 (Y轴翻转)** — 最关键，影响所有多部件合成的位置正确性。⚠️ 但不能简单翻转，需要先分析单部件输出坐标系
@@ -664,9 +725,9 @@ canvas.paste(comp_img, (x, y), comp_img)
 
 **核心文件**: `scripts/compose_paintings.py`（多部件合成）、`scripts/synthesize_paintings.py`（单部件合成）
 
-**当前状态**: 两个修复（AABB + Y-flip）均已被回退。脚本能运行但合成位置不完全正确。
+**当前状态**: ⚠️ 本节（2026-06-24 写）称「两个修复已回退」已过时。实际脚本已落地 7-30/7-31 修复 + bj 绝对定位机制，**当前可正常运行**；详见 **§9（2026-08-02 更新）** 与 `HANDOFF.md`。
 
-**已知问题**: 见 §6.1 多部件立绘合成 — 已知问题清单
+**已知问题**: 见 §6.1 多部件立绘合成 — 已知问题清单（仅剩 bj 背景层逐角色参数调优，见 §9）
 
 **⚠️ 修复尝试失败记录**:
 - AABB 修复（`2 * extent` + 顶点偏移）→ 全量运行后用户反馈"角色本体和背景的大小和位置关系都错了"
@@ -739,3 +800,118 @@ Output/Live2D/{name}/
 ### MOC3 版本分布
 - Version 1: lingbo, z23, bisimai_2 等
 - Version 2: qiye_7, xinnong_3, abeikelongbi_3 等
+
+---
+
+## 9. 2026-08-02 进度更新（bj 背景层专项 — 接手必读）
+
+> 本文件此前最后更新至 2026-07-31（feiteliekaer_3 床层定稿）。以下为 2026-08-02 新增工作。
+> **更细的交接文档见 `D:\Azur Lane Assets\HANDOFF.md`**（2026-08-02 03:44 生成，含任务清单 / 开放问题 / 验证流程 / 文件路径）。
+
+### 9.1 全量 bj 背景层筛查（只读分析）
+
+- 脚本：`scripts/screen_bj_misalign.py`（18 秒扫 4315 个 bundle）
+- 结论：**仅 172 个（4%）角色有 `bj` 层**；其余 4133 个用 `mainFullScreen` 全屏背景，无 bj 错位问题。
+- 172 个 bj 角色按 mesh 占 rect 比例（mesh_ratio）分级：🔴 高风险 <0.10 共 **61 个**，🟠 0.10~0.20 共 33 个，🟡/🟢 >0.20 共 74 个。
+- ⚠️ 重要认知：**mesh_ratio 小 ≠ 位置错位**。61 个高风险里多数 contain+居中就对了（feiteliekaer_3 是 bj 内容在 rect 内偏置的特例）。真正 bug 是「bj 被放大 6~16 倍铺满画布又画在角色上层」。
+- 产物：`Output/bj_misalign_report.md` + `Output/bj_screen_full.csv`
+
+### 9.2 bj 绝对定位机制（BUNDLE_BJ_ABSOLUTE）
+
+- `compose_paintings.py` 顶部新增 `BUNDLE_BJ_ABSOLUTE = {(bundle): (S, px, py, below_rw)}`：
+  - `S` = 缩放系数（<1 缩小 / 1 原尺寸 / 2-3 放大 / 10+ 铺满）
+  - `(px,py)` = 画布绝对坐标（裁 content bbox 后贴到这）
+  - `below_rw = True` 时 bj 绘制在 rw 之前（角色遮挡 bj）
+- 与已有 `BUNDLE_BJ_OFFSETS` / `BUNDLE_BJ_SCALES`（feiteliekaer_3 用）并存，默认仍走 contain+居中。
+- 自动求解器：`scripts/solve_bj_transform.py`（对照游戏原 CG 用 FFT 相位相关 + viewport 标定解参数）；解出的参数**必须目视复核**（纯色块尺度偏向、掩码粘连，早期被坑过）。
+
+### 9.3 当前三个已定参角色状态
+
+| 角色 | 状态 | 参数 |
+|---|---|---|
+| feiteliekaer_3 | ✅ 定稿 + 已同步正式目录 | `BUNDLE_BJ_SCALES=0.844` / `BUNDLE_BJ_OFFSETS=(160,-190)` |
+| **hailunna_4** | ✅ 定稿 + 已同步正式目录（2026-08-02） | `BUNDLE_BJ_ABSOLUTE=(1.50, 1447.0, 1244.0, True)`。酒杯在栏杆后，栏杆横杆穿过酒身 |
+| **xili_alter** | ✅ 定稿 + 已同步正式目录（2026-08-02） | `BUNDLE_BJ_ABSOLUTE=(2.6966, 1613.3, 2074.9, True)`。粉色漩涡铺满背景，在角色身后（已确认 `below_rw=True`） |
+
+- 参考 CG：`Output/refs/hailunna_4_ref.jpg`、`Output/refs/xili_alter_ref.jpg`
+- 三向对比图：`Output/Paintings_Synthesized_FIXTEST/final_handoff/samescale_*.png`（ref vs 定稿版）
+- 旧版（6-24）已备份：`Output/_OLD_bak/hailunna_4.png_20260624_bj铺满盖角色`、`Output/_OLD_bak/xili_alter.png_20260624_bj铺满盖角色`
+- 已知细节：xili_alter 漩涡相对角色比 ref 略大（ref 含游戏 UI 边距、我们合成的纯净画布更大）；如需更严格比例匹配可微调 S（当前 2.6966）和 (px, py)
+
+### 9.4 待接手任务（详见 HANDOFF.md §7）
+
+- ~~**A. hailunna_4 收尾**~~ ✅ 2026-08-02 完成：正式管线渲染通过、与 ref 一致（栏杆横杆穿过酒身）、旧版已备份并覆盖
+- ~~**B. xili_alter 图层确认**~~ ✅ 2026-08-02 完成：`below_rw` 改为 `True`、渲染与 ref 空间关系一致（漩涡在角色身后）、旧版已备份并覆盖
+- **C. 61 高风险角色批量策略**（待用户拍板：给 ref 自动解 / 全量自动解 / 直接全量重跑）
+- **D. 全量重跑**（先备份 `Output/_OLD_bak/`）
+
+### 9.5 关于 §6.1「脚本已回退到修复前版本」的更正
+
+§6.1 开头称「当前脚本状态: 已回退到修复前版本（按面积排序 + AABB 原始算法）」——**此描述已过时**。实际 `compose_paintings.py` 已落地 2026-07-30 / 07-31 的多项修复（ALPA 自包含、face 从 `paintingface/` 加载、绘制顺序改 Unity 兄弟顺序、contain+居中、`BUNDLE_BJ_ABSOLUTE` 绝对定位），当前可正常运行；正在进行的是 bj 背景层的**逐角色参数调优**，不是坐标系重建。
+
+### 9.6 坐标系统 / 历史坑（接手者不要重蹈）
+
+- ❌ 不要用 `fill` 拉伸（改比例，用户否决过）
+- ❌ 不要贴左下角，必须 rect 内居中
+- ❌ 单角色 rw 偏移必须 **rw + face 一起移**，否则脸身脱节
+- ❌ 不要加 pivot 对齐偏移——用户反馈 rw mesh < rect 时贴左下角是正确的，加 pivot 偏移导致回归
+- 画布坐标 Y 向下（PIL 习惯）；配置表 `py` / `dy_up` 均为画布坐标（Y 向下）
+
+### 9.7 2026-08-02 会话记录（pivot 偏移 → 回退）
+
+- 用户报告 `alabama_3.png` rw 身体错位（mesh=1792 < rect=2048）。
+- 我误判为 pivot 对齐问题，新增了 pivot 偏移逻辑（mesh 中心对齐 rect pivot）。
+- 导致 feiteliekaer_3（mesh==rect）也被偏移 → 加条件排除 bj + 仅 mesh < rect 时生效。
+- 进一步发现 hailunna_4/xili_alter 仍有差异 → 用户纠正"我上次是对的"，**全部回退，无净代码改动**。
+- **教训**：rw mesh < rect 时直接贴 rect 左下角是正确行为（与 Unity 游戏内渲染一致），不要加 pivot 偏移。
+
+### 9.8 2026-08-02 高风险 bj 批量渲染 + 交互式调参工具
+
+- 批量渲染 58 个高风险 bj 角色（排除已定稿 3 个）到 `sample_highrisk/`。
+- 用户反馈"大部分有问题，小部分没问题"，问题集中在 bj 组件的**大小比例**和**位置**。
+- 因无参考 CG，自动求解不可行 → 制作**交互式调参网页**。
+
+**交互式调参工具**：
+- 位置：`Output/Paintings_Synthesized_FIXTEST/tuner_assets/tuner.html`
+- 资源：`base/`（58 张无 bj 底图）+ `bj/`（58 张 bj 精灵图）+ `meta.json`
+- 操作方式：
+  - 🖱️ **鼠标拖拽**：移动 bj 位置
+  - 🖱️ **滚轮**：缩放 bj（Ctrl+滚轮 = 视图缩放）
+  - ⌨️ **方向键**：微调位置（Shift=大步 10px）
+  - ⌨️ **W/S**：缩放 ±0.01
+  - ⌨️ **Q/E**：上一个/下一个
+  - ⌨️ **B**：切换 below_rw（bj 在角色上/下）
+  - ⌨️ **空格**：切换显示/隐藏 bj
+  - ⌨️ **Ctrl+S**：保存当前参数
+- 参数自动保存到 `localStorage`，可一键导出 `bj_params.json`
+- 调完后将参数写入 `compose_paintings.py` 的 `BUNDLE_BJ_ABSOLUTE`
+
+**代码改动**：
+- `compose_paintings.py` 新增 `skip_bj` 参数（供 base 图导出使用）
+- 新增调试脚本：`export_tuner_assets*.py`、`gen_bj_report.py`、`analyze_bj_types.py`
+
+### 9.9 2026-08-02 调参工具 v4 — 逐层独立调整 + 磁吸对齐
+
+v3 工具只支持调整体 bj 层，用户反馈很多组件内部也存在错位 → 重写为逐层版本。
+
+**新方案**：
+- **资源提取**：通过 prefab RectTransform → GameObject 映射 + `find_tex_path()` 找到每个 GameObject 对应的 _tex bundle
+- 成功提取 ~1200 个独立层（58 角色 × ~21 层/角色），包含 rw、bj、face、extra bg 等类型
+- 每层单独导出 PNG 精灵图（已裁剪透明边缘），记录完整元数据（x,y,w,h,pivot,texture coords）
+
+**v4 调参网页**：
+- 位置：`Output/Paintings_Synthesized_FIXTEST/tuner_assets_v4/tuner.html`
+- 资源：`base/`（合成底图）+ `layers/`（~1200 张逐层精灵图）+ `meta.json`
+- **逐层选择器**：侧栏列出当前角色的所有层，带类型标记 [RW]🔵/[BJ]🟡/[BG]⚪，点击选中后可独立调整
+- **单层控制**：scale/xpos/ypos/below_rw/visibility 全可独立设值
+- **磁吸对齐**：拖动时检测其他可见层边界，距离 < 15px 自动吸附并显示虚线引导
+- **锁定机制**：保存后自动锁定，防止误操作；再次点击锁定按钮解锁
+- 全部快捷键与 v3 兼容（方向键/W/S/Q/E/B/空格/R/Ctrl+S）
+
+**关键修复**：
+- PPtr 引用读取：从 `get_obj()` 改为 `.read()` 才能正确获取 GameObject 名称
+- JSON 序列化：numpy int64 需 `.item()` 转原生 Python 类型
+
+**遗留问题**：
+- 部分 GameObject 无对应 _tex 文件（如 build/pifu/biandui 等 UI 标记节点）→ 这些是热区/标签，不含纹理
+- feiteliekaer 有额外 "3" 层（background 类型），mesh_w=2048/mesh_h=1220 但 rect_w=296/rect_h=194 → 比例悬殊
