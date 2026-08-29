@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-08-03（调参工具 v3-v6 全部失败 — FIXTEST 清理 + 问题归档）
+> **生成时间**: 2026-08-28（bj 全纹理渲染修复 + 图鉴重建）
 > **用途**: 跨会话对接，方便新会话快速了解项目状态
 
 ---
@@ -1076,3 +1076,45 @@ v3 工具只支持调整体 bj 层，用户反馈很多组件内部也存在错�
 2. **备选方案 A：Python + PIL/Pillow 脚本化调参** — 用 Python 脚本渲染合成图，参数写在配置表中，改参数后重跑脚本看结果。虽然没有交互式拖拽，但稳定可靠
 3. **备选方案 B：参考游戏原图逐角色定参** — 已有 3 个角色（feiteliekaer_3/hailunna_4/xili_alter）通过此方式定参成功，剩余 55 个高风险角色可如法炮制
 4. **备选方案 C：接受当前合成质量** — 172 个 bj 角色中，3 个已定参，74 个 mesh_ratio>0.20 基本正确，仅 61 个高风险需要手动调参。可以考虑先全量重跑，再逐个修高风险角色
+
+### 9.14 2026-08-28 bj sprite-frame 修复落地 + ALPA 参考算法反编译确认 ✅
+
+**根因**：bj 背景层错位的真因不是「mesh 小」，而是旧 contain+居中 把「mesh≪sprite 的贴纸型背景」放大铺满 rect。正确机制：mesh 是嵌在 `mRawSpriteSize` 大小的 sprite 画框里的子区域，游戏引擎把 sprite 等比缩放铺满 rect。
+
+**参考算法确认（反编译本地 `tools/ALPA-1.0.5.1` 的 Kotlin 字节码）**：
+- `io.github.deficuet.alp.FunctionsKt.rebuildPainting(tex, mesh)`：按 mesh 顶点坐标渲染成 (maxX+1, maxY+1) 图像，顶点坐标即 sprite 像素空间坐标（未裁 AABB min）。
+- `FunctionsKt.decoratePainting(img, tr)`：把 mesh 图贴到 `max(rawPaintingSize, image)` 的 sprite 画框 (0,0) 处，再 `fancyResize` 到 RectTransform `mSizeDelta`。
+- 结论：`内容位置 = mesh 顶点坐标 × (rect / mRawSpriteSize)`，与我们实现的 sprite-frame 数学等价。
+
+**实现**（`scripts/compose_paintings.py`）：
+- 新增 `get_raw_sprite_sizes()`（读 MonoBehaviour.mRawSpriteSize）与 `get_mesh_aabb_min()`（读 Mesh.m_LocalAABB 左下偏移）。
+- bj 无手动配置时走 sprite-frame：`scale = rect / sprite`，位置 = `origin + aabb.min × scale`。
+- 有 `BUNDLE_BJ_ABSOLUTE`（hailunna_4 / xili_alter）仍走绝对定位；feiteliekaer_3 走 SCALES/OFFSETS。三者互斥。
+
+**样本验证**：kewei_6 / alabama_3 / zhaohe_4 / hailunna_4，sprite-frame scale≈2~2.4（不再 6~16 倍放大），定位正常。
+
+**批量产物**：`Output/Paintings_Synthesized_FIXTEST/bj_172/`（172 张，172/172 成功，2026-08-28 重跑）。
+
+**待办**：
+- ✅ 用户抽查 bj_172 确认视觉正确（sprite-frame scale≈2~2.4，样本通过）。
+- ✅ 全量落地：已备份 172 张 bj 旧图到 `Output/_OLD_bak/bj_172_20260828/`，并对 172 个 bj 角色重跑正式目录 `Output/Paintings_Synthesized/`（172/172 成功）。
+- ⚠️ `Output/refs/` 参考 CG 已空（被 FIXTEST 清理），如需逐角色目视定参需重新获取游戏原图。
+
+### 9.15 2026-08-28 bj 全纹理渲染修复 + 图鉴重建 ✅
+
+**bj 修复方案**：
+- 根因：bj 背景层被当作 mesh 渲染，只提取了 mesh AABB 子集（如 haerfude 只有 1345×1377），而游戏里 bj 是占满画布（6900×6424）的全屏背景。
+- 修复：新增 `load_texture_full()` 函数，bj 层直接读取完整纹理（flip=True）→ 缩放到画布大小 → 贴 (0,0) 作为底层，彻底放弃 mesh + sprite-frame 定位路径。
+- 特殊配置角色（如 feiteliekaer_3 躺椅，有 bj_scale/bj_offset）不受影响，仍走原有的 contain+center 或绝对定位路径。
+
+**bj 全量落地**：
+- 脚本 `scripts/_run_bj_172_prod.py`：先备份、再重跑 172 个含 bj 层角色。
+- 备份：`Output/_OLD_bak/bj_172_full_20260828/`（172 张旧图）。
+- 重跑：172/172 成功，写入 `Output/Paintings_Synthesized/`（现共 4,306 张 PNG）。
+
+**立绘图鉴网站**：
+- 脚本 `scripts/build_gallery.py`：生成 `Output/gallery/index.html` + `index.json` + `thumbs/`（4,306 张缩略图）。
+- 功能：搜索 + 阵营/舰种/稀有度筛选 + Lightbox 大图。
+- 元数据源：`Output/WikiData/ship_data.json`（862 舰）+ `ship_name_map.py` 拼音映射 + 归一化/模糊匹配。
+- 阵营命中约 73%：重樱 681 / 白鹰 584 / 皇家 556 / 铁血 461 / 北方联合 176 / 维希教廷 137 / 东煌 136 / 撒丁帝国 114 / 自由鸢尾 55 / 飓风 49 / 郁金王国 6 / 联动 187；未知 1,164（27%，多为换装后缀、NPC、部分联动舰船）。
+- 预览：`python -m http.server 8765 --directory Output` → `http://localhost:8765/gallery/index.html`
