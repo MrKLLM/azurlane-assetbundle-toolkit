@@ -400,6 +400,35 @@ D:\Azur Lane Assets\
 
 ## 6. 接下来的任务
 
+### ★ 2026-08-29 攻关路线（当前主线，双线并行）
+
+**背景**：立绘合成逆向卡壳的根因 = 合成逻辑在游戏代码里而不在资产里。确定双线攻关：用「官方真值对照」短期收敛，用「逆向安装包代码」长期治本。
+
+#### 路线 A：逆向游戏安装包代码（治本，拿权威算法）
+- 目标：从游戏代码取回资产处理的官方逻辑（立绘布局 / Y 翻转 / Spine 解密等），终止"从结果猜规则"
+- 需准备：
+  1. 游戏安装包 APK（~2GB，含代码不含数据；B 服 = `com.bilibili.azurlane`；官网/渠道重下或手机导出 `base.apk`，版本尽量与现有资产匹配）
+  2. PC 工具：Il2CppDumper（从 libil2cpp.so + global-metadata.dat 导出类/方法表）+ Ghidra/IDA（读函数逻辑）
+  3. APK 内只需两个文件：`lib/arm64-v8a/libil2cpp.so`、`assets/bin/Data/Managed/Metadata/global-metadata.dat`
+- 产出：painting 显示相关类的真实算法 → 对照/重写 compose_paintings.py
+- 风险：arm64 反汇编门槛高；参考先例 —— 2026-08 已成功反编译 ALPA（Kotlin）验证过方法论
+
+#### 路线 B：ALPA 对照法（见效快，先走）
+- 工具：`tools/ALPA-1.0.5.1/`（GUI 版，使用说明见 `docs/ALPA使用说明.md`）
+- 操作：三个根目录设好（立绘=painting / 素材=AssetBundles 总目录 / 差分表情=paintingface）→ 「导入文件」选皮肤 → 「总体预览」看官方效果 → 「保存」导出 PNG → 存 `Output/refs/`（与我们的输出同名）
+- 差分表情：「为所有表情保存」批量导出。注意用「导出」；「注入」会改写游戏源文件，本项目不用
+- 闭环：写自动比对脚本（像素差/NCC）→ ALPA 输出 vs 我们的输出 → 差异清单 → 修脚本 → 复检
+- 局限：GUI 一次一张，全量真值不现实；长期靠路线 A 或把 jar 内官方算法（PaintingTransform/TextureTransform/ExtendedTransform）移植进 Python 批量脚本
+
+#### 配套事项
+- Spine 动态立绘验收：用 DeskSpine / SpineViewer（ww-rm）加载 `Output/Spine` 已有模型 —— 能播放 = 导出质量 OK；放不出 = 修导出管线（对应 §2.6 遗留问题）。Live2D 部分（3.5GB）后续单独规划
+- 全量重跑 4306 张 + 画廊重建：放在真值闭环验证通过之后执行（当前画廊仍是旧脚本产物；`_OLD_bak` 已清理，重跑为直接覆盖）
+
+#### 待用户准备 / 确认
+1. APK 获取：渠道（B 服/国际服）与版本
+2. ALPA 试导出：已验证界面与路径语义（2026-08-29），待实际导出 `chicheng_4` 等样本
+3. 「整图/背景颠倒」样本：等 ALPA 真值后通过 diff 自动暴露，不再人工找
+
 ### 优先级高
 
 1. ✅ **Live2DViewerEX 兼容性修复** — 已完成
