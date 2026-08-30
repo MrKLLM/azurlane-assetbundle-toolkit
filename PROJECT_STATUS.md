@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-08-28（bj 全纹理渲染修复 + 图鉴重建）
+> **生成时间**: 2026-08-29（背景层定位修复 + 项目清理）
 > **用途**: 跨会话对接，方便新会话快速了解项目状态
 
 ---
@@ -50,6 +50,12 @@
 
 **脚本**: `scripts/export_assets.py`（使用 UnityPy，无需外部工具）  
 **状态**: 全量导出成功
+
+**2026-08-29 合成修复 + 清理**:
+- 修复 `compose_paintings.py` 背景层定位：root/bj 改为 cover 等比铺满（旧 contain 留白）、bj 带 mesh 时按 mRawSpriteSize+AABB 精确定位（旧整图拉伸产生污染，典型：kewei_6 海鸥白痕，受影响 136 bundle）、节点名 `_bj/_rw` 后缀兜底（如 kewei_6_n 包内叫 kewei_6_bj）
+- 样本验证：chicheng_4/kewei_6/bulvxieer_3 修复 ✅；zhaohe_4/alabama_3/hailunna_4/xili_alter/feiteliekaer_3 回归通过（diff≤2.3）
+- **待办**：全量重跑 4306 张（旧图无备份直接覆盖前需再确认）；「整图/背景上下颠倒」两问题仍无样本定位（需用户提供文件名）
+- 清理：删除 Paintings_Synthesized_FIXTEST(3.1GB)/_OLD_bak(2.1GB)/tuner_assets/_contact_sheets 等 ≈6.1GB；scripts 88→38 个（删 debug/ 与诊断脚本）
 
 ### 2.3 背景导出 ✅ 已完成
 
