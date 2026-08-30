@@ -1,264 +1,154 @@
-# ALPA 使用说明（傻瓜式教程）
+# ALPA 使用说明（GUI 图形界面版）
 
-> **ALPA** (Azur Lane Painting Analysis) 是碧蓝航线立绘/头像注入工具，可以将自定义立绘图片注入到游戏的 AssetBundle 文件中。
-
----
-
-## 一、安装 Java（必须）
-
-ALPA 是用 Java 编写的，需要先安装 Java 才能运行。
-
-### 方法一：直接下载（推荐）
-
-1. **下载地址**：
-   - https://adoptium.net/temurin/releases/?version=17&os=windows&arch=x64&package=jdk
-   - 点击页面上蓝色的 **`.msi`** 下载按钮
-
-2. **安装步骤**：
-   - 双击下载好的 `.msi` 文件
-   - 一路点 **Next**
-   - **最重要的一步**：在安装向导中找到 **"Add to PATH"** 选项，**一定要勾选**！
-   - 点击 **Install** 完成安装
-
-3. **验证安装**：
-   - 按 `Win + R`，输入 `cmd`，回车
-   - 在弹出的黑色窗口中输入：
-   ```
-   java -version
-   ```
-   - 如果显示类似 `openjdk version "17.0.19"` 的信息，说明安装成功
-
-### 方法二：让 AI 帮你装
-
-如果你懒得自己装，可以让我帮你装（就像刚才那样）。
+> **ALPA** (Azur Lane Painting Analysis) 是碧蓝航线立绘分析工具：直接读取游戏的 painting 资产包，**按官方布局实时合成预览**，并可将合成结果**导出为 PNG**，也支持把自定义立绘注入回游戏。
+>
+> 本项目的主要用途：**导出官方合成的立绘作为「标准答案」**，用于验收我们自己的合成脚本（`scripts/compose_paintings.py`）。
 
 ---
 
-## 二、ALPA 文件说明
+## 一、启动
 
-下载并解压 ALPA 后，你会看到以下文件：
+双击：`tools/ALPA-1.0.5.1/launch.bat`
+
+前提：已安装 Java 17+（本项目电脑已装，`java -version` 可验证）。
+界面是 JavaFX 图形窗口，**所有路径都可以在界面里点「浏览...」选择，不需要手动改 alpa.yml**（界面设置会自动持久化回 alpa.yml）。
+
+---
+
+## 二、界面说明
 
 ```
-ALPA-1.0.5.1/
-├── ALPA-1.0.5.1.jar    ← 主程序（不要删除！）
-├── alpa.yml            ← 配置文件（需要修改这个！）
-├── launch.bat          ← 启动脚本（双击运行）
-└── javafx-sdk-17.0.11/ ← JavaFX 运行库（不要删除！）
+┌─ 设置 ──────────────────────────────────────────────┐
+│ 保存图片压缩等级(0-9)   ← 导出 PNG 的压缩级别，保持 9     │
+│ 立绘根目录        [路径] [浏览...]   ← painting 目录     │
+│ 素材文件根目录     [路径] [浏览...]   ← AssetBundles 目录  │
+│ 差分表情根目录     [路径] [浏览...]   ← paintingface 目录  │
+│ 自动导入: ☑立绘 ☑差分表情文件（注入功能用的，导出可不管）  │
+├─ 分析文件 ──────────┐  ┌─ 总体预览 ──────────────────┐
+│ [导入文件]           │  │                            │
+│ 当前任务: 空闲中      │  │   合成立绘显示在这里         │
+│ 依赖项列表           │  │                            │
+├─ 导入图像 ──────────┤  └────────────────────────────┘
+│ （注入自定义图用，     │
+│   导出用不到）        │
+├─ [保存] [为所有表情保存] [打开保存文件夹] ──────────────┘
 ```
 
+### 三个路径分别填什么（本项目实际路径）
+
+| 界面字段 | 填什么 | 本项目路径 |
+|---|---|---|
+| **立绘根目录** | AssetBundles 下的 `painting` 目录 | `D:\Azur Lane Assets\files\AssetBundles\painting` |
+| **素材文件根目录** | **AssetBundles 总目录**（用于解析 bundle 之间的依赖） | `D:\Azur Lane Assets\files\AssetBundles` |
+| **差分表情根目录** | AssetBundles 下的 `paintingface` 目录 | `D:\Azur Lane Assets\files\AssetBundles\paintingface` |
+
+> ⚠️ 三个路径任一不对，点「导入文件」后会报红字 **「目标文件夹不存在」**。
+
 ---
 
-## 三、配置 alpa.yml（最关键的一步）
+## 三、快速上手：导出一张立绘（完整点击流程）
 
-用记事本或任意文本编辑器打开 `alpa.yml`，按下面的说明修改：
+1. **设置三个路径**（见上表，各点一次「浏览...」选中对应文件夹）
+2. 点 **「导入文件」**
+3. 在文件选择框里进入 `painting` 目录，选一个**无后缀的资源包文件**
+   - 例如：`painting\chicheng_4`、`painting\kewei_6`（文件没有扩展名是正常的）
+4. 等待「当前任务」从 *导入中* 变回 *空闲中*，「依赖项」列表会列出它引用的 `*_tex` 包
+   - 如果报 `DependencyMissing`，检查「素材文件根目录」是否填的是 AssetBundles 总目录
+5. 右侧 **「总体预览」** 会显示官方布局合成的完整立绘 —— **这就是正确答案**
+6. 点 **「保存」** → 立绘导出为 PNG（压缩等级用「设置」里的值）
+7. 点 **「打开保存文件夹」** 找到导出的图片
 
-```yaml
-# PNG 压缩级别（0-9），数字越大文件越小，建议保持 9
-pngCompressionLevel: 9
+表情差分（脸图）：导入的皮肤如有表情包，「为所有表情保存」可一次导出全部表情版本。
 
-# 【重要】游戏 AssetBundle 根目录
-# 这是你手机上碧蓝航线游戏的资源文件夹
-# 通常路径是：手机存储/Android/data/com.bilibili.azurlane/files/AssetBundles
-# 你需要先把游戏资源从手机复制到电脑上
-assetSystemRoot: 'D:\sdcard\Android\data\com.bilibili.azurlane\files\AssetBundles'
+---
 
-# 【重要】立绘 AssetBundle 路径
-# 在上面路径的基础上加上 \painting
-importMainBundlePath: 'D:\sdcard\Android\data\com.bilibili.azurlane\files\AssetBundles\painting'
+## 四、批量导出的现状
 
-# 立绘注入设置
-painting:
-  autoImport: true                    # 是否自动导入立绘（保持 true）
-  importImagePath: 'D:\我的立绘图片'  # 【重要】你的自定义立绘图片放在哪里
-  imageNamePattern: '*{name}.png;*{name}_dec.png;*{name}_group.png;*{name}_exp.png'
+- 「导入文件」一次处理**一个**皮肤；逐个导 4300+ 张不现实
+- **适用场景**：只导出关键样本/问题皮肤当验收基准（如 `chicheng_4`、`kewei_6`、`bulvxieer_3`、`zhaohe_4`…）
+- 是否支持多选/文件夹拖放待实测；若要全量真值，更现实的路线是把 ALPA 的定位算法（jar 内 `PaintingTransform` / `TextureTransform` / `ExtendedTransform` 类）移植进我们的 Python 批量脚本
 
-# 头像注入设置
-face:
-  autoImport: false                   # 是否自动导入头像（先设为 false，需要时改成 true）
-  importBundlePath: 'D:\...\paintingface'  # 头像 AssetBundle 路径
-  bundleNamePattern: '{name}'
-  importImagePath: 'D:\我的头像图片'  # 你的自定义头像图片放在哪里
-  imageNamePattern: '?.png'
+---
+
+## 五、导出结果怎么用（本项目工作流）
+
+```
+ALPA 导出的 PNG（官方效果）
+        │  逐张对比（像素差/NCC）
+        ▼
+我们 compose_paintings.py 的输出
+        │
+        ├─ 一致 → 该皮肤合成正确 ✅
+        └─ 不一致 → 差异就是明确的待修项（背景大小/位置/翻转/遮挡）
 ```
 
-### 路径设置说明
-
-| 配置项 | 说明 | 示例 |
-|--------|------|------|
-| `assetSystemRoot` | 游戏资源根目录 | `D:\游戏资源\AssetBundles` |
-| `importMainBundlePath` | 立绘资源目录 | `D:\游戏资源\AssetBundles\painting` |
-| `importImagePath` (painting) | 你的自定义立绘图片目录 | `D:\我的立绘\花园` |
-| `importImagePath` (face) | 你的自定义头像图片目录 | `D:\我的头像\花园` |
-
-### 注意事项
-
-1. **路径要用单引号包裹**：`'D:\path\to\folder'`
-2. **路径中的反斜杠**：Windows 路径使用 `\`，保持原样即可
-3. **路径不要有中文空格**：最好用纯英文路径，或者路径中不要有空格
+建议导出后统一放到 `Output/refs/`（与合成输出同名，如 `chicheng_4.png`），方便写脚本自动比对。
 
 ---
 
-## 四、图片命名规则
+## 六、注入自定义立绘（进阶，导出用不到）
 
-ALPA 会根据图片文件名匹配对应的角色。图片命名格式：
+ALPA 原本的核心功能是把自定义立绘**替换进游戏**：
 
-| 类型 | 命名格式 | 示例 |
-|------|----------|------|
-| 普通立绘 | `{角色名}.png` | `hanyuan.png` |
-| 立绘（解包格式） | `{角色名}_dec.png` | `hanyuan_dec.png` |
-| 集体立绘 | `{角色名}_group.png` | `hanyuan_group.png` |
-| 特殊立绘 | `{角色名}_exp.png` | `hanyuan_exp.png` |
-| 头像 | `?.png` | `0.png`, `1.png` |
+1. 准备自定义 PNG，命名符合：`{角色名}.png` / `{角色名}_dec.png` / `{角色名}_group.png` / `{角色名}_exp.png`
+2. 「导入图像」区 → 「添加图像」加入图片
+3. 点「保存」→ 会生成修改后的 bundle → 放回手机覆盖原文件即可在游戏里看到自定义立绘
 
-> **提示**：`{name}` 是通配符，ALPA 会自动替换成角色文件夹名。
+> ⚠️ 注入会**改写 AssetBundles 源文件**！本项目里务必别点「保存」时误选覆盖 `files/` 下的原始包；注入实验请复制一份到别的目录再操作。
 
 ---
 
-## 五、使用步骤
+## 七、alpa.yml 和界面是什么关系
 
-### 第一步：准备游戏资源
+`alpa.yml` 就是界面里那些设置的**持久化存储**。界面里点「浏览...」选完路径后，配置会写回 yml。
+手动编辑 yml 也可以（等价），但推荐直接用界面。
 
-1. 手机连接电脑，或者使用文件管理器
-2. 找到碧蓝航线的资源文件夹：
-   ```
-   Android/data/com.bilibili.azurlane/files/AssetBundles/
-   ```
-3. 把整个 `AssetBundles` 文件夹复制到电脑上（大约 10-20GB）
+字段对应关系：
 
-### 第二步：准备自定义立绘图片
-
-1. 把你的自定义立绘 PNG 图片放到一个文件夹里
-2. 图片文件名要符合上面的命名规则
-3. 例如：`D:\我的立绘\花园\hanyuan.png`
-
-### 第三步：修改配置文件
-
-1. 打开 `alpa.yml`
-2. 修改 `assetSystemRoot` 为你复制到电脑上的 AssetBundles 路径
-3. 修改 `importMainBundlePath` 为上面路径 + `\painting`
-4. 修改 `painting.importImagePath` 为你的自定义立绘图片目录
-5. 保存文件
-
-### 第四步：运行 ALPA
-
-1. 双击 `launch.bat`
-2. 等待 ALPA 启动（可能需要几秒到十几秒）
-3. ALPA 界面会显示出来
-
-### 第五步：注入立绘
-
-1. 在 ALPA 界面中，选择你要注入的角色
-2. 点击 **"注入"** 按钮
-3. 等待处理完成
-4. 修改后的 AssetBundle 文件会覆盖原文件
-
-### 第六步：将修改后的文件放回手机
-
-1. 把修改后的 `painting` 文件夹（或整个 AssetBundles 文件夹）复制回手机
-2. 覆盖原来的文件
-3. 启动游戏，查看效果
+| yml 字段 | 界面字段 |
+|---|---|
+| `importMainBundlePath` | 立绘根目录 |
+| `assetSystemRoot` | 素材文件根目录 |
+| `face.importBundlePath` | 差分表情根目录 |
+| `pngCompressionLevel` | 保存图片压缩等级 |
+| `painting.importImagePath` | 「添加图像」的图片来源目录（注入用） |
 
 ---
 
-## 六、常见问题
+## 八、ALPA 和 AssetStudio 的关系
 
-### Q1: 双击 launch.bat 后一闪而过？
+| | ALPA | AssetStudio |
+|---|---|---|
+| 本质 | 立绘**专用**分析/预览/导出/注入工具 | Unity 资产**通用**浏览器/提取器 |
+| 内部也解析 Unity bundle？ | ✅（内置 UnityKt，不需要 AssetStudio 配合） | — |
+| 能看什么 | 仅 painting / paintingface（立绘） | 任何 bundle：纹理、网格、音频、TextAsset… |
+| 能按官方布局合成完整立绘？ | ✅（这就是它的预览） | ❌ 只能看单个纹理/网格 |
+| 本项目用途 | 出「标准答案」对照验收 | 手动查包、导原始资源、交叉验证 |
 
-**原因**：Java 没有正确安装或没有添加到 PATH。
-
-**解决**：
-1. 按 `Win + R`，输入 `cmd`，回车
-2. 输入 `java -version`，看看有没有反应
-3. 如果没有，说明 Java 没装好，重新安装并确保勾选了 "Add to PATH"
-
-### Q2: 提示 "'java' 不是内部或外部命令"？
-
-**原因**：Java 没有添加到系统 PATH。
-
-**解决**：
-1. 重新安装 Java，在安装向导中勾选 **"Add to PATH"**
-2. 或者手动添加：
-   - 右键点击"此电脑" → 属性 → 高级系统设置 → 环境变量
-   - 在"用户变量"中找到 `Path`，点击编辑
-   - 点击"新建"，添加 Java 的 bin 目录路径，例如：
-     ```
-     C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot\bin
-     ```
-   - 重启 cmd 窗口
-
-### Q3: ALPA 启动后报错 "Could not find or load main class"？
-
-**原因**：`alpa.yml` 路径配置错误。
-
-**解决**：
-1. 检查 `assetSystemRoot` 路径是否正确
-2. 检查 `importMainBundlePath` 路径是否正确
-3. 确保路径用单引号包裹
-4. 确保路径存在且可访问
-
-### Q4: 注入后游戏闪退？
-
-**原因**：可能是文件损坏或版本不匹配。
-
-**解决**：
-1. 确保使用的是最新版本的 ALPA (v1.0.5.1)
-2. 确保游戏资源是最新的
-3. 重新复制一份干净的游戏资源再试
-
-### Q5: 如何恢复原版立绘？
-
-**解决**：
-1. 只要你保留了原始的 AssetBundles 文件夹备份
-2. 把备份的文件覆盖回去即可
+结论：**在立绘这件事上 ALPA 自带解析，不需要 AssetStudio 参与**；但看音频/Live2D/其他类型资产时仍然用 AssetStudio。
 
 ---
 
-## 七、进阶用法
+## 九、常见问题
 
-### 批量注入多个角色
+### Q1: 点「导入文件」后报红字「目标文件夹不存在」
+三个根目录至少有一个没设或指向了不存在的旧路径。按第二节表格重设三个路径。
 
-在 `importImagePath` 指向的文件夹中放入多个角色的立绘图片：
-```
-D:\我的立绘\
-├── hanyuan.png
-├── haiyan.png
-├── linbo.png
-└── ...
-```
+### Q2: 依赖项出现 DependencyMissing
+「素材文件根目录」必须填 **AssetBundles 总目录**（不是 painting 子目录），否则找不到依赖的 `*_tex` 包。
 
-ALPA 会自动匹配所有图片并注入。
+### Q3: 双击 launch.bat 一闪而过
+Java 未安装或未加入 PATH。命令行运行 `java -version` 验证。
 
-### 同时注入立绘和头像
+### Q4: 预览显示 "Preview not available"
+还没成功导入文件，或导入失败。看「当前任务」与「依赖项」的状态。
 
-1. 把 `face.autoImport` 改为 `true`
-2. 设置好 `face.importBundlePath` 和 `face.importImagePath`
-3. 运行 ALPA 时会同时注入立绘和头像
+### Q5: 导出的图和游戏里不完全一样？
+个别皮肤游戏运行时会动态调整布局（这正是我们项目踩坑的根源）。ALPA 用的是静态 prefab + 官方算法，绝大多数皮肤与游戏一致；发现不一致的皮肤本身就是有价值的研究样本。
 
 ---
 
-## 八、技术说明（可跳过）
+## 十、相关链接
 
-ALPA 使用以下技术：
-- **Java 17+**：运行环境
-- **JavaFX 17**：图形界面框架
-- **Kotlin**：主要编程语言
-- **UnityKt**：Unity 资产处理库
-
-注入原理：
-1. 读取原始 AssetBundle 文件
-2. 解析 Unity 资产结构
-3. 用自定义 PNG 图片替换原始纹理
-4. 重新打包 AssetBundle
-5. 覆盖原文件
-
----
-
-## 九、相关资源
-
-- **ALPA 下载**：https://github.com/Deficuet/AzurLanePaintingAnalysis-Kt/releases
-- **Java 下载**：https://adoptium.net/temurin/releases/?version=17
-- **碧蓝航线 Wiki**：https://wiki.biligame.com/azurlane/
-
----
-
-> **最后提醒**：修改游戏文件有风险，建议先备份原始文件！
+- ALPA 项目（Deficuet/AzurLanePaintingAnalysis-Kt）：https://github.com/Deficuet/AzurLanePaintingAnalysis-Kt
+- Java 下载：https://adoptium.net/temurin/releases/?version=17
