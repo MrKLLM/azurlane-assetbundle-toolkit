@@ -108,6 +108,24 @@ def load_texture_full(bundle_path):
             return get_image_from_texture2d(data, flip=True)
     return None
 
+def tex_has_mesh(bundle_path):
+    """判断 _tex 包是否带有效 mesh（顶点数 > 10）。
+    有 mesh = 该层是画布局部内容（道具/碎片/区域），必须按 sprite 框定位；
+    无 mesh = 纯 sprite 整图。"""
+    try:
+        env = UnityPy.load(bundle_path)
+    except Exception:
+        return False
+    for obj in env.objects:
+        if obj.type.name == 'Mesh':
+            try:
+                data = obj.read()
+                if data.m_VertexData and data.m_VertexData.m_VertexCount > 10:
+                    return True
+            except Exception:
+                return False
+    return False
+
 def synthesize_tex_bundle(bundle_path):
     """从单个 _tex 包还原单部件图像（mesh 局部坐标，Y 轴已校正为正向）。
     参数: bundle_path 单个 _tex 资源包路径
@@ -490,7 +508,12 @@ def compose_paintings(bundle_name, output_dir, fill_rect=False, skip_bj=False):
     # 特殊情况：below_rw=True 且 root 层有纹理时（如 hailunna_4 栏杆在 root），
     # bj 需要移到 root 之前，否则栏杆会穿过酒杯。
     rw_pid = next((p for p, n in path_to_name.items() if n == bj_name.replace('_bj', '_rw')), None)
-    bj_pid = next((p for p, n in path_to_name.items() if n == bj_name), None)
+    if rw_pid is None:
+        # 兜底：部分 prefab 的 rw 节点沿用基础名（如 kewei_6_n 包里叫 kewei_6_rw）
+        rw_pid = next((p for p, n in path_to_name.items() if n.endswith('_rw')), None)
+    # bj 节点同样可能沿用基础名（如 kewei_6_n 包里叫 kewei_6_bj），用 _bj 后缀兜底
+    bj_pid = next((p for p, n in path_to_name.items()
+                   if n == bj_name or n.endswith('_bj')), None)
     root_pid = next((p for p, n in path_to_name.items() if n == bundle_name), None)
     bj_below_rw = True  # 默认：bj 在 rw 之下
     if bj_abs is not None and len(bj_abs) >= 4:
@@ -540,49 +563,79 @@ def compose_paintings(bundle_name, output_dir, fill_rect=False, skip_bj=False):
             print(f'  [bj abs] {c["name"]}: S={_S:.4f} -> {_nw}x{_nh} @ ({_px:.0f},{_py:.0f})')
             continue
 
-        # bj 全屏背景：直接读取完整纹理，缩放到画布大小，贴 (0,0) 作为底层。
-        # 游戏里 bj 是占满整个画布的大背景图，不需要 mesh 子集 + sprite-frame 定位。
-        # 注意：只有没有手动配置的 bj 才走此路径；有 BUNDLE_BJ_SCALES/OFFSETS/ABSOLUTE
-        # 的 bj（如 feiteliekaer_3 躺椅）仍走 contain+center 或绝对定位路径。
-        if c['name'] == bj_name and bj_abs is None and bj_scale == 1.0 and bj_offset == (0, 0):
-            bj_full = load_texture_full(c['tex_path'])
-            if bj_full:
-                bj_full = bj_full.resize((canvas_w, canvas_h), Image.LANCZOS)
-                canvas.paste(bj_full, (0, 0), bj_full)
-                print(f'  [bj full] {c["name"]}: texture -> canvas ({canvas_w}x{canvas_h})')
-                continue
-
-        # 缩放策略：等比 contain（min(rect/mesh)），保持部件原始比例不拉伸。
-        mesh_w, mesh_h = comp_img.size
         rect_w, rect_h = c['size'][0], c['size'][1]
-        if mesh_w > 0 and mesh_h > 0:
-            if fill_rect:
-                # 仅用于对比测试：拉伸铺满 rect（会改变比例，已弃用为默认）
-                new_w, new_h = int(round(rect_w)), int(round(rect_h))
-            else:
+        is_root = (c['name'] == bundle_name)
+        is_bj = (c['name'] == bj_name or c['name'].endswith('_bj'))
+
+        # ── 背景语义层（root 主图 / bj 背景）统一处理 ──
+        # 修复 1（背景不满画布）：旧逻辑 contain(min) 导致横版背景贴竖版画布时上下/左右留白，
+        #   表现为"背景缩成一坨"。改为 cover(max)：等比放大铺满 rect，溢出部分居中裁掉。
+        # 修复 2（bj 拉伸污染）：旧逻辑把整张 bj 纹理拉伸铺满画布，若 bj 其实是带 mesh 的
+        #   局部内容（海鸥/道具/床），会产生巨大模糊污染。改为 mesh 重建后按
+        #   mRawSpriteSize→rect 的 cover 比例 + AABB 偏移精确定位。
+        # 例外：手动调过参的 bj（BUNDLE_BJ_OFFSETS/SCALES，如 feiteliekaer_3）保留旧
+        #   contain+center 语义，避免调参失效。
+        if is_root or is_bj:
+            if is_bj and (bj_scale != 1.0 or bj_offset != (0, 0)):
+                # 旧路径：contain + 居中 + 手动缩放/偏移（feiteliekaer_3 等调参角色专用）
+                mesh_w, mesh_h = comp_img.size
                 ratio = min(rect_w / mesh_w, rect_h / mesh_h)
-                # 单角色床层微调：等比整体缩小（BUNDLE_BJ_SCALES，默认 1.0 不影响其他角色）
-                if c['name'] == bj_name and bj_scale != 1.0:
-                    ratio *= bj_scale
-                    print(f'  [bj scale] {c["name"]}: contain ratio={min(rect_w/mesh_w, rect_h/mesh_h):.4f} -> {ratio:.4f} (x{bj_scale})')
+                ratio *= bj_scale
                 new_w = max(1, int(round(mesh_w * ratio)))
                 new_h = max(1, int(round(mesh_h * ratio)))
+                comp_img = comp_img.resize((new_w, new_h), Image.LANCZOS)
+                off_x = (rect_w - new_w) / 2.0 + bj_offset[0]
+                off_y = (rect_h - new_h) / 2.0 + bj_offset[1]
+                px = int(round(c['origin'][0] + off_x))
+                py = int(round(canvas_h - (c['origin'][1] + off_y) - new_h))
+                canvas.paste(comp_img, (px, py), comp_img)
+                print(f'  [bg legacy] {c["name"]}: contain x{bj_scale} -> {new_w}x{new_h} @ ({px},{py})')
+                continue
+
+            # sprite 框尺寸（mRawSpriteSize = 该层在游戏里的画框）；缺省退化为 rect
+            sprite = raw_sprite.get(c['name'])
+            if sprite and sprite[0] > 0 and sprite[1] > 0:
+                sprite_w, sprite_h = sprite
+            else:
+                sprite_w, sprite_h = rect_w, rect_h
+
+            # mesh 内容在 sprite 框内的左下偏移；无 mesh（整图）则为 0
+            min_x, min_y = 0.0, 0.0
+            if tex_has_mesh(c['tex_path']):
+                aabb_min = get_mesh_aabb_min(c['tex_path'])
+                if aabb_min:
+                    min_x, min_y = aabb_min
+
+            # cover：等比放大铺满 rect，溢出居中（游戏内背景铺满行为）
+            scale = max(rect_w / sprite_w, rect_h / sprite_h)
+            new_w = max(1, int(round(comp_img.width * scale)))
+            new_h = max(1, int(round(comp_img.height * scale)))
             if (new_w, new_h) != comp_img.size:
                 comp_img = comp_img.resize((new_w, new_h), Image.LANCZOS)
 
-        # 粘贴：仅对 bj（背景）层在 rect 内【居中】放置（Unity Image "Preserve Aspect" 行为）。
-        # 对于 rw（角色）和 face（面部）等主立绘组件，mesh 应填满 rect（mesh≈rect），
-        # 若 mesh < rect（如 alabama_3 rw mesh=1792 < rect=2048），居中会让角色上移
-        # 造成"身体错位"。因此居中只对 bj 层生效，其余组件按 origin 左下角粘贴。
-        if c['name'] == bj_name:
-            off_x = (rect_w - comp_img.width) / 2.0
-            off_y = (rect_h - comp_img.height) / 2.0
-        else:
-            off_x = 0.0
-            off_y = 0.0
-        # origin 为 rect 左下角(Y 向上)；居中后图像左下角 = origin + off
-        px = int(round(c['origin'][0] + off_x))
-        py = int(round(canvas_h - (c['origin'][1] + off_y) - comp_img.height))
+            content_x = c['origin'][0] + min_x * scale + (rect_w - sprite_w * scale) / 2.0
+            content_y = c['origin'][1] + min_y * scale + (rect_h - sprite_h * scale) / 2.0
+            px = int(round(content_x))
+            py = int(round(canvas_h - content_y - new_h))
+            canvas.paste(comp_img, (px, py), comp_img)
+            kind = 'root' if is_root else 'bj'
+            print(f'  [bg cover] {c["name"]}({kind}): sprite={sprite_w:.0f}x{sprite_h:.0f} '
+                  f'content=({min_x:.0f},{min_y:.0f}) scale={scale:.3f} -> {new_w}x{new_h} @ ({px},{py})')
+            continue
+
+        # 缩放策略：等比 contain（min(rect/mesh)），保持部件原始比例不拉伸。
+        # 仅角色（rw）/面部（face）等主立绘组件走此路径：mesh 应填满 rect（mesh≈rect）。
+        mesh_w, mesh_h = comp_img.size
+        if mesh_w > 0 and mesh_h > 0:
+            ratio = min(rect_w / mesh_w, rect_h / mesh_h)
+            new_w = max(1, int(round(mesh_w * ratio)))
+            new_h = max(1, int(round(mesh_h * ratio)))
+            if (new_w, new_h) != comp_img.size:
+                comp_img = comp_img.resize((new_w, new_h), Image.LANCZOS)
+
+        # origin 为 rect 左下角(Y 向上)
+        px = int(round(c['origin'][0]))
+        py = int(round(canvas_h - c['origin'][1] - comp_img.height))
         canvas.paste(comp_img, (px, py), comp_img)
 
     # 裁剪到不透明内容包围盒（去除大片透明边缘）
