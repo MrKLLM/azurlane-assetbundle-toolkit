@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-08-29（背景层定位修复 + 项目清理）
+> **生成时间**: 2026-09-15（匹配机制打通，v2 数据驱动管线验证通过）
 > **用途**: 跨会话对接，方便新会话快速了解项目状态
 
 ---
@@ -1153,3 +1153,164 @@ v3 工具只支持调整体 bj 层，用户反馈很多组件内部也存在错�
 - 元数据源：`Output/WikiData/ship_data.json`（862 舰）+ `ship_name_map.py` 拼音映射 + 归一化/模糊匹配。
 - 阵营命中约 73%：重樱 681 / 白鹰 584 / 皇家 556 / 铁血 461 / 北方联合 176 / 维希教廷 137 / 东煌 136 / 撒丁帝国 114 / 自由鸢尾 55 / 飓风 49 / 郁金王国 6 / 联动 187；未知 1,164（27%，多为换装后缀、NPC、部分联动舰船）。
 - 预览：`python -m http.server 8765 --directory Output` → `http://localhost:8765/gallery/index.html`
+
+---
+
+## 10. 2026-08-30 模拟器资源增量同步 + il2cpp 逆向素材
+
+### 10.1 与模拟器的资源同步链路（已可用）✅
+
+| 指标 | 数值 |
+|---|---|
+| 第一轮同步（新增） | 3,824（+20 样本） |
+| **第二轮同步（版本更新）** | **868 个，1.4 GB** |
+| 失败数 | 0 / 0 |
+| 耗时 | 207 秒 + 69 秒 |
+| 同步后本地文件数 | 90,727（模拟器 90,612） |
+| 复检 diff | 新增 0、**大小不一致 0** ✅ |
+
+### 10.1.1 ⚠️ 同步工具曾有两个严重 bug（已修复）
+
+1. **只比对文件存在性、不比对大小** → 868 个资源停留在 6-18 旧版（模拟器已是 8-29 新版），
+   diff 却报「新增 0」，造成"同步已完成"的假象。**这是此前合成结果出错的根因级隐患。**
+   现已改为 `{路径: 大小}` 字典比对，diff 输出新增 / 大小不一致 / 本地独有三类。
+2. **`find -exec stat -c '%s %n'` 输出解析顺序错误** —— 行格式是 `<size> <path>`，
+   却拿整行做 `startswith(root+"/")`，导致一个文件都解析不出来。
+
+其他要点：adb shell stdout 会被截断（~20KB），必须按顶层子目录分块；
+`ls -la` 同样会截断，改用 `ls -1` + `for f in *; do stat -c '%F|%s' "$f"; done`；
+沙箱下 `Path.unlink()` 被安全策略拦截，**不要预先删除本地文件，adb pull 会自己覆盖**。
+
+- **工具**：`scripts/mumu_sync.py` / `.bat`（增量）、`scripts/mumu_adb.py` / `.bat`（整目录拉取与探查）
+- **原理**：ADB 连 `127.0.0.1:16384`，对比本地与模拟器的相对路径集合，只拉缺失文件
+- **注意**：本地独有的 111 个文件是模拟器已删除的旧资源，**未删除**，保留待定
+- 背景知识：模拟器磁盘是 `C:\Program Files\Netease\MuMuPlayer\vms\MuMuPlayerGlobal-12.0-0\data.vdi`
+  （61GB VDI → MBR → 3 个 ext4 分区），Windows 打不开，只能走 ADB 或离线挂载；
+  只读探测脚本见 `scripts/probe_vdi_fs.py`
+
+### 10.2 il2cpp 逆向素材 ✅ 已就位
+
+| 文件 | 大小 | 说明 |
+|---|---|---|
+| `files/il2cpp/libil2cpp.so` | 121,853,720 B | x86_64，ELF 校验通过 |
+| `files/il2cpp/Metadata/global-metadata.dat` | 18,245,232 B | version 0x1F(31)，magic FAB11BAF |
+
+- 两者**版本匹配**（APK 内 metadata 字节数完全一致）→ Il2CppDumper 可直接运行
+- 提取方式（6 秒，无需下载 1.73GB APK）：
+  `adb exec-out "unzip -p <base.apk> lib/x86_64/libil2cpp.so" > libil2cpp.so`
+- APK 路径：`adb shell pm path com.bilibili.azurlane`（adb 为 shell 权限即可读，无需 root）
+
+**strings 粗扫第一手线索**：
+- `SkeletonGraphic` 与 `SkeletonRenderer` **共存** → 动态立绘有 UI 版（RectTransform + CanvasRenderer）
+  和世界版（Transform + MeshRenderer）两条路径
+- `Spine.Unity.MeshGenerator` + `SubmeshInstruction` 存在 → Spine 在 Unity 内本质是生成 Mesh 再交 Renderer，
+  **与静态立绘 Mesh+Sprite 机制同源**
+- 计数：CanvasRenderer 33 / MeshRenderer 30 / RectTransform 25 / sortingOrder 6 / meshFilter 0
+- Live2D 走官方 Cubism SDK（`Live2D.Cubism.dll`、`Live2D.Cubism.Core.Unmanaged.*`）
+- ⚠️ `Painting` / `spinepainting` 字符串 0 命中，业务类名需 Il2CppDumper 出 dump.cs 后检索
+
+**推论（待验证）**：§9.13 放弃的 spine-webgl Viewer 走「世界坐标系自己算」，若游戏实际走
+SkeletonGraphic（RectTransform 锚定），正确路线应是**复用 compose_paintings.py 的 RectTransform
+布局逻辑**，把 Spine 当带 RectTransform 的图层放置，与静态立绘共用坐标系。
+
+### 10.3 22 号角色的特殊性（ALPA 预览空白的根因）
+
+- 22 号**没有** `paintingface/22_*` 常规脸部多层，定制资源全在
+  `AssetBundles/custom_builtin` —— **一个 24 MB 的单个文件**，不是目录。
+- 本地旧版 23.5 MB（6-18）vs 模拟器新版 24,175,181 B（8-27），旧版数据残缺
+  → ALPA 报 "Preview not available"。已删旧拉新，大小精确匹配。
+- 该路径在旧版同步中曾被误建为**空目录**，屏蔽了同名文件的拉取。
+
+---
+
+## 11. 静态立绘真实结构（逆向成果，2026-08-30 晚）
+
+### 11.1 关键：新版 AssetBundle 有版本字段伪装 ⚠️
+- 游戏把 UnityFS header 的 `unity_version` 改成 **`5.x.x`**，真实版本 `2022.3.62f3`
+  藏在 serialized file header 里。
+- **后果**：UnityPy、ALPA 1.0.5.1 等依赖该字段的工具全部解析失败。
+  这就是 2b 报「dependencies 文件已过时」的真正原因 —— **不是文件缺失，是读不了**。
+- **解法**：`UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"`
+
+### 11.2 dependencies = 完整资源依赖图 ✅
+| 指标 | 数值 |
+|---|---|
+| 条目数 | 85,525 |
+| 载体 | UnityFS 内单个 MonoBehaviour |
+| 结构 | `m_Keys`(资源路径) → `m_Values`(`m_FileName`/`m_Hash`/`m_Crc`/`m_Dependencies`) |
+
+### 11.3 静态立绘 = 纯 UI 结构（决定性证据）
+`painting/2b` 对象构成：**RectTransform 23 / CanvasRenderer 7 / Transform 1 / MeshRenderer 0**
+→ 立绘走 UI 渲染路径，不是世界坐标 3D。图集在 `painting/2b_tex`（Texture2D 2048×1134 ASTC + Mesh）。
+
+已导出 2b 完整布局树到 `Output/layout_2b.json`（根 `2B` 4298×3778、pivot 0.49/0.67、
+`face` 172×182、背景层 `2B_bj1`/`2B_bj2`、改造 `2B_rw`，以及 kanban/jiesuan/duihua 等
+十余个场景节点）。**每个部件的位置/大小/anchor/pivot 游戏都写死了，合成不需要猜坐标。**
+
+工具：`scripts/export_painting_layout.py`（可导出任意立绘布局）
+环境：UnityPy 1.25.3 @ `C:\Users\KLLM\.workbuddy\binaries\python\envs\default`
+
+**下一步**：
+1. 用导出的布局数据重写/校正 `compose_paintings.py`（当前疑似在猜坐标）
+2. 解出 `2b_tex` 的 Mesh UV，把图集切片与 RectTransform 对应起来
+3. 用同一套 UI 坐标系思路攻克 Spine 动态立绘（§9.13 的死结）
+
+---
+
+## 12. 2026-09-15 匹配机制打通 + v2 数据驱动管线 ✅（当前主线，取代 §6 攻关路线）
+
+### 12.1 资产重新同步 ✅
+- 修复 `mumu_sync.py` 多设备 bug（adb 未带 `-s`，双设备时报 more than one device）
+- diff→sync→复检闭环：拉取 **1,302 个文件**（新增 900 + 大小不一致 402，含全部清单 CSV），
+  复检新增 0 / 大小不一致 0 ✅；本地独有 111 个（游戏已删旧资源）保留未动
+- 游戏版本 `version.txt = 9.7.216`，清单 `hashes-painting.csv` 10,531 条、
+  `hashes.csv` 63,359 条（含 paintingface 2,216 / spinepainting 438）
+
+### 12.2 立绘匹配机制（游戏本体权威答案）✅ ★ 核心突破
+1. **`AssetBundles/dependencies`**（6.4MB 单包）内 MonoBehaviour 携带 **86,398 条官方依赖表**：
+   `资源名 → deps 列表`。已导出 `Output/dependency_manifest.json`
+   （脚本 `scripts/export_dependency_manifest.py`）。
+2. **PPtr 解析规则（实测验证）**：prefab 中 `m_Sprite=(FileID, PathID)`；
+   FileID=0 → 本包；FileID=N → **SerializedFile.externals[N-1] 的 CAB 名** → 反查所在依赖包。
+   ⚠️ externals 顺序 ≠ manifest deps 排序（后者按字母序），必须以 externals 为准
+   （2b 的 rw 节点 FileID=2 → externals[1]=2b_rw_tex ✓；按 manifest 序会错配成 bj1_tex）。
+3. **paintingface/<name>**：包内 Texture2D+Sprite 命名 `1..N`（如 2b 五张 172×182）＝表情差分；
+   face 节点 PPtr 直接指向该包（feiteliekaer_3 FileID=6=paintingface ✓）。
+4. **spinepainting 双结构**：内联型（2b_2：主包含 skel/atlas/tex）与
+   **分离型（aersasi：资源在 `<name>_res` 包）**——旧提取漏掉 _res 型是"部分放不出"根因之一；
+   atlas 页纹理还可能来自外部 deps（artresource/effect/*、ui/commonui_atlas）。
+5. 工具脚本：`scripts/probe_matching.py`（机制探查）。
+
+### 12.3 静态立绘 v2 管线 ✅（`scripts/compose_paintings_v2.py`）
+与 v1 本质区别：**零猜测、零手调参数**——部件→纹理包=deps+externals；
+对象定位=PathID 精确匹配（一包多 mesh 不再错拿）；放置=统一 Unity UI 数学
+（anchor/pivot/sizeDelta/anchoredPosition/localScale 全递归 + sprite 画框 mRawSpriteSize
+非等比映射 rect，mesh 重心插值光栅化回贴）。
+- 疑难样本 7/7：2b / feiteliekaer_3 / adiliao_2 / xili_alter / hailunna_4 / kewei_6 /
+  aersasi_3 / chicheng_4 **全部目视正确**。
+  ★ feiteliekaer_3（旧管线 S=0.844+dx160+dy-190 手调）与 xili_alter/hailunna_4
+  （旧 BUNDLE_BJ_ABSOLUTE 绝对定位）现在**无参数自动正确** → 证明旧问题根因全是坐标猜测。
+- 表情差分：`--faces all` 输出 `{name}_face{k}.png`（feiteliekaer_3 九张，脸区像素 diff 验证生效）。
+- 随机 30 皮肤批量 30/30 成功（含 _g/_asmr/_memory/_wjz/_alter 等变体）。
+- 输出目录 `Output/Paintings_v2/`（样本）、`Paintings_v2_batchtest/`（30 张）、
+  `Paintings_v2_facetest/`（差分）。
+- 环境：UnityPy 1.25.3 @ `py -3`（用户级 pip；原 workbuddy venv 已失效）。
+- 坑：命令行参数带 \r（CRLF）会伪装成"文件不存在"；main 已 strip。
+
+### 12.4 Spine v2 提取 ✅（`scripts/extract_spine_v2.py`）
+双结构兼容 + 外部页纹理按 deps 补齐 + DeskSpine/spine-webgl 兼容目录输出
+`Output/Spine_v2/<name>/`。样本 3/3（aersasi 2skel/2atlas/6png、2b_2、aisaikesi_7）。
+skel 版本 3.8.99（与 tools/spine-viewer 3.8 runtime 匹配），骨骼含 bj/bq/EyeM 多层。
+全量 226 主包（源 2.4GB，PNG 化预计 15~25GB）——**待用户确认后跑**。
+
+### 12.5 Live2D 核查 ✅
+manifest 266 个 `live2d/` 包本地零缺失；deps 仅 `l2dshader`（+1 个 paintingface 掩码）
+→ **包全部自包含，旧提取无资产缺口**。剩余已知问题仍是 motion 质量（§2.5 B 类 12 模型），
+与资产完整性无关。
+
+### 12.6 待办
+1. ⏳ 静态立绘全量重跑（~4,300 基础皮肤 → `Output/Paintings_v2/`，v1 产物保留不动）——需确认
+2. ⏳ Spine 全量提取（226 包）——需确认
+3. ⏳ 全量后画廊重建（build_gallery.py 指向 v2 目录）
+4. ⏳ Spine 动态立绘 viewer 验收（DeskSpine 或 spine-viewer 加载 Spine_v2）
+5. 💡 表情差分与游戏内表情 ID 的对应表可从 `AzurLaneData/ShareCfg/ship_skin_template.json` 补
