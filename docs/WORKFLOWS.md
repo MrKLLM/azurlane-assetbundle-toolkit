@@ -342,3 +342,59 @@
 - Canvas2D→WebGL 切换（读源码+写代码）→ general agent 可并行
 
 **涉及文件**: 无（策略文档）
+
+---
+
+### WF-12: v2 数据驱动立绘/Spine 还原管线
+
+**日期**: 2026-09-15
+**目标**: 用游戏本体权威数据（prefab 层级 + 官方依赖表）自动还原静态立绘与 Spine，取代 v1 时代逐条目手调参数
+**适用场景**: Unity UI 布局语义正确还原多部件立绘；跨包引用解析；皮肤命名归组
+
+**步骤**:
+1. **立绘匹配机制**（核心突破）：解析 `painting/<name>` prefab 的 RectTransform 层级，部件命名规律 `_rw`(人物)/`_bj`(背景)/`_front`(前景)/`_jz`(舰装)/`_n`(夜战)/`_hx`(换色)；脸多数烤进 `_rw`，仅约 4% 皮肤有独立 `face` 部件（表情差分来自 `paintingface/<name>` 包）。
+2. **跨包引用解析**：`PPtr.m_FileID` → `SerializedFile.externals[N-1]`（CAB 名反查 bundle），**不是** dependencies 清单的字母序；FileID=0 为本包。官方 `dependencies` 包即权威依赖表。
+3. **layout_all 布局还原**（正确 Unity UI 语义）：`sizeDelta`/`anchoredPosition` 在父局部空间做纯 anchor 数学（不乘 scale）→ 仿射映射到世界；自身 scale 绕 pivot（负=镜像）；root scale 是屏幕适配可归一为 1。
+4. **纹理方向**：UnityPy `flip=False` 时第 0 行 = v=0 = Unity 底部，`Sprite m_Rect.y` 自底计数直接切片即 Y-up；Spine 页纹理导出须 `flip=True`（运行时按行 0=顶采样）。
+5. **Spine 提取**（`extract_spine_v2.py`）：一个 `Spine_v2/<皮肤>/` 目录内含 1~8 个部件骨骼（B/M/T 等），须整体保留供前端分层合成；兼容无后缀 skel/atlas 变体（按特征嗅探）。
+6. **全量驱动**（`run_v2_full.py`）：两阶段（Spine→静态），断点续跑（输出已存在则跳过），错误落盘。
+
+**关键决策**:
+- 目标皮肤清单 → **以真实源包 `files/AssetBundles/painting/` 为准枚举**（滤 `_tex`/`_res`/`_dark_shadow`/`_face`），并与旧 v1 基线取并集。旧版只从 v1 基线取名 → v1 没有的联动舰（2b/a2 等约 190 个真实皮肤）永不合成。
+- 一切层间比例/位置由官方数据自然推导，**零手调参数**（v1 的 BUNDLE_BJ_ABSOLUTE/SCALES/OFFSETS 全部废弃）。
+
+**踩坑记录**:
+- 背景层颠倒 → sprite 路径双重 Y 翻转；Spine 页纹理方向错 → flip 参数用反。
+- root scale 只乘子层 → 层间比例错误真根因（§12.8）。
+- Windows 分离进程 stdout 默认 GBK，`print('✓')` 抛 UnicodeEncodeError → 全量假失败；脚本头 `sys.stdout.reconfigure(encoding='utf-8')` + 子进程 env `PYTHONIOENCODING=utf-8`。
+- 手动命令行跑 compose 也需 `PYTHONIOENCODING=utf-8`，否则 ✓/✗ 崩。
+
+**涉及文件**: `scripts/compose_paintings_v2.py`, `scripts/extract_spine_v2.py`, `scripts/run_v2_full.py`, `PROJECT_STATUS.md §11–12`
+
+---
+
+### WF-13: 本地资产浏览平台搭建
+
+**日期**: 2026-09-15
+**目标**: 参照 l2d.su 做一个可本地浏览全部已还原资产（静态立绘/Spine/Live2D/语音）、中文名展示的平台
+**适用场景**: 解包产物量大（源 28GB / 立绘 15GB 数千张）无法发布上线，需本地高效浏览
+
+**步骤**:
+1. **数据索引**（`build_gallery_index.py`）：复用 `ship_name_map.SHIP_NAME_MAP`（拼音→中文名，812 条）+ `generate_audio_doc.CV_MAP`（语音ID→中文名）；资产目录/文件名 ID = 中文舰名拼音，按「归一化基ID → 完整皮肤 stem」分组，合并 `ship_data.json`（舰种/稀有度/阵营）。同时输出 `index.json` 与 `index.js`（`window.GALLERY=`）。
+2. **缩略图**（`make_thumbs.py`）：多进程为高清 PNG 生成 380px WebP（含透明），否则数千张 3.5MB 原图浏览器加载不动。
+3. **前端**（`index.html` 单文件）：网格懒加载缩略图 + 搜索 + 阵营/舰种/稀有度/内容多维筛选 + 排序；详情弹层四标签（立绘全图 / Spine WebGL 实时 / Live2D 贴图 / 语音 `<audio>`）。
+4. **Spine 实时播放**：复用本机 `tools/spine-viewer/spine-runtime/3.8_spine-all.js`（拷入 `vendor/spine/`，纯 JS 无 wasm）；`ManagedWebGLRenderingContext`+`SceneRenderer`+`SkeletonBinary`，**按皮肤目录内 B/M/T 部件列表分层合成绘制**，相机包围盒自适应 + 滚轮缩放/拖拽平移。
+5. **启动器**（`启动资产浏览器.bat`）：`Output/` 起 `py -m http.server` 并开 `/gallery_v2/index.html`。
+
+**关键决策**:
+- 形态 → 本地网页（体量决定发布上线不现实）。
+- 数据加载 → 另存 `index.js` 让 `file://` 双击也能读到数据。
+- Spine 运行时 → 复用本机已有 viewer 的 3.8 runtime，离线可用，不依赖网络。
+
+**踩坑记录**:
+- `<img>`/`<audio>` 在 `file://` 可直读，但 `fetch/XHR` 读 `.skel/.atlas/.json` 被 CORS 拦 → **实时播放必须起 http 服务器**；页面按 `location.protocol` 提示。
+- `.bat` 里 `start URL` 若抢在 `http.server` 监听前会连不上 → 后台起服务器 + `timeout /t 2` 延时再 `start URL`，并探测 `py`/`python`。
+- Live2D 动作播放需 Cubism Web 运行时（`live2dcubismcore.min.js`+`pixi-live2d-display`），本机无且环境出网受限 → 暂只显示模型贴图，预留 `vendor/live2d/`。
+- 个别 bundle 拼音与 `SHIP_NAME_MAP` 拼写不一致（如 daofeng/dafeng）→ 约 7% 未匹配中文名，按约定保留拼音 ID。
+
+**涉及文件**: `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `Output/gallery_v2/index.html`, `Output/gallery_v2/启动资产浏览器.bat`, `PROJECT_STATUS.md §13`

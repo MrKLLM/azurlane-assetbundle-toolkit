@@ -25,6 +25,7 @@ PY = sys.executable
 STATIC_OUT = os.path.join(ROOT, "Output", "Paintings_v2")
 SPINE_OUT = os.path.join(ROOT, "Output", "Spine_v2")
 BASELINE_DIR = os.path.join(ROOT, "Output", "Paintings_Synthesized")
+PAINTING_DIR = os.path.join(ROOT, "files", "AssetBundles", "painting")
 PROGRESS_LOG = os.path.join(ROOT, "Output", "run_v2_full.progress.log")
 ERROR_LOG = os.path.join(ROOT, "Output", "run_v2_full.errors.log")
 
@@ -37,16 +38,42 @@ def log(msg):
 
 
 def baseline_targets():
-    """旧基线的 4,300 个主立绘名（排除表情差分/阴影层）。"""
-    names = []
+    """合成目标主皮肤名。
+
+    根因修复：旧版只从 v1 基线目录取名，导致 v1 里没有的皮肤（联动舰 2b/a2 等
+    约 180 个真实主皮肤）永远不会被合成。改为以真实源包
+    files/AssetBundles/painting/ 为准枚举主皮肤包（排除部件纹理包 _tex、资源包
+    _res、投影层 _dark_shadow、表情差分 _face），并与旧基线取并集，保证不回退。
+    """
+    names = set()
+    # 非主皮肤的部件/材质/杂项 bundle 名后缀（不带 _tex 但仍是子部件）
+    PART_SUFFIX = ("_rw", "_bj", "_front", "_jz", "_bg", "_shadow", "_shophx", "_mat")
+    def is_main(fn):
+        if fn.endswith("_tex") or fn.endswith("_res"):
+            return False
+        if "_dark_shadow" in fn or "_face" in fn:
+            return False
+        if fn == "mat" or fn.startswith("mat_"):
+            return False
+        if any(fn.endswith(s) for s in PART_SUFFIX):
+            return False
+        return True
+    # 1) 真实源包：painting/<name>（不带 _tex/_res 后缀的即主皮肤包）
+    if os.path.isdir(PAINTING_DIR):
+        for fn in os.listdir(PAINTING_DIR):
+            if not os.path.isfile(os.path.join(PAINTING_DIR, fn)):
+                continue
+            if is_main(fn):
+                names.add(fn)
+    # 2) 旧基线并集（兜底，防源包命名差异导致遗漏）
     for fn in os.listdir(BASELINE_DIR):
         if not fn.endswith(".png"):
             continue
         base = fn[:-4]
         if "_dark_shadow" in base or "_face" in base:
             continue
-        names.append(base)
-    return sorted(set(names))
+        names.add(base)
+    return sorted(names)
 
 
 def run_spine():
