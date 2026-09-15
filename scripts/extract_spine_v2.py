@@ -99,8 +99,25 @@ def extract_one(name):
     src_bundles = [key] + [d for d in deps if d.endswith("_res")]
     texts, textures = collect_assets(src_bundles)
 
-    skels = {k: v for k, v in texts.items() if k.endswith(".skel")}
-    atlases = {k: v for k, v in texts.items() if k.endswith(".atlas")}
+    skels, atlases = {}, {}
+    for k, v in texts.items():
+        b = to_bytes(v)
+        if k.endswith(".atlas") or k.endswith(".atlas.txt"):
+            atlases[k[:-4] if k.endswith(".txt") else k] = v
+        elif k.endswith(".skel"):
+            skels[k] = v
+        else:
+            # 无后缀变体：atlas 文本含 spine 特征词；其余大二进制当 skel
+            head = b[:4096]
+            try:
+                txt = head.decode("utf-8")
+                is_atlas = ("size:" in txt and ("filter:" in txt or "pma:" in txt))
+            except UnicodeDecodeError:
+                is_atlas = False
+            if is_atlas:
+                atlases[k + ".atlas"] = v
+            elif len(b) > 1024:
+                skels[k + ".skel"] = v
     if not skels:
         return False, "无 skel"
 
