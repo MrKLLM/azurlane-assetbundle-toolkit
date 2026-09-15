@@ -369,14 +369,15 @@ def build_part(part, face_sprite_name=None):
                 img, bbox = rasterize_mesh(verts, uvs, tris, tex, *frame)
                 if img is not None:
                     return img, bbox, frame
-    # 无 mesh：sprite 矩形从纹理整块裁（flip=False 空间 -> 转 Y-up 数组）
-    tw, th = tex.size
-    sx0 = int(round(rect.x)); sy0 = int(round(th - rect.y - rect.height))
+    # 无 mesh：sprite 矩形从纹理整块裁。
+    # decoded_texture 用 flip=False 读出 —— 数组第 0 行就是 v=0（Unity 底部），
+    # 而 m_Rect.y 本身就是自底坐标，直接切片得到的就是 Y-up 内容，无需再翻转。
+    # （旧版这里 th-rect.y-h 再 [::-1] 是双重翻转，正是背景层上下颠倒的根因）
+    sx0 = int(round(rect.x)); sy0 = int(round(rect.y))
     sx1 = sx0 + int(round(rect.width)); sy1 = sy0 + int(round(rect.height))
-    arr = np.asarray(tex.convert("RGBA"))[max(0, sy0):sy1, max(0, sx0):sx1]
-    arr = arr[::-1]  # 转 Y-up
+    arr = np.asarray(tex.convert("RGBA"))[sy0:sy1, sx0:sx1]
     x0 = max(0, int(round(rect.x)))
-    y0 = max(0, int(round(frame[1] - rect.y - rect.height)))
+    y0 = max(0, int(round(rect.y)))
     bbox = (x0, y0, x0 + arr.shape[1], y0 + arr.shape[0])
     return arr, bbox, frame
 

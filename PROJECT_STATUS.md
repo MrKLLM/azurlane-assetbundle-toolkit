@@ -1314,3 +1314,33 @@ manifest 266 个 `live2d/` 包本地零缺失；deps 仅 `l2dshader`（+1 个 pa
 3. ⏳ 全量后画廊重建（build_gallery.py 指向 v2 目录）
 4. ⏳ Spine 动态立绘 viewer 验收（DeskSpine 或 spine-viewer 加载 Spine_v2）
 5. 💡 表情差分与游戏内表情 ID 的对应表可从 `AzurLaneData/ShareCfg/ship_skin_template.json` 补
+
+### 12.7 2026-09-15 下午：v2 首轮全量暴露的 3 个系统性 bug + 根因修复 ✅ ★重要教训
+
+用户抽查 v2 样本发现「图层大小/方向关系不对、有几个倒过来」，定位到 3 个**系统性**根因
+（全部代码级修复，零逐角色参数，未重蹈 v1 手调覆辙）：
+
+1. **无 mesh 整图部件双重 Y 翻转**（`compose_paintings_v2.py::build_part` sprite 路径）：
+   `decoded_texture(flip=False)` 的 PIL 数组第 0 行 = v=0 = Unity 底部，而 `m_Rect.y`
+   本身就是自底坐标——直接切片即 Y-up 内容。旧代码 `th-rect.y-h` 再 `[::-1]` 是双重翻转
+   → **root 背景层整层上下颠倒**（典型：hailunna_4 甲板挂天上）。
+   修复：`arr = A[rect.y : rect.y+h]`，bbox y0 = rect.y。
+2. **Spine atlas 页纹理方向**（`extract_spine_v2.py`）：Spine 运行时（spine-webgl/DeskSpine）
+   按标准 PNG（行0=顶）采样，Unity raw data 需 `flip=True` 导出。
+   验证法：与旧版可用输出 `Output/Spine/` 逐像素比对方向。
+3. **Windows 分离进程 GBK 假失败**（`run_v2_full.py`）：Start-Process 重定向的 stdout 默认
+   GBK，`print('✓')` 抛 UnicodeEncodeError → 首轮全量 100% 记为失败（实际图像已写出）。
+   修复：主进程 `sys.stdout.reconfigure(encoding='utf-8')` + 子进程 env 传
+   `PYTHONIOENCODING=utf-8`。
+
+**修复后验证**：hailunna_4（酒杯自动落在栏杆后，v1 需手调绝对定位才达到的效果现在零参数
+自动正确）、feiteliekaer_3（角色自动躺正浮床，v1 需 S=0.844+dx+dy 手调）、2b、xili_alter
+全部目视通过 → 再次印证「游戏数据自洽，之前所有错位都是解析姿势不对」。
+
+**运维教训**：`powershell -Command` 经 Git Bash 传 `$_`/`$env:` 会被错误展开——
+凡含 `$` 的 PowerShell 逻辑一律写 .ps1 文件执行（scripts/kill_stale_run.ps1）；
+Start-Process 重启批处理前必须先确认旧进程已终止，否则双进程并发写同一输出目录。
+
+**全量运行状态**（16:37 起，单进程）：Spine 232 主包（172 续跑 + 60 已完成）；
+静态 4,300 目标 ok=200 fail=0，速度 ~1.2s/张，预计 ~85 分钟。
+错误清单（待跑完处理）：beierfasite_g 无 skel、dahuangfengii 部件为空 等。

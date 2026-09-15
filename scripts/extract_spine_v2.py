@@ -127,7 +127,8 @@ def extract_one(name):
                     notes.append(f"缺页 {pg}")
                     continue
             if o is not None:
-                img = get_image_from_texture2d(o.read(), flip=False)
+                # Spine 运行时按标准 PNG（行0=顶）采样，Unity raw data 需翻转
+                img = get_image_from_texture2d(o.read(), flip=True)
                 img.save(os.path.join(out_dir, pg))
                 n_png += 1
         with open(os.path.join(out_dir, aname), "wb") as f:

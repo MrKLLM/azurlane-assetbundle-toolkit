@@ -14,6 +14,11 @@ import subprocess
 import sys
 import time
 
+# Windows 分离进程 stdout 默认 GBK，print('✓') 会 UnicodeEncodeError 导致全量假失败
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+_SUBPROC_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PY = sys.executable
@@ -59,7 +64,7 @@ def run_spine():
         batch = todo[i:i + 25]
         p = subprocess.run([PY, os.path.join(HERE, "extract_spine_v2.py")] + batch,
                            capture_output=True, text=True, encoding="utf-8",
-                           errors="replace")
+                           errors="replace", env=_SUBPROC_ENV)
         for ln in (p.stdout or "").splitlines():
             if ln.startswith("✗"):
                 with open(ERROR_LOG, "a", encoding="utf-8") as f:
