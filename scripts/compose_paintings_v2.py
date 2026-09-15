@@ -472,6 +472,10 @@ def is_lighting(arr):
 
 def compose(bundle_name, out_dir, faces=None):
     """合成一个皮肤。faces=None 只出默认脸；faces=[..] 额外输出差分。"""
+    # 每个 bundle 处理前释放解码缓存（4096² ASTC 一张 ~64MB，长跑必须清）
+    _env_cache.clear()
+    _obj_cache.clear()
+    _img_cache.clear()
     rects, go_names, father_map, children_map, parts, deps = parse_painting(bundle_name)
     if not parts:
         print(f"  ✗ {bundle_name}: 没有可绘制部件")
