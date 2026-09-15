@@ -385,53 +385,59 @@ def build_part(part, face_sprite_name=None):
 # ---------------------------------------------------------------- 布局
 
 def layout_all(rects, father_map, children_map):
-    """递归计算每个 RectTransform 的世界矩形（Y-up 画布坐标，含 localScale）。
-    返回 {pid: (ox, oy, w, h)}（ox,oy = rect 左下角，已含父级累计缩放）。"""
-    out = {}
+    """正确的 Unity UI 布局：
+    1) 局部空间纯 anchor 数学（sizeDelta/anchoredPosition 不乘父 scale）；
+    2) 递归把局部 rect 经「父局部→父世界」仿射映射到世界（继承全部祖先缩放）；
+    3) 节点自身 localScale 绕 pivot 缩放（负值 = 镜像，记入 mirrors）。
+    root 自身 scale 归一为 1（游戏屏幕适配缩放，不影响层间比例）。
+    返回 ({pid: (rx,ry,w,h) 世界 Y-up}, {pid: (mx,my)}, roots)。"""
+    boxes, mirrors = {}, {}
 
-    def get_size(pid):
-        r = rects[pid]
-        sd = r.m_SizeDelta
-        return (sd.x, sd.y)
-
-    def visit(pid, parent_box, parent_scale):
-        if pid in out:
-            return
-        r = rects[pid]
-        ox, oy, pw, ph = parent_box
+    def local_rect(r, pw, ph):
+        """节点在父局部空间的 rect（Y-up，父左下为原点）。"""
         amin, amax = r.m_AnchorMin, r.m_AnchorMax
         sd = r.m_SizeDelta
         ap = r.m_AnchoredPosition
         piv = r.m_Pivot
+        w = (amax.x - amin.x) * pw + sd.x
+        h = (amax.y - amin.y) * ph + sd.y
+        px = amin.x * pw + ap.x + (amax.x - amin.x) * pw * piv.x
+        py = amin.y * ph + ap.y + (amax.y - amin.y) * ph * piv.y
+        return (px - piv.x * w, py - piv.y * h, w, h)
+
+    def visit(pid, p_local, p_world):
+        r = rects[pid]
+        lx, ly, lw, lh = local_rect(r, p_local[2], p_local[3])
+        # 父局部 -> 父世界 仿射（纯缩放+平移）
+        ax = p_world[2] / p_local[2] if p_local[2] else 1.0
+        ay = p_world[3] / p_local[3] if p_local[3] else 1.0
+        wx = p_world[0] + (lx - p_local[0]) * ax
+        wy = p_world[1] + (ly - p_local[1]) * ay
+        ww, wh = lw * ax, lh * ay
+        # 自身 localScale 绕 pivot 缩放（负值镜像）
         ls = getattr(r, "m_LocalScale", None)
         sx = (ls.x if ls else 1) or 1
         sy = (ls.y if ls else 1) or 1
-
-        a0x, a0y = ox + amin.x * pw, oy + amin.y * ph
-        a1x, a1y = ox + amax.x * pw, oy + amax.y * ph
-        w = (a1x - a0x) + sd.x * parent_scale
-        h = (a1y - a0y) + sd.y * parent_scale
-        px = a0x + ap.x * parent_scale + (a1x - a0x) * piv.x
-        py = a0y + ap.y * parent_scale + (a1y - a0y) * piv.y
-        rx = px - piv.x * w
-        ry = py - piv.y * h
-        out[pid] = (rx, ry, w, h)
-        own_scale = parent_scale * ((sx + sy) / 2.0)
+        piv = r.m_Pivot
+        pcx, pcy = wx + piv.x * ww, wy + piv.y * wh
+        ww2, wh2 = ww * abs(sx), wh * abs(sy)
+        wx2, wy2 = pcx - piv.x * ww2, pcy - piv.y * wh2
+        boxes[pid] = (wx2, wy2, ww2, wh2)
+        mirrors[pid] = (sx < 0, sy < 0)
         for c in children_map.get(pid, []):
             if c in rects:
-                visit(c, (rx, ry, w * sx, h * sy), own_scale)
+                visit(c, (lx, ly, lw, lh), (wx2, wy2, ww2, wh2))
 
     roots = [p for p in rects if not father_map.get(p)]
     for root in roots:
         r = rects[root]
         sd = r.m_SizeDelta
-        out[root] = (0.0, 0.0, sd.x, sd.y)
-        sc = getattr(r, "m_LocalScale", None)
-        s = ((sc.x + sc.y) / 2.0 if sc else 1) or 1
+        boxes[root] = (0.0, 0.0, sd.x, sd.y)
+        mirrors[root] = (False, False)
         for c in children_map.get(root, []):
             if c in rects:
-                visit(c, (0.0, 0.0, sd.x, sd.y), s)
-    return out, roots
+                visit(c, (0.0, 0.0, sd.x, sd.y), (0.0, 0.0, sd.x, sd.y))
+    return boxes, mirrors, roots
 
 
 def draw_order(rects, father_map, children_map):
@@ -481,7 +487,7 @@ def compose(bundle_name, out_dir, faces=None):
     if not parts:
         print(f"  ✗ {bundle_name}: 没有可绘制部件")
         return False
-    boxes, roots = layout_all(rects, father_map, children_map)
+    boxes, mirrors, roots = layout_all(rects, father_map, children_map)
     order = draw_order(rects, father_map, children_map)
     rank = {p: i for i, p in enumerate(order)}
 
@@ -518,6 +524,11 @@ def compose(bundle_name, out_dir, faces=None):
                 sx = rw / frame[0] if frame[0] else 1
                 sy = rh / frame[1] if frame[1] else 1
                 x0, y0, x1, y1 = bbox
+                mx, my = mirrors.get(pid, (False, False))
+                if mx:  # 画框内水平镜像
+                    x0, x1 = frame[0] - x1, frame[0] - x0
+                if my:  # 画框内垂直镜像
+                    y0, y1 = frame[1] - y1, frame[1] - y0
                 # 内容在画框坐标 -> 世界(Y-up) -> PIL(Y-down)
                 wx0 = rx + x0 * sx
                 wy0 = ry + y0 * sy
@@ -526,6 +537,10 @@ def compose(bundle_name, out_dir, faces=None):
                 img = Image.fromarray(arr.astype(np.uint8), "RGBA")
                 # arr 是 Y-up，转 PIL 需要上下翻转
                 img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                if mx:
+                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                if my:
+                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
                 if (img.width, img.height) != (ww, wh):
                     img = img.resize((ww, wh), Image.BILINEAR)
                 px = int(round(wx0))
