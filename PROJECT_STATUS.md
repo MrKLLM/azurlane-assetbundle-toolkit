@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-15（匹配机制打通，v2 数据驱动管线验证通过）
+> **生成时间**: 2026-09-15（v2 全量完成 4300/4300；本地资产浏览平台 `Output/gallery_v2` 上线）
 > **用途**: 跨会话对接，方便新会话快速了解项目状态
 
 ---
@@ -1367,3 +1367,37 @@ root 节点的 localScale（hailunna_4=0.6 / feiteliekaer_3=0.48 / 2b=0.75）被
 
 全量第三次启动（17:22）：4300 张，50/4300 ok=0 fail，预计 ~100 分钟。
 错误比例的第一/二轮产物已移入 .trash/（paintings_v2_buggy / paintings_v2_scalebug）。
+
+**全量完成（18:50）：静态立绘 4300/4300，ok=4300 fail=0 ✅；Spine 阶段 17:22 已完成（232 主包）。v2 管线全量收官。**
+
+---
+
+## 13. 本地资产浏览平台 `Output/gallery_v2` ✅（2026-09-15 晚）
+
+### 13.1 目标与形态
+参照 l2d.su，做一个可本地浏览全部已还原资产的平台：**静态立绘 + Spine 动态 + Live2D + 语音**，中文名展示。选择**本地网页**（源 28GB / Paintings_v2 15GB，发布上线不现实）。
+
+### 13.2 数据构建（脚本）
+| 脚本 | 职责 |
+| --- | --- |
+| `scripts/build_gallery_index.py` | 复用 `ship_name_map.SHIP_NAME_MAP`（拼音→中文名，812 条）+ `generate_audio_doc.CV_MAP`（语音ID→中文名），扫描四类资产，按「归一化基ID → 皮肤stem」合并 `ship_data.json` 元数据，输出 `index.json` + `index.js` |
+| `scripts/make_thumbs.py` | 多进程为 4300 张高清 PNG 生成 380px WebP 缩略图（含透明）→ `gallery_v2/thumbs/` |
+
+构建结果统计：`ships=926 / with_cn=796 / skins=4326 / spine=231 / live2d=256 / with_voice=268 / npc=57`。
+非 NPC 未匹配中文名 73 个（联动 2B/A2、Vtuber、DOAXVV、未知舰、探索者等），按约定保留拼音 ID。
+
+### 13.3 前端 `Output/gallery_v2/index.html`
+- 网格按船展示缩略图（`loading=lazy`），搜索（中文名/拼音）+ 阵营/舰种/稀有度/内容多维筛选 + 排序。
+- 详情弹层四标签：**静态立绘**（全图）/ **Spine 动态**（WebGL 实时播放）/ **Live2D**（模型贴图，动作待运行时）/ **语音**（原生 `<audio>`）。
+- Spine 引擎复用本机 `tools/spine-viewer` 的 `spine-all.js`（3.8.99），拷入 `vendor/spine/`。**关键：一个 Spine 皮肤目录内含 1~8 个部件骨骼（`B/M/T` 等图层），前端按 `parts` 列表分层合成绘制**（岛风=daofengB+daofengT，依仙=yixian_2B/2M/2T）。170 单部件 / 61 多部件 / 1 空目录已剔除。
+
+### 13.4 运行方式与已知限制
+- **`启动资产浏览器.bat`**：在 `Output/` 起 `py -m http.server 8777` 并打开 `/gallery_v2/index.html`。本地服务器模式 Spine 实时播放可用。
+- 直接双击 `index.html`（file://）：立绘/缩略图/语音可看（`<img>`/`<audio>` 不受 CORS 限制），但 **Spine 的 `fetch(.skel/.atlas)` 被 file:// 拦截**，页面顶部有橙色提示引导改用 .bat。
+- **Live2D 暂只能看模型贴图**：动作播放需 Cubism Web 运行时（`live2dcubismcore.min.js` + `pixi-live2d-display`），本机无、且当前环境出网受限无法下载；预留 `vendor/live2d/` 目录，放入运行时即可升级。
+- 冒烟验证（http）：`index.html`/`index.js`/`spine-all.js`/缩略图/立绘/Spine skel+atlas+png 全部 200；相对 `../` 路径解析正确。
+
+### 13.5 待办
+- 网络可用时补 Live2D Cubism 运行时，启用 Live2D 动作播放。
+- 73 个联动/特殊舰的中文名可后续人工补录进 `ship_name_map`。
+- 可加：按舰种/阵营的分组视图、收藏、批量导出。
