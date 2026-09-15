@@ -1344,3 +1344,26 @@ Start-Process 重启批处理前必须先确认旧进程已终止，否则双进
 **全量运行状态**（16:37 起，单进程）：Spine 232 主包（172 续跑 + 60 已完成）；
 静态 4,300 目标 ok=200 fail=0，速度 ~1.2s/张，预计 ~85 分钟。
 错误清单（待跑完处理）：beierfasite_g 无 skel、dahuangfengii 部件为空 等。
+
+### 12.8 2026-09-15 晚：第四个系统性 bug —— root scale 只乘子层（层间比例错误的真根因）✅
+
+用户复查仍报「图层之间大小比例不对」。真根因在 `layout_all`：
+root 节点的 localScale（hailunna_4=0.6 / feiteliekaer_3=0.48 / 2b=0.75）被旧代码
+**只乘到了子部件的 sizeDelta/anchoredPosition 上，root 自己的背景层没乘**——
+背景用一套缩放、角色用另一套，比例必然错。
+
+**正确 Unity UI 语义（已重写）**：
+1. 布局在 root 局部空间做纯 anchor 数学（sizeDelta/anchoredPosition 不乘父 scale）；
+2. 局部 rect 递归经「父局部→父世界」仿射映射（纯缩放+平移）到世界；
+3. 节点自身 localScale 绕 pivot 缩放，负值 = 镜像（水面倒影等）；
+4. **root 自身 scale 归一为 1**：它只是游戏把整棵 UI 树适配到屏幕的统一缩放，
+   不改变层间比例——归一化后画布保持原分辨率。
+
+修复后验证（全部零手调）：2b 角色比例正常、hailunna_4 角色站上甲板倚栏杆
+（酒杯自动落于扶手后）、feiteliekaer_3 角色精确躺上浮床（v1 需 S/dx/dy 三参数
+手调的效果现在自动正确）、xili_alter 层序正确。
+**至此 v1 时代的全部手调参数（BUNDLE_BJ_ABSOLUTE/SCALES/OFFSETS）均被官方数据
+自然推导取代。**
+
+全量第三次启动（17:22）：4300 张，50/4300 ok=0 fail，预计 ~100 分钟。
+错误比例的第一/二轮产物已移入 .trash/（paintings_v2_buggy / paintings_v2_scalebug）。
