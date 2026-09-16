@@ -36,8 +36,8 @@
 256/256 还原、纹理拼接正确、HitAreas 已修复；有真实动画 244/256，全部成功 26/256，B 类 12 个动画完全失败（资产无缺口，属 motion 质量，见 §9.5）。输出 `Output/Live2D/{舰名}/`，~3.4GB。脚本 `reconstruct_live2d.py` / `fix_model3.py` / `extract_motions.py`。
 已知限制：StreamedClip 未完全逆向；HitAreas 用 moc3 Touch ID，非真实交互区。
 
-### 2.6 Spine 动态立绘 ✅（v2，见 §9.4 / §10）
-v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` 双结构兼容提取到 `Output/Spine_v2/`，232 主包完成；gallery_v2 内用 `spine-all.js`(3.8) 分层实时播放。
+### 2.6 Spine 动态立绘 ⚠️（v2 提取完成，viewer 动画/层序待修，见 §6）
+v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` 双结构兼容提取到 `Output/Spine_v2/`，232 主包完成；gallery_v2 内用 `spine-all.js`(3.8) 分层实时播放。**已知问题**：仅 `normal` 动画会动、比例偏、部分「N 层失败」，待查（§6）。
 
 ### 2.7 UI/图标导出 ⏳ 未处理
 `ui/` 4,059 文件 + 各 icon 目录数万，可复用 `export_assets.py`。优先级最低。
@@ -96,17 +96,29 @@ v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` �
 
 ## 6. 接下来的任务
 
+### ★ 2026-09-16 gallery_v2 质量复核（排查中，未定论）
+
+用户浏览 gallery_v2 时发现一批还原质量问题，正在逐条定位根因（尚未修复、未重跑全量）：
+
+1. ⚠️ **静态立绘层序 bug（系统性嫌疑）**——i404 背景层盖在角色右半身之上（硬竖直缝）。根因假设：UnityPy 不暴露 `CanvasRenderer.m_SortingOrder`，`compose_paintings_v2.py::draw_order` 只能按 `m_Children` 兄弟序定层序，多层背景（`bj1/2/3`）/前景（`_front`）的立绘会排错序。**待验证**：需游戏真值（l2d.su / wiki）确认正确层序来源。影响面可能覆盖所有多 bj/front 立绘。样本：i404、jialimaoxian（`_front` 前景章鱼挤压角色）。
+2. ⚠️ **missd（D小姐）「黑影」**——未定论：是 `bj` 背景本身为碎裂主题美术，还是混入了深色投影层。待用户/真值确认。
+3. ⚠️ **Spine 动态**——只有 `normal` 动画会动（下拉列 1/2/3/4/normal）、比例怪、i404 显示「1 层部件·1 层失败」。属 gallery 前端动画/分层逻辑 + `extract_spine_v2` 产物，另一条线，未深入。
+4. ⏳ **元数据匹配**——角色名/阵营/舰种有误或缺失，参考 l2d.su + 碧蓝 wiki 校正（联动/特殊舰尤甚，见 §10）。
+
+> 推进纪律：核心合成管线改动 → 先取游戏真值样本验证 → 再全量重跑 4486 张；未确认不擅自全量。诊断临时图存 `.diag/`（不入库）。
+
+### 既有待办
+
 **优先级高**
 1. ⏳ Spine 动态立绘 viewer 验收（DeskSpine / gallery_v2 加载 Spine_v2 全量）。
-2. ⏳ 「缺脸」「有阴影」两类未决：150 样本诊断显示仅 ~4% 皮肤有独立 face 部件、脸多烤进 `_rw`；`is_lighting` 只剔近纯白光效。**需用户指认具体船名**后定位部件/图层根因，样本验证再全量。
 
 **优先级中**
-3. ⏳ 网络可用时补 Live2D Cubism 运行时，启用 gallery 的 Live2D 动作播放。
-4. ⏳ 73 个联动/特殊舰中文名补录进 `ship_name_map`。
-5. ⏳ 表情差分与游戏内表情 ID 对应表（可从 `AzurLaneData/ShareCfg/ship_skin_template.json` 补）。
+2. ⏳ 网络可用时补 Live2D Cubism 运行时，启用 gallery 的 Live2D 动作播放。
+3. ⏳ 73 个联动/特殊舰中文名补录进 `ship_name_map`。
+4. ⏳ 表情差分与游戏内表情 ID 对应表（可从 `AzurLaneData/ShareCfg/ship_skin_template.json` 补）。
 
 **优先级低**
-6. UI/图标批量导出（~2 万）、3D 宿舍资源、资源分类整理 `organize.py`。
+5. UI/图标批量导出（~2 万）、3D 宿舍资源、资源分类整理 `organize.py`。
 
 ---
 
@@ -141,8 +153,9 @@ v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` �
 - 部件→纹理包 = deps + externals；对象定位 = PathID 精确匹配（一包多 mesh 不再错拿）；放置 = 统一 Unity UI 数学（anchor/pivot/sizeDelta/anchoredPosition/localScale 全递归 + sprite 画框 `mRawSpriteSize` 非等比映射 rect）。
 - 逆向关键：新版 bundle header `unity_version` 伪装成 `5.x.x`，真实 `2022.3.62f3` → 需 `UnityPy.config.FALLBACK_UNITY_VERSION="2022.3.62f3"`。静态立绘 = **纯 UI 结构**（RectTransform/CanvasRenderer，无 MeshRenderer），游戏把每个部件位置/大小/anchor/pivot 全写死，合成不需猜坐标。
 
-### 9.2 静态立绘 v2（`scripts/compose_paintings_v2.py`）✅
+### 9.2 静态立绘 v2（`scripts/compose_paintings_v2.py`）⚠️
 零猜测、零手调。疑难样本 7/7 目视正确；v1 需手调的 feiteliekaer_3 / xili_alter / hailunna_4 现无参数自动正确。表情差分 `--faces all` 输出 `{name}_face{k}.png`。
+> ⚠️ **遗留层序问题（2026-09-16 复核）**：单背景/单角色立绘正确，但**多层背景（`bj1/2/3`）或带 `_front` 前景**的立绘（i404 / jialimaoxian 等）出现背景盖角色、前景挤压角色——疑因 `draw_order` 只按 `m_Children` 兄弟序、缺 `sortingOrder`。待游戏真值验证后修（§6）。
 **全量收官**：4300 → **4486**（补合成 190，成功 186 / 失败 4 为非主皮肤杂项包，已加过滤）。输出 `Output/Paintings_v2/`。
 
 ### 9.3 四个系统性根因修复 ★教训（全部代码级、零逐角色参数）
