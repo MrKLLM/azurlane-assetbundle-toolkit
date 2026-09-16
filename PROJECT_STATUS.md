@@ -84,7 +84,7 @@ v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` �
 
 **核心脚本**：`scan_assets.py`、`export_assets.py`、`export_cue_audio.py`、`reconstruct_live2d.py`/`fix_model3.py`/`extract_motions.py`、`compose_paintings_v2.py`(★v2)、`extract_spine_v2.py`(★v2)、`export_dependency_manifest.py`、`build_gallery_index.py`、`make_thumbs.py`、`mumu_sync.py`、`ship_name_map.py`、`scrape_wiki_fast.py`。
 
-**文档**（导航见 `docs/README.md`，写入路由见 `AGENTS.md`）：
+**文档**（导航见根目录 `README.md`，写入路由见 `AGENTS.md`）：
 - `docs/DEV_LOG.md` 操作手册 · `docs/WORKFLOWS.md` 可复用工作流 · `docs/TROUBLESHOOTING.md` 踩坑 · `docs/ERRORS.log` 错误流水
 - `docs/tools/` ALPA、AssetStudio 使用说明
 - `docs/archive/` 历史归档（含 `PROJECT_STATUS_历史归档.md`、旧目录审计报告、旧 Spine 交接）
