@@ -36,6 +36,10 @@ except ImportError:
     print("[*] 这是主要导出方案，无需外部工具")
     sys.exit(1)
 
+# 新版 AssetBundle 的 unity_version 被伪装/缺失，需显式回退，否则较新包加载失败
+from UnityPy import config
+config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+
 try:
     from PIL import Image
     HAS_PIL = True
