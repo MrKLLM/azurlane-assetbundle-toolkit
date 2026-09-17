@@ -409,10 +409,13 @@ def layout_all(rects, father_map, children_map):
         r = rects[pid]
         lx, ly, lw, lh = local_rect(r, p_local[2], p_local[3])
         # 父局部 -> 父世界 仿射（纯缩放+平移）
+        # 注意：local_rect 返回的 (lx,ly) 已是「相对父节点局部矩形左下角(0,0)」的偏移，
+        # 不能再减 p_local[0]/[1]（那是父节点在它自己父级里的位置）——多减会让
+        # 嵌套容器(如 layers)的子层整体错位甩到左下（jialimaoxian 角色脱离背景的根因）。
         ax = p_world[2] / p_local[2] if p_local[2] else 1.0
         ay = p_world[3] / p_local[3] if p_local[3] else 1.0
-        wx = p_world[0] + (lx - p_local[0]) * ax
-        wy = p_world[1] + (ly - p_local[1]) * ay
+        wx = p_world[0] + lx * ax
+        wy = p_world[1] + ly * ay
         ww, wh = lw * ax, lh * ay
         # 自身 localScale 绕 pivot 缩放（负值镜像）
         ls = getattr(r, "m_LocalScale", None)
