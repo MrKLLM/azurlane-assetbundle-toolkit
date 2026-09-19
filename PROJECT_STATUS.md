@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-19（Spine 全屏 CG 批量导出 231/231 完成并接入画廊；viewer 三 bug 修复：相机视口比例 / `my` 变量遮蔽 / 空动画过滤；无 mesh 画框修复换入 10 张）
+> **生成时间**: 2026-09-19（mesh 越框裁头修复换入 55 张；Spine 全屏 CG 231/231 接入画廊；元数据官方数据源与 Live2D 运行时已备妥，交接见 §6 第 5~7 条）
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
 
 ---
@@ -96,33 +96,25 @@
 
 ## 6. 接下来的任务
 
-### ★ 2026-09-16~18 gallery_v2 质量复核
+### ★ 2026-09-16~19 gallery_v2 质量复核（1~4 已闭环，5~7 为交接待办）
 
-用户浏览 gallery_v2 发现一批还原问题，逐条排查进展：
+1. ✅ **静态立绘「嵌套容器错位」（2026-09-18）**：`layout_all` 仿射多减 `p_local[0]`，修 `52782a7`，85 张换入（备份 `Output/_OLD_bak/affected_20260918/`）。
+2. ✅ **i404 型「背景缝隙」（2026-09-19）**：无 mesh 部件误用 `mRawSpriteSize` 当画框，改 textureRect 拉伸铺满 RectTransform，10 张换入（备份 `framefix_20260919/`）。painting 本身即半景特写，完整 CG 走 Spine 线（第 4 条）。
+3. ✅ **mesh 越框裁头（2026-09-19，用户报「库尔斯克缺块」）**：`rasterize_mesh` 把内容钳在画框内，而 mesh 顶点可合法越框（kuersike_rw 头部伸出框顶 713px）→ 改按内容 AABB 输出（安全钳 ±2~3 倍框）。扫描 4490 包：84 皮肤越框、**55 张画面实际变化已换入**（29 张越框部分全透明逐像素同旧图；5 张画布按预期变大找回内容）；对照 5 皮肤 maxdiff=0。备份 `Output/_OLD_bak/meshfix_20260919/`，清单 `.diag/mesh_overflow.txt`，对比图 `.diag/cmp_meshfix/`。
+4. ✅ **Spine 动态 + 全屏 CG 导出（2026-09-19）**：viewer 三修（相机视口 `camera.setViewport`、`my` 变量遮蔽 TDZ、0 秒空动画过滤+默认 normal）+ JSON 骨架支持；`cg_export.html` 两段式构图批量导出 **231/231** → `Output/CG_v2/`，画廊默认展示 CG 可切原件，缩略图 `<key>_cg.webp`。详见 WORKFLOWS WF-14。
+5. ⏳ **元数据重建（当前主攻，方案已定，数据已到手）**：
+   - **数据源**：社区解密快照 LYLCLIMBER/azurlane-data（国服 9.7.381，唯一版本）。被墙拉取通道已验证：`https://gh-proxy.com/https://raw.githubusercontent.com/LYLCLIMBER/azurlane-data/main/versions/9.7.381/<file>.json`（api.github.com 亦可走 gh-proxy.com；ghproxy.net 只能代理 raw）。**本地已缓存**：`.diag/azdata_ship_data_statistics.json`(4119 舰) / `.diag/azdata_ship_data_template.json` / `.diag/azdata_ship_skin_template.json`(2863 皮肤)。
+   - **桥接关键**：`ship_skin_template[皮肤ID].painting` = bundle 拼音 ID（如 `kuersike`），同记录含 `name`(中文)、`ship_group`、`voice_actor`、`desc`("重巡洋舰—库尔斯克"→舰种中文兜底)；`ship_data_statistics[舰ID]` 含 `name/english_name/nationality/rarity/type/skin_id`。**不再需要拼音猜测**。
+   - **覆盖率实测**：4490 bundle 直接命中 92.3%；`_n/_hx/_hei/_alter` 后缀推导后 ~97%。剩余：下架联动舰（2b/a2/DOA 系→现有 `ship_name_map` 兜底）、快照后新皮肤（_ex/_wjz/_idolns/_heihua/_shophx→从基名继承）、个别怪例（chicheng_2..4、dahuangfengii、akasita 等→manual 覆盖表）。
+   - **实施**：新建 `scripts/build_ship_meta.py` 产出 `Output/ship_meta.json`（bundleID→{cn,en,faction,type,rarity,voice_actor,category}）；`nationality/rarity/type` 若为数值 ID 先打印值域对照中文；`build_gallery_index.py` 改读 ship_meta（替换 SHIP_NAME_MAP+meta_by_cn 链路）。旧 `ship_name_map.py` 812 条仅 407 条自洽，降级为兜底。
+6. ⏳ **剧情角色与舰船分级（与第 5 条同一次重建做）**：`ship_group` 不在 `ship_data_statistics` 键集 → `category:"story"`（爱酱 aijiang*、TB娘、领航员、NPC 系等），否则 `"ship"`；index.json 落字段；前端筛选器加「舰船/剧情角色」分组，网格分区展示。
+7. ⏳ **Live2D 动作播放接入（运行时已下载就位）**：`Output/gallery_v2/vendor/live2d/` 已有 `live2dcubismcore.min.js`(5.1.0，l2d.su 直链) + `pixi.min.js`(6.5.2) + `pixi-live2d-display-cubism4.min.js`(0.4.0)（后两个走 npmmirror tgz；pixi6.5.2+display0.4.0 组合）。待做：index.html Live2D 标签懒加载三脚本 → `PIXI.Application` + `Live2DModel.from(model3.json)` → 播放 motions/（244/256 有真实动画）；先 1-2 个模型样本验收再全量。模型资产零缺口（§9.5 已核查）。
+8. ⏸️ **missd（D小姐）「黑影」——用户暂搁置**。
 
-1. ✅ **静态立绘「嵌套容器错位」——已修复并换入（2026-09-18）**
-   根因（**非**此前猜的 sortingOrder）：`compose_paintings_v2.py::layout_all` 的仿射多减了 `p_local[0]/[1]`——`local_rect` 返回的 `(lx,ly)` 已是「相对父节点局部矩形左下角(0,0)」的偏移，不该再减父节点在其父级里的位置。单层皮肤 `p_local[0]=0` 不受影响；带中间容器（`layers`/`Touch`）的皮肤子层被整体甩偏（jialimaoxian 角色脱离克拉肯、fuluoxiluofu 角色甩到左下角）。
-   修复提交 `52782a7`。只读扫描：4486 张中 **85 张受影响**（清单 `.diag/affected_skins.txt`，>500px 明显错位 32 张），逐张改前/改后对比确认均为改善 → **已换入 `Output/Paintings_v2/` 并重建这 85 张缩略图**（旧图备份 `Output/_OLD_bak/affected_20260918/`）。其余 4401 张逐像素不变。
-2. ✅ **i404 型「背景大铺开/缝隙」——根因已修并换入（2026-09-19）**
-   根因（又一个解析姿势问题，非相机/非 p_local）：`build_part` 无 mesh 部件误用 CanvasRenderer `mRawSpriteSize` 当绘制画框。视差背景皮肤（i404 型）每条背景带记录的是**切分前原图尺寸**(2048×1770)，按它缩放把竖带横向压窄 ~2 倍，拼不满留黑洞。修复：无 mesh 部件按 Unity UI Image 语义把 textureRect 拉伸铺满 RectTransform（mesh 部件仍用 frame）。全量扫描 4490 包：真实受影响仅 **10 皮肤/16 部件**（i404(_n)、hemuhao_2(_n)、jinshi_2_hx(_n_hx)、junzhu_5、kansasi_2_hx、tiancheng_cv_3(_n)）；540 个 4×4 占位精灵全透明零影响；对照组逐像素 maxdiff=0。**10 张已换入并重建缩略图**（旧图备份 `Output/_OLD_bak/framefix_20260919/`）。
-   ⚠️ 遗留认知：painting bundle 本身只含**半景特写条带**（角色+浪花区），完整 CG（月亮/龙身/鱼群等）只存在于 Spine 图集（i404 156 部件、完整背景 bj 3994×3279）→「全屏 CG」还原并入 Spine 线（下条）。
-3. ⏸️ **missd（D小姐）「黑影」——用户暂搁置**（"先不管 missd"）。
-4. ✅ **Spine 动态 + 全屏 CG 导出线——已完成（2026-09-19）**
-   - viewer 三修：相机视口不更新致比例怪（`camera.setViewport`）、`my` 状态对象被鼠标坐标 `let my` 遮蔽（TDZ → 每个部件加载成功也抛错显示「N 层失败」、切皮肤取消失效）、0 秒空占位动画过滤 + 默认播 `normal`。另支持 JSON 骨架（beierfasite_g）。
-   - 全屏 CG：`gallery_v2/cg_export.html` 渲染 setup pose（顶点包围盒 + 二次像素 alpha 包围盒构图），无头 Chrome+CDP 批量驱动（`.diag/run_cg_export.py`），**231/231** 落盘 `Output/CG_v2/`（长边 2400）。画廊「静态立绘」标签对 Spine 皮肤默认显示全屏 CG，可一键切回 painting 原件；缩略图优先 CG（`<key>_cg.webp`）。
-5. ⏳ **元数据匹配——未做（当前主攻）**：角色名/阵营/舰种有误或缺失，参考 l2d.su + 碧蓝 wiki 校正（联动/特殊舰尤甚，见 §10）。
-
-> 诊断产物在 `.diag/`（不入库）。第 1、2、4 条已闭环；剩第 3（搁置）、第 5 条。
+> 诊断产物/缓存均在 `.diag/`（不入库，本机可继续用）。画廊前端改动走 `gallery_src/` → `scripts/deploy_gallery.py`。
 
 ### 既有待办
 
-**优先级高**
-1. ✅ Spine 动态立绘 viewer 验收（2026-09-19 完成：三 bug 修复 + 231 皮肤 CG 导出，见 §6 第 4 条）。
-
-**优先级中**
-2. ⏳ 网络可用时补 Live2D Cubism 运行时，启用 gallery 的 Live2D 动作播放。
-3. ⏳ 73 个联动/特殊舰中文名补录进 `ship_name_map`。
-4. ⏳ 表情差分与游戏内表情 ID 对应表（可从 `AzurLaneData/ShareCfg/ship_skin_template.json` 补）。
 
 **优先级低**
 5. UI/图标批量导出（~2 万）、3D 宿舍资源、资源分类整理 `organize.py`。
@@ -166,12 +158,13 @@
 > ✅ **i404 型背景缝隙已修（2026-09-19）**：无 mesh 部件误用 `mRawSpriteSize` 当画框致视差背景带压窄，改按 textureRect 拉伸铺满 RectTransform，10 张受影响已换入（见 §6 第 2 条）。注意 painting 本身即半景特写，完整 CG 走 Spine 线。
 **全量收官**：4300 → **4486**（补合成 190，成功 186 / 失败 4 为非主皮肤杂项包，已加过滤）。输出 `Output/Paintings_v2/`。
 
-### 9.3 五个系统性根因修复 ★教训（全部代码级、零逐角色参数）
+### 9.3 六个系统性根因修复 ★教训（全部代码级、零逐角色参数）
 1. 无 mesh 整图部件**双重 Y 翻转** → root 背景层颠倒。修：`arr = A[rect.y : rect.y+h]`。
 2. Spine atlas 页纹理需 **`flip=True`**（运行时按行0=顶采样）。
 3. Windows 分离进程 stdout 默认 GBK，`print('✓')` 抛错致全量**假失败** → `sys.stdout.reconfigure('utf-8')` + 子进程 `PYTHONIOENCODING=utf-8`。
 4. `layout_all` **root scale 只乘子层未乘 root 自身** → 层间比例错。修：局部空间纯 anchor 数学 + 仿射映射世界 + 自身 scale 绕 pivot（负=镜像）+ root 屏幕适配 scale 归一为 1。
 5. 无 mesh 部件**误用 `mRawSpriteSize` 当画框** → i404 型视差背景带（记录切分前原图尺寸）被压窄留黑洞。修：按 UI Image 语义 textureRect 拉伸铺满 RectTransform；mesh 部件才用 frame。
+6. `rasterize_mesh` **把内容钳死在画框内** → mesh 顶点合法越框的皮肤（kuersike_rw 头部伸出框顶 713px）被裁头、纹理矩形露缝。修：按内容实际 AABB 输出（±2~3 倍框安全钳），越框部分由 render() 仿射照常映射。
 > 结论再次印证：游戏数据自洽，所有错位都是解析姿势不对。（完整明细含文件行号与验证样本，见 `docs/archive/PROJECT_STATUS_历史归档.md` 末尾「完整明细存档」。）
 
 ### 9.4 Spine v2（`scripts/extract_spine_v2.py`）✅

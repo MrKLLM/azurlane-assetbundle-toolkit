@@ -120,8 +120,10 @@ def decoded_texture(bundle_name, path_id):
 
 def rasterize_mesh(verts, uvs, tris, tex_img, frame_w, frame_h):
     """三角形重心插值光栅化：mesh（sprite 像素坐标系, Y-up）+ UV 图集
-    -> 画框大小的 RGBA numpy（Y-up）。只覆盖内容 AABB。
-    返回 (ndarray RGBA Y-up, (x0,y0,x1,y1)) 或 (None, None)。"""
+    -> 内容 AABB 的 RGBA numpy（Y-up）。返回 (ndarray, (x0,y0,x1,y1)) 或 (None, None)。
+    注意：mesh 顶点可以合法超出画框 mRawSpriteSize（如 kuersike_rw 头部越出 1536 框顶），
+    不能把内容裁进框内——只按内容 AABB 输出，越框部分由 render() 的仿射照常映射。
+    安全钳制 [-2fw..3fw]×[-2fh..3fh] 防退化控制点撑爆画布。"""
     tex = np.asarray(tex_img.convert("RGBA"))
     th, tw = tex.shape[:2]
     fw = max(1, int(np.ceil(frame_w)))
@@ -129,10 +131,10 @@ def rasterize_mesh(verts, uvs, tris, tex_img, frame_w, frame_h):
 
     px = verts[:, 0]
     py = verts[:, 1]
-    x0 = max(0, int(np.floor(px.min())))
-    y0 = max(0, int(np.floor(py.min())))
-    x1 = min(fw, int(np.ceil(px.max())) + 1)
-    y1 = min(fh, int(np.ceil(py.max())) + 1)
+    x0 = max(-2 * fw, int(np.floor(px.min())))
+    y0 = max(-2 * fh, int(np.floor(py.min())))
+    x1 = min(3 * fw, int(np.ceil(px.max())) + 1)
+    y1 = min(3 * fh, int(np.ceil(py.max())) + 1)
     if x1 <= x0 or y1 <= y0:
         return None, None
 
