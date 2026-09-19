@@ -365,7 +365,7 @@
 
 **踩坑记录**:
 - 背景层颠倒 → sprite 路径双重 Y 翻转；Spine 页纹理方向错 → flip 参数用反。
-- root scale 只乘子层 → 层间比例错误真根因（§12.8）。
+- root scale 只乘子层 → 层间比例错误真根因（§9.3）。
 - Windows 分离进程 stdout 默认 GBK，`print('✓')` 抛 UnicodeEncodeError → 全量假失败；脚本头 `sys.stdout.reconfigure(encoding='utf-8')` + 子进程 env `PYTHONIOENCODING=utf-8`。
 - 手动命令行跑 compose 也需 `PYTHONIOENCODING=utf-8`，否则 ✓/✗ 崩。
 

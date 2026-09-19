@@ -17,7 +17,7 @@ version: 1.5.0
 - 目录约定（碧蓝航线项目，路径 `D:\Azur Lane Assets`）：
   - 源包：`AssetBundles/`（含 `dependencies` 单包、`painting/`、`paintingface/`、`spinepainting/` 等子目录）
   - 脚本：`scripts/`，输出：`Output/Paintings_v2/`、`Output/Spine_v2/`
-  - 进度文档：`PROJECT_STATUS.md` §12（管线细节权威来源，跨会话先读它）
+  - 进度文档：`PROJECT_STATUS.md` §9（当前主线：v2 数据驱动管线，跨会话先读它；系统性根因清单见 §9.3）
 
 ## 核心原则
 
@@ -143,9 +143,9 @@ prefab 中 `m_Sprite = (FileID, PathID)`：
 
 ## 完成收尾
 
-每轮管线改动/全量完成后，按项目 AGENTS.md 规则：更新 `PROJECT_STATUS.md` 对应章节（状态 emoji、指标、生成时间，新根因写入 §12.x），`git add` 相关脚本并用中文 commit message 提交。
+每轮管线改动/全量完成后，按项目 AGENTS.md 规则：更新 `PROJECT_STATUS.md` 对应章节（状态 emoji、指标、生成时间，新根因写入 §9.3），`git add` 相关脚本并用中文 commit message 提交。
 
 ## 参考
 
 - `reference.md`：Y 翻转坐标系总表、PPtr/externals 完整解析规则、批量运维细则。
-- 项目内权威文档：`PROJECT_STATUS.md` §12.2-12.8（管线设计+四轮 bug 复盘）、`DEV_LOG.md`（操作手册）。
+- 项目内权威文档：`PROJECT_STATUS.md` §9.1-9.5（管线设计 + 五个系统性根因复盘）、`docs/DEV_LOG.md`（操作手册）。
