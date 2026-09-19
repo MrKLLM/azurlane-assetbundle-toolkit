@@ -130,6 +130,15 @@ for d in glob.glob(os.path.join(OUT, 'Spine_v2', '*')):
     sk['spine'] = {'folder': stem, 'parts': parts}
     ship_of(base)['spineSkins'].append(stem)
 
+# Spine setup-pose 全屏 CG（cg_export.html 导出到 CG_v2/，目录名=皮肤 stem）
+for p in glob.glob(os.path.join(OUT, 'CG_v2', '*.png')):
+    stem = os.path.splitext(os.path.basename(p))[0]
+    sk = skins.get(stem)
+    if sk is None:
+        add_skin(stem, '')
+        sk = skins[stem]
+    sk['cg'] = 'CG_v2/' + os.path.basename(p)
+
 # Live2D
 for d in glob.glob(os.path.join(OUT, 'Live2D', '*')):
     if not os.path.isdir(d): continue

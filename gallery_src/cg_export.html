@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Spine 全屏 CG 批量导出</title>
+<style>
+body{background:#0d1017;color:#dbe2ee;font:14px/1.6 "Segoe UI","Microsoft YaHei",sans-serif;margin:0;padding:24px}
+h1{font-size:18px;margin:0 0 6px}
+.note{color:#8b96ad;font-size:12px;margin-bottom:14px}
+.bar{display:flex;gap:10px;align-items:center;margin:12px 0;flex-wrap:wrap}
+button{background:#243049;color:#dbe2ee;border:1px solid #3a4a6b;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px}
+button:hover{background:#2e3d5c}
+button.primary{background:#2b6cb0;border-color:#3b82c4}
+.stat{font-size:13px;color:#9fb0c8}
+.stat b{color:#7bd88f}
+#log{background:#11151f;border:1px solid #232a3a;border-radius:8px;padding:10px 12px;height:60vh;overflow:auto;font:12px/1.5 Conslas,Consolas,monospace;white-space:pre-wrap}
+.ok{color:#7bd88f}.fail{color:#ff7b7b}.skip{color:#8b96ad}.warn{color:#ffb27b}
+canvas{position:fixed;left:-99999px;top:0}
+</style>
+</head>
+<body>
+<h1>Spine 全屏 CG 批量导出 <span class="stat" id="head"></span></h1>
+<div class="note">渲染每个 Spine 皮肤全部件 setup pose（游戏皮肤详情全屏同款构图）→ PNG 落盘 <b>Output/CG_v2/&lt;皮肤&gt;.png</b>。需要先运行本地服务器（启动资产浏览器.bat --export 或 _gallery_server.py）。</div>
+<div class="bar">
+  <button id="btnStart" class="primary">开始导出</button>
+  <button id="btnStop">停止</button>
+  <label><input type="checkbox" id="chkRedo"> 重做已存在的</label>
+  <label>长边 <select id="selSize"><option>1600</option><option selected>2400</option><option>3200</option></select> px</label>
+  <span class="stat" id="prog"></span>
+</div>
+<div id="log"></div>
+<canvas id="cv"></canvas>
+<script src="./index.js"></script>
+<script src="./vendor/spine/spine-all.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const G=window.GALLERY;
+const logEl=$('#log');
+function log(msg,cls){const d=document.createElement('div');if(cls)d.className=cls;d.textContent=msg;logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+// 收集待导出：按 Spine_v2 目录去重
+const jobs=[];{const seen=new Set();
+  for(const s of (G.ships||[]))for(const sk of (s.skins||[])){
+    const sp=sk.spine; if(!sp||!sp.folder)continue;
+    if(seen.has(sp.folder))continue; seen.add(sp.folder);
+    jobs.push({folder:sp.folder, parts:(sp.parts&&sp.parts.length)?sp.parts:[sp.folder], name:s.name||sp.folder});
+  }}
+$('#head').textContent=`共 ${jobs.length} 个 Spine 皮肤`;
+log(`发现 ${jobs.length} 个 Spine 皮肤目录`);
+{const q=new URLSearchParams(location.search);
+ const only=q.get('only'); if(only){const set=new Set(only.split(',')); jobs.length=0;
+   for(const s of (G.ships||[]))for(const sk of (s.skins||[])){const sp=sk.spine;
+     if(sp&&set.has(sp.folder)&&!jobs.some(j=>j.folder===sp.folder))
+       jobs.push({folder:sp.folder, parts:(sp.parts&&sp.parts.length)?sp.parts:[sp.folder], name:s.name||sp.folder});}}
+ const sz=q.get('size'); if(sz){const o=document.createElement('option');o.textContent=sz;o.selected=true;$('#selSize').appendChild(o);}
+ if(q.get('redo')==='1')$('#chkRedo').checked=true;
+}
+
+const cv=$('#cv');
+const glctx=new spine.webgl.ManagedWebGLRenderingContext(cv,{alpha:true,premultipliedAlpha:true,preserveDrawingBuffer:true});
+const scene=new spine.webgl.SceneRenderer(cv,glctx,false);
+const gl=glctx.gl; gl.clearColor(0,0,0,0); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+let running=false, stopFlag=false;
+
+async function loadPart(base,pn,textures){
+  const skelR=await fetch(base+pn+'.skel'); if(!skelR.ok)throw new Error('skel '+pn+' 404');
+  const bytes=new Uint8Array(await skelR.arrayBuffer());
+  const atlasR=await fetch(base+pn+'.atlas'); if(!atlasR.ok)throw new Error('atlas '+pn+' 404');
+  const atlasTxt=await atlasR.text();
+  const pageNames=[];for(const ln of atlasTxt.split('\n')){const t=(ln||'').replace(/\r$/,'');if(/^[A-Za-z0-9_].*\.(png|jpg)$/i.test(t)&&!ln.startsWith(' ')&&!ln.startsWith('\t')&&!t.includes(':'))pageNames.push(t);}
+  for(const pgn of pageNames){ if(textures[pgn])continue;
+    const img=new Image();img.crossOrigin='anonymous';
+    await new Promise((rs,rj)=>{img.onload=rs;img.onerror=()=>rj(new Error('tex '+pgn+' 加载失败'));img.src=base+pgn;});
+    textures[pgn]=new spine.webgl.GLTexture(glctx,img,false);
+  }
+  const texLoader=path=>{for(const q in textures){if(q===path||(''+path).endsWith(q)||q.endsWith(''+path))return textures[q];}return textures[pageNames[0]];};
+  const atlas=new spine.TextureAtlas(atlasTxt,texLoader);
+  const ofind=atlas.findRegion.bind(atlas); atlas.findRegion=n=>{let r=ofind(n);if(r)return r;const t=(''+n).trim();return t!==n?ofind(t):r;};
+  const loaderArgs=[new spine.AtlasAttachmentLoader(atlas)];
+  let data;
+  if(bytes[0]===0x7B){ // JSON 骨架（如 beierfasite_g）
+    data=new spine.SkeletonJson(...loaderArgs).readSkeletonData(new TextDecoder().decode(bytes));
+  } else {
+    data=new spine.SkeletonBinary(...loaderArgs).readSkeletonData(bytes);
+  }
+  const skeleton=new spine.Skeleton(data);
+  skeleton.setSlotsToSetupPose(); skeleton.setBonesToSetupPose(); skeleton.updateWorldTransform();
+  return {skeleton,data};
+}
+
+function boundsOf(sk){let r=[1e9,1e9,-1e9,-1e9];
+  for(const slot of sk.slots){const a=slot.getAttachment(); if(!a||!slot.bone||!slot.bone.active)continue;
+    try{let v,c;
+      if(a instanceof spine.RegionAttachment){v=spine.Utils.newFloatArray(8);c=8;a.computeWorldVertices(slot.bone,v,0,2);}
+      else if(a instanceof spine.MeshAttachment&&a.worldVerticesLength){c=a.worldVerticesLength;v=spine.Utils.newFloatArray(c);a.computeWorldVertices(slot,0,c,v,0,2);}
+      else continue;
+      for(let j=0;j<c;j+=2){if(v[j]<r[0])r[0]=v[j];if(v[j]>r[2])r[2]=v[j];if(v[j+1]<r[1])r[1]=v[j+1];if(v[j+1]>r[3])r[3]=v[j+1];}
+    }catch(e){}}
+  return r;}
+
+async function exportOne(job,longSide){
+  const base='../Spine_v2/'+job.folder+'/';
+  const textures={};
+  const layers=[]; const errs=[];
+  for(const pn of job.parts){
+    try{ layers.push(await loadPart(base,pn,textures)); }
+    catch(e){ errs.push(pn+': '+(e.message||e)); }
+  }
+  if(!layers.length){ for(const t in textures)try{textures[t].dispose()}catch(e){} throw new Error(errs.join(' | ')||'无部件'); }
+  // setup pose 联合包围盒
+  let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+  for(const L of layers){const b=boundsOf(L.skeleton);
+    if(b[0]<minX)minX=b[0];if(b[1]<minY)minY=b[1];if(b[2]>maxX)maxX=b[2];if(b[3]>maxY)maxY=b[3];}
+  if(minX>maxX){ for(const t in textures)try{textures[t].dispose()}catch(e){} throw new Error('包围盒为空'); }
+  const bw=maxX-minX, bh=maxY-minY;
+  let W,H; const pad=1.04;
+  if(bw>=bh){W=longSide;H=Math.max(64,Math.round(longSide*bh/bw*pad/pad));}else{H=longSide;W=Math.max(64,Math.round(longSide*bw/bh*pad/pad));}
+  W=Math.min(W,4096);H=Math.min(H,4096);
+  cv.width=W;cv.height=H;
+  gl.viewport(0,0,W,H);
+  scene.camera.setViewport(W,H);   // 关键：resize() 不更新相机视口，必须显式 setViewport
+  const camX0=(minX+maxX)/2, camY0=(minY+maxY)/2;
+  let camX=camX0, camY=camY0, zoom=Math.max(bw*pad/W,bh*pad/H);
+  function draw(){
+    scene.camera.position.set(camX,camY,0);
+    scene.camera.zoom=zoom;
+    scene.camera.update();
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    scene.begin(); for(const L of layers)scene.drawSkeleton(L.skeleton,true); scene.end();
+  }
+  draw();
+  await sleep(30); // 等 GPU 完成
+  // 二次构图：像素 alpha 包围盒（顶点包围盒会被超大半透明部件撑爆，如冒险号/阿拉曼什）
+  function contentBBox(){
+    const px=new Uint8Array(W*H*4); gl.readPixels(0,0,W,H,gl.RGBA,gl.UNSIGNED_BYTE,px);
+    let x0=W,y0=H,x1=-1,y1=-1;
+    for(let y=0;y<H;y++){const row=(H-1-y)*W;
+      for(let x=0;x<W;x++){ if(px[(row+x)*4+3]>8){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } } }
+    return x1<0?null:[x0,y0,x1,y1];
+  }
+  const bb=contentBBox();
+  let frac=1;
+  if(bb){
+    frac=((bb[2]-bb[0]+1)*(bb[3]-bb[1]+1))/(W*H);
+    if(frac<0.82){
+      const cx=(bb[0]+bb[2])/2, cy=(bb[1]+bb[3])/2;
+      camX=camX+(cx-W/2)*zoom; camY=camY+(H/2-cy)*zoom;
+      zoom=Math.max((bb[2]-bb[0]+1)*zoom*pad/W,(bb[3]-bb[1]+1)*zoom*pad/H);
+      draw(); await sleep(30);
+    }
+  }
+  const blob=await new Promise((rs,rj)=>cv.toBlob(b=>b?rs(b):rj(new Error('toBlob 失败')),'image/png'));
+  const r=await fetch('/save_cg?name='+encodeURIComponent(job.folder),{method:'POST',body:blob});
+  if(!r.ok)throw new Error('save 失败 HTTP '+r.status);
+  for(const t in textures)try{textures[t].dispose()}catch(e){}
+  return {W,H,bw:Math.round(bw),bh:Math.round(bh),frac:+frac.toFixed(2),errs};
+}
+
+$('#btnStop').onclick=()=>{stopFlag=true;log('收到停止指令，当前皮肤完成后中断…','warn');};
+$('#btnStart').onclick=async()=>{
+  if(running)return; running=true; stopFlag=false;
+  const longSide=parseInt($('#selSize').value,10);
+  const redo=$('#chkRedo').checked;
+  let done=0,skip=0,fail=0;
+  for(let i=0;i<jobs.length;i++){
+    if(stopFlag)break;
+    const job=jobs[i];
+    if(!redo){const e=await (await fetch('/cg_exists?name='+encodeURIComponent(job.folder))).text();
+      if(e==='1'){skip++;$('#prog').textContent=`${i+1}/${jobs.length} 跳过${skip} 完成${done} 失败${fail}`;continue;}}
+    try{
+      const r=await exportOne(job,longSide);
+      done++;
+      log(`✓ [${i+1}/${jobs.length}] ${job.folder} (${job.name}) ${r.W}x${r.H} 场景${r.bw}x${r.bh} 覆盖${r.frac}${r.errs.length?'  ⚠ '+r.errs.join('; '):''}`, r.errs.length||r.frac<0.5?'warn':'ok');
+    }catch(e){fail++;log(`✗ [${i+1}/${jobs.length}] ${job.folder}: ${e.message||e}`,'fail');}
+    $('#prog').textContent=`${i+1}/${jobs.length} 跳过${skip} 完成${done} 失败${fail}`;
+    await sleep(50);
+  }
+  log(stopFlag?`已停止：完成${done} 跳过${skip} 失败${fail}`:`全部结束：完成${done} 跳过${skip} 失败${fail}`,'warn');
+  running=false;
+};
+if(new URLSearchParams(location.search).get('autostart')==='1')$('#btnStart').click();
+</script>
+</body>
+</html>

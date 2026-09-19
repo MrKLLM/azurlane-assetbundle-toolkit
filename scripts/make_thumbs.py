@@ -8,15 +8,17 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.join(ROOT, 'Output', 'Paintings_v2')
+SRC_CG = os.path.join(ROOT, 'Output', 'CG_v2')   # Spine setup-pose 全屏 CG → <stem>_cg.webp
 TDIR = os.path.join(ROOT, 'Output', 'gallery_v2', 'thumbs')
 os.makedirs(TDIR, exist_ok=True)
 MAXW = 380  # 缩略图最大宽
 
 def work(png):
     stem = os.path.splitext(os.path.basename(png))[0]
-    out = os.path.join(TDIR, stem + '.webp')
+    cg = '_cg' if os.path.basename(os.path.dirname(png)) == 'CG_v2' else ''
+    out = os.path.join(TDIR, stem + cg + '.webp')
     if os.path.exists(out):
-        return ('skip', stem)
+        return ('skip', stem + cg)
     try:
         im = Image.open(png)
         im.load()
@@ -26,12 +28,12 @@ def work(png):
         if im.mode not in ('RGBA', 'RGB'):
             im = im.convert('RGBA')
         im.save(out, 'WEBP', quality=82)
-        return ('ok', stem)
+        return ('ok', stem + cg)
     except Exception as e:
-        return ('err', stem + ':' + str(e)[:60])
+        return ('err', stem + cg + ':' + str(e)[:60])
 
 if __name__ == '__main__':
-    files = sorted(glob.glob(os.path.join(SRC, '*.png')))
+    files = sorted(glob.glob(os.path.join(SRC, '*.png'))) + sorted(glob.glob(os.path.join(SRC_CG, '*.png')))
     total = len(files)
     print('待生成', total, flush=True)
     ok = skip = err = 0

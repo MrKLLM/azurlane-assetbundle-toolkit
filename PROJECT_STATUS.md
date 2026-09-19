@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-19（修复无 mesh 部件 mRawSpriteSize 画框错位、换入 10 张视差背景皮肤；Spine CG 导出线开工）
+> **生成时间**: 2026-09-19（Spine 全屏 CG 批量导出 231/231 完成并接入画廊；viewer 三 bug 修复：相机视口比例 / `my` 变量遮蔽 / 空动画过滤；无 mesh 画框修复换入 10 张）
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
 
 ---
@@ -36,8 +36,8 @@
 256/256 还原、纹理拼接正确、HitAreas 已修复；有真实动画 244/256，全部成功 26/256，B 类 12 个动画完全失败（资产无缺口，属 motion 质量，见 §9.5）。输出 `Output/Live2D/{舰名}/`，~3.4GB。脚本 `reconstruct_live2d.py` / `fix_model3.py` / `extract_motions.py`。
 已知限制：StreamedClip 未完全逆向；HitAreas 用 moc3 Touch ID，非真实交互区。
 
-### 2.6 Spine 动态立绘 ⚠️（v2 提取完成，viewer 动画/层序待修，见 §6）
-v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` 双结构兼容提取到 `Output/Spine_v2/`，232 主包完成；gallery_v2 内用 `spine-all.js`(3.8) 分层实时播放。**已知问题**：仅 `normal` 动画会动、比例偏、部分「N 层失败」，待查（§6）。
+### 2.6 Spine 动态立绘 ✅（v2 提取 + 全屏 CG 导出 + viewer 修复，2026-09-19）
+`scripts/extract_spine_v2.py` 双结构兼容提取到 `Output/Spine_v2/`，232 主包。gallery 内 `spine-all.js`(3.8) 分层实时播放。**2026-09-19 三修复**：①相机视口（`SceneRenderer.resize()` 不更新 viewport → 比例怪）②`my` 变量遮蔽 TDZ（假「N 层失败」+ 取消失效）③过滤 0 秒空占位动画、默认播 `normal`、缺动画层回落 normal；另支持 JSON 骨架（beierfasite_g）。**全屏 CG 导出**：`cg_export.html` 渲染 setup pose 批量落盘 `Output/CG_v2/` **231/231 成功**（含二次像素包围盒构图修正）。
 
 ### 2.7 UI/图标导出 ⏳ 未处理
 `ui/` 4,059 文件 + 各 icon 目录数万，可复用 `export_assets.py`。优先级最低。
@@ -83,7 +83,7 @@ v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` �
 
 ## 5. 关键文件清单
 
-**核心脚本**：`scan_assets.py`、`export_assets.py`、`export_cue_audio.py`、`reconstruct_live2d.py`/`fix_model3.py`/`extract_motions.py`、`compose_paintings_v2.py`(★v2)、`extract_spine_v2.py`(★v2)、`export_dependency_manifest.py`、`build_gallery_index.py`、`make_thumbs.py`、`mumu_sync.py`、`ship_name_map.py`、`scrape_wiki_fast.py`。
+**核心脚本**：`scan_assets.py`、`export_assets.py`、`export_cue_audio.py`、`reconstruct_live2d.py`/`fix_model3.py`/`extract_motions.py`、`compose_paintings_v2.py`(★v2)、`extract_spine_v2.py`(★v2)、`export_dependency_manifest.py`、`build_gallery_index.py`、`make_thumbs.py`、`deploy_gallery.py`(gallery_src→Output)、`mumu_sync.py`、`ship_name_map.py`、`scrape_wiki_fast.py`。
 
 **文档**（导航见根目录 `README.md`，写入路由见 `AGENTS.md`）：
 - `docs/DEV_LOG.md` 操作手册 · `docs/WORKFLOWS.md` 可复用工作流 · `docs/TROUBLESHOOTING.md` 踩坑 · `docs/ERRORS.log` 错误流水
@@ -107,17 +107,17 @@ v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` �
    根因（又一个解析姿势问题，非相机/非 p_local）：`build_part` 无 mesh 部件误用 CanvasRenderer `mRawSpriteSize` 当绘制画框。视差背景皮肤（i404 型）每条背景带记录的是**切分前原图尺寸**(2048×1770)，按它缩放把竖带横向压窄 ~2 倍，拼不满留黑洞。修复：无 mesh 部件按 Unity UI Image 语义把 textureRect 拉伸铺满 RectTransform（mesh 部件仍用 frame）。全量扫描 4490 包：真实受影响仅 **10 皮肤/16 部件**（i404(_n)、hemuhao_2(_n)、jinshi_2_hx(_n_hx)、junzhu_5、kansasi_2_hx、tiancheng_cv_3(_n)）；540 个 4×4 占位精灵全透明零影响；对照组逐像素 maxdiff=0。**10 张已换入并重建缩略图**（旧图备份 `Output/_OLD_bak/framefix_20260919/`）。
    ⚠️ 遗留认知：painting bundle 本身只含**半景特写条带**（角色+浪花区），完整 CG（月亮/龙身/鱼群等）只存在于 Spine 图集（i404 156 部件、完整背景 bj 3994×3279）→「全屏 CG」还原并入 Spine 线（下条）。
 3. ⏸️ **missd（D小姐）「黑影」——用户暂搁置**（"先不管 missd"）。
-4. ⚠️ **Spine 动态 + 全屏 CG 导出线（当前主攻）**：
-   - 已知问题：只有 `normal` 动画会动（下拉列 1/2/3/4/normal）、比例怪、i404 显示「1 层部件·1 层失败」。
-   - 新目标：渲染 Spine **setup pose** 批量导出 232 个 Spine 皮肤的完整全屏 CG 静态图（游戏皮肤详情全屏即渲染 Spine，painting 只有半景）。方案：复用 gallery 前端 `spine-all.js` 运行时或纯 Python 解析 .skel，与动画/比例修复共用同一套渲染逻辑。
-5. ⏳ **元数据匹配——未做**：角色名/阵营/舰种有误或缺失，参考 l2d.su + 碧蓝 wiki 校正（联动/特殊舰尤甚，见 §10）。
+4. ✅ **Spine 动态 + 全屏 CG 导出线——已完成（2026-09-19）**
+   - viewer 三修：相机视口不更新致比例怪（`camera.setViewport`）、`my` 状态对象被鼠标坐标 `let my` 遮蔽（TDZ → 每个部件加载成功也抛错显示「N 层失败」、切皮肤取消失效）、0 秒空占位动画过滤 + 默认播 `normal`。另支持 JSON 骨架（beierfasite_g）。
+   - 全屏 CG：`gallery_v2/cg_export.html` 渲染 setup pose（顶点包围盒 + 二次像素 alpha 包围盒构图），无头 Chrome+CDP 批量驱动（`.diag/run_cg_export.py`），**231/231** 落盘 `Output/CG_v2/`（长边 2400）。画廊「静态立绘」标签对 Spine 皮肤默认显示全屏 CG，可一键切回 painting 原件；缩略图优先 CG（`<key>_cg.webp`）。
+5. ⏳ **元数据匹配——未做（当前主攻）**：角色名/阵营/舰种有误或缺失，参考 l2d.su + 碧蓝 wiki 校正（联动/特殊舰尤甚，见 §10）。
 
-> 诊断产物在 `.diag/`（不入库）。第 1、2 条已闭环；当前主攻第 4 条（Spine 动态 + 全屏 CG 导出），其次第 5 条元数据。
+> 诊断产物在 `.diag/`（不入库）。第 1、2、4 条已闭环；剩第 3（搁置）、第 5 条。
 
 ### 既有待办
 
 **优先级高**
-1. ⏳ Spine 动态立绘 viewer 验收（DeskSpine / gallery_v2 加载 Spine_v2 全量）。
+1. ✅ Spine 动态立绘 viewer 验收（2026-09-19 完成：三 bug 修复 + 231 皮肤 CG 导出，见 §6 第 4 条）。
 
 **优先级中**
 2. ⏳ 网络可用时补 Live2D Cubism 运行时，启用 gallery 的 Live2D 动作播放。
@@ -185,8 +185,9 @@ v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` �
 ## 10. 本地资产浏览平台 `Output/gallery_v2` ✅（2026-09-15）
 
 - **形态**：本地网页（源 28GB / Paintings 15GB，上线不现实），参照 l2d.su，中文名展示 静态立绘 + Spine + Live2D + 语音。
-- **数据**：`build_gallery_index.py`（合并四类 + `ship_name_map` 拼音→中文 812 条 → `index.json/js`）+ `make_thumbs.py`（4300 张 380px WebP）。结果 954 船 / 4489 皮肤 / spine 231 / live2d 256 / 语音 268。
-- **前端** `index.html`：网格懒加载 + 搜索/阵营/舰种/稀有度筛选；详情四标签，Spine 用 `vendor/spine/spine-all.js`(3.8) 按 `parts` 分层 WebGL 播放（170 单部件 / 61 多部件）。
+- **数据**：`build_gallery_index.py`（合并四类 + `ship_name_map` 拼音→中文 812 条 → `index.json/js`；Spine 皮肤附 `cg` 字段指向 `CG_v2/`）+ `make_thumbs.py`（Paintings_v2 + CG_v2 → 380px WebP，CG 缩略图 `<stem>_cg.webp`）。结果 954 船 / 4489 皮肤 / spine 231 / CG 231 / live2d 256 / 语音 268。
+- **前端** `index.html`：网格懒加载 + 搜索/阵营/舰种/稀有度筛选；详情四标签。「静态立绘」对 Spine 皮肤默认展示全屏 CG（可切换回 painting 原件）；Spine 标签 `vendor/spine/spine-all.js`(3.8) 分层 WebGL 播放（相机视口/动画过滤已修）。
+- **源码治理**：画廊前端源码在**仓库内 `gallery_src/`**（唯一权威版本），改完跑 `scripts/deploy_gallery.py` 同步到 `Output/gallery_v2/`（运行目录，gitignore）。CG 导出页 `cg_export.html` 同样入 `gallery_src/`；服务器 `_gallery_server.py` 提供 `POST /save_cg` 落盘接口，`--export` 参数直开导出页。
 - **运行**：`启动资产浏览器.bat`（→ `_gallery_server.py`：8777 端口 + `allow_reuse_address` + 端口占用即复用 + 结尾 `pause`，杜绝闪退）。file:// 下立绘/语音可看，Spine `fetch` 被 CORS 拦需走 .bat。
 - **限制**：Live2D 暂只显示贴图（缺 Cubism Web 运行时 + 出网受限），预留 `vendor/live2d/`。
 

@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>碧蓝航线资产浏览器 · Azur Lane Asset Browser</title>
+<style>
+:root{
+  --bg:#0f1320; --panel:#171c2e; --panel2:#1e2438; --line:#2b3350;
+  --txt:#e6e9f2; --dim:#8b93ad; --acc:#e94560; --acc2:#4d8bff; --ok:#37c26e;
+  --r1:#ff5c8a; --r2:#b07bff; --r3:#5aa2ff; --r4:#37c26e; --r0:#c9a24b;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',"Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--txt);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+header{background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header h1{font-size:15px;color:var(--acc);white-space:nowrap;font-weight:600}
+header .sub{font-size:11px;color:var(--dim)}
+.ctl{display:flex;align-items:center;gap:6px}
+.ctl label{font-size:12px;color:var(--dim)}
+input[type=text],select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);padding:5px 9px;border-radius:6px;font-size:13px;outline:none}
+input[type=text]:focus,select:focus{border-color:var(--acc2)}
+#search{width:180px}
+.grow{flex:1}
+.hint{font-size:11px;color:var(--dim)}
+.hint b{color:var(--acc2)}
+main{flex:1;overflow:auto;padding:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;transition:.15s;display:flex;flex-direction:column}
+.card:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.4)}
+.card .thumb{aspect-ratio:3/4;background:var(--panel2) center/contain no-repeat;position:relative}
+.card .thumb img{width:100%;height:100%;object-fit:contain;display:block}
+.card .body{padding:7px 8px}
+.card .nm{font-size:13px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .py{font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}
+.tag{font-size:9px;padding:1px 5px;border-radius:4px;background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+.tag.f{color:#cfe0ff}.tag.s{color:#ffd9a0}.tag.v{color:#b7f0c8}
+.rar-海上传奇{color:var(--r0)}.rar-超稀有{color:var(--r1)}.rar-精锐{color:var(--r2)}.rar-稀有{color:var(--r3)}.rar-普通{color:var(--r4)}
+.badge{position:absolute;top:6px;right:6px;display:flex;flex-direction:column;gap:3px}
+.badge span{font-size:9px;padding:1px 5px;border-radius:4px;font-weight:600;background:rgba(0,0,0,.55)}
+.b-spine{color:#7bd88f}.b-l2d{color:#ffb27b}.b-voice{color:#7bb8ff}
+.empty{color:var(--dim);text-align:center;padding:40px;font-size:14px}
+
+/* modal */
+.mask{position:fixed;inset:0;background:rgba(5,7,14,.82);display:none;align-items:stretch;justify-content:center;z-index:50}
+.mask.on{display:flex}
+.modal{background:var(--panel);width:min(1100px,96vw);height:min(880px,96vh);border-radius:12px;border:1px solid var(--line);display:flex;overflow:hidden}
+.side{width:230px;flex:none;background:var(--panel2);border-right:1px solid var(--line);display:flex;flex-direction:column}
+.side .hd{padding:14px 14px 10px}
+.side .hd .t{font-size:18px;font-weight:700}
+.side .hd .p{font-size:11px;color:var(--dim);margin-top:2px}
+.meta{padding:8px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);display:flex;flex-wrap:wrap;gap:6px}
+.meta b{color:var(--txt)}
+.skinlist{flex:1;overflow:auto;padding:8px}
+.skinlist .lab{font-size:11px;color:var(--dim);margin:6px 4px 4px}
+.skin{display:flex;gap:8px;align-items:center;padding:5px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+.skin:hover{background:var(--panel)}
+.skin.on{background:var(--panel);border-color:var(--acc)}
+.skin .th{width:38px;height:48px;flex:none;border-radius:5px;background:var(--bg) center/contain no-repeat;border:1px solid var(--line)}
+.skin .info{font-size:12px;line-height:1.3;min-width:0}
+.skin .info .s2{font-size:10px;color:var(--dim)}
+.content{flex:1;display:flex;flex-direction:column;min-width:0}
+.tabs{display:flex;gap:2px;background:var(--panel2);border-bottom:1px solid var(--line);flex:none;padding:0 8px}
+.tab{padding:11px 16px;font-size:13px;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent}
+.tab.on{color:var(--txt);border-bottom-color:var(--acc)}
+.tab.dis{opacity:.35;cursor:not-allowed}
+.view{flex:1;position:relative;overflow:hidden;background:
+  repeating-conic-gradient(#12172a 0 25%, #0d1120 0 50%) 0 0/28px 28px}
+.view .fitwrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.srcbar{position:absolute;left:0;right:0;bottom:0;background:rgba(10,13,24,.85);border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:8px;align-items:center;font-size:12px;z-index:5}
+.srcbar button{font-size:12px;padding:4px 10px;background:#243049;border:1px solid #3a4a6b;color:#c9d4e6;border-radius:6px;cursor:pointer}
+.srcbar button.on{background:#2b6cb0;border-color:#5b9bd8;color:#fff}
+.srcbar .pill{color:#8b96ad}
+.view img.full{max-width:100%;max-height:100%;object-fit:contain}
+.view canvas{width:100%;height:100%;display:block;cursor:grab}
+.close{position:absolute;top:10px;right:12px;z-index:60;background:var(--panel2);border:1px solid var(--line);color:var(--txt);width:34px;height:34px;border-radius:8px;font-size:20px;cursor:pointer;line-height:1}
+.close:hover{background:var(--acc);border-color:var(--acc)}
+.spine-bar{position:absolute;left:0;right:0;bottom:0;background:rgba(10,13,24,.85);border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;z-index:5}
+.spine-bar select,.spine-bar button{font-size:12px;padding:4px 8px}
+.audwrap{padding:16px;overflow:auto;height:100%}
+.audwrap h4{font-size:12px;color:var(--dim);margin-bottom:8px}
+.aud{display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:12px}
+.aud .lbl{width:90px;color:var(--dim);flex:none}
+audio{height:30px;flex:1}
+.pill{font-size:10px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);padding:1px 6px;border-radius:4px}
+.note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:30px;text-align:center;color:var(--dim);font-size:13px;line-height:1.7}
+.note b{color:var(--acc2)}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#333a56;border-radius:5px}::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<header>
+  <h1>碧蓝航线资产浏览器</h1>
+  <div class="ctl"><input type="text" id="search" placeholder="搜索 中文名 / 拼音ID"></div>
+  <div class="ctl"><label>阵营</label><select id="fFaction"><option value="">全部</option></select></div>
+  <div class="ctl"><label>舰种</label><select id="fType"><option value="">全部</option></select></div>
+  <div class="ctl"><label>稀有度</label><select id="fRarity"><option value="">全部</option></select></div>
+  <div class="ctl"><label>排序</label><select id="fSort">
+    <option value="cn">按名称</option><option value="faction">按阵营</option><option value="type">按舰种</option><option value="rarity">按稀有度</option>
+  </select></div>
+  <div class="grow"></div>
+  <div class="ctl"><label>内容</label><select id="fHas">
+    <option value="">全部</option><option value="spine">含Spine</option><option value="live2d">含Live2D</option><option value="voice">含语音</option><option value="cn">有中文名</option>
+  </select></div>
+  <div class="hint" id="count"></div>
+  <div class="hint" id="modehint"></div>
+</header>
+<main><div class="grid" id="grid"></div></main>
+
+<div class="mask" id="mask">
+  <div class="modal">
+    <button class="close" id="close">×</button>
+    <div class="side">
+      <div class="hd"><div class="t" id="mName"></div><div class="p" id="mPy"></div></div>
+      <div class="meta" id="mMeta"></div>
+      <div class="skinlist" id="mSkins"></div>
+    </div>
+    <div class="content">
+      <div class="tabs" id="mTabs"></div>
+      <div class="view" id="mView"></div>
+    </div>
+  </div>
+</div>
+
+<script src="./index.js"></script>
+<script src="./vendor/spine/spine-all.js"></script>
+<script>
+const G = window.GALLERY;
+const P = location.protocol === 'file:' ? '../' : '../'; // 图片相对路径前缀（两种协议下均可）
+const ships = G.ships;
+let view = ships.slice();
+
+/* ---------- 工具 ---------- */
+function thumbOf(skin){ return skin.cg ? ('thumbs/' + skin.key + '_cg.webp') : skin.image ? ('thumbs/' + skin.key + '.webp') : ''; }
+function fullOf(skin){ return skin.cg ? (P + skin.cg) : skin.image ? (P + skin.image) : ''; }
+function hasSpine(s){ return s.spineSkins && s.spineSkins.length; }
+function hasL2d(s){ return s.live2dSkins && s.live2dSkins.length; }
+function defSkin(s){ return s.skins[0]; }
+function rarClass(r){ return r ? ('rar-'+r) : ''; }
+
+/* ---------- 筛选下拉填充 ---------- */
+function uniqCount(arr){ const m={}; arr.forEach(x=>{if(x)m[x]=(m[x]||0)+1;}); return m; }
+(function fillSelects(){
+  const fc=uniqCount(ships.map(s=>s.faction)), tp=uniqCount(ships.map(s=>s.type)), rr=uniqCount(ships.map(s=>s.rarity));
+  const opt=(sel,m,ph)=>{const e=document.getElementById(sel);Object.keys(m).sort((a,b)=>m[b]-m[a]).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=`${k} (${m[k]})`;e.appendChild(o);});};
+  opt('fFaction',fc); opt('fType',tp); opt('fRarity',rr);
+})();
+
+/* ---------- 渲染网格 ---------- */
+const gridEl = document.getElementById('grid');
+function renderGrid(){
+  gridEl.innerHTML='';
+  if(!view.length){ gridEl.innerHTML='<div class="empty">没有匹配的舰船</div>'; return; }
+  document.getElementById('count').textContent=`共 ${view.length} 艘`;
+  const frag=document.createDocumentFragment();
+  view.forEach((s,idx)=>{
+    const card=document.createElement('div'); card.className='card'; card.dataset.i=idx;
+    const ds=defSkin(s); const th=thumbOf(ds);
+    const badges=[]; if(hasSpine(s))badges.push('<span class="b-spine">SPINE</span>'); if(hasL2d(s))badges.push('<span class="b-l2d">L2D</span>'); if(s.voiceCount)badges.push('<span class="b-voice">🔊'+s.voiceCount+'</span>');
+    const tags=[]; if(s.rarity)tags.push(`<span class="tag ${rarClass(s.rarity)}">${s.rarity}</span>`); if(s.faction)tags.push(`<span class="tag f">${s.faction}</span>`); if(s.type)tags.push(`<span class="tag s">${s.type}</span>`);
+    card.innerHTML=`<div class="thumb">${th?`<img loading="lazy" src="${th}">`:'<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:12px">无立绘</div>'}<div class="badge">${badges.join('')}</div></div>
+      <div class="body"><div class="nm">${s.name}</div><div class="py">${s.id} · ${s.skins.length}皮肤</div><div class="tags">${tags.join('')}</div></div>`;
+    card.onclick=()=>openShip(s);
+    frag.appendChild(card);
+  });
+  gridEl.appendChild(frag);
+}
+
+/* ---------- 搜索/筛选 ---------- */
+function apply(){
+  const q=document.getElementById('search').value.trim().toLowerCase();
+  const f=document.getElementById('fFaction').value, t=document.getElementById('fType').value, r=document.getElementById('fRarity').value, hs=document.getElementById('fHas').value;
+  view=ships.filter(s=>{
+    if(f && s.faction!==f)return false;
+    if(t && s.type!==t)return false;
+    if(r && s.rarity!==r)return false;
+    if(hs==='spine' && !hasSpine(s))return false;
+    if(hs==='live2d' && !hasL2d(s))return false;
+    if(hs==='voice' && !s.voiceCount)return false;
+    if(hs==='cn' && !s.hasCn)return false;
+    if(q && s.name.toLowerCase().indexOf(q)<0 && s.id.toLowerCase().indexOf(q)<0)return false;
+    return true;
+  });
+  const sk=document.getElementById('fSort').value;
+  const RAR={'海上传奇':0,'超稀有':1,'精锐':2,'稀有':3,'普通':4};
+  if(sk==='rarity')view.sort((a,b)=>(RAR[a.rarity]??9)-(RAR[b.rarity]??9)||a.name.localeCompare(b.name,'zh'));
+  else if(sk==='faction')view.sort((a,b)=>a.faction.localeCompare(b.faction,'zh')||a.name.localeCompare(b.name,'zh'));
+  else if(sk==='type')view.sort((a,b)=>a.type.localeCompare(b.type,'zh')||a.name.localeCompare(b.name,'zh'));
+  else view.sort((a,b)=>a.name.localeCompare(b.name,'zh'));
+  renderGrid();
+}
+['search'].forEach(id=>document.getElementById(id).addEventListener('input',debounce(apply,180)));
+['fFaction','fType','fRarity','fHas','fSort'].forEach(id=>document.getElementById(id).addEventListener('change',apply));
+function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+
+/* ---------- 详情弹层 ---------- */
+let curShip=null, curSkin=null, tab='painting', paintSrc='cg';
+const mask=document.getElementById('mask'), viewEl=document.getElementById('mView');
+function openShip(s){ curShip=s; setSkin(defSkin(s)); buildSkinList(s); mask.classList.add('on'); }
+function closeShip(){ stopSpine(); mask.classList.remove('on'); viewEl.innerHTML=''; document.getElementById('mTabs').innerHTML=''; }
+document.getElementById('close').onclick=closeShip;
+mask.onclick=e=>{if(e.target===mask)closeShip();};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&mask.classList.contains('on'))closeShip();});
+
+function buildSkinList(s){
+  const el=document.getElementById('mSkins'); el.innerHTML='<div class="lab">皮肤 / 变体 ('+s.skins.length+')</div>';
+  s.skins.forEach(sk=>{
+    const sp=s.spineSkins.includes(sk.key), l2=s.live2dSkins.includes(sk.key);
+    const d=document.createElement('div'); d.className='skin'+(sk===curSkin?' on':''); d.dataset.k=sk.key;
+    const th=thumbOf(sk);
+    d.innerHTML=`<div class="th" style="background-image:${th?`url('${th}')`:'none'}"></div><div class="info">${sk.label}<div class="s2">${sk.key}${sp?' · Spine':''}${l2?' · L2D':''}</div></div>`;
+    d.onclick=()=>{setSkin(sk);buildSkinList(s);};
+    el.appendChild(d);
+  });
+}
+function setSkin(sk){ curSkin=sk; paintSrc='cg'; const s=curShip;
+  document.getElementById('mName').textContent=s.name;
+  document.getElementById('mPy').textContent=s.id+(s.hasCn?'':' (未匹配中文名)');
+  document.getElementById('mMeta').innerHTML=`${s.rarity?`<span class="${rarClass(s.rarity)}">${s.rarity}</span>`:''}${s.faction?`<span>阵营 <b>${s.faction}</b></span>`:''}${s.type?`<span>舰种 <b>${s.type}</b></span>`:''}<span>语音 <b>${s.voiceCount}</b></span>`;
+  const spineOn=!!(sk.spine && sk.spine.parts && sk.spine.parts.length), l2dOn=s.live2dSkins.includes(sk.key);
+  const tabs=[['painting','静态立绘',!!(sk.image||sk.cg)],['spine','Spine 动态',spineOn],['live2d','Live2D',l2dOn],['voice','语音 '+(s.voiceCount||''),s.voiceCount>0]];
+  const tl=document.getElementById('mTabs'); tl.innerHTML='';
+  tabs.forEach(([k,lab,en])=>{const d=document.createElement('div');d.className='tab'+(en?'':' dis')+(k===tab?' on':'');d.textContent=lab;d.dataset.k=k;
+    d.onclick=()=>{if(!en)return; tab=k; [...tl.children].forEach(c=>c.classList.toggle('on',c.dataset.k===k)); renderView();}; tl.appendChild(d);});
+  // 自动切到有内容的标签
+  if(!tabs.find(t=>t[0]===tab&&t[2])) tab = tabs.find(t=>t[2])?tabs.find(t=>t[2])[0]:'painting';
+  [...tl.children].forEach(c=>c.classList.toggle('on',c.dataset.k===tab));
+  renderView();
+}
+function renderView(){
+  stopSpine(); const sk=curSkin;
+  if(tab==='painting'){
+    const hasCg=!!sk.cg, hasRaw=!!sk.image;
+    if(!hasCg&&!hasRaw){ viewEl.innerHTML='<div class="note">该皮肤无独立立绘，只有动态资源</div>'; }
+    else{
+      const useCg = paintSrc==='raw' ? false : hasCg;
+      const src = useCg ? P+sk.cg : P+sk.image;
+      const bar = (hasCg&&hasRaw) ? `<div class="fitwrap"><img class="full" src="${src}"><div class="srcbar"><button data-s="cg" class="${useCg?'on':''}">全屏 CG（Spine 合成）</button><button data-s="raw" class="${!useCg?'on':''}">立绘原件（painting）</button></div></div>`
+                : `<div class="fitwrap"><img class="full" src="${src}">${hasCg?'<div class="srcbar"><span class="pill">Spine setup pose 全屏 CG</span></div>':''}</div>`;
+      viewEl.innerHTML=bar;
+      viewEl.querySelectorAll('.srcbar button').forEach(b=>b.onclick=()=>{paintSrc=b.dataset.s;renderView();});
+    }
+  }
+  else if(tab==='voice'){ renderVoice(); }
+  else if(tab==='spine'){ viewEl.innerHTML='<div class="note">正在初始化 Spine…</div>'; if(location.protocol==='file:') viewEl.innerHTML='<div class="note">Spine 实时播放需要通过本地服务器加载资源。<br>请运行 <b>启动资产浏览器.bat</b>（或 <b>python -m http.server</b> 于 Output 目录）后，浏览器打开提示的地址访问。</div>'; else startSpine(curShip, sk); }
+  else if(tab==='live2d'){ renderLive2D(curShip, sk); }
+}
+function renderVoice(){
+  const s=curShip; let h='<div class="audwrap"><h4>台词 / 语音（'+s.voices.length+' 条）'+(location.protocol==='file:'?'':' · 可点击播放')+'</h4>';
+  s.voices.forEach(v=>{const fn=v.split('/').pop();const cat=(fn.match(/cv-\d+(-\w+)?\.wav/)||[])[1]||'';h+=`<div class="aud"><span class="lbl">${cat?cat.replace('-',''):'默认'}</span><audio controls preload="none" src="${P+v}"></audio></div>`;});
+  h+='</div>'; viewEl.innerHTML=h;
+}
+function renderLive2D(s, sk){
+  const model=s.live2dSkins.includes(sk.key)?sk.live2d:'';
+  if(!model){viewEl.innerHTML='<div class="note">该皮肤无 Live2D 模型</div>';return;}
+  const tex=P+model+'/texture_00.png';
+  viewEl.innerHTML=`<div class="fitwrap"><img class="full" src="${tex}" onerror="this.parentNode.innerHTML='<div class=\\'note\\'>贴图加载失败</div>'"></div>
+    <div class="spine-bar"><span class="pill">Live2D 模型：${sk.key}</span><span class="hint">当前展示为模型贴图。动作播放需引入 Live2D Cubism Web 运行时（live2dcubismcore.min.js + pixi-live2d-display），本机与网络均暂缺，放置到 <b>vendor/live2d/</b> 后可自动启用。</span></div>`;
+}
+
+/* ---------- Spine 引擎（复用 spine-all.js，单皮肤加载） ---------- */
+let spState = null; // {cancelled, raf}
+function stopSpine(){ if(spState){ spState.cancelled=true; if(spState.raf)cancelAnimationFrame(spState.raf); spState=null; } }
+async function startSpine(s, sk){
+  const info=sk.spine||{}; const folder=info.folder||sk.key; const parts=(info.parts&&info.parts.length)?info.parts:[folder];
+  const base=P+'Spine_v2/'+folder+'/';
+  stopSpine();
+  const my={cancelled:false, raf:0}; spState=my;
+  try{
+    viewEl.innerHTML='<div id="spcwrap"></div>';
+    const wrap=document.getElementById('spcwrap'); wrap.style.cssText='position:absolute;inset:0';
+    const cv=document.createElement('canvas'); cv.style.cssText='width:100%;height:100%;display:block;cursor:grab'; wrap.appendChild(cv);
+    const bar=document.createElement('div'); bar.className='spine-bar'; wrap.appendChild(bar);
+    const glctx=new spine.webgl.ManagedWebGLRenderingContext(cv,{alpha:true,premultipliedAlpha:true});
+    const scene=new spine.webgl.SceneRenderer(cv,glctx,false);
+    const gl=glctx.gl; gl.clearColor(0,0,0,0); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+
+    async function loadPart(pn){
+      const skelR=await fetch(base+pn+'.skel'); if(!skelR.ok)throw new Error('skel '+pn+' 404');
+      const bytes=new Uint8Array(await skelR.arrayBuffer());
+      const atlasR=await fetch(base+pn+'.atlas'); if(!atlasR.ok)throw new Error('atlas '+pn+' 404');
+      const atlasTxt=await atlasR.text();
+      const pageNames=[];for(const ln of atlasTxt.split('\n')){const t=(ln||'').replace(/\r$/,'');if(/^[A-Za-z0-9_].*\.(png|jpg)$/i.test(t)&&!ln.startsWith(' ')&&!ln.startsWith('\t')&&!t.includes(':'))pageNames.push(t);}
+      const textures={};
+      for(const pgn of pageNames){const img=new Image();img.crossOrigin='anonymous';await new Promise((rs,rj)=>{img.onload=rs;img.onerror=()=>rj(new Error('tex '+pgn));img.src=base+pgn;});textures[pgn]=new spine.webgl.GLTexture(glctx,img,false);}
+      const texLoader=path=>{for(const q in textures){if(q===path||(''+path).endsWith(q)||q.endsWith(''+path))return textures[q];}return textures[pageNames[0]];};
+      const atlas=new spine.TextureAtlas(atlasTxt,texLoader);
+      const ofind=atlas.findRegion.bind(atlas); atlas.findRegion=n=>{let r=ofind(n);if(r)return r;const t=(''+n).trim();return t!==n?ofind(t):r;};
+      let data;
+      if(bytes[0]===0x7B){ data=new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas)).readSkeletonData(new TextDecoder().decode(bytes)); }
+      else { data=new spine.SkeletonBinary(new spine.AtlasAttachmentLoader(atlas)).readSkeletonData(bytes); }
+      const skeleton=new spine.Skeleton(data); skeleton.setSlotsToSetupPose(); skeleton.setBonesToSetupPose(); skeleton.updateWorldTransform();
+      const anim=new spine.AnimationState(new spine.AnimationStateData(data));
+      const anims=(data.animations||[]).filter(a=>a.duration>0.01).map(a=>({name:a.name||a,dur:+a.duration.toFixed(1)}));
+      return {skeleton,anim,data,anims};
+    }
+
+    const layers=[]; let loadFail=0;
+    for(const pn of parts){ try{ layers.push(await loadPart(pn)); if(my.cancelled)return; }catch(e){ loadFail++; console.warn('part fail',pn,e); } }
+    if(!layers.length)throw new Error('部件加载失败（'+parts.join(',')+'）');
+
+    let camX=0,camY=0,zoom=1,base1=1,playing=true,last=performance.now();
+    function resize(){ cv.width=wrap.clientWidth; cv.height=wrap.clientHeight; scene.resize();
+      scene.camera.setViewport(cv.width, cv.height); }  // 关键：scene.resize() 不更新相机视口（比例怪的根因）
+    function boundsOf(L){ let r=[1e9,1e9,-1e9,-1e9];
+      for(const slot of L.skeleton.slots){ const a=slot.getAttachment(); if(!a||!slot.bone||!slot.bone.active)continue;
+        try{ let v,c;
+          if(a instanceof spine.RegionAttachment){ v=spine.Utils.newFloatArray(8); c=8; a.computeWorldVertices(slot.bone,v,0,2); }
+          else if(a instanceof spine.MeshAttachment&&a.worldVerticesLength){ c=a.worldVerticesLength; v=spine.Utils.newFloatArray(c); a.computeWorldVertices(slot,0,c,v,0,2); }
+          else continue;
+          for(let j=0;j<c;j+=2){ if(v[j]<r[0])r[0]=v[j]; if(v[j]>r[2])r[2]=v[j]; if(v[j+1]<r[1])r[1]=v[j+1]; if(v[j+1]>r[3])r[3]=v[j+1]; }
+        }catch(e){}
+      } return r; }
+    function fit(){ let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+      for(const L of layers){ const b=boundsOf(L); if(b[0]<minX)minX=b[0]; if(b[1]<minY)minY=b[1]; if(b[2]>maxX)maxX=b[2]; if(b[3]>maxY)maxY=b[3]; }
+      if(minX>maxX){ base1=1; return; }
+      const bw=maxX-minX, bh=maxY-minY; camX=(minX+maxX)/2; camY=(minY+maxY)/2; base1=Math.min(cv.width/(bw*1.1), cv.height/(bh*1.1)); }
+    resize();
+    // 动画：取各层「有时长」动画名并集（空占位 0 秒动画已过滤）
+    const animUnion=[]; layers.forEach(L=>L.anims.forEach(a=>{if(animUnion.indexOf(a.name)<0)animUnion.push(a.name);}));
+    bar.innerHTML=`<label>动画</label><select id="spAnim"></select><button id="spPlay">暂停</button><button id="spFit">复位</button><span class="pill">${layers.length} 层部件${loadFail?' · '+loadFail+' 层失败':''}</span><span class="pill">滚轮缩放 · 拖拽平移</span>`;
+    const sel=document.getElementById('spAnim');
+    (animUnion.length?animUnion:['']).forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n||'(setup pose)';sel.appendChild(o);});
+    function setAnim(n){ layers.forEach(L=>{ try{
+        if(n && L.anims.some(a=>a.name===n)) L.anim.setAnimation(0,n,true);
+        else if(L.anims.some(a=>a.name==='normal')) L.anim.setAnimation(0,'normal',true);
+      }catch(e){} }); }
+    const def=animUnion.indexOf('normal')>=0?'normal':animUnion[0];
+    if(def) setAnim(def);
+    sel.value=def||'';
+    sel.onchange=()=>setAnim(sel.value);
+    document.getElementById('spPlay').onclick=e=>{playing=!playing;e.target.textContent=playing?'暂停':'播放';};
+    document.getElementById('spFit').onclick=()=>{fit();zoom=1;};
+    let drag=false,pmx=0,pmy=0;
+    cv.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.05,Math.min(60,zoom*(e.deltaY>0?.9:1.1)));},{passive:false});
+    cv.addEventListener('mousedown',e=>{drag=true;pmx=e.clientX;pmy=e.clientY;cv.style.cursor='grabbing';});
+    const mm=e=>{if(!drag)return;camX-=(e.clientX-pmx)/(base1*zoom);camY+=(e.clientY-pmy)/(base1*zoom);pmx=e.clientX;pmy=e.clientY;};
+    const mu=()=>{drag=false;cv.style.cursor='grab';};
+    window.addEventListener('mousemove',mm); window.addEventListener('mouseup',mu); window.addEventListener('resize',resize);
+    function frame(now){ if(my.cancelled){window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);return;} my.raf=requestAnimationFrame(frame);
+      const dt=Math.min((now-last)/1000,.1);last=now;
+      if(playing)layers.forEach(L=>{L.anim.update(dt);L.anim.apply(L.skeleton);L.skeleton.updateWorldTransform();});
+      gl.clear(gl.COLOR_BUFFER_BIT); scene.camera.position.set(camX,camY,0); scene.camera.zoom=1/(base1*zoom); scene.camera.update(); scene.begin();
+      layers.forEach(L=>scene.drawSkeleton(L.skeleton,true)); scene.end(); }
+    fit(); my.raf=requestAnimationFrame(frame);
+  }catch(err){ if(my.cancelled)return; viewEl.innerHTML='<div class="note">Spine 加载失败：'+(err.message||err)+'<br><span class="hint">'+(location.protocol==='file:'?'请用 启动资产浏览器.bat 以本地服务器方式打开。':'请确认该皮肤已导出 Spine 资源。')+'</span></div>'; }
+}
+
+/* ---------- 模式提示 ---------- */
+(function(){const el=document.getElementById('modehint');
+  if(location.protocol==='file:'){el.innerHTML='⚠ 当前以 <b>file://</b> 打开：立绘/语音可看，<b>Spine 实时播放</b>请用 <b>启动资产浏览器.bat</b>';el.style.color='#ffb27b';}
+  else{el.innerHTML='✅ 本地服务器模式：Spine 可实时播放';el.style.color='#7bd88f';}
+})();
+
+renderGrid();
+</script>
+</body>
+</html>
