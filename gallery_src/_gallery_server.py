@@ -107,6 +107,11 @@ def main():
                 return
             super().do_GET()
 
+        def end_headers(self):
+            # 本地工具页：每次强制回源校验，杜绝 index.html/index.js 改版后浏览器仍用旧缓存
+            self.send_header("Cache-Control", "no-cache")
+            super().end_headers()
+
         def log_message(self, fmt, *args):  # 只留导出相关日志，屏蔽静态文件刷屏
             s = fmt % args
             if "/save_cg" in s or "/cg_exists" in s:

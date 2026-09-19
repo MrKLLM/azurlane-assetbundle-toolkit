@@ -71,7 +71,9 @@ main{flex:1;overflow:auto;padding:14px}
 .srcbar button{font-size:12px;padding:4px 10px;background:#243049;border:1px solid #3a4a6b;color:#c9d4e6;border-radius:6px;cursor:pointer}
 .srcbar button.on{background:#2b6cb0;border-color:#5b9bd8;color:#fff}
 .srcbar .pill{color:#8b96ad}
-.view img.full{max-width:100%;max-height:100%;object-fit:contain}
+.view img.full{max-width:100%;max-height:100%;object-fit:contain;user-select:none}
+.view:fullscreen{width:100vw;height:100vh}
+#imgStage{overflow:hidden}
 .view canvas{width:100%;height:100%;display:block;cursor:grab}
 .close{position:absolute;top:10px;right:12px;z-index:60;background:var(--panel2);border:1px solid var(--line);color:var(--txt);width:34px;height:34px;border-radius:8px;font-size:20px;cursor:pointer;line-height:1}
 .close:hover{background:var(--acc);border-color:var(--acc)}
@@ -235,15 +237,61 @@ function renderView(){
     else{
       const useCg = paintSrc==='raw' ? false : hasCg;
       const src = useCg ? P+sk.cg : P+sk.image;
-      const bar = (hasCg&&hasRaw) ? `<div class="fitwrap"><img class="full" src="${src}"><div class="srcbar"><button data-s="cg" class="${useCg?'on':''}">全屏 CG（Spine 合成）</button><button data-s="raw" class="${!useCg?'on':''}">立绘原件（painting）</button></div></div>`
-                : `<div class="fitwrap"><img class="full" src="${src}">${hasCg?'<div class="srcbar"><span class="pill">Spine setup pose 全屏 CG</span></div>':''}</div>`;
-      viewEl.innerHTML=bar;
-      viewEl.querySelectorAll('.srcbar button').forEach(b=>b.onclick=()=>{paintSrc=b.dataset.s;renderView();});
+      const sw = (hasCg&&hasRaw)
+        ? `<button data-s="cg" class="${useCg?'on':''}">全屏 CG（Spine 合成）</button><button data-s="raw" class="${!useCg?'on':''}">立绘原件（painting）</button>`
+        : (hasCg?'<span class="pill">Spine setup pose 全屏 CG</span>':'<span class="pill">painting 立绘</span>');
+      viewEl.innerHTML=`<div class="fitwrap" id="imgStage"><img class="full" src="${src}" draggable="false"></div>
+        <div class="srcbar">${sw}<span style="flex:1"></span><span class="pill">滚轮缩放 · 拖拽平移 · 双击100% · 全屏</span><button id="zReset">复位</button><button id="zFull">全屏</button></div>`;
+      viewEl.querySelectorAll('.srcbar button[data-s]').forEach(b=>b.onclick=()=>{paintSrc=b.dataset.s;renderView();});
+      mountImageViewer();
     }
   }
   else if(tab==='voice'){ renderVoice(); }
   else if(tab==='spine'){ viewEl.innerHTML='<div class="note">正在初始化 Spine…</div>'; if(location.protocol==='file:') viewEl.innerHTML='<div class="note">Spine 实时播放需要通过本地服务器加载资源。<br>请运行 <b>启动资产浏览器.bat</b>（或 <b>python -m http.server</b> 于 Output 目录）后，浏览器打开提示的地址访问。</div>'; else startSpine(curShip, sk); }
   else if(tab==='live2d'){ renderLive2D(curShip, sk); }
+}
+/* 静态立绘/CG 交互浏览：滚轮缩放(以光标为中心) · 拖拽平移 · 双击100% · 全屏 */
+function mountImageViewer(){
+  const stage=document.getElementById('imgStage'); if(!stage)return;
+  const img=stage.querySelector('img');
+  let s=1,x=0,y=0;
+  function relayout(){ const r=stage.getBoundingClientRect();
+    if(!img.naturalWidth) return false;
+    const k=Math.min(r.width/img.naturalWidth, r.height/img.naturalHeight, 1);
+    img.style.width=Math.round(img.naturalWidth*k)+'px';
+    img.style.height=Math.round(img.naturalHeight*k)+'px';
+    return true; }
+  const apply=()=>{ img.style.transformOrigin='0 0';
+    img.style.transform=`translate(${x}px,${y}px) scale(${s})`;
+    stage.style.cursor=s>1.001?'grab':'zoom-in'; };
+  const reset=()=>{ s=1; x=0; y=0; apply(); };
+  function init(){ if(relayout()) reset(); }
+  img.addEventListener('load',init);
+  stage.addEventListener('wheel',e=>{ e.preventDefault();
+    const r=stage.getBoundingClientRect(), offX=img.offsetLeft, offY=img.offsetTop;
+    const mx=e.clientX-r.left, my=e.clientY-r.top;
+    const ns=Math.min(24, Math.max(0.15, s*(e.deltaY>0?0.9:1.125)));
+    x=mx-offX-(mx-offX-x)*(ns/s); y=my-offY-(my-offY-y)*(ns/s); s=ns; apply();
+  },{passive:false});
+  let drag=false,dx=0,dy=0;
+  stage.addEventListener('pointerdown',e=>{ drag=true; dx=e.clientX; dy=e.clientY;
+    stage.setPointerCapture(e.pointerId); stage.style.cursor='grabbing'; });
+  stage.addEventListener('pointermove',e=>{ if(!drag)return; x+=e.clientX-dx; y+=e.clientY-dy;
+    dx=e.clientX; dy=e.clientY; apply(); });
+  const up=()=>{ drag=false; apply(); };
+  stage.addEventListener('pointerup',up); stage.addEventListener('pointercancel',up);
+  stage.addEventListener('dblclick',e=>{ const r=stage.getBoundingClientRect(), offX=img.offsetLeft, offY=img.offsetTop;
+    const mx=e.clientX-r.left, my=e.clientY-r.top;
+    if(s>1.02){ reset(); return; }
+    const ns=Math.min(24, (img.naturalWidth/img.clientWidth)||2);   // 放大到 1:1 像素
+    x=mx-offX-(mx-offX-x)*(ns/s); y=my-offY-(my-offY-y)*(ns/s); s=ns; apply(); });
+  document.getElementById('zReset').onclick=reset;
+  document.getElementById('zFull').onclick=()=>{
+    if(document.fullscreenElement) document.exitFullscreen();
+    else viewEl.requestFullscreen().catch(()=>{});
+  };
+  stage.addEventListener('fullscreenchange',init);
+  init();
 }
 function renderVoice(){
   const s=curShip; let h='<div class="audwrap"><h4>台词 / 语音（'+s.voices.length+' 条）'+(location.protocol==='file:'?'':' · 可点击播放')+'</h4>';
