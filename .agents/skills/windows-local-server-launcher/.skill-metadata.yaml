@@ -1,0 +1,85 @@
+examples:
+  - id: create-launcher
+    title:
+      zh: 为本地页面做双击启动器
+      en: Create A Double-Click Launcher For A Local Page
+    description:
+      zh: 给一个本地网页生成 GBK+CRLF 的 .bat 外壳和 Python 启动器，双击即起本地服务器并自动开浏览器
+      en: Generate a GBK+CRLF .bat shell plus a Python launcher so double-clicking starts a local server and opens the browser
+    prompt:
+      zh: |-
+        帮我在 Windows 上做一个双击即启动的本地预览脚本。
+
+        页面文件：{{本地页面路径，如 D:\proj\web\index.html}}
+        启动器放在：{{.bat 存放路径，如 D:\proj\web\启动预览.bat}}
+        端口：{{端口号，如 8777}}
+        窗口标题：{{标题，如 项目预览 (本地服务器)}}
+
+        页面里用 ../ 引用了 {{资源目录}} 下的资源，请据此决定服务器根目录。
+        请生成 Python 启动器 + 最小 .bat 壳，跑三场景验证（正常启动 / 杀掉立即重启 / 端口已占用）后告诉我双击怎么用。
+      en: |-
+        Please build a Windows double-click launcher for a local page.
+
+        Page file: {{local page path, e.g. D:\proj\web\index.html}}
+        Launcher path: {{.bat path, e.g. D:\proj\web\launch-preview.bat}}
+        Port: {{port, e.g. 8777}}
+        Window title: {{title, e.g. Project Preview}}
+
+        The page references assets in {{assets dir}} via ../, so pick the served root accordingly.
+        Generate the Python launcher plus a minimal .bat shell, run the three verification scenarios
+        (fresh start / restart right after kill / port already busy), then tell me how to use it.
+  - id: fix-flash-close
+    title:
+      zh: 排查 .bat 双击闪退
+      en: Diagnose A Batch File That Flashes And Closes
+    description:
+      zh: 现成的启动脚本双击后窗口一闪就退或报“未找到 Python”，定位编码/换行/端口根因并修好
+      en: An existing launcher window flashes closed or claims Python is missing; find the encoding, line-ending, or port root cause and fix it
+    prompt:
+      zh: |-
+        这个启动脚本双击后窗口一闪就退（或提示未找到 py/python），帮我定位根因并修好：
+
+        脚本路径：{{.bat 文件路径}}
+        现象：{{闪退 / 中文乱码 / 报未找到 Python / 第一次能开之后每次都退}}
+
+        请按 CRLF、GBK(cp936)、where 检测写法、TIME_WAIT 端口残留、缺少 pause 这几条逐一排查，
+        给出改好的脚本，并用 cmd 跑一遍验证端口能监听、页面返回 200。
+      en: |-
+        This launcher's window flashes closed on double-click (or says py/python was not found).
+        Diagnose and fix it:
+
+        Script path: {{.bat path}}
+        Symptom: {{flashes closed / mojibake / "Python not found" / worked once then always dies}}
+
+        Check CRLF endings, GBK(cp936) encoding, the `where` detection form, TIME_WAIT port residue,
+        and the missing `pause`. Produce a fixed script and verify via cmd that the port listens and
+        the page returns 200.
+  - id: harden-port-reuse
+    title:
+      zh: 加固端口占用与重复启动
+      en: Harden Port Reuse And Repeat Launches
+    description:
+      zh: 让启动器在端口被占用时复用现有服务直接开浏览器，关窗后立即重开也不因 TIME_WAIT 绑定失败
+      en: Make the launcher reuse a server that is already running and survive an immediate relaunch after TIME_WAIT residue
+    prompt:
+      zh: |-
+        帮我加固本地服务器启动器：
+
+        启动器路径：{{.bat 或 Python 启动器路径}}
+        端口：{{端口号}}
+        页面地址：{{http://127.0.0.1:端口/页面}}
+
+        要求：ThreadingTCPServer + allow_reuse_address；启动前探测端口，已占用就直接复用开浏览器；
+        绑定失败要打印原因并停住等回车，绝不静默闪退。改完跑验证：正常启动、强杀后 1 秒内重启、
+        已运行时再次启动，三种情况都要通过。
+      en: |-
+        Please harden my local server launcher:
+
+        Launcher path: {{.bat or Python launcher path}}
+        Port: {{port}}
+        Page URL: {{http://127.0.0.1:port/page}}
+
+        Requirements: ThreadingTCPServer with allow_reuse_address; probe the port first and reuse an
+        existing server by just opening the browser; on bind failure print the reason and block for
+        Enter instead of closing silently. Then verify three cases: fresh start, restart within one
+        second of an abrupt kill, and launching while one is already running.
