@@ -18,7 +18,7 @@
 | `project-doc-governance` | **已执行** | 文档治理四步管线。2026-09-16 已执行完毕（提交 `d889ee9`），规则常驻 `AGENTS.md`；文档再次膨胀时可重跑 |
 | `progress-tracker` | **已被吸收** | 功能已完整内联进 `AGENTS.md` §进度文档维护 与 §格式规范，技能本身冗余，留作溯源 |
 | `workflow-recorder` | **部分冗余** | 条目格式已固化在 `docs/WORKFLOWS.md`（WF-1 ~ WF-14），现按 `AGENTS.md` 写入路由续写，无需技能 |
-| `troubleshooting-logger` | **已停用** | 被 `PROJECT_STATUS.md` §12 取代。`docs/TROUBLESHOOTING.md` 最后条目为 #11（2026-06-20），近三个月无新增 |
+| `troubleshooting-logger` | **已停用** | 被 `PROJECT_STATUS.md` §9.3「五个系统性根因修复」取代。`docs/TROUBLESHOOTING.md` 最后条目为 #11（2026-06-20），近三个月无新增 |
 
 ## 与项目文档的分工
 
