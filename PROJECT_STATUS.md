@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-18（v2 全量收官；修复嵌套容器错位 bug、换入 85 张受影响立绘；gallery_v2 上线）
+> **生成时间**: 2026-09-19（修复无 mesh 部件 mRawSpriteSize 画框错位、换入 10 张视差背景皮肤；Spine CG 导出线开工）
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
 
 ---
@@ -103,13 +103,16 @@ v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` �
 1. ✅ **静态立绘「嵌套容器错位」——已修复并换入（2026-09-18）**
    根因（**非**此前猜的 sortingOrder）：`compose_paintings_v2.py::layout_all` 的仿射多减了 `p_local[0]/[1]`——`local_rect` 返回的 `(lx,ly)` 已是「相对父节点局部矩形左下角(0,0)」的偏移，不该再减父节点在其父级里的位置。单层皮肤 `p_local[0]=0` 不受影响；带中间容器（`layers`/`Touch`）的皮肤子层被整体甩偏（jialimaoxian 角色脱离克拉肯、fuluoxiluofu 角色甩到左下角）。
    修复提交 `52782a7`。只读扫描：4486 张中 **85 张受影响**（清单 `.diag/affected_skins.txt`，>500px 明显错位 32 张），逐张改前/改后对比确认均为改善 → **已换入 `Output/Paintings_v2/` 并重建这 85 张缩略图**（旧图备份 `Output/_OLD_bak/affected_20260918/`）。其余 4401 张逐像素不变。
-2. ⚠️ **i404 型「背景大铺开/缝隙」——独立问题，未修**
-   i404 的 `layers` 是 sd=(0,0) 满铺、`p_local[0]=0`，不受上面 bug 影响。它的背景层（`bj1/bj2/bj3`）在数据里就大范围铺开、拼不满有黑洞，是**另一类**问题。你给的 16:9 全屏 CG 是游戏运行时相机呈现（prefab 无扁平资源，已确认无法从立绘直接复现，放弃）。待查：是否需逆向游戏全屏 CG 相机/视口逻辑，或接受「角色居中视口裁切」的近似。
+2. ✅ **i404 型「背景大铺开/缝隙」——根因已修并换入（2026-09-19）**
+   根因（又一个解析姿势问题，非相机/非 p_local）：`build_part` 无 mesh 部件误用 CanvasRenderer `mRawSpriteSize` 当绘制画框。视差背景皮肤（i404 型）每条背景带记录的是**切分前原图尺寸**(2048×1770)，按它缩放把竖带横向压窄 ~2 倍，拼不满留黑洞。修复：无 mesh 部件按 Unity UI Image 语义把 textureRect 拉伸铺满 RectTransform（mesh 部件仍用 frame）。全量扫描 4490 包：真实受影响仅 **10 皮肤/16 部件**（i404(_n)、hemuhao_2(_n)、jinshi_2_hx(_n_hx)、junzhu_5、kansasi_2_hx、tiancheng_cv_3(_n)）；540 个 4×4 占位精灵全透明零影响；对照组逐像素 maxdiff=0。**10 张已换入并重建缩略图**（旧图备份 `Output/_OLD_bak/framefix_20260919/`）。
+   ⚠️ 遗留认知：painting bundle 本身只含**半景特写条带**（角色+浪花区），完整 CG（月亮/龙身/鱼群等）只存在于 Spine 图集（i404 156 部件、完整背景 bj 3994×3279）→「全屏 CG」还原并入 Spine 线（下条）。
 3. ⏸️ **missd（D小姐）「黑影」——用户暂搁置**（"先不管 missd"）。
-4. ⚠️ **Spine 动态——未深入**：只有 `normal` 动画会动（下拉列 1/2/3/4/normal）、比例怪、i404 显示「1 层部件·1 层失败」。属 gallery 前端动画/分层逻辑 + `extract_spine_v2` 产物，另一条线。
+4. ⚠️ **Spine 动态 + 全屏 CG 导出线（当前主攻）**：
+   - 已知问题：只有 `normal` 动画会动（下拉列 1/2/3/4/normal）、比例怪、i404 显示「1 层部件·1 层失败」。
+   - 新目标：渲染 Spine **setup pose** 批量导出 232 个 Spine 皮肤的完整全屏 CG 静态图（游戏皮肤详情全屏即渲染 Spine，painting 只有半景）。方案：复用 gallery 前端 `spine-all.js` 运行时或纯 Python 解析 .skel，与动画/比例修复共用同一套渲染逻辑。
 5. ⏳ **元数据匹配——未做**：角色名/阵营/舰种有误或缺失，参考 l2d.su + 碧蓝 wiki 校正（联动/特殊舰尤甚，见 §10）。
 
-> 诊断产物在 `.diag/`（不入库）。接手 agent 从第 2~5 条继续；第 1 条已闭环。
+> 诊断产物在 `.diag/`（不入库）。第 1、2 条已闭环；当前主攻第 4 条（Spine 动态 + 全屏 CG 导出），其次第 5 条元数据。
 
 ### 既有待办
 
@@ -154,19 +157,21 @@ v1 的 WebGL Viewer 调试史已归档。当前 `scripts/extract_spine_v2.py` �
 
 ### 9.1 匹配机制（游戏本体权威答案）★核心突破
 - `AssetBundles/dependencies`(6.4MB 单包) 内 MonoBehaviour 携带 **86,398 条官方依赖表** → `Output/dependency_manifest.json`。
-- 部件→纹理包 = deps + externals；对象定位 = PathID 精确匹配（一包多 mesh 不再错拿）；放置 = 统一 Unity UI 数学（anchor/pivot/sizeDelta/anchoredPosition/localScale 全递归 + sprite 画框 `mRawSpriteSize` 非等比映射 rect）。
+- 部件→纹理包 = deps + externals；对象定位 = PathID 精确匹配（一包多 mesh 不再错拿）；放置 = 统一 Unity UI 数学（anchor/pivot/sizeDelta/anchoredPosition/localScale 全递归；有 mesh 部件按画框 `mRawSpriteSize` 非等比映射 rect，无 mesh 部件 textureRect 直接拉伸铺满 rect）。
 - 逆向关键：新版 bundle header `unity_version` 伪装成 `5.x.x`，真实 `2022.3.62f3` → 需 `UnityPy.config.FALLBACK_UNITY_VERSION="2022.3.62f3"`。静态立绘 = **纯 UI 结构**（RectTransform/CanvasRenderer，无 MeshRenderer），游戏把每个部件位置/大小/anchor/pivot 全写死，合成不需猜坐标。
 
 ### 9.2 静态立绘 v2（`scripts/compose_paintings_v2.py`）⚠️
 零猜测、零手调。疑难样本 7/7 目视正确；v1 需手调的 feiteliekaer_3 / xili_alter / hailunna_4 现无参数自动正确。表情差分 `--faces all` 输出 `{name}_face{k}.png`。
-> ✅ **嵌套容器错位已修（2026-09-18）**：带中间容器（`layers`/`Touch`）的皮肤子层曾被 `layout_all` 仿射多减 `p_local[0]` 甩偏（非 sortingOrder 问题），修复提交 `52782a7`，扫描 85/4486 受影响已全部换入。**仍遗留**：i404 型背景大铺开/缝隙（`p_local[0]=0` 不受该 bug 影响，另因，见 §6 第 2 条）。
+> ✅ **嵌套容器错位已修（2026-09-18）**：带中间容器（`layers`/`Touch`）的皮肤子层曾被 `layout_all` 仿射多减 `p_local[0]` 甩偏（非 sortingOrder 问题），修复提交 `52782a7`，扫描 85/4486 受影响已全部换入。
+> ✅ **i404 型背景缝隙已修（2026-09-19）**：无 mesh 部件误用 `mRawSpriteSize` 当画框致视差背景带压窄，改按 textureRect 拉伸铺满 RectTransform，10 张受影响已换入（见 §6 第 2 条）。注意 painting 本身即半景特写，完整 CG 走 Spine 线。
 **全量收官**：4300 → **4486**（补合成 190，成功 186 / 失败 4 为非主皮肤杂项包，已加过滤）。输出 `Output/Paintings_v2/`。
 
-### 9.3 四个系统性根因修复 ★教训（全部代码级、零逐角色参数）
+### 9.3 五个系统性根因修复 ★教训（全部代码级、零逐角色参数）
 1. 无 mesh 整图部件**双重 Y 翻转** → root 背景层颠倒。修：`arr = A[rect.y : rect.y+h]`。
 2. Spine atlas 页纹理需 **`flip=True`**（运行时按行0=顶采样）。
 3. Windows 分离进程 stdout 默认 GBK，`print('✓')` 抛错致全量**假失败** → `sys.stdout.reconfigure('utf-8')` + 子进程 `PYTHONIOENCODING=utf-8`。
 4. `layout_all` **root scale 只乘子层未乘 root 自身** → 层间比例错。修：局部空间纯 anchor 数学 + 仿射映射世界 + 自身 scale 绕 pivot（负=镜像）+ root 屏幕适配 scale 归一为 1。
+5. 无 mesh 部件**误用 `mRawSpriteSize` 当画框** → i404 型视差背景带（记录切分前原图尺寸）被压窄留黑洞。修：按 UI Image 语义 textureRect 拉伸铺满 RectTransform；mesh 部件才用 frame。
 > 结论再次印证：游戏数据自洽，所有错位都是解析姿势不对。（完整明细含文件行号与验证样本，见 `docs/archive/PROJECT_STATUS_历史归档.md` 末尾「完整明细存档」。）
 
 ### 9.4 Spine v2（`scripts/extract_spine_v2.py`）✅

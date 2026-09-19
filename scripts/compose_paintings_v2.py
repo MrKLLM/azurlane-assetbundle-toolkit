@@ -373,12 +373,15 @@ def build_part(part, face_sprite_name=None):
     # decoded_texture 用 flip=False 读出 —— 数组第 0 行就是 v=0（Unity 底部），
     # 而 m_Rect.y 本身就是自底坐标，直接切片得到的就是 Y-up 内容，无需再翻转。
     # （旧版这里 th-rect.y-h 再 [::-1] 是双重翻转，正是背景层上下颠倒的根因）
+    # 绘制画框 = 纹理矩形本身：Unity UI Image 语义是把 textureRect 拉伸铺满
+    # RectTransform。不能用 CanvasRenderer.mRawSpriteSize 当画框——多背景视差皮肤
+    # （i404 型）的每条背景带都记录着切分前原图尺寸(2048x1770)，按它缩放会把
+    # 竖带横向压窄 2 倍，拼不满留下黑洞（§6 第 2 条的根因）。
     sx0 = int(round(rect.x)); sy0 = int(round(rect.y))
     sx1 = sx0 + int(round(rect.width)); sy1 = sy0 + int(round(rect.height))
     arr = np.asarray(tex.convert("RGBA"))[sy0:sy1, sx0:sx1]
-    x0 = max(0, int(round(rect.x)))
-    y0 = max(0, int(round(rect.y)))
-    bbox = (x0, y0, x0 + arr.shape[1], y0 + arr.shape[0])
+    bbox = (0, 0, arr.shape[1], arr.shape[0])
+    frame = (float(rect.width), float(rect.height))
     return arr, bbox, frame
 
 
