@@ -398,3 +398,33 @@
 - 个别 bundle 拼音与 `SHIP_NAME_MAP` 拼写不一致（如 daofeng/dafeng）→ 约 7% 未匹配中文名，按约定保留拼音 ID。
 
 **涉及文件**: `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `Output/gallery_v2/index.html`, `Output/gallery_v2/启动资产浏览器.bat`, `PROJECT_STATUS.md §13`
+
+> 2026-09-19 更新：前端源码已迁至仓库内 `gallery_src/`（唯一权威版本），改完跑 `scripts/deploy_gallery.py` 同步到 `Output/gallery_v2/`；服务器 `_gallery_server.py` 统一发 `Cache-Control: no-cache`，杜绝改版后浏览器吃旧缓存。
+
+---
+
+### WF-14: Spine setup pose 全屏 CG 批量导出
+
+**日期**: 2026-09-19
+**目标**: 批量导出全部 Spine 皮肤的「游戏皮肤详情全屏」同款完整 CG 静态图（painting bundle 只有半景特写条带，完整场景只存在于 Spine 资源）
+**适用场景**: 需要 Spine 骨架的静态高质量渲染图（封面/画廊/对比审查），且本机无头浏览器可用
+
+**步骤**:
+1. **渲染通道复用前端运行时**：不重造 Spine 解析器。`gallery_src/cg_export.html` 用 `spine-all.js` 加载 `Output/Spine_v2/<皮肤>/*.skel + .atlas + 页纹理`，`setSlotsToSetupPose/setBonesToSetupPose` 后绘制全部件（多部件按 B/M/T 层序）。
+2. **两段式构图**：①顶点包围盒（Region/Mesh `computeWorldVertices` 联合）定相机；②首绘后 `gl.readPixels` 扫 alpha 非零像素包围盒，覆盖率 <82% 则把相机重定到真实内容区重绘（修正被超大半透明部件撑歪构图的情况，如冒险号 0.32→0.83）。
+3. **落盘**：canvas `toBlob`（WebGL 上下文必须 `preserveDrawingBuffer:true`）→ `POST /save_cg?name=<皮肤>` → `_gallery_server.py` 写 `Output/CG_v2/<皮肤>.png`；`GET /cg_exists` 支持断点续跑；URL 参数 `autostart/only/size/redo` 供自动化。
+4. **无头驱动**：`.diag/run_cg_export.py`（Chrome `--headless=new --remote-allow-origins=* --enable-unsafe-swiftshader --use-angle=swiftshader` + websocket-client CDP 轮询 `#prog/#log`），231 皮肤约 5 分钟。每个皮肤导出后 `GLTexture.dispose()` 防 4096² 页纹理堆爆显存。
+5. **接入画廊**：`build_gallery_index.py` 扫 `CG_v2/` 附 `sk.cg`；前端「静态立绘」默认 CG、可切回原件；`make_thumbs.py` 生成 `<stem>_cg.webp`。
+
+**关键决策**:
+- 渲染器选型 → 复用浏览器 spine-all.js（WebGL 处理 mesh/换色/预乘 alpha 全对），放弃纯 Python 重写 skel 解析。
+- 长边 2400px（SwiftShader 下 ~2s/张；4096 上限保护）。
+
+**踩坑记录**:
+- `SceneRenderer.resize()` **不更新相机视口**（恒初始 300×150）→ 渲染放大数倍「比例怪」；必须 `scene.camera.setViewport(cv.width, cv.height)`。
+- 同块内 `let my=0`（鼠标坐标）遮蔽外层 `const my`（状态对象）→ 块内所有 `my` 引用进 TDZ，部件加载成功也抛「Cannot access 'my'」→ 假「N 层失败」。变量命名冲突是隐形炸弹，前端也适用。
+- 动画名 `1..N` 多为 0 秒空占位（逐部件不同），真实动画是 `normal/touch_*/login/change_out` → 下拉过滤空动画、默认 normal、缺层回落。
+- `beierfasite_g` 的 .skel 实为 JSON → 按首字节 `{` 分流 `SkeletonJson`。
+- 浏览器缓存旧 `index.js` 会让「数据已生成但页面看不到」→ 服务器发 `Cache-Control: no-cache` 根治。
+
+**涉及文件**: `gallery_src/cg_export.html`, `gallery_src/_gallery_server.py`, `.diag/run_cg_export.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `PROJECT_STATUS.md §6/§10`

@@ -15,6 +15,7 @@
 |---|---|---|
 | 静态立绘 | 4,486 张 | v2 数据驱动合成，零手调 |
 | Spine 动态立绘 | 232 主包 | 多部件骨骼分层 |
+| 全屏 CG | 231 张 | Spine setup pose 浏览器端批量导出（长边 2400，`Output/CG_v2`） |
 | Live2D | 256 模型 | 纹理/物理/motion |
 | 语音 | 4,370 WAV | BGM/CV/Other/SE |
 | 背景族 | ~1,900 张 | bg/helpbg/commonbg/loadingbg 等 |
@@ -34,6 +35,7 @@ AGENTS.md            # agent 协作规则（含文档写入路由表）
 PROJECT_STATUS.md    # 当前进度快照（跨会话对接入口）
 IDEA.md              # 想法备忘
 scripts/             # 数据驱动还原管线与工具脚本
+gallery_src/         # 本地浏览平台前端源码（唯一权威版本，deploy_gallery.py 同步到 Output/gallery_v2）
 docs/                # 操作手册 / 工作流 / 踩坑 / 工具说明 / 归档
 ```
 
@@ -49,7 +51,9 @@ docs/                # 操作手册 / 工作流 / 踩坑 / 工具说明 / 归档
 | `extract_spine_v2.py` | ★ Spine 动态立绘 v2 提取 |
 | `run_v2_full.py` | v2 全量批跑编排 |
 | `reconstruct_live2d.py` / `fix_model3.py` / `extract_motions.py` | Live2D 还原 |
-| `build_gallery_index.py` / `make_thumbs.py` | 生成本地浏览平台数据与缩略图 |
+| `build_gallery_index.py` / `make_thumbs.py` | 生成本地浏览平台数据与缩略图（含 CG_v2） |
+| `deploy_gallery.py` | `gallery_src/` 前端源码 → `Output/gallery_v2/` 部署同步 |
+| `gallery_src/cg_export.html` | Spine setup pose 全屏 CG 批量导出页（配 `_gallery_server.py --export` / 无头 Chrome） |
 | `scrape_wiki_fast.py` / `generate_ship_database.py` / `ship_name_map.py` | 舰船 wiki 数据与中文名映射 |
 | `mumu_sync.py` / `mumu_adb.py` | 与模拟器增量同步资产 |
 
