@@ -386,7 +386,7 @@ async function renderLive2D(s, sk){
        priority 也不能传 false（会被当 0 而低于当前优先级被拒） */
     const play=g=>{ if(!g) return false; try{ return mm.startMotion(g,0,MP.FORCE)!==false; }catch(e){ return false; } };
     const bar=document.getElementById('l2bar');
-    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><span class="pill">${groups.length} 组动作</span><span class="hint">点击模型=触摸响应 · 滚轮缩放/拖拽平移 · 双击复位</span>`;
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · 滚轮缩放/拖拽平移 · 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     sel.innerHTML=groups.map(g=>`<option value="${g}">${g}</option>`).join('');
     sel.onchange=()=>play(sel.value);
@@ -394,12 +394,38 @@ async function renderLive2D(s, sk){
     document.getElementById('l2Fit').onclick=fit;
     document.getElementById('l2Full').onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else viewEl.requestFullscreen().catch(()=>{}); };
     const ro=new ResizeObserver(fit); ro.observe(wrap);
-    const tapG=groups.find(g=>/^tap/i.test(g));
+    /* 部位命中：model3.json 的 HitAreas[].Name 就是动作组名（全库 768/768 精确匹配）。
+       用「点击瞬间实时读取的部件包围盒」而不是加载时算好的三角面：
+       ① 框会随呼吸/物理位移动，缓存坐标会点空；② 部位框彼此重叠/嵌套（有的模型 Head 框大到压住 Body），
+       按顺序或按最小框都会点错 → 取「归一化中心距离最近」的包含框（点在哪就最像哪个部位）。 */
+    const core=mdl.internalModel.coreModel, ppu=mdl.internalModel.pixelsPerUnit||1;
+    const hitAreas=(mdl.internalModel.settings.hitAreas||[]).map(a=>{
+      let idx=-1; try{ idx=core.getDrawableIndex(a.Id); }catch(e){}
+      return idx<0 ? null : {name:a.Name, idx};
+    }).filter(Boolean);
+    const hitAt=(mx,my)=>{ let best=null, bestS=Infinity;
+      for(const ha of hitAreas){
+        const p=core.getDrawableVertexPositions(ha.idx); if(!p||!p.length) continue;
+        let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+        for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
+        if(mx<x0||mx>x1||my<y0||my>y1) continue;
+        const cx=(x0+x1)/2, cy=(y0+y1)/2, rad=Math.max(1e-6,(x1-x0)/2,(y1-y0)/2);
+        const s=Math.hypot(mx-cx,my-cy)/rad;              // 0=正中，1=边缘
+        if(s<bestS){ bestS=s; best=ha.name; } }
+      return best; };
+    const fallbackG=groups.find(g=>/^(tap|touch)/i.test(g))||null;   // 无 HitAreas 的模型兜底
     let dragging=false,px=0,py=0,moved=0;
     const onDown=e=>{ dragging=true; moved=0; px=e.clientX; py=e.clientY; };
     const onMove=e=>{ if(!dragging)return; const dx=e.clientX-px,dy=e.clientY-py; moved+=Math.abs(dx)+Math.abs(dy);
       ox+=dx; oy+=dy; px=e.clientX; py=e.clientY; apply(); };
-    const onUp=()=>{ dragging=false; if(moved<6&&tapG) play(tapG); };
+    const onUp=e=>{ if(!dragging) return; dragging=false; if(moved>=6) return;
+      const r=wrap.getBoundingClientRect();
+      const lp=mdl.toLocal(new PIXI.Point(e.clientX-r.left, e.clientY-r.top));
+      const name=hitAt(lp.x/ppu, lp.y/ppu);
+      const g = name && (groups.includes(name) ? name : groups.find(x=>x.toLowerCase()===name.toLowerCase())) || (name?null:fallbackG);
+      if(!g) return;
+      if(play(g)){ sel.value=g; const pill=document.getElementById('l2Hit');
+        if(pill) pill.textContent=(name?'部位 '+name+' → ':'')+g; } };
     const onWheel=e=>{ e.preventDefault();
       const r=wrap.getBoundingClientRect(), mx=e.clientX-r.left, myy=e.clientY-r.top;
       const s0=baseK*z, s1=baseK*Math.min(12, Math.max(0.2, z*(e.deltaY>0?0.9:1.111)));
