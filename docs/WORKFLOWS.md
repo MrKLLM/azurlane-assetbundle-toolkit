@@ -413,7 +413,7 @@
 1. **渲染通道复用前端运行时**：不重造 Spine 解析器。`gallery_src/cg_export.html` 用 `spine-all.js` 加载 `Output/Spine_v2/<皮肤>/*.skel + .atlas + 页纹理`，`setSlotsToSetupPose/setBonesToSetupPose` 后绘制全部件（多部件按 B/M/T 层序）。
 2. **两段式构图**：①顶点包围盒（Region/Mesh `computeWorldVertices` 联合）定相机；②首绘后 `gl.readPixels` 扫 alpha 非零像素包围盒，覆盖率 <82% 则把相机重定到真实内容区重绘（修正被超大半透明部件撑歪构图的情况，如冒险号 0.32→0.83）。
 3. **落盘**：canvas `toBlob`（WebGL 上下文必须 `preserveDrawingBuffer:true`）→ `POST /save_cg?name=<皮肤>` → `_gallery_server.py` 写 `Output/CG_v2/<皮肤>.png`；`GET /cg_exists` 支持断点续跑；URL 参数 `autostart/only/size/redo` 供自动化。
-4. **无头驱动**：`.diag/run_cg_export.py`（Chrome `--headless=new --remote-allow-origins=* --enable-unsafe-swiftshader --use-angle=swiftshader` + websocket-client CDP 轮询 `#prog/#log`），231 皮肤约 5 分钟。每个皮肤导出后 `GLTexture.dispose()` 防 4096² 页纹理堆爆显存。
+4. **无头驱动**：`scripts/diag/run_cg_export.py`（Chrome `--headless=new --remote-allow-origins=* --enable-unsafe-swiftshader --use-angle=swiftshader` + websocket-client CDP 轮询 `#prog/#log`），231 皮肤约 5 分钟。每个皮肤导出后 `GLTexture.dispose()` 防 4096² 页纹理堆爆显存。
 5. **接入画廊**：`build_gallery_index.py` 扫 `CG_v2/` 附 `sk.cg`；前端「静态立绘」默认 CG、可切回原件；`make_thumbs.py` 生成 `<stem>_cg.webp`。
 
 **关键决策**:
@@ -427,4 +427,54 @@
 - `beierfasite_g` 的 .skel 实为 JSON → 按首字节 `{` 分流 `SkeletonJson`。
 - 浏览器缓存旧 `index.js` 会让「数据已生成但页面看不到」→ 服务器发 `Cache-Control: no-cache` 根治。
 
-**涉及文件**: `gallery_src/cg_export.html`, `gallery_src/_gallery_server.py`, `.diag/run_cg_export.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `PROJECT_STATUS.md §6/§10`
+**涉及文件**: `gallery_src/cg_export.html`, `gallery_src/_gallery_server.py`, `scripts/diag/run_cg_export.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `PROJECT_STATUS.md §6/§10`
+
+---
+
+### WF-15: 游戏版本更新后的增量重跑（资产同步 → 定位受影响子集 → 定向重建 → 证零回退）
+
+**日期**: 2026-09-20
+**目标**: 游戏出新版本（如 9.7.381 → 9.7.385）后，**只重跑受影响的那部分产物**，不打乱已验证正确的 4400+ 立绘 / 232 Spine / 260 Live2D，并且能证明「没改坏任何原本正确的东西」。
+**适用场景**: 收到新版本资源包；或换了权威元数据源；或改了批处理脚本后需要落地。
+
+#### 承重文件白名单（**清理磁盘前先核对，删了就断链**）
+| 文件 | 谁依赖它 | 丢了能否复原 |
+|---|---|---|
+| `scripts/`、`scripts/diag/`、`gallery_src/`、`docs/`、根 `*.md` | —— | ✅ 已入 Git，随时可取 |
+| `.diag/azdata_ship_{skin_template,data_statistics,data_template}.json`、`azdata_{tree,version}.json` | **`scripts/build_ship_meta.py` 的唯一权威输入**（舰名/阵营/舰种/稀有度/CV id 全从这里来） | ⚠️ 半可再生：社区快照会滞后（385 时最新仍 381），且 `sharecfgdata/*` 是**自定义加密**、本机无解 → **务必当源文件保护** |
+| `Output/dependency_manifest.json`（~15MB / 86k+ 条） | `compose_paintings_v2`、`extract_spine_v2`（PPtr→包 依赖表） | ✅ 可再生：`export_dependency_manifest.py` |
+| `Output/ship_meta.json` | `build_gallery_index`（元数据主源） | ✅ 可再生：`build_ship_meta.py --write` |
+| `Output/WikiData/ship_data.json` | `build_gallery_index` 兜底 | ✅ 可再生：`scrape_wiki_fast.py`（需外网） |
+| `Output/Paintings_v2`、`Spine_v2`、`Live2D`、`CG_v2`、`Audio`、`gallery_v2/` | 画廊 | ✅ 全量可再生，但**耗时数十小时**，故按 WF-15 增量而非全量 |
+
+> `.diag/` 已写入 `.gitignore`，定位是「临时产物区」；**可复用工具一律放 `scripts/diag/`（入库）**。清理 `.diag` 前必须先跑上表白名单核对。
+
+#### 步骤
+1. **只读差异，先不动手**：`python scripts/mumu_sync.py diff` → 输出三类：新增（模拟器有/本地无）、大小不一致（同名但本地旧）、本地独有。记下版本号与数量（385 那次 = 95 文件）。
+2. **同步源包**：`mumu_sync.py sync`（或 `mumu_adb.py pull`）落到 `files/AssetBundles/`。
+3. **重生成官方依赖表**（**最容易漏的一步**）：`python scripts/export_dependency_manifest.py --out Output/dependency_manifest.json`。不重生成 → 新包的 PPtr/externals 解析不到 → 新皮肤合成失败或层级缺失。
+4. **Unity 版本伪装**：新包 header 可能仍伪装 `5.x.x`。若加载报错，更新脚本里的 `UnityPy.config.FALLBACK_UNITY_VERSION`（当前 `2022.3.62f3`）为游戏实际引擎版本。
+5. **定位受影响子集**（不要全量重跑）：按新增/变更包所在顶层目录（`painting` / `paintingface` / `spine` / `live2d` / `bg`…）映射到磁盘 stem 集合，写进 `.diag/affected.txt`。
+6. **元数据是否也要跟新**：若社区 azdata 快照已更新到新版本 → 重跑 `build_ship_meta.py --write`；若没更新（如 385 时社区仍 381）→ 新皮肤的名字/阵营会缺，按 §6 待办 7 的决策处理（标「待补」，不要瞎猜）。
+7. **定向重跑到临时目录**：`python scripts/compose_paintings_v2.py <stems> --out .diag/rerun`（Spine 用 `extract_spine_v2.py`，Live2D 用 `reconstruct_live2d.py`+`extract_motions.py`，全屏 CG 用 `python scripts/diag/run_cg_export.py --only a,b,c`）。
+8. **出对比图交人工确认**（硬闸门）：`python scripts/diag/make_face_cmp.py` / `make_review_sheet.py` 这类前后对照；未确认**不得**换入正式目录。
+9. **备份换入**：先 `cp` 旧件到 `Output/_OLD_bak/<主题>_<日期>/`，再**确认 `st_nlink==1`**（Paintings_v2 有 519 组硬链，直接覆写会串改孪生文件）后 `os.remove` + copy 换入。
+10. **派生产物增量重建**：删受影响 `gallery_v2/thumbs/<stem>.webp` 后跑 `make_thumbs.py`（它对已存在者 skip，天然增量；`<stem>_cg.webp` 来自 CG_v2，别误删）→ `build_gallery_index.py` → `deploy_gallery.py`。
+11. **证零回退**（三件套，缺一不可）：
+    - **逐字段 diff**：新旧 `index.json` 比 ship 集合/皮肤集合/每字段，期望「只有该变的变」（label 改动那次 = 1746 条 label 变化、非 label 变化 0）。
+    - **未涉及文件 mtime 未变**：证明没误伤（脸洞换入那次 = 其余 4454 张 mtime 全未变）。
+    - **端到端可达**：起 http.server 对全部受影响 URL（png + webp）GET 200 且长度与磁盘一致；前端渲染类改动再用无头 Chrome 断言（`scripts/diag/l2d_sweep.py` 全量 260 模型加载+动作启动；`l2d_verify.py`/`l2d_click.py` 抽样与真实点击路径）。
+
+#### 关键决策
+- **增量而非全量**：全量重跑 4486 张立绘会打乱已人工确认正确的结果，且无法逐张复核。
+- **对比图必须人工过目**：机器指标（不透明率/差异像素）会误判——`leiniya_wjz` 就是指标说"有问题"但目视才确认是回退（见 TROUBLESHOOTING §14）。
+- **规则修正优先于例外表**：误判靠收紧判据解决，不写死名单。
+
+#### 踩坑记录
+- 跳过第 3 步（依赖表）→ 新皮肤合成缺层，症状像"脚本 bug"，实为数据源过期（385 那次即如此）。
+- 判"动画是否在播"不能只看帧哈希：headless 下 rAF 被节流会假阴性，而 physics/眨眼会让帧变化造成**假阳性**；必须读 `motionManager.state.currentGroup` 非空（且 `startMotion` 后要等 ~1.5s 让它 fetch motion3.json）。
+- `make_thumbs.py` 遇已存在文件直接 skip → 换入新图后**不删旧 webp 就不会更新**（静默留旧图）。
+- 硬链接未检查就覆写 → 孪生文件被一起改掉。
+
+#### 涉及文件
+`scripts/mumu_sync.py`, `scripts/mumu_adb.py`, `scripts/export_dependency_manifest.py`, `scripts/compose_paintings_v2.py`, `scripts/extract_spine_v2.py`, `scripts/reconstruct_live2d.py`, `scripts/extract_motions.py`, `scripts/build_ship_meta.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `scripts/deploy_gallery.py`, `scripts/diag/run_cg_export.py`, `scripts/diag/l2d_sweep.py`, `scripts/diag/l2d_verify.py`, `scripts/diag/l2d_click.py`, `scripts/diag/make_face_cmp.py`, `scripts/diag/make_review_sheet.py`, `scripts/diag/scan_faces.py`, `scripts/diag/dedup_*.py`, `PROJECT_STATUS.md §6/§9/§10`

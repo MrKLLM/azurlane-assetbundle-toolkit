@@ -75,3 +75,7 @@ Thumbs.db
 .windsurf/
 .roo/
 .codeium/
+
+# 本地诊断/一次性验证工作区（截图、headless Chrome profile、扫描中间产物）。
+# 其中「可复用」的工具脚本一律放 scripts/diag/（已入库），本目录只留临时产物。
+.diag/
