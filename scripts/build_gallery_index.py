@@ -51,7 +51,8 @@ NAME_FIX = {'贾斯科涅': '加斯科涅'}
 
 PINS = set(SHIP_NAME_MAP.keys())
 ROMAN = {'ii': '改', 'iii': '改三', 'iv': '改四'}
-VARMAP = {'hx': '换色', 'n': '夜战', 'g': 'G', 'meta': 'META', 'asmr': 'ASMR', 'gv': '改造'}
+# 后缀真实语义（用户 2026-09-20 确认）：_hx 是和谐处理版立绘（非调色变体），_n 是不显示背景的立绘（非夜战场景）
+VARMAP = {'hx': '和谐版', 'n': '无背景版', 'g': 'G', 'meta': 'META', 'asmr': 'ASMR', 'gv': '改造'}
 JUNK = {'22', '33', 'unknown3'}  # 明显测试残留
 
 def normalize(stem):
