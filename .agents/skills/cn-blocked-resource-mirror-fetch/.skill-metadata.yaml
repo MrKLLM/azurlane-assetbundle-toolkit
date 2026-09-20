@@ -1,0 +1,87 @@
+examples:
+  - id: fetch-github-file
+    title:
+      zh: 下载被墙的 GitHub 文件
+      en: Fetch a Blocked GitHub File
+    description:
+      zh: raw.githubusercontent.com 直连返回空时，通过国内镜像前缀下载仓库文件
+      en: Download a repo file via CN mirror prefixes when raw.githubusercontent.com returns empty
+    prompt:
+      zh: |-
+        帮我下载这个被墙的 GitHub 文件：
+
+        源地址：{{raw.githubusercontent 或其他被墙 URL}}
+        保存到：{{本地保存路径}}
+
+        先探测原源确认不可用，再按镜像探测顺序拿到文件，并校验内容非空。
+      en: |-
+        Please download this blocked GitHub file:
+
+        Source URL: {{raw.githubusercontent or other blocked URL}}
+        Save to: {{local save path}}
+
+        Probe the original source first, then fetch via the mirror detection order and verify the content is non-empty.
+  - id: list-github-repo-via-api
+    title:
+      zh: 代理 GitHub API 列仓库/找最新版本
+      en: List a GitHub Repo via Proxied API
+    description:
+      zh: 用镜像代理 api.github.com 枚举仓库文件树或定位最新版本目录
+      en: Use a mirror prefix to proxy api.github.com to enumerate the repo tree or locate the latest version
+    prompt:
+      zh: |-
+        GitHub API 直连不通，帮我通过镜像代理查询仓库 {{owner/repo}}：
+
+        目标：{{列出仓库文件树 / 找 versions 目录下的最新版本号}}
+        分支：{{master/main}}
+
+        拿到结果后告诉我最新版本号及对应文件路径。
+      en: |-
+        The GitHub API is blocked; query repo {{owner/repo}} through a mirror proxy:
+
+        Goal: {{list the repo file tree / find the latest version under versions/}}
+        Branch: {{master/main}}
+
+        Report the latest version number and the corresponding file paths.
+  - id: download-npm-package-tgz
+    title:
+      zh: 从 npmmirror 下载 npm 包
+      en: Download an npm Package from npmmirror
+    description:
+      zh: 不走 npmjs/unpkg，先查 dist-tags 版本再拼 tgz 路径下载解包
+      en: Skip npmjs/unpkg; read dist-tags version then build the tgz URL and unpack
+    prompt:
+      zh: |-
+        帮我从国内镜像下载 npm 包 {{包名}}（版本：{{latest 或指定版本}}）里的 {{目标文件，如某个 min.js}}：
+
+        保存到：{{本地目录}}
+
+        先查 dist-tags 确定版本，再拼 tgz 地址下载并解包，确认文件非空。
+      en: |-
+        Download file {{target file, e.g. a min.js}} from npm package {{package name}} (version: {{latest or pinned}}) via the CN registry mirror:
+
+        Save to: {{local directory}}
+
+        Resolve the version from dist-tags first, then fetch the tgz URL, unpack, and verify the file is non-empty.
+  - id: find-mirror-for-blocked-asset
+    title:
+      zh: 为被墙静态资源找镜像站
+      en: Find a Mirror Site for a Blocked Static Asset
+    description:
+      zh: 被墙网站上的 js/模型等静态资源，搜索公开镜像直链后下载
+      en: Search public mirror direct links for js/model static assets hosted on a blocked site, then download
+    prompt:
+      zh: |-
+        这个被墙站点上的静态资源我下载不到：
+
+        资源：{{资源名或原始 URL，如某运行时 js 文件}}
+        保存到：{{本地路径}}
+
+        请搜索可用的公开镜像站直链，验证可达后下载并校验内容。
+      en: |-
+        I cannot download this static asset from a blocked site:
+
+        Asset: {{name or original URL, e.g. a runtime js file}}
+        Save to: {{local path}}
+
+        Search for reachable public mirror direct links, verify, download, and validate the content.
