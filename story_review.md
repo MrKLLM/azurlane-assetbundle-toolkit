@@ -1,47 +1,48 @@
 # 剧情角色复核清单（共 158 条）
 
-> 每条下面勾选 `[x]` 表示**其实是可玩舰船**（应移出剧情）；留空 `[ ]`＝维持剧情角色。
-> 排序：越像自机的越靠前（有阵营/舰种/Spine/Live2D 的先看）。
+> 1.每条下面勾选 `[x]` 表示**其实是可玩舰船**（应移出剧情）；留空 `[ ]`＝维持剧情角色。
+> 2.排序：越像自机的越靠前（有阵营/舰种/Spine/Live2D 的先看）。
+> 3.有npc前缀的我暂且不确定，因为有一些有npc前缀的是自机角色的皮肤在剧情中的立绘，可以先不管，已勾选的是确定自机角色
 
 ### 1. 拉菲III  `lafeiii`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 6 ｜ Spine、Live2D ｜ source=fallback
 ![拉菲III](Output/gallery_v2/thumbs/lafeiii_cg.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 2. I-404  `i404`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 6 ｜ Spine ｜ source=fallback
 ![I-404](Output/gallery_v2/thumbs/i404_cg.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 3. 探索者  `tansuozhe`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ Spine ｜ source=
 ![探索者](Output/gallery_v2/thumbs/tansuozhe_2_cg.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 4. 2b  `2b`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 6 ｜ Spine ｜ source=manual
 ![2b](Output/gallery_v2/thumbs/2b.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 5. a2  `a2`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 4 ｜ Spine ｜ source=manual
 ![a2](Output/gallery_v2/thumbs/a2.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 6. suweiaitongmengnew  `suweiaitongmengnew`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ Spine ｜ source=unresolved
 ![suweiaitongmengnew](Output/gallery_v2/thumbs/suweiaitongmengnew_cg.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 7. linghangyuan3  `linghangyuan3`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ Spine ｜ source=
 ![linghangyuan3](Output/gallery_v2/thumbs/linghangyuan3_2_cg.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 8. lingyangzhe3  `lingyangzhe3`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ Spine ｜ source=
 ![lingyangzhe3](Output/gallery_v2/thumbs/lingyangzhe3_2_cg.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 9. D小姐  `missd`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=fallback
@@ -51,37 +52,37 @@
 ### 10. I-13  `i13`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 3 ｜ — ｜ source=fallback
 ![I-13](Output/gallery_v2/thumbs/i13.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 11. I-168  `i168`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ — ｜ source=fallback
 ![I-168](Output/gallery_v2/thumbs/i168.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 12. I-19  `i19`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 6 ｜ — ｜ source=fallback
 ![I-19](Output/gallery_v2/thumbs/i19.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 13. I-25  `i25`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 4 ｜ — ｜ source=fallback
 ![I-25](Output/gallery_v2/thumbs/i25.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 14. I-26  `i26`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 4 ｜ — ｜ source=fallback
 ![I-26](Output/gallery_v2/thumbs/i26.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 15. I-56  `i56`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ — ｜ source=fallback
 ![I-56](Output/gallery_v2/thumbs/i56.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 16. I-58  `i58`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=fallback
 ![I-58](Output/gallery_v2/thumbs/i58.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 17. R小姐  `missr`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=fallback
@@ -96,17 +97,17 @@
 ### 19. 伊织  `hdn101`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=fallback
 ![伊织](Output/gallery_v2/thumbs/hdn101.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 20. 伊织  `hdn102`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ — ｜ source=
 ![伊织](Output/gallery_v2/thumbs/hdn102_1.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 21. 兰利III  `lanliii`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 4 ｜ — ｜ source=fallback
 ![兰利III](Output/gallery_v2/thumbs/lanliii.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 22. 凉子  `ryouko`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ — ｜ source=painting
@@ -122,7 +123,7 @@
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 4 ｜ — ｜ source=painting
 - 英文：HMS Hasty
 ![匆忙](Output/gallery_v2/thumbs/congmang.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 25. 塔  `tower`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ — ｜ source=painting
@@ -217,7 +218,7 @@
 ### 43. 海酱  `aijiang`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ — ｜ source=painting
 ![海酱](Output/gallery_v2/thumbs/aijiang.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 44. 清除者  `qingchuzhe`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting
@@ -289,22 +290,22 @@
 ### 57. aijiangbb  `aijiangbb`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=unresolved
 ![aijiangbb](Output/gallery_v2/thumbs/aijiangbb.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 58. aijiangcl  `aijiangcl`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=unresolved
 ![aijiangcl](Output/gallery_v2/thumbs/aijiangcl.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 59. aijiangcv  `aijiangcv`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=unresolved
 ![aijiangcv](Output/gallery_v2/thumbs/aijiangcv.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 60. aijiangdd  `aijiangdd`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 2 ｜ — ｜ source=unresolved
 ![aijiangdd](Output/gallery_v2/thumbs/aijiangdd.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 61. baolei1  `baolei1`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting
@@ -419,37 +420,37 @@
 ### 83. vtuber_aqua_wjz  `vtuber_aqua_wjz`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting
 ![vtuber_aqua_wjz](Output/gallery_v2/thumbs/vtuber_aqua_wjz.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 84. vtuber_ayame_wjz  `vtuber_ayame_wjz`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting
 ![vtuber_ayame_wjz](Output/gallery_v2/thumbs/vtuber_ayame_wjz.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 85. vtuber_fubuki_wjz  `vtuber_fubuki_wjz`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting
 ![vtuber_fubuki_wjz](Output/gallery_v2/thumbs/vtuber_fubuki_wjz.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 86. vtuber_matsuri_wjz  `vtuber_matsuri_wjz`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting
 ![vtuber_matsuri_wjz](Output/gallery_v2/thumbs/vtuber_matsuri_wjz.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 87. vtuber_mio_wjz  `vtuber_mio_wjz`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting
 ![vtuber_mio_wjz](Output/gallery_v2/thumbs/vtuber_mio_wjz.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 88. vtuber_shion_wjz  `vtuber_shion_wjz`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting
 ![vtuber_shion_wjz](Output/gallery_v2/thumbs/vtuber_shion_wjz.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 89. vtuber_sora_wjz  `vtuber_sora_wjz`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting
 ![vtuber_sora_wjz](Output/gallery_v2/thumbs/vtuber_sora_wjz.webp)
-- [ ] 自机?
+- [x] 自机?
 
 ### 90. 埃塞克斯·META  `npcsalatuojia_alter`
 - 无阵营 / 无舰种 / 无稀有度 ｜ 皮肤 1 ｜ — ｜ source=painting

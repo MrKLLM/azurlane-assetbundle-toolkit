@@ -227,14 +227,22 @@ for f in glob.glob(os.path.join(OUT, 'Audio', 'CV', 'cv-*.wav')):
 # 单一字段不可靠：塞壬 unknown* 带 900000+ 假 stats（误判 ship）；联动可玩船(hdn/DOA/海王星/NieR)缺 stats（误判 story）。
 SIREN_PREFIX = re.compile(r'^(unknown|sairen|error|npc|linghangyuan|lingyangzhe|tansuozhe|aijiang|tbniang|congmang|missd|missr|magician)')
 COLLAB_SKIN = re.compile(r'(_doa|_tolove|_idol|_idolns)')   # 联动/偶像皮肤只出现在可玩船上 → 判舰船
-EXTRA_SHIP = {'haorenlichade'}                               # 用户确认的可玩船(Bon Homme Richard，仅 _alter 皮肤)
+# 用户确认的可玩船(Bon Homme Richard，仅 _alter 皮肤) + story_review.md 勾选的 31 条自机（2026-09-20）
+EXTRA_SHIP = {'haorenlichade',
+    'lafeiii','i404','tansuozhe','2b','a2','suweiaitongmengnew','linghangyuan3','lingyangzhe3',
+    'i13','i168','i19','i25','i26','i56','i58','hdn101','hdn102','lanliii','congmang',
+    'aijiang','aijiangbb','aijiangcl','aijiangcv','aijiangdd',
+    'vtuber_aqua_wjz','vtuber_ayame_wjz','vtuber_fubuki_wjz','vtuber_matsuri_wjz',
+    'vtuber_mio_wjz','vtuber_shion_wjz','vtuber_sora_wjz'}
 WIKI_NAMES = set(meta_by_cn.keys())
 def reclassify():
     for s in ships.values():
         k = s['id']; name = s['name']
-        if ('？' in name) or SIREN_PREFIX.match(k):          # 塞壬/BOSS/NPC：剧情角色 + 清空战斗属性
+        if k in EXTRA_SHIP:                                    # 用户勾选确认的自机：舰船 + 保留 ship_meta 属性
+            s['category'] = 'ship'
+        elif ('？' in name) or SIREN_PREFIX.match(k):          # 塞壬/BOSS/NPC：剧情角色 + 清空战斗属性
             s['category'] = 'story'; s['faction'] = ''; s['type'] = ''; s['rarity'] = ''
-        elif s['faction'] or name in WIKI_NAMES or any(COLLAB_SKIN.search(sk['key']) for sk in s['skins']) or k in EXTRA_SHIP:
+        elif s['faction'] or name in WIKI_NAMES or any(COLLAB_SKIN.search(sk['key']) for sk in s['skins']):
             s['category'] = 'ship'
         else:
             s['category'] = 'story'
