@@ -230,7 +230,7 @@ function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f
 let curShip=null, curSkin=null, tab='painting', paintSrc='cg';
 const mask=document.getElementById('mask'), viewEl=document.getElementById('mView');
 function openShip(s){ curShip=s; setSkin(defSkin(s)); buildSkinList(s); mask.classList.add('on'); }
-function closeShip(){ stopSpine(); mask.classList.remove('on'); viewEl.innerHTML=''; document.getElementById('mTabs').innerHTML=''; }
+function closeShip(){ stopSpine(); stopLive2D(); mask.classList.remove('on'); viewEl.innerHTML=''; document.getElementById('mTabs').innerHTML=''; }
 document.getElementById('close').onclick=closeShip;
 mask.onclick=e=>{if(e.target===mask)closeShip();};
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&mask.classList.contains('on'))closeShip();});
@@ -261,7 +261,7 @@ function setSkin(sk){ curSkin=sk; paintSrc='cg'; const s=curShip;
   renderView();
 }
 function renderView(){
-  stopSpine(); const sk=curSkin;
+  stopSpine(); stopLive2D(); const sk=curSkin;
   if(tab==='painting'){
     const hasCg=!!sk.cg, hasRaw=!!sk.image;
     if(!hasCg&&!hasRaw){ viewEl.innerHTML='<div class="note">该皮肤无独立立绘，只有动态资源</div>'; }
@@ -329,12 +329,92 @@ function renderVoice(){
   s.voices.forEach(v=>{const fn=v.split('/').pop();const cat=(fn.match(/cv-\d+(-\w+)?\.wav/)||[])[1]||'';h+=`<div class="aud"><span class="lbl">${cat?cat.replace('-',''):'默认'}</span><audio controls preload="none" src="${P+v}"></audio></div>`;});
   h+='</div>'; viewEl.innerHTML=h;
 }
-function renderLive2D(s, sk){
+/* ---------- Live2D（pixi 6.5.2 + pixi-live2d-display 0.4.0 + cubismcore 5.1.0，均为 vendor/live2d/ 本地脚本） ---------- */
+let l2State = null;
+function stopLive2D(){ if(l2State){ l2State.cancelled=true; if(l2State.off)try{l2State.off()}catch(e){}
+  if(l2State.app)try{l2State.app.destroy(true,{children:true,baseTexture:true,texture:true})}catch(e){} l2State=null; } }
+let _l2seq=0;
+function loadScriptOnce(src){
+  if(document.querySelector('script[data-l2d="'+src+'"]')) return document.querySelector('script[data-l2d="'+src+'"]')._p;
+  const el=document.createElement('script'); el.src=src; el.dataset.l2d=src;
+  el._p=new Promise((rs,rj)=>{el.onload=rs;el.onerror=()=>rj(new Error('脚本加载失败 '+src));});
+  document.body.appendChild(el); return el._p;
+}
+async function loadLive2DRuntime(){
+  if(window.PIXI && window.Live2DCubismCore && window.PIXI && PIXI.live2d && PIXI.live2d.Live2DModel) return;
+  await loadScriptOnce('./vendor/live2d/live2dcubismcore.min.js');
+  await loadScriptOnce('./vendor/live2d/pixi.min.js');
+  await loadScriptOnce('./vendor/live2d/pixi-live2d-display-cubism4.min.js');
+  if(!(window.PIXI && window.Live2DCubismCore && PIXI.live2d && PIXI.live2d.Live2DModel)) throw new Error('Live2D 运行时未就绪');
+}
+async function renderLive2D(s, sk){
   const model=s.live2dSkins.includes(sk.key)?sk.live2d:'';
   if(!model){viewEl.innerHTML='<div class="note">该皮肤无 Live2D 模型</div>';return;}
-  const tex=P+model+'/texture_00.png';
-  viewEl.innerHTML=`<div class="fitwrap"><img class="full" src="${tex}" onerror="this.parentNode.innerHTML='<div class=\\'note\\'>贴图加载失败</div>'"></div>
-    <div class="spine-bar"><span class="pill">Live2D 模型：${sk.key}</span><span class="hint">当前展示为模型贴图。动作播放需引入 Live2D Cubism Web 运行时（live2dcubismcore.min.js + pixi-live2d-display），本机与网络均暂缺，放置到 <b>vendor/live2d/</b> 后可自动启用。</span></div>`;
+  stopLive2D();
+  if(location.protocol==='file:'){
+    const tex=P+model+'/texture_00.png';
+    viewEl.innerHTML=`<div class="fitwrap"><img class="full" src="${tex}"></div><div class="spine-bar"><span class="pill">Live2D 模型：${sk.key}</span><span class="hint">动作播放需通过本地服务器访问（file:// 下 fetch 被 CORS 拦截）。请运行 <b>启动资产浏览器.bat</b>。</span></div>`;
+    return;
+  }
+  const my={cancelled:false, app:null, off:null}; l2State=my;
+  const seq=++_l2seq;
+  viewEl.innerHTML='<div class="note">正在加载 Live2D 运行时…</div>';
+  try{ await loadLive2DRuntime(); }catch(e){ if(my.cancelled||seq!==_l2seq)return; viewEl.innerHTML=`<div class="note">Live2D 运行时加载失败：${e.message}</div>`; return; }
+  if(my.cancelled||seq!==_l2seq)return;
+  viewEl.innerHTML='<div id="l2wrap"></div><div class="spine-bar" id="l2bar"><span class="pill">Live2D：'+sk.key+'</span><span class="hint">加载中…</span></div>';
+  const wrap=document.getElementById('l2wrap');
+  wrap.style.cssText='position:absolute;inset:0;bottom:44px';
+  try{
+    const app=new PIXI.Application({backgroundAlpha:0, resizeTo:wrap, antialias:true});
+    wrap.appendChild(app.view); my.app=app;
+    const L2M=PIXI.live2d.Live2DModel;
+    const mdl=await L2M.from(P+model+'/'+sk.live2dBase+'.model3.json',{autoInteract:false});
+    if(my.cancelled||seq!==_l2seq){ app.destroy(true,{children:true}); return; }
+    app.stage.addChild(mdl);
+    /* fit 必须用「未缩放尺寸」：mdl.width 已含 scale，直接用它会在 ResizeObserver 二次触发时正反馈放大 */
+    let baseK=1, z=1, ox=0, oy=0;
+    const natW=mdl.width/mdl.scale.x, natH=mdl.height/mdl.scale.y;
+    const apply=()=>{ mdl.scale.set(baseK*z);
+      mdl.x=(wrap.clientWidth-natW*baseK*z)/2+ox; mdl.y=(wrap.clientHeight-natH*baseK*z)/2+oy; };
+    function fit(){ const cw=wrap.clientWidth||1, ch=wrap.clientHeight||1;
+      baseK=Math.min(cw/natW, ch/natH); z=1; ox=0; oy=0; apply(); }
+    fit();
+    const groups=Object.keys((mdl.internalModel.motionManager.definitions)||{});
+    const bar=document.getElementById('l2bar');
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><span class="pill">${groups.length} 组动作</span><span class="hint">点击模型=触摸响应 · 滚轮缩放/拖拽平移 · 双击复位</span>`;
+    const sel=document.getElementById('l2Motion');
+    sel.innerHTML=groups.map(g=>`<option value="${g}">${g}</option>`).join('');
+    const play=g=>{ if(g) mdl.internalModel.motionManager.startMotion(g,null,false); };
+    sel.onchange=()=>play(sel.value);
+    document.getElementById('l2Replay').onclick=()=>play(sel.value);
+    document.getElementById('l2Fit').onclick=fit;
+    document.getElementById('l2Full').onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else viewEl.requestFullscreen().catch(()=>{}); };
+    const ro=new ResizeObserver(fit); ro.observe(wrap);
+    const tapG=groups.find(g=>/^tap/i.test(g));
+    let dragging=false,px=0,py=0,moved=0;
+    const onDown=e=>{ dragging=true; moved=0; px=e.clientX; py=e.clientY; };
+    const onMove=e=>{ if(!dragging)return; const dx=e.clientX-px,dy=e.clientY-py; moved+=Math.abs(dx)+Math.abs(dy);
+      ox+=dx; oy+=dy; px=e.clientX; py=e.clientY; apply(); };
+    const onUp=()=>{ dragging=false; if(moved<6&&tapG) play(tapG); };
+    const onWheel=e=>{ e.preventDefault();
+      const r=wrap.getBoundingClientRect(), mx=e.clientX-r.left, myy=e.clientY-r.top;
+      const s0=baseK*z, s1=baseK*Math.min(12, Math.max(0.2, z*(e.deltaY>0?0.9:1.111)));
+      const tx=mx-(mx-mdl.x)*(s1/s0), ty=myy-(myy-mdl.y)*(s1/s0);
+      z=s1/baseK; apply(); ox+=tx-mdl.x; oy+=ty-mdl.y; apply(); };
+    const onDbl=()=>fit();
+    wrap.addEventListener('wheel',onWheel,{passive:false});
+    wrap.addEventListener('pointerdown',onDown);
+    wrap.addEventListener('dblclick',onDbl);
+    window.addEventListener('pointermove',onMove);
+    window.addEventListener('pointerup',onUp);
+    my.off=()=>{ ro.disconnect(); wrap.removeEventListener('wheel',onWheel);
+      wrap.removeEventListener('pointerdown',onDown); wrap.removeEventListener('dblclick',onDbl);
+      window.removeEventListener('pointermove',onMove); window.removeEventListener('pointerup',onUp); };
+    const def=['idle','main','home'].find(g=>groups.includes(g))||groups[0];
+    if(sel.value!==def) sel.value=def||'';
+    play(def);
+  }catch(e){ if(my.cancelled||seq!==_l2seq)return;
+    viewEl.innerHTML=`<div class="note">Live2D 加载失败：${e&&(e.stack||e.message||e)}</div>`; return; }
 }
 
 /* ---------- Spine 引擎（复用 spine-all.js，单皮肤加载） ---------- */
