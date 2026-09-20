@@ -380,11 +380,15 @@ async function renderLive2D(s, sk){
       baseK=Math.min(cw/natW, ch/natH); z=1; ox=0; oy=0; apply(); }
     fit();
     const groups=Object.keys((mdl.internalModel.motionManager.definitions)||{});
+    const mm=mdl.internalModel.motionManager;
+    const MP=(PIXI.live2d&&PIXI.live2d.MotionPriority)||{IDLE:1,NORMAL:2,FORCE:3};
+    /* startMotion 必须显式给 index：传 null 会让库取 motion[group][null] → undefined 而静默失败；
+       priority 也不能传 false（会被当 0 而低于当前优先级被拒） */
+    const play=g=>{ if(!g) return false; try{ return mm.startMotion(g,0,MP.FORCE)!==false; }catch(e){ return false; } };
     const bar=document.getElementById('l2bar');
     bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><span class="pill">${groups.length} 组动作</span><span class="hint">点击模型=触摸响应 · 滚轮缩放/拖拽平移 · 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     sel.innerHTML=groups.map(g=>`<option value="${g}">${g}</option>`).join('');
-    const play=g=>{ if(g) mdl.internalModel.motionManager.startMotion(g,null,false); };
     sel.onchange=()=>play(sel.value);
     document.getElementById('l2Replay').onclick=()=>play(sel.value);
     document.getElementById('l2Fit').onclick=fit;
