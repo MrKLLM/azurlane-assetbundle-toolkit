@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-20（**§6 交接点 B 完成**：`build_gallery_index.py` 元数据主源改 `ship_meta.json`（舰名/阵营/舰种/稀有度），旧 `SHIP_NAME_MAP`+Wiki 降级兜底。**根因修复**——`build_ship_meta.py` 舰名取错表(skin_template 皮肤名→改 statistics.name)，**237 个 ship 级 `{namecode}` 占位符归零(同时关闭既有待办#8)**；META/灰烬 56 形态 `_alter` 从本体船拆为**独立卡**(faction=META)。逐船四字段零回退：ships 954→1008 / with_cn 796→899 / 阵营 445→837 / category 已落(ship 816·story 192)。index 已换入正式，skin 层未动故 **thumbs 无需重建**。**交接点更新 = C**（前端按 `category` 分「舰船/剧情角色」+ 筛选）。晶环联盟取 C 搁置标「其他」。前项：385 变更美术定向重建完成）
+> **生成时间**: 2026-09-20（**§6 交接点 B 完成**：`build_gallery_index.py` 元数据主源改 `ship_meta.json`（舰名/阵营/舰种/稀有度），旧 `SHIP_NAME_MAP`+Wiki 降级兜底。**根因修复**——`build_ship_meta.py` 舰名取错表(skin_template 皮肤名→改 statistics.name)，**237 个 ship 级 `{namecode}` 占位符归零(同时关闭既有待办#8)**；META/灰烬 56 形态 `_alter` 从本体船拆为**独立卡**(faction=META)。逐船四字段零回退：ships 954→1008 / with_cn 796→899 / 阵营 445→837 / category 已落(ship 816·story 192)。index 已换入正式，skin 层未动故 **thumbs 无需重建**。**交接点更新 = D**（Live2D 动作播放接入）。**C 已完成（2026-09-20）**：`gallery_src/index.html` 顶部加「类别」分段控件（全部/舰船 816/剧情角色 192，带总数），主网格按 `category` 分区渲染（舰船段+剧情角色段各带小标题计数），与阵营/舰种/稀有度/内容/搜索/排序正交共存；无头 Chrome dump-dom + 截图校验分区与计数正确、缩略图全 200、META 独立卡呈现正常，已 `deploy_gallery.py` 同步。晶环联盟取 C 搁置标「其他」。前项：385 变更美术定向重建完成）
 > **上一里程碑** 2026-09-20（385 变更美术定向重建）：换入 11 单位（立绘2/Spine3/Live2D4/表情2，全新增零覆盖，对照逐字节零回退）；根因修复=dependency_manifest 重生成(86449条)+两脚本补 UnityPy fallback；index/thumbs 已增量。遗留：3 个新 Spine 未做 CG_v2 全屏导出。
 > **上上里程碑** 2026-09-19：§6 第5~6条 A 收尾完成，`Output/ship_meta.json` 已产出，Live2D 运行时已备妥。
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
@@ -111,7 +111,7 @@
    - **数值码→中文标签表已写进脚本常量**（NATIONALITY/RARITY/TYPE，对齐游戏内筛选词表）：nationality 1白鹰 2皇家 3重樱 4铁血 5东煌 6撒丁帝国 7北方联合 8自由鸢尾 9维希教廷 11郁金王国 96飓风 97META 98其他(布里) 102~115各联动；rarity 2普通 3稀有 4精锐 5超稀有 6海上传奇 18超稀有；type 1驱逐…24风帆。游戏筛选里的「晶环联盟」本快照(9.7.381)无对应码 → 前端归「其他」。
    - **✅ 两个决策已定**：① `voice_actor` = **只存数字 id**（CV 姓名表未缓存，以后再补映射）；② 非核心码(98/111~115) = **经验名 + 兜底原样保留**，不逐个核。
    - **✅ B 已完成（2026-09-20）**：`build_gallery_index.py` 元数据主源切 `ship_meta.json`，舰名/阵营/舰种/稀有度取 ship_meta（未解析条目回落 `SHIP_NAME_MAP`+Wiki，如 `kelei`→可畏/皇家保住了），`category` 已落 index.json。**根因**：`build_ship_meta.py` 舰名原取 `ship_skin_template.name`（皮肤名，含 433 个 `{namecode}` 占位符 + 皮肤主题标题），改取 `ship_data_statistics.name`（实测 0 占位符），237 舰级占位符归零（`weizhang`→尾张、`linggu`→铃谷、`xinzexi`→新泽西、`antu`→安土，名称与阵营一致）；`META/灰烬`（`_alter` 形态）经 `normalize` 守卫拆为 56 独立卡。逐船四字段零回退。⏭️ **下一步 = C**：前端按 `category` 分「舰船/剧情角色」+ 筛选器；D Live2D 动作播放。
-6. 🟡 **剧情角色与舰船分级（分级已随 A 落进 ship_meta.json 的 `category`，ship/story=4065/427）**：口径=「经 `ship_group` 反查到 stats→`ship`，否则`story`」（**非**旧记“ship_group 是否在 stats 键集”）。待做（并入 B/C）：index.json 落 `category` 字段；前端筛选器加「舰船/剧情角色」分组、网格分区。游戏内筛选权威词表（截图存档）：索引=前排先锋/后排主力/驱逐/轻巡/重巡/战列/航母/维修/潜艇/其他；阵营=白鹰/皇家/重樱/铁血/东煌/撒丁帝国/北方联合/自由鸢尾/维希教廷/郁金王国/晶环联盟/META/飓风/其他；稀有度=普通/稀有/精锐/超稀有/海上传奇。
+6. ✅ **剧情角色与舰船分级（已随 B/C 落地，2026-09-20）**：`category` 已进 index.json（ship 816 / story 192），前端 `index.html` 已加「类别」分段控件 + 网格分区（舰船段/剧情角色段各带小标题计数），与其余筛选正交。口径=「经 `ship_group` 反查到 stats→`ship`，否则`story`」。游戏内筛选权威词表（截图存档）：索引=前排先锋/后排主力/驱逐/轻巡/重巡/战列/航母/维修/潜艇/其他；阵营=白鹰/皇家/重樱/铁血/东煌/撒丁帝国/北方联合/自由鸢尾/维希教廷/郁金王国/晶环联盟/META/飓风/其他；稀有度=普通/稀有/精锐/超稀有/海上传奇。
 7. ⏳ **Live2D 动作播放接入（运行时已下载就位）**：`Output/gallery_v2/vendor/live2d/` 已有 `live2dcubismcore.min.js`(5.1.0，l2d.su 直链) + `pixi.min.js`(6.5.2) + `pixi-live2d-display-cubism4.min.js`(0.4.0)（后两个走 npmmirror tgz；pixi6.5.2+display0.4.0 组合）。待做：index.html Live2D 标签懒加载三脚本 → `PIXI.Application` + `Live2DModel.from(model3.json)` → 播放 motions/（244/256 有真实动画）；先 1-2 个模型样本验收再全量。模型资产零缺口（§9.5 已核查）。
 8. ⏸️ **missd（D小姐）「黑影」——用户暂搁置**。
 
@@ -189,7 +189,7 @@
 
 - **形态**：本地网页（源 28GB / Paintings 15GB，上线不现实），参照 l2d.su，中文名展示 静态立绘 + Spine + Live2D + 语音。
 - **数据**：`build_gallery_index.py`（合并四类 + `ship_name_map` 拼音→中文 812 条 → `index.json/js`；Spine 皮肤附 `cg` 字段指向 `CG_v2/`）+ `make_thumbs.py`（Paintings_v2 + CG_v2 → 380px WebP，CG 缩略图 `<stem>_cg.webp`）。结果 954 船 / 4489 皮肤 / spine 231 / CG 231 / live2d 256 / 语音 268。
-- **前端** `index.html`：网格懒加载 + 搜索/阵营/舰种/稀有度筛选；详情四标签。「静态立绘」对 Spine 皮肤默认展示全屏 CG（可切换回 painting 原件），支持**滚轮缩放(光标锚点)/拖拽平移/双击100%/全屏浏览/复位**；Spine 标签 `vendor/spine/spine-all.js`(3.8) 分层 WebGL 播放（相机视口/动画过滤已修）。服务器统一响应 `Cache-Control: no-cache`，改版后浏览器不再吃旧缓存。
+- **前端** `index.html`：网格懒加载 + 搜索/阵营/舰种/稀有度筛选 + **类别分段（全部/舰船/剧情角色，主网格按 `category` 分区渲染各带小标题计数）**；详情四标签。「静态立绘」对 Spine 皮肤默认展示全屏 CG（可切换回 painting 原件），支持**滚轮缩放(光标锚点)/拖拽平移/双击100%/全屏浏览/复位**；Spine 标签 `vendor/spine/spine-all.js`(3.8) 分层 WebGL 播放（相机视口/动画过滤已修）。服务器统一响应 `Cache-Control: no-cache`，改版后浏览器不再吃旧缓存。
 - **源码治理**：画廊前端源码在**仓库内 `gallery_src/`**（唯一权威版本），改完跑 `scripts/deploy_gallery.py` 同步到 `Output/gallery_v2/`（运行目录，gitignore）。CG 导出页 `cg_export.html` 同样入 `gallery_src/`；服务器 `_gallery_server.py` 提供 `POST /save_cg` 落盘接口，`--export` 参数直开导出页。
 - **运行**：`启动资产浏览器.bat`（→ `_gallery_server.py`：8777 端口 + `allow_reuse_address` + 端口占用即复用 + 结尾 `pause`，杜绝闪退）。file:// 下立绘/语音可看，Spine `fetch` 被 CORS 拦需走 .bat。
 - **限制**：Live2D 暂只显示贴图（缺 Cubism Web 运行时 + 出网受限），预留 `vendor/live2d/`。

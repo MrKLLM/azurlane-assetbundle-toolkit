@@ -41,6 +41,17 @@ main{flex:1;overflow:auto;padding:14px}
 .b-spine{color:#7bd88f}.b-l2d{color:#ffb27b}.b-voice{color:#7bb8ff}
 .empty{color:var(--dim);text-align:center;padding:40px;font-size:14px}
 
+/* 类别分段控件 + 分区标题 */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{background:var(--panel2);color:var(--dim);border:none;padding:5px 10px;font-size:12px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--acc2);color:#fff}
+.sec-hd{font-size:14px;color:var(--txt);font-weight:600;margin:18px 2px 10px;display:flex;align-items:center;gap:8px}
+.sec-hd:first-child{margin-top:2px}
+.sec-hd .n{color:var(--dim);font-weight:400;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:0 8px}
+.sec-hd::before{content:'';width:3px;height:15px;background:var(--acc);border-radius:2px}
+.sec-hd.story::before{background:var(--acc2)}
+
 /* modal */
 .mask{position:fixed;inset:0;background:rgba(5,7,14,.82);display:none;align-items:stretch;justify-content:center;z-index:50}
 .mask.on{display:flex}
@@ -94,6 +105,9 @@ audio{height:30px;flex:1}
 <header>
   <h1>碧蓝航线资产浏览器</h1>
   <div class="ctl"><input type="text" id="search" placeholder="搜索 中文名 / 拼音ID"></div>
+  <div class="ctl"><label>类别</label><div class="seg" id="fCat">
+    <button data-c="" class="on">全部</button><button data-c="ship">舰船</button><button data-c="story">剧情角色</button>
+  </div></div>
   <div class="ctl"><label>阵营</label><select id="fFaction"><option value="">全部</option></select></div>
   <div class="ctl"><label>舰种</label><select id="fType"><option value="">全部</option></select></div>
   <div class="ctl"><label>稀有度</label><select id="fRarity"><option value="">全部</option></select></div>
@@ -107,7 +121,7 @@ audio{height:30px;flex:1}
   <div class="hint" id="count"></div>
   <div class="hint" id="modehint"></div>
 </header>
-<main><div class="grid" id="grid"></div></main>
+<main id="main"></main>
 
 <div class="mask" id="mask">
   <div class="modal">
@@ -131,6 +145,7 @@ const G = window.GALLERY;
 const P = location.protocol === 'file:' ? '../' : '../'; // 图片相对路径前缀（两种协议下均可）
 const ships = G.ships;
 let view = ships.slice();
+let catFilter = '';   // ''=全部 / ship=舰船 / story=剧情角色
 
 /* ---------- 工具 ---------- */
 function thumbOf(skin){ return skin.cg ? ('thumbs/' + skin.key + '_cg.webp') : skin.image ? ('thumbs/' + skin.key + '.webp') : ''; }
@@ -148,24 +163,40 @@ function uniqCount(arr){ const m={}; arr.forEach(x=>{if(x)m[x]=(m[x]||0)+1;}); r
   opt('fFaction',fc); opt('fType',tp); opt('fRarity',rr);
 })();
 
-/* ---------- 渲染网格 ---------- */
-const gridEl = document.getElementById('grid');
+/* ---------- 渲染网格（按 category 分区：舰船 / 剧情角色） ---------- */
+const mainEl = document.getElementById('main');
+function catOf(s){ return s.category==='story' ? 'story' : 'ship'; }
+function makeCard(s){
+  const card=document.createElement('div'); card.className='card';
+  const ds=defSkin(s); const th=thumbOf(ds);
+  const badges=[]; if(hasSpine(s))badges.push('<span class="b-spine">SPINE</span>'); if(hasL2d(s))badges.push('<span class="b-l2d">L2D</span>'); if(s.voiceCount)badges.push('<span class="b-voice">🔊'+s.voiceCount+'</span>');
+  const tags=[]; if(s.rarity)tags.push(`<span class="tag ${rarClass(s.rarity)}">${s.rarity}</span>`); if(s.faction)tags.push(`<span class="tag f">${s.faction}</span>`); if(s.type)tags.push(`<span class="tag s">${s.type}</span>`);
+  card.innerHTML=`<div class="thumb">${th?`<img loading="lazy" src="${th}">`:'<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:12px">无立绘</div>'}<div class="badge">${badges.join('')}</div></div>
+    <div class="body"><div class="nm">${s.name}</div><div class="py">${s.id} · ${s.skins.length}皮肤</div><div class="tags">${tags.join('')}</div></div>`;
+  card.onclick=()=>openShip(s);
+  return card;
+}
 function renderGrid(){
-  gridEl.innerHTML='';
-  if(!view.length){ gridEl.innerHTML='<div class="empty">没有匹配的舰船</div>'; return; }
-  document.getElementById('count').textContent=`共 ${view.length} 艘`;
-  const frag=document.createDocumentFragment();
-  view.forEach((s,idx)=>{
-    const card=document.createElement('div'); card.className='card'; card.dataset.i=idx;
-    const ds=defSkin(s); const th=thumbOf(ds);
-    const badges=[]; if(hasSpine(s))badges.push('<span class="b-spine">SPINE</span>'); if(hasL2d(s))badges.push('<span class="b-l2d">L2D</span>'); if(s.voiceCount)badges.push('<span class="b-voice">🔊'+s.voiceCount+'</span>');
-    const tags=[]; if(s.rarity)tags.push(`<span class="tag ${rarClass(s.rarity)}">${s.rarity}</span>`); if(s.faction)tags.push(`<span class="tag f">${s.faction}</span>`); if(s.type)tags.push(`<span class="tag s">${s.type}</span>`);
-    card.innerHTML=`<div class="thumb">${th?`<img loading="lazy" src="${th}">`:'<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:12px">无立绘</div>'}<div class="badge">${badges.join('')}</div></div>
-      <div class="body"><div class="nm">${s.name}</div><div class="py">${s.id} · ${s.skins.length}皮肤</div><div class="tags">${tags.join('')}</div></div>`;
-    card.onclick=()=>openShip(s);
-    frag.appendChild(card);
+  mainEl.innerHTML='';
+  const cntEl=document.getElementById('count');
+  if(!view.length){ mainEl.innerHTML='<div class="empty">没有匹配的内容</div>'; cntEl.textContent='共 0 项'; return; }
+  const groups = catFilter==='' ? [['ship','舰船'],['story','剧情角色']] : [[catFilter, catFilter==='ship'?'舰船':'剧情角色']];
+  let shown=0; const per={};
+  groups.forEach(([key,label])=>{
+    const list = view.filter(s=>catOf(s)===key);
+    per[key]=list.length;
+    if(!list.length) return;
+    shown+=list.length;
+    const hd=document.createElement('div'); hd.className='sec-hd'+(key==='story'?' story':'');
+    hd.innerHTML=`${label} <span class="n">${list.length}</span>`;
+    mainEl.appendChild(hd);
+    const g=document.createElement('div'); g.className='grid';
+    const frag=document.createDocumentFragment();
+    list.forEach(s=>frag.appendChild(makeCard(s)));
+    g.appendChild(frag); mainEl.appendChild(g);
   });
-  gridEl.appendChild(frag);
+  if(!shown){ mainEl.innerHTML='<div class="empty">该类别下没有匹配项</div>'; }
+  cntEl.textContent = catFilter==='' ? `共 ${shown} 项 · 舰船 ${per.ship||0} / 剧情 ${per.story||0}` : `共 ${shown} 项`;
 }
 
 /* ---------- 搜索/筛选 ---------- */
@@ -398,6 +429,18 @@ async function startSpine(s, sk){
 (function(){const el=document.getElementById('modehint');
   if(location.protocol==='file:'){el.innerHTML='⚠ 当前以 <b>file://</b> 打开：立绘/语音可看，<b>Spine 实时播放</b>请用 <b>启动资产浏览器.bat</b>';el.style.color='#ffb27b';}
   else{el.innerHTML='✅ 本地服务器模式：Spine 可实时播放';el.style.color='#7bd88f';}
+})();
+
+/* ---------- 类别分段控件：总数标注 + 点击切换分区 ---------- */
+(function initCatSeg(){
+  const all=ships.reduce((a,s)=>{a[catOf(s)]++;return a;},{ship:0,story:0});
+  document.querySelectorAll('#fCat button').forEach(b=>{
+    const c=b.dataset.c;
+    if(c==='ship')b.textContent='舰船 '+all.ship;
+    else if(c==='story')b.textContent='剧情角色 '+all.story;
+    else b.textContent='全部 '+ships.length;
+    b.onclick=()=>{catFilter=c; document.querySelectorAll('#fCat button').forEach(x=>x.classList.toggle('on',x===b)); renderGrid();};
+  });
 })();
 
 renderGrid();
