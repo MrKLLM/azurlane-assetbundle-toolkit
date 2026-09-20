@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """验证「按部位点击触发对应动作」：对若干模型，把每个 HitArea 的几何中心换算成屏幕坐标，
    派发 pointerdown/pointerup，断言 motionManager.state.currentGroup == 该部位对应的动作组。
-用法: py -3 .diag/hit_verify.py [--limit N]
+用法: py -3 scripts/diag/hit_verify.py [--limit N]   # 不给 --limit 即全量
 """
 import sys, os, json, time, subprocess, urllib.request
 sys.stdout.reconfigure(encoding='utf-8')
@@ -10,15 +10,18 @@ import websocket
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
 PORT = 9342
-limit = int(sys.argv[sys.argv.index('--limit') + 1]) if '--limit' in sys.argv else 6
+limit = int(sys.argv[sys.argv.index('--limit') + 1]) if '--limit' in sys.argv else 0
+only = [x for x in (sys.argv[sys.argv.index('--only')+1] if '--only' in sys.argv else '').split(',') if x]
 
 idx = json.load(open(os.path.join(ROOT, 'Output', 'gallery_v2', 'index.json'), encoding='utf-8'))
 cands = []
 for s in idx['ships']:
     for sk in s['skins']:
         if sk.get('live2d'):
-            cands.append(sk['key']); break
-    if len(cands) >= limit: break
+            cands.append(sk['key'])        # 覆盖全部带 live2d 的皮肤，不只取每船第一个
+    if limit and len(cands) >= limit: break
+if only: cands = [c for c in cands if c in only] or only
+if limit: cands = cands[:limit]
 
 proc = subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
   '--remote-allow-origins=*', f'--user-data-dir={ROOT}/.diag/chrome_hitv', '--no-first-run',
@@ -60,6 +63,7 @@ JS = r"""(async key => { try{
   const areas=(im.settings.hitAreas||[]).map(a=>{ let i=-1; try{i=core.getDrawableIndex(a.Id);}catch(e){}
     return i<0?null:{Name:a.Name, idx:i}; }).filter(Boolean);
   const centerOf=(a)=>{ const p=core.getDrawableVertexPositions(a.idx); if(!p||!p.length) return null;
+    /* 探针取顶点平均：与产品侧「包围盒包含」判定同语义（三角面重心对斜置框会落在盒外，测的是另一种语义） */
     let sx=0,sy=0,n=0; for(let k=0;k+1<p.length;k+=2){sx+=p[k];sy+=p[k+1];n++;}
     const g=m.toGlobal(new PIXI.Point(sx/n*ppu, sy/n*ppu));   // 点击瞬间重算：框会随呼吸/物理位移
     return [r.left+g.x, r.top+g.y]; };

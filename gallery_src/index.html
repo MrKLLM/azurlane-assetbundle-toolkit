@@ -386,7 +386,7 @@ async function renderLive2D(s, sk){
        priority 也不能传 false（会被当 0 而低于当前优先级被拒） */
     const play=g=>{ if(!g) return false; try{ return mm.startMotion(g,0,MP.FORCE)!==false; }catch(e){ return false; } };
     const bar=document.getElementById('l2bar');
-    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · 滚轮缩放/拖拽平移 · 双击复位</span>`;
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     sel.innerHTML=groups.map(g=>`<option value="${g}">${g}</option>`).join('');
     sel.onchange=()=>play(sel.value);
@@ -408,16 +408,24 @@ async function renderLive2D(s, sk){
         const p=core.getDrawableVertexPositions(ha.idx); if(!p||!p.length) continue;
         let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
         for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
-        if(mx<x0||mx>x1||my<y0||my>y1) continue;
+        /* 容差 2%：只吸收「算探针点 → 派发事件 → 处理器读框」之间几十毫秒的呼吸/物理位移。
+           不能给大：画布四周有大量透明边距，宽容差会把视觉上空白的角落判成命中。
+           实测对比：改用 Cubism 三角面精确判定反而更差（部分模型的 Touch 部件顶点数据不规整，
+           如 yingrui_3/z46_3 的三角面连自己的重心都不包含），故用包围盒。 */
         const cx=(x0+x1)/2, cy=(y0+y1)/2, rad=Math.max(1e-6,(x1-x0)/2,(y1-y0)/2);
-        const s=Math.hypot(mx-cx,my-cy)/rad;              // 0=正中，1=边缘
+        const s=Math.hypot(mx-cx,my-cy)/rad;              // 0=正中，1=边缘；多个包含时取最贴近的
         if(s<bestS){ bestS=s; best=ha.name; } }
       return best; };
-    const fallbackG=groups.find(g=>/^(tap|touch)/i.test(g))||null;   // 无 HitAreas 的模型兜底
+    /* 兜底只给「没有判定区」的模型用；有 HitAreas 的模型点空白处不播任何动作（与游戏一致），
+       否则会随机触发一个 touch_drag* 动作，用户会觉得「点哪都乱动」 */
+    const fallbackG=hitAreas.length ? null : (groups.find(g=>/^(tap|touch)/i.test(g))||null);
+    const clampPan=()=>{ const cw=wrap.clientWidth||1, ch=wrap.clientHeight||1;
+      const lim=Math.max(cw,ch)*0.6;
+      ox=Math.max(-lim,Math.min(lim,ox)); oy=Math.max(-lim,Math.min(lim,oy)); };
     let dragging=false,px=0,py=0,moved=0;
     const onDown=e=>{ dragging=true; moved=0; px=e.clientX; py=e.clientY; };
     const onMove=e=>{ if(!dragging)return; const dx=e.clientX-px,dy=e.clientY-py; moved+=Math.abs(dx)+Math.abs(dy);
-      ox+=dx; oy+=dy; px=e.clientX; py=e.clientY; apply(); };
+      ox+=dx; oy+=dy; px=e.clientX; py=e.clientY; clampPan(); apply(); };
     const onUp=e=>{ if(!dragging) return; dragging=false; if(moved>=6) return;
       const r=wrap.getBoundingClientRect();
       const lp=mdl.toLocal(new PIXI.Point(e.clientX-r.left, e.clientY-r.top));
@@ -426,19 +434,29 @@ async function renderLive2D(s, sk){
       if(!g) return;
       if(play(g)){ sel.value=g; const pill=document.getElementById('l2Hit');
         if(pill) pill.textContent=(name?'部位 '+name+' → ':'')+g; } };
-    const onWheel=e=>{ e.preventDefault();
+    const onCancel=()=>{ dragging=false; };
+    /* 缩放必须按住 Ctrl(或 ⌘/Alt)：裸滚轮要留给页面滚动。
+       之前裸滚轮被 preventDefault 劫持，用户浏览列表时鼠标经过模型就会一路放大到 12 倍并累积偏移，
+       看起来像「模型乱动/位置不对」 */
+    const onWheel=e=>{ if(!(e.ctrlKey||e.metaKey||e.altKey)) return;
+      e.preventDefault();
       const r=wrap.getBoundingClientRect(), mx=e.clientX-r.left, myy=e.clientY-r.top;
       const s0=baseK*z, s1=baseK*Math.min(12, Math.max(0.2, z*(e.deltaY>0?0.9:1.111)));
       const tx=mx-(mx-mdl.x)*(s1/s0), ty=myy-(myy-mdl.y)*(s1/s0);
-      z=s1/baseK; apply(); ox+=tx-mdl.x; oy+=ty-mdl.y; apply(); };
+      z=s1/baseK; apply(); ox+=tx-mdl.x; oy+=ty-mdl.y; clampPan(); apply(); };
     const onDbl=()=>fit();
     wrap.addEventListener('wheel',onWheel,{passive:false});
     wrap.addEventListener('pointerdown',onDown);
     wrap.addEventListener('dblclick',onDbl);
+    wrap.addEventListener('pointercancel',onCancel);
+    window.addEventListener('pointercancel',onCancel);
+    window.addEventListener('blur',onCancel);
     window.addEventListener('pointermove',onMove);
     window.addEventListener('pointerup',onUp);
     my.off=()=>{ ro.disconnect(); wrap.removeEventListener('wheel',onWheel);
       wrap.removeEventListener('pointerdown',onDown); wrap.removeEventListener('dblclick',onDbl);
+      wrap.removeEventListener('pointercancel',onCancel);
+      window.removeEventListener('pointercancel',onCancel); window.removeEventListener('blur',onCancel);
       window.removeEventListener('pointermove',onMove); window.removeEventListener('pointerup',onUp); };
     const def=['idle','main','home'].find(g=>groups.includes(g))||groups[0];
     if(sel.value!==def) sel.value=def||'';
