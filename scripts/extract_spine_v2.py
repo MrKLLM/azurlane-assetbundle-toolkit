@@ -160,8 +160,14 @@ def extract_one(name):
 
 
 def main():
-    if len(sys.argv) > 1:
-        names = [a.strip() for a in sys.argv[1:] if a.strip()]
+    global OUT_ROOT
+    argv = sys.argv[1:]
+    if "--out" in argv:
+        i = argv.index("--out")
+        OUT_ROOT = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
+    if argv:
+        names = [a.strip() for a in argv if a.strip()]
     else:
         d = os.path.join(AB_ROOT, "spinepainting")
         names = sorted(f for f in os.listdir(d)

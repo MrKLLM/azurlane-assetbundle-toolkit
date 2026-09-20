@@ -19,6 +19,8 @@ except ImportError:
 
 try:
     import UnityPy
+    from UnityPy import config
+    config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
 except ImportError:
     print("[ERROR] 需要安装 UnityPy: pip install UnityPy")
     sys.exit(1)
@@ -77,6 +79,9 @@ def main():
 
     all_files = os.listdir(FACE_DIR)
     bundles = [f for f in all_files if os.path.isfile(os.path.join(FACE_DIR, f))]
+    if len(sys.argv) > 1:
+        only = set(sys.argv[1:])
+        bundles = [b for b in bundles if b in only]
     print(f"[+] {len(bundles)} 个 paintingface bundle")
 
     tasks = [(name, OUTPUT_DIR) for name in bundles]

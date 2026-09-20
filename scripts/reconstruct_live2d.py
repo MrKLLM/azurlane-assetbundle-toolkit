@@ -37,6 +37,8 @@ from datetime import datetime
 
 try:
     import UnityPy
+    from UnityPy import config
+    config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
 except ImportError:
     print("[ERROR] 需要安装 UnityPy: pip install UnityPy")
     sys.exit(1)
@@ -325,7 +327,12 @@ def main():
     parser.add_argument("--name", help="指定模型名称（如 lingbo）")
     parser.add_argument("--list", action="store_true", help="列出所有模型")
     parser.add_argument("--all", action="store_true", help="还原全部模型")
+    parser.add_argument("--out", help="覆盖输出目录（默认 Output/Live2D）")
     args = parser.parse_args()
+
+    global OUTPUT_DIR
+    if args.out:
+        OUTPUT_DIR = args.out
 
     if args.list:
         list_models()
