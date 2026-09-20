@@ -40,6 +40,8 @@ _env_cache = {}      # bundle_name -> env / False
 _obj_cache = {}      # (bundle, path_id) -> UnityPy object
 _img_cache = {}      # (bundle, path_id) -> PIL RGBA (flip=False)
 FACE_APPLIED = {}    # bundle_name -> 是否触发了 paintingface 脸洞叠层（扫描用）
+# 门控阈值：脸谱落笔处下方「不透明且有彩色」的实画占比超过它即判「脸已烤好」，不叠
+FACE_ART_MAX = float(os.environ.get("FACE_ART_MAX", "0.5"))
 
 
 def manifest():
@@ -588,35 +590,37 @@ def compose(bundle_name, out_dir, faces=None, save=True):
                 py = int(round(ch - (wy0 + wh)))
                 canvas.paste(img, (px, py), img)
                 cinfo.append(f"{part['name'] or pid}")
-        # ---- 叠 paintingface 默认脸（仅当 face 节点区域是「不透明近白洞」时才叠，避免动到已烤脸的皮肤）----
+        # ---- 叠 paintingface 默认脸（门控：只看脸谱自身落笔处，其下若已是「不透明+有彩色」的实画则说明脸已烤好，不叠）----
+        # 判据不能用整框不透明率：face rect 常含大片透明背景，已烤脸的皮肤（如 leiniya_wjz）整框率会跌破 0.5 而误叠。
         if face_pid is not None and face_pid in boxes:
             rx, ry, rw, rh = boxes[face_pid]
             fpx = int(round(rx)); fpy = int(round(ch - (ry + rh)))
             fww = max(1, int(round(rw))); fwh = max(1, int(round(rh)))
-            x0 = max(0, fpx); y0 = max(0, fpy)
-            x1 = min(cw, fpx + fww); y1 = min(ch, fpy + fwh)
-            if x1 > x0 + 8 and y1 > y0 + 8:
-                reg = np.asarray(canvas.crop((x0, y0, x1, y1))).astype(int)
-                frac_op = (reg[..., 3] > 250).mean()
-                # 洞判据：face 区域几乎没画东西（`_rw` 把脸留成透明洞）→ 需叠 paintingface 脸。
-                # 已烤脸的皮肤该区域是画满的（frac_op≈1），不叠。
-                is_hole = frac_op < 0.5
-            else:
-                is_hole = False
-            if is_hole:
-                fx = paintingface_face(bundle_name, FACE_DEFAULT if face_override is None else face_override)
-                if fx is not None:
-                    fimg, (fw, fh) = fx
-                    mx, my = mirrors.get(face_pid, (False, False))
-                    fimg = fimg.transpose(Image.FLIP_TOP_BOTTOM)   # Y-up -> PIL Y-down
-                    if mx:
-                        fimg = fimg.transpose(Image.FLIP_LEFT_RIGHT)
-                    if my:
-                        fimg = fimg.transpose(Image.FLIP_TOP_BOTTOM)
-                    if (fimg.width, fimg.height) != (fww, fwh):
-                        fimg = fimg.resize((fww, fwh), Image.BILINEAR)
-                    canvas.paste(fimg, (fpx, fpy), fimg)
-                    cinfo.append(f"face-overlay:{FACE_DEFAULT if face_override is None else face_override}")
+            fx = paintingface_face(bundle_name, FACE_DEFAULT if face_override is None else face_override)
+            if fx is not None and fww > 8 and fwh > 8:
+                fimg, (fw, fh) = fx
+                mx, my = mirrors.get(face_pid, (False, False))
+                fimg = fimg.transpose(Image.FLIP_TOP_BOTTOM)   # Y-up -> PIL Y-down
+                if mx:
+                    fimg = fimg.transpose(Image.FLIP_LEFT_RIGHT)
+                if my:
+                    fimg = fimg.transpose(Image.FLIP_TOP_BOTTOM)
+                if (fimg.width, fimg.height) != (fww, fwh):
+                    fimg = fimg.resize((fww, fwh), Image.BILINEAR)
+                sp = np.asarray(fimg).astype(int)
+                foot = sp[..., 3] > 200                        # 脸谱真正落笔的像素
+                n_foot = int(foot.sum())
+                if n_foot >= 64:
+                    # PIL crop 越界部分补 0（透明），语义上等于「那里没画」
+                    sub = np.asarray(canvas.crop((fpx, fpy, fpx + fww, fpy + fwh))).astype(int)
+                    rgb = sub[..., :3]
+                    sat = rgb.max(axis=2) - rgb.min(axis=2)
+                    frac_realart = float(((sub[..., 3] >= 250) & (sat >= 30) & foot).sum()) / n_foot
+                    if frac_realart < FACE_ART_MAX:
+                        canvas.paste(fimg, (fpx, fpy), fimg)
+                        cinfo.append(f"face-overlay:{FACE_DEFAULT if face_override is None else face_override}")
+                    else:
+                        cinfo.append(f"face-skip(realart={frac_realart:.2f})")
         return canvas, cinfo
 
     os.makedirs(out_dir, exist_ok=True)
