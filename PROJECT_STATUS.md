@@ -1,7 +1,8 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-20（**385 变更美术定向重建完成**：换入 11 单位（立绘2/Spine3/Live2D4/表情2，全新增零覆盖，对照逐字节零回退）；根因修复=dependency_manifest 重生成(86449条)+两脚本补 UnityPy fallback；index/thumbs 已增量。遗留：3 个新 Spine 未做 CG_v2 全屏导出。前项：385 同步 95 文件 0 失败；待办 #7 晶环联盟 A/B/C 挂起。**主线交接点不变 = B**）
-> **上一里程碑** 2026-09-19：§6 第5~6条 A 收尾完成，`Output/ship_meta.json` 已产出（4492 键，ship/story=4065/427），两个决策已定，Live2D 运行时已备妥。
+> **生成时间**: 2026-09-20（**§6 交接点 B 完成**：`build_gallery_index.py` 元数据主源改 `ship_meta.json`（舰名/阵营/舰种/稀有度），旧 `SHIP_NAME_MAP`+Wiki 降级兜底。**根因修复**——`build_ship_meta.py` 舰名取错表(skin_template 皮肤名→改 statistics.name)，**237 个 ship 级 `{namecode}` 占位符归零(同时关闭既有待办#8)**；META/灰烬 56 形态 `_alter` 从本体船拆为**独立卡**(faction=META)。逐船四字段零回退：ships 954→1008 / with_cn 796→899 / 阵营 445→837 / category 已落(ship 816·story 192)。index 已换入正式，skin 层未动故 **thumbs 无需重建**。**交接点更新 = C**（前端按 `category` 分「舰船/剧情角色」+ 筛选）。晶环联盟取 C 搁置标「其他」。前项：385 变更美术定向重建完成）
+> **上一里程碑** 2026-09-20（385 变更美术定向重建）：换入 11 单位（立绘2/Spine3/Live2D4/表情2，全新增零覆盖，对照逐字节零回退）；根因修复=dependency_manifest 重生成(86449条)+两脚本补 UnityPy fallback；index/thumbs 已增量。遗留：3 个新 Spine 未做 CG_v2 全屏导出。
+> **上上里程碑** 2026-09-19：§6 第5~6条 A 收尾完成，`Output/ship_meta.json` 已产出，Live2D 运行时已备妥。
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
 
 ---
@@ -109,7 +110,7 @@
    - **成品实测**：source 分档 painting 2493 + suffix 1786 + fallback(ship_name_map) 136 + manual 2 = **4417 有中文 cn（98.3%）**；残 **75 unresolved** 全为剧情/NPC/测试（aijiang*、linghangyuan*、lingyangzhe*、npc*、error13、magician、2b/a2 联动变体）→ 归第 6 条 story。分类 **ship 4065 / story 427**。阵营分布 重樱824/白鹰729/皇家622/铁血492…，空阵营 0。
    - **数值码→中文标签表已写进脚本常量**（NATIONALITY/RARITY/TYPE，对齐游戏内筛选词表）：nationality 1白鹰 2皇家 3重樱 4铁血 5东煌 6撒丁帝国 7北方联合 8自由鸢尾 9维希教廷 11郁金王国 96飓风 97META 98其他(布里) 102~115各联动；rarity 2普通 3稀有 4精锐 5超稀有 6海上传奇 18超稀有；type 1驱逐…24风帆。游戏筛选里的「晶环联盟」本快照(9.7.381)无对应码 → 前端归「其他」。
    - **✅ 两个决策已定**：① `voice_actor` = **只存数字 id**（CV 姓名表未缓存，以后再补映射）；② 非核心码(98/111~115) = **经验名 + 兜底原样保留**，不逐个核。
-   - **⏭️ 下一步 = B**：改 `build_gallery_index.py` 读 `ship_meta.json`（替换 `SHIP_NAME_MAP+meta_by_cn` 链路，旧表降级兜底），**改前备份 `index.json`** → 重新生成 index 抽样比对 → C 前端分组 → D Live2D。
+   - **✅ B 已完成（2026-09-20）**：`build_gallery_index.py` 元数据主源切 `ship_meta.json`，舰名/阵营/舰种/稀有度取 ship_meta（未解析条目回落 `SHIP_NAME_MAP`+Wiki，如 `kelei`→可畏/皇家保住了），`category` 已落 index.json。**根因**：`build_ship_meta.py` 舰名原取 `ship_skin_template.name`（皮肤名，含 433 个 `{namecode}` 占位符 + 皮肤主题标题），改取 `ship_data_statistics.name`（实测 0 占位符），237 舰级占位符归零（`weizhang`→尾张、`linggu`→铃谷、`xinzexi`→新泽西、`antu`→安土，名称与阵营一致）；`META/灰烬`（`_alter` 形态）经 `normalize` 守卫拆为 56 独立卡。逐船四字段零回退。⏭️ **下一步 = C**：前端按 `category` 分「舰船/剧情角色」+ 筛选器；D Live2D 动作播放。
 6. 🟡 **剧情角色与舰船分级（分级已随 A 落进 ship_meta.json 的 `category`，ship/story=4065/427）**：口径=「经 `ship_group` 反查到 stats→`ship`，否则`story`」（**非**旧记“ship_group 是否在 stats 键集”）。待做（并入 B/C）：index.json 落 `category` 字段；前端筛选器加「舰船/剧情角色」分组、网格分区。游戏内筛选权威词表（截图存档）：索引=前排先锋/后排主力/驱逐/轻巡/重巡/战列/航母/维修/潜艇/其他；阵营=白鹰/皇家/重樱/铁血/东煌/撒丁帝国/北方联合/自由鸢尾/维希教廷/郁金王国/晶环联盟/META/飓风/其他；稀有度=普通/稀有/精锐/超稀有/海上传奇。
 7. ⏳ **Live2D 动作播放接入（运行时已下载就位）**：`Output/gallery_v2/vendor/live2d/` 已有 `live2dcubismcore.min.js`(5.1.0，l2d.su 直链) + `pixi.min.js`(6.5.2) + `pixi-live2d-display-cubism4.min.js`(0.4.0)（后两个走 npmmirror tgz；pixi6.5.2+display0.4.0 组合）。待做：index.html Live2D 标签懒加载三脚本 → `PIXI.Application` + `Live2DModel.from(model3.json)` → 播放 motions/（244/256 有真实动画）；先 1-2 个模型样本验收再全量。模型资产零缺口（§9.5 已核查）。
 8. ⏸️ **missd（D小姐）「黑影」——用户暂搁置**。
@@ -126,7 +127,7 @@
    - **挂起三选一待用户定**：**A** 逆向 sharecfgdata 加密（需从游戏二进制挖密钥，成本不确定）｜**B** 以 381 为基础走旁路（维基/其它社区数据/从美术包推断，省力但不完整）｜**C** 搁置（晶环联盟与新皮肤 `mile_3`/`aierdeliqi_9` 的归属均标「待补」，381 能解析的照常用）。
    - 现状维持：ship_meta 前端仍归「其他」。同理受影响：385 新皮肤在 381 快照无记录，归属也卡在同一决策上。
    - 不受影响、可独立推进：§6 交接点 B→C→D 主线；以及「385 变更美术的定向重建」（立绘/Spine/Live2D 包本身是明文 UnityFS，已同步在手）。**（2026-09-20 已完成，见头部）**
-8. **ship_meta 存在 `{namecode:XX}` 占位符名**（2026-09-20 发现）：`build_ship_meta.py` 的 fallback 源（WikiData/ship_data.json 名表）里 550 个条目的 cn/en 是游戏本地化占位符（如 `xianghe_4 → {namecode:95}`），非真实中文名。影响 B 步前端显示质量；修向=换/补权威中文名源，或按 namecode 从本地化表反查。
+8. ✅ **ship_meta `{namecode:XX}` 占位符名（已于 2026-09-20 随 B 根因修复关闭）**：根因=`build_ship_meta.py` 舰名取 `ship_skin_template.name`（皮肤名，含占位符）——**改取 `ship_data_statistics.name`（0 占位符）**后，237 个 ship 级占位符全归零、名称与阵营自洽（`weizhang`→尾张、`xinzexi`→新泽西 等）。残余 ~52 占位符全为 `story` 类（NPC/剧情/2b 联动变体，本就无 stats 舰名，非缺漏）。详见 §6 第 5 条 B 已完成。
 
 ---
 

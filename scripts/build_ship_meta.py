@@ -114,10 +114,13 @@ def build_meta(skin, stats, wiki, verbose=False):
                  'voice_actor': 0, 'category': 'story', 'base_painting': base, 'source': source or 'unresolved'}
         if base:
             sk = painting2skin[base]
-            entry['cn'] = sk.get('name') or stem
             entry['voice_actor'] = sk.get('voice_actor', 0)
+            # skin_template.name 是「皮肤名」(常含 {namecode} 占位符，或是皮肤主题标题如"午夜的瑰色电梯")，
+            # 不能当舰名；另存 skin_name 备用。舰名取自 statistics.name(0 占位符，实测 4119/4119 皆真名)。
+            entry['skin_name'] = sk.get('name') or stem
             sv = stats_by_group.get(sk.get('ship_group'))
             if sv:
+                entry['cn'] = sv.get('name') or sk.get('name') or stem
                 entry['en'] = sv.get('english_name', '')
                 entry['faction'] = NATIONALITY.get(sv.get('nationality'), '其他')
                 entry['rarity'] = RARITY.get(sv.get('rarity'), '')
@@ -126,6 +129,8 @@ def build_meta(skin, stats, wiki, verbose=False):
                 entry['rarity_code'] = sv.get('rarity')
                 entry['type_code'] = sv.get('type')
                 entry['category'] = 'ship'
+            else:
+                entry['cn'] = sk.get('name') or stem
         else:
             # painting 未命中 -> ship_name_map 兜底（剥变体后缀找基名）-> manual 怪例表
             s = stem

@@ -9,7 +9,8 @@ from ship_name_map import SHIP_NAME_MAP
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 OUT = os.path.join(ROOT, 'Output')
-GAL = os.path.join(OUT, 'gallery_v2')
+# 支持 GALLERY_OUT_DIR 环境变量把产物写到临时目录，供改造后小规模比对，默认写正式 gallery_v2
+GAL = os.environ.get('GALLERY_OUT_DIR') or os.path.join(OUT, 'gallery_v2')
 
 # ---------- CV_MAP ----------
 cv_src = open(os.path.join(ROOT, 'scripts', 'generate_audio_doc.py'), encoding='utf-8').read()
@@ -28,6 +29,22 @@ for pin, cn in SHIP_NAME_MAP.items():
 meta_by_cn = {}
 for s in json.load(open(os.path.join(OUT, 'WikiData', 'ship_data.json'), encoding='utf-8')):
     meta_by_cn[s['name']] = s
+
+# ---------- 新权威元数据源：ship_meta.json（旧 SHIP_NAME_MAP + Wiki meta_by_cn 降级兜底）----------
+# 键=完整 bundle stem，值含 cn(皮肤名)/faction/type/rarity/category(舰级，经 ship_group 归并)
+# ⚠️ cn 可能含 {namecode:XX} 本地化占位符(§6#8)，故「舰名」优先用干净的 SHIP_NAME_MAP，
+#    仅当 SHIP_NAME_MAP 缺失且 cn 为真实名时才用 cn；「阵营/舰种/稀有度」则以 ship_meta 为主(Wiki 覆盖仅 445 太低)。
+SHIP_META = {}
+_sm_path = os.path.join(OUT, 'ship_meta.json')
+if os.path.exists(_sm_path):
+    try:
+        SHIP_META = json.load(open(_sm_path, encoding='utf-8'))
+    except Exception:
+        SHIP_META = {}
+PLACEH = re.compile(r'\{namecode:\d+\}')
+def _clean_cn(v):
+    """占位符/空/等于 stem 本身的 cn 视为无有效名。"""
+    return '' if (not v or PLACEH.search(v)) else v
 
 PINS = set(SHIP_NAME_MAP.keys())
 ROMAN = {'ii': '改', 'iii': '改三', 'iv': '改四'}
@@ -49,6 +66,10 @@ def normalize(stem):
     base = '_'.join(toks)
     # 命中表 或 base 本身即在表 → base；否则若首段在表则用首段
     if base not in PINS and len(toks) > 1 and toks[0] in PINS:
+        # META/灰烬舰(异格,_alter 形态)不并入本体船——独立成卡才能显示 faction=META。
+        # 仅当该 _alter 基名在 ship_meta 里确为 META 阵营时才独立;非 META 的 alter 仍折叠。
+        if base.endswith('_alter') and SHIP_META.get(base, {}).get('faction') == 'META':
+            return base
         base = toks[0]
     return base
 
@@ -70,6 +91,27 @@ def variant_label(stem, base):
             parts.append(t)
     return '·'.join(parts)
 
+# ---------- ship_meta 反查：base → 代表性条目（同 base 多 stem 中挑 cn 干净/ship/有阵营 的最优）----------
+_base2stems = {}
+for _stem in SHIP_META:
+    _base2stems.setdefault(normalize(_stem), []).append(_stem)
+
+def ship_meta_entry(base):
+    """舰级字段(faction/type/rarity/category/en)来源：优先基皮肤自身条目，其次同 base 兄弟。"""
+    if base in SHIP_META:
+        return SHIP_META[base]
+    best = None
+    for s in sorted(_base2stems.get(base, [])):
+        if s in SHIP_META:
+            e = SHIP_META[s]
+            score = (1 if e.get('category') == 'ship' else 0,
+                     1 if e.get('faction') else 0,
+                     1 if e.get('type') else 0,
+                     1 if e.get('rarity') else 0)
+            if best is None or score > best[0]:
+                best = (score, e)
+    return best[1] if best else {}
+
 # ---------- 收集 skins（key=完整stem）----------
 skins = {}   # stem -> {key,label,base,image,spine_dir,live2d}
 ships = {}   # base -> ship dict
@@ -77,13 +119,25 @@ ships = {}   # base -> ship dict
 def ship_of(base):
     if base in ships:
         return ships[base]
-    cn = SHIP_NAME_MAP.get(base)
+    e = ship_meta_entry(base)
+    # 舰名：ship_meta 为权威（解密配置+en 交叉印证，如 beianpudun=北安普敦而非旧表错的"贝尔法斯特"），
+    # SHIP_NAME_MAP 是含已知错误的手写猜测表，降为兜底。
+    # 但仅当 meta 条目「已解析出阵营」(resolved) 时才信它的 cn——未解析条目(如 kelei→柯蕾/空阵营)
+    # 的 cn 可能是皮肤名或错值，此时回落 SHIP_NAME_MAP(可畏)+Wiki。
+    # ⚠️ 只认「基皮肤自身」的 cn 作舰名（变体皮肤 cn 是皮肤标题，不能当舰名）；{namecode}占位符视为无名(§6#8)。
+    resolved = bool(e.get('faction'))
+    name_meta = _clean_cn(SHIP_META[base].get('cn')) if (resolved and base in SHIP_META) else ''
+    cn = name_meta or SHIP_NAME_MAP.get(base) or ''
     meta = meta_by_cn.get(cn, {}) if cn else {}
     npc = bool(re.match(r'(npc|linghangyuan|lingyangzhe)', base))
+    # 阵营/舰种/稀有度：ship_meta 主，Wiki meta_by_cn 兜底（Wiki 覆盖仅 445，且须舰名先正确才可信）
+    faction = e.get('faction') or meta.get('faction', '')
+    stype = e.get('type') or meta.get('ship_type', '') or ('NPC' if npc else '')
+    rarity = e.get('rarity') or meta.get('rarity', '')
+    category = e.get('category') or ('story' if (npc or not cn) else 'ship')
     ships[base] = {
         'id': base, 'name': cn or base, 'hasCn': bool(cn), 'npc': npc,
-        'type': meta.get('ship_type', '') or ('NPC' if npc else ''),
-        'rarity': meta.get('rarity', ''), 'faction': meta.get('faction', ''),
+        'type': stype, 'rarity': rarity, 'faction': faction, 'category': category,
         'skins': [], 'voices': [], 'spineSkins': [], 'live2dSkins': [],
     }
     return ships[base]
@@ -182,6 +236,9 @@ cnt = {
     'live2d': sum(1 for v in skins.values() if v['live2d']),
     'with_voice': sum(1 for s in ship_list if s['voices']),
     'npc': sum(1 for s in ship_list if s['npc']),
+    'with_faction': sum(1 for s in ship_list if s['faction']),
+    'ship': sum(1 for s in ship_list if s['category'] == 'ship'),
+    'story': sum(1 for s in ship_list if s['category'] == 'story'),
 }
 index = {'generated': 'v2', 'counts': cnt, 'ships': ship_list}
 os.makedirs(GAL, exist_ok=True)
