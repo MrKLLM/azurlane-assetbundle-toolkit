@@ -1092,3 +1092,11 @@ root 节点的 localScale（hailunna_4=0.6 / feiteliekaer_3=0.48 / 2b=0.75）被
 **另**：`.bat` 启动器修复（先起服务器+延时再开浏览器、探测 py/python）；工作流补录 `docs/WORKFLOWS.md` WF-12/WF-13。
 
 **未决（需用户指认具体船名）**：「缺脸」「有阴影」——150 样本诊断显示仅 ~4% 皮肤有独立 `face` 部件且 0 解析失败，脸多烤进 `_rw`；`is_lighting` 只剔近纯白光效、深色投影不剔（样本仅 1 例命中）。待用户给出确切船名后定位部件/图层根因，样本验证再全量。
+
+---
+
+## 附：PROJECT_STATUS 头部被取代的流水（2026-09-20 生成时间行原文，逐字保留）
+
+> 2026-09-21 文档同步时从 PROJECT_STATUS.md 头部移出（该文档只保留精简快照）。
+
+> **生成时间**: 2026-09-20（**§6 交接点 B 完成**：`build_gallery_index.py` 元数据主源改 `ship_meta.json`（舰名/阵营/舰种/稀有度），旧 `SHIP_NAME_MAP`+Wiki 降级兜底。**根因修复**——`build_ship_meta.py` 舰名取错表(skin_template 皮肤名→改 statistics.name)，**237 个 ship 级 `{namecode}` 占位符归零(同时关闭既有待办#8)**；META/灰烬 56 形态 `_alter` 从本体船拆为**独立卡**(faction=META)。逐船四字段零回退：ships 954→1008 / with_cn 796→899 / 阵营 445→837 / category 已落(ship 816·story 192)。index 已换入正式，skin 层未动故 **thumbs 无需重建**。**交接点更新 = ~~D~~ 已关闭（2026-09-20 Live2D 动作播放接入完成，见 §6.7；当前唯一在途 = §6.9 脸洞重渲换入）**。**C 已完成（2026-09-20）**：`gallery_src/index.html` 顶部加「类别」分段控件（全部/舰船 816/剧情角色 192，带总数），主网格按 `category` 分区渲染（舰船段+剧情角色段各带小标题计数），与阵营/舰种/稀有度/内容/搜索/排序正交共存；无头 Chrome dump-dom + 截图校验分区与计数正确、缩略图全 200、META 独立卡呈现正常，已 `deploy_gallery.py` 同步。晶环联盟取 C 搁置标「其他」。前项：385 变更美术定向重建完成）

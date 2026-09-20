@@ -1,12 +1,12 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-20（**§6 交接点 B 完成**：`build_gallery_index.py` 元数据主源改 `ship_meta.json`（舰名/阵营/舰种/稀有度），旧 `SHIP_NAME_MAP`+Wiki 降级兜底。**根因修复**——`build_ship_meta.py` 舰名取错表(skin_template 皮肤名→改 statistics.name)，**237 个 ship 级 `{namecode}` 占位符归零(同时关闭既有待办#8)**；META/灰烬 56 形态 `_alter` 从本体船拆为**独立卡**(faction=META)。逐船四字段零回退：ships 954→1008 / with_cn 796→899 / 阵营 445→837 / category 已落(ship 816·story 192)。index 已换入正式，skin 层未动故 **thumbs 无需重建**。**交接点更新 = ~~D~~ 已关闭（2026-09-20 Live2D 动作播放接入完成，见 §6.7；当前唯一在途 = §6.9 脸洞重渲换入）**。**C 已完成（2026-09-20）**：`gallery_src/index.html` 顶部加「类别」分段控件（全部/舰船 816/剧情角色 192，带总数），主网格按 `category` 分区渲染（舰船段+剧情角色段各带小标题计数），与阵营/舰种/稀有度/内容/搜索/排序正交共存；无头 Chrome dump-dom + 截图校验分区与计数正确、缩略图全 200、META 独立卡呈现正常，已 `deploy_gallery.py` 同步。晶环联盟取 C 搁置标「其他」。前项：385 变更美术定向重建完成）
+> **生成时间**: 2026-09-21（本轮闭环：§6.7 Live2D 动作播放 + 按部位点击触发，全量 260 皮肤验证 **767/768**；§6.9 脸部白块 34 张换入；§6 第 6 条 story_review 31 条自机落地；§8 变体后缀语义纠正并改准画廊标签；新增 **WF-15 游戏更新增量重跑** + `scripts/diag/` 13 个诊断工具入库；技能沉淀 1 新建 + 3 更新。历史流水已移出本文件至 `docs/archive/`）
 > **上一里程碑** 2026-09-20（385 变更美术定向重建）：换入 11 单位（立绘2/Spine3/Live2D4/表情2，全新增零覆盖，对照逐字节零回退）；根因修复=dependency_manifest 重生成(86449条)+两脚本补 UnityPy fallback；index/thumbs 已增量。遗留：3 个新 Spine 未做 CG_v2 全屏导出。
 > **上上里程碑** 2026-09-19：§6 第5~6条 A 收尾完成，`Output/ship_meta.json` 已产出，Live2D 运行时已备妥。
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
 >
-> **【2026-09-20 交接状态】在途线索已清零**。本轮三件事全部完成并提交：① **§6.9 I-168 脸部白块换入**——扫描 2221 候选得 35 个脸洞 → 对比图交用户过目 → **换入 34 张**（`leiniya_wjz` 经用户确认排除，靠收紧门控自动排除而非例外表）+ 增量重建 34 张缩略图，端到端校验全通过（备份 `Output/_OLD_bak/facefix_20260920/`）。② **story_review 勾选落地**——用户勾定自机 31 条进 `build_gallery_index.EXTRA_SHIP` 白名单且白名单优先于塞壬前缀分支（不再被清空属性），ship 850→881 / story 158→127，逐船 diff 非类别字段回退 0。③ **交接点 D 关闭**——画廊 Live2D 动作播放接入 + 无头 CDP 抽样验证（§6.7）。
-> **下一步候选**（均需用户点头）：§6 既有待办 7「晶环联盟阵营码」三选一决策（A 逆向 sharecfgdata 加密 / B 走 381 旁路 / C 搁置）｜新线索：**剧情 CG 混进 `Paintings_v2/` 立绘目录**（用户 2026-09-20 指出「脸黑的基本都是剧情 CG」，与缺脸是两类问题，见 §6.8）｜低优先：声优中文姓名回填、UI/图标批量导出、`organize.py`。
+> **【2026-09-21 交接状态】在途线索清零，§6 交接待办 1~7 全部闭环**（提交 `0c6bb47`→`4154da9`）。① **§6.9 脸部白块换入 34 张**——扫描 2221 候选得 35 洞 → 对比图交用户过目 → `leiniya_wjz` 经确认排除（靠**收紧门控**自动排除，不写例外名单）；端到端校验：34 张内容一致 / 68 URL 200 / 其余 4454 张 mtime 未变（备份 `Output/_OLD_bak/facefix_20260920/`）。② **story_review 勾选落地**——31 条自机进 `EXTRA_SHIP` 且白名单优先于塞壬分支，ship 850→881 / story 158→127，非类别字段零回退。③ **§6.7 Live2D 关闭并追加两轮修复**——动作播放（`startMotion` 传参陷阱）+ **按部位点击触发**（HitAreas；全量 260 皮肤 **767/768**、259/260 模型全中，残留歧义 1 例 `z46_3` 已记录）+ 交互层三修（裸滚轮劫持页面 / 点空白乱播兜底 / `pointercancel` 缺失致拖拽卡死）。④ **§8 变体后缀语义纠正**——`_hx`=和谐版、`_n`=无背景版，画廊 1746 条 label 改准、逐字段 diff 无意外变化。⑤ **治理沉淀**——新增 `docs/WORKFLOWS.md` **WF-15 游戏版本更新增量重跑**（含承重文件白名单）；13 个可复用诊断工具从 `.diag` 归档入 `scripts/diag/`；`.diag/` 正式 gitignore；AGENTS.md 加「清理前核对白名单」硬规则；技能 1 新建（`live2d-web-runtime-integration`）+ 3 更新（headless-cdp / unity-assetbundle / safe-pipeline）。
+> **下一步候选**（均需用户点头）：§6 待办 7「晶环联盟阵营码」三选一（A 逆向 sharecfgdata 加密 / B 走 381 旁路 / C 搁置）｜**剧情 CG 混进 `Paintings_v2/`** 的识别与分离（用户指出"脸黑的基本都是剧情 CG"，与缺脸是两类问题，见 §6.8）｜**两项结构隐患**：`azdata_*.json` 权威元数据源仍住在可被清理的 `.diag/`（建议迁 `scripts/data/` 并入库）、18 个核心脚本硬编码 `D:\Azur Lane Assets` 绝对路径（建议改 `__file__` 推导）｜低优先：声优中文姓名回填、UI/图标批量导出、`organize.py`。
 
 ---
 
@@ -90,11 +90,12 @@
 
 **核心脚本**：`scan_assets.py`、`export_assets.py`、`export_cue_audio.py`、`reconstruct_live2d.py`/`fix_model3.py`/`extract_motions.py`、`compose_paintings_v2.py`(★v2)、`extract_spine_v2.py`(★v2)、`export_dependency_manifest.py`、`build_gallery_index.py`、`make_thumbs.py`、`deploy_gallery.py`(gallery_src→Output)、`mumu_sync.py`、`ship_name_map.py`、`scrape_wiki_fast.py`。
 
-**可复用诊断/验证工具 `scripts/diag/`**（2026-09-20 从 `.diag` 归档入库，12 件）：`scan_faces.py`(脸洞扫描)、`make_face_cmp.py`/`make_review_sheet.py`(改前后对比图/复核总表)、`l2d_sweep.py`(全量 Live2D 加载+动作启动扫描)、`l2d_verify.py`/`l2d_click.py`(抽样与真实点击路径无头校验)、`hit_verify.py`(按部位点击触发断言)、`run_cg_export.py`(Spine CG 批量导出驱动)、`dedup_plan.py`/`dedup_apply.py`/`dedup_httpverify.py`(硬链去重三件套)、`gen_story_md.py`(复核清单生成)。**游戏版本更新怎么跑 → 看 `docs/WORKFLOWS.md` WF-15**（含承重文件白名单）。
+**可复用诊断/验证工具 `scripts/diag/`**（2026-09-20 从 `.diag` 归档入库，13 件）：`scan_faces.py`(脸洞扫描)、`make_face_cmp.py`/`make_review_sheet.py`(改前后对比图/复核总表)、`l2d_sweep.py`(全量 Live2D 加载+动作启动扫描)、`l2d_verify.py`/`l2d_click.py`(抽样与真实点击路径无头校验)、`hit_verify.py`(按部位点击触发断言，支持 `--only`)、`interact_verify.py`(滚轮/拖拽/兜底五项交互断言)、`run_cg_export.py`(Spine CG 批量导出驱动)、`dedup_plan.py`/`dedup_apply.py`/`dedup_httpverify.py`(硬链去重三件套)、`gen_story_md.py`(复核清单生成)。**游戏版本更新怎么跑 → 看 `docs/WORKFLOWS.md` WF-15**（含承重文件白名单）。
 
 **文档**（导航见根目录 `README.md`，写入路由见 `AGENTS.md`）：
 - `docs/DEV_LOG.md` 操作手册 · `docs/WORKFLOWS.md` 可复用工作流 · `docs/TROUBLESHOOTING.md` 踩坑 · `docs/ERRORS.log` 错误流水
 - `docs/tools/` ALPA、AssetStudio 使用说明
+- **项目技能库 `.agents/skills/`**（8 个，入库）：`live2d-web-runtime-integration`(新建)、`unity-assetbundle-painting-restore`、`headless-chrome-cdp-batch-export`、`safe-pipeline-fix-targeted-rerun`、`windows-hardlink-dedup-verify`、`windows-local-server-launcher`、`cn-blocked-resource-mirror-fetch`、`project-doc-governance`——做同类任务前先查这里，别从零摸索
 - `docs/archive/` 历史归档（含 `PROJECT_STATUS_历史归档.md`、旧目录审计报告、旧 Spine 交接）
 
 **数据**：`asset_manifest.json`、`Output/dependency_manifest.json`(86,398 条官方依赖表)、`Output/WikiData/ship_data.json`、`Output/gallery_v2/index.json`。
