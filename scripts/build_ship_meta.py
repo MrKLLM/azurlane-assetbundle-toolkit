@@ -47,6 +47,9 @@ TYPE = {
 # 快照里查不到、但画廊有实体的怪例（下架联动舰等）；painting 与 ship_name_map 兜底都覆盖不到时用它
 MANUAL = {'2b': '2B', 'a2': 'A2'}
 
+# 社区快照译名与游戏官方中文名的差异修正（cn 命中左侧即替换为右侧官方名）
+NAME_FIX = {'贾斯科涅': '加斯科涅'}
+
 try:
     from ship_name_map import SHIP_NAME_MAP
 except Exception:
@@ -146,6 +149,8 @@ def build_meta(skin, stats, wiki, verbose=False):
             if entry['source'] == 'unresolved' and stem in MANUAL:
                 entry['cn'] = MANUAL[stem]
                 entry['source'] = 'manual'
+        if entry.get('cn') in NAME_FIX:
+            entry['cn'] = NAME_FIX[entry['cn']]
         meta[stem] = entry
     return meta, painting2skin, stats_by_group, wiki_by_name
 

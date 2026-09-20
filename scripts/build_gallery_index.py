@@ -46,6 +46,9 @@ def _clean_cn(v):
     """占位符/空/等于 stem 本身的 cn 视为无有效名。"""
     return '' if (not v or PLACEH.search(v)) else v
 
+# 社区快照/拼音表译名与游戏官方中文名差异修正（与 build_ship_meta 保持一致，兜底路径也生效）
+NAME_FIX = {'贾斯科涅': '加斯科涅'}
+
 PINS = set(SHIP_NAME_MAP.keys())
 ROMAN = {'ii': '改', 'iii': '改三', 'iv': '改四'}
 VARMAP = {'hx': '换色', 'n': '夜战', 'g': 'G', 'meta': 'META', 'asmr': 'ASMR', 'gv': '改造'}
@@ -128,6 +131,7 @@ def ship_of(base):
     resolved = bool(e.get('faction'))
     name_meta = _clean_cn(SHIP_META[base].get('cn')) if (resolved and base in SHIP_META) else ''
     cn = name_meta or SHIP_NAME_MAP.get(base) or ''
+    cn = NAME_FIX.get(cn, cn)   # 官方译名修正（兜底路径也生效）
     meta = meta_by_cn.get(cn, {}) if cn else {}
     npc = bool(re.match(r'(npc|linghangyuan|lingyangzhe)', base))
     # 阵营/舰种/稀有度：ship_meta 主，Wiki meta_by_cn 兜底（Wiki 覆盖仅 445，且须舰名先正确才可信）
@@ -218,6 +222,23 @@ for f in glob.glob(os.path.join(OUT, 'Audio', 'CV', 'cv-*.wav')):
     base = CN2PIN.get(cn)
     if base and base in ships:
         ships[base]['voices'].append('Audio/CV/' + fn)
+
+# ---------- 舰船/剧情角色 分层重分类（收集完成后，按皮肤标记+阵营+维基+塞壬覆盖综合判定）----------
+# 单一字段不可靠：塞壬 unknown* 带 900000+ 假 stats（误判 ship）；联动可玩船(hdn/DOA/海王星/NieR)缺 stats（误判 story）。
+SIREN_PREFIX = re.compile(r'^(unknown|sairen|error|npc|linghangyuan|lingyangzhe|tansuozhe|aijiang|tbniang|congmang|missd|missr|magician)')
+COLLAB_SKIN = re.compile(r'(_doa|_tolove|_idol|_idolns)')   # 联动/偶像皮肤只出现在可玩船上 → 判舰船
+EXTRA_SHIP = {'haorenlichade'}                               # 用户确认的可玩船(Bon Homme Richard，仅 _alter 皮肤)
+WIKI_NAMES = set(meta_by_cn.keys())
+def reclassify():
+    for s in ships.values():
+        k = s['id']; name = s['name']
+        if ('？' in name) or SIREN_PREFIX.match(k):          # 塞壬/BOSS/NPC：剧情角色 + 清空战斗属性
+            s['category'] = 'story'; s['faction'] = ''; s['type'] = ''; s['rarity'] = ''
+        elif s['faction'] or name in WIKI_NAMES or any(COLLAB_SKIN.search(sk['key']) for sk in s['skins']) or k in EXTRA_SHIP:
+            s['category'] = 'ship'
+        else:
+            s['category'] = 'story'
+reclassify()
 
 # 每船 skins 排序（默认在前，皮肤号升序）
 def skin_sort(s):

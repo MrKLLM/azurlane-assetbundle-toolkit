@@ -397,7 +397,9 @@ async function startSpine(s, sk){
     resize();
     // 动画：取各层「有时长」动画名并集（空占位 0 秒动画已过滤）
     const animUnion=[]; layers.forEach(L=>L.anims.forEach(a=>{if(animUnion.indexOf(a.name)<0)animUnion.push(a.name);}));
-    bar.innerHTML=`<label>动画</label><select id="spAnim"></select><button id="spPlay">暂停</button><button id="spFit">复位</button><span class="pill">${layers.length} 层部件${loadFail?' · '+loadFail+' 层失败':''}</span><span class="pill">滚轮缩放 · 拖拽平移</span>`;
+    bar.innerHTML=`<label>动画</label><select id="spAnim"></select><button id="spPlay">暂停</button><button id="spFit">复位</button><button id="spFull">全屏</button><span class="pill">${layers.length} 层部件${loadFail?' · '+loadFail+' 层失败':''}</span><span class="pill">滚轮缩放 · 拖拽平移</span>`;
+    document.getElementById('spFull').onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else viewEl.requestFullscreen().catch(()=>{}); };
+    document.addEventListener('fullscreenchange', resize);
     const sel=document.getElementById('spAnim');
     (animUnion.length?animUnion:['']).forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n||'(setup pose)';sel.appendChild(o);});
     function setAnim(n){ layers.forEach(L=>{ try{
