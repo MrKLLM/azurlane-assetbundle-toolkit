@@ -5,7 +5,7 @@
 > **上上里程碑** 2026-09-19：§6 第5~6条 A 收尾完成，`Output/ship_meta.json` 已产出，Live2D 运行时已备妥。
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
 >
-> **【2026-09-20 交接状态】两条在途线索**：① **剧情/自机名单待用户勾选**——已导出带缩略图的 `story_review.md`（158 条剧情角色，每条 `自机? []`），用户勾 `[x]` 的应移入 `build_gallery_index.reclassify` 的 `EXTRA_SHIP` 白名单重建 index（`npc*` 前缀误伤了 `npcsalatuojia_alter` 等 META 自机）。② **I-168 脸部白块修复**——根因已定位（见 §6.9），修复代码未动，按 safe-pipeline 续做。已完成并提交：B/C 分类精修、清理 7.3GB、硬链去重 358MB、Spine 全屏（HEAD `e09d07a`）。
+> **【2026-09-20 交接状态】两条在途线索**：① **I-168 脸部白块修复**——`compose_paintings_v2.py` 已实现 face 叠层(透明洞门控 `frac_op<0.5`+`paintingface` 默认脸)，样本双验证过(i168 对照 maxdiff=0 / i168_2 修好)；**后台扫描 2221 候选找脸洞进行中**(输出 `.diag/face_holes.txt`)，扫完→只重渲洞子集→对比图交用户确认→换入(详 §6.9)。② **剧情/自机名单待用户勾选** `story_review.md`(158 条带缩略图,勾 `[x]` 者进 `build_gallery_index.reclassify` 的 `EXTRA_SHIP` 白名单重建 index)。已完成并提交：B/C 分类精修、清理 7.3GB、硬链去重 358MB、Spine 全屏。
 
 ---
 
@@ -119,8 +119,9 @@
 9. ⚠️ **I-168 皮肤2 脸部白块（2026-09-20 用户报告，根因已定位，修复待实现）**：
    - **现象**：`Output/Paintings_v2/i168_2.png` 脸上是不透明白色矩形；默认 `i168.png` 正常（脸烤进 `_rw`）。
    - **根因链（已探包证实）**：painting 包里有个 GameObject 名为 `face` 的节点，但其 `MonoBehaviour.m_Sprite` 是**空的（path=0/file=0）**；`compose_paintings_v2.parse_painting` 第 268 行 `if not path_id: continue` 把它跳过了。真脸在**独立的 `paintingface/<name>` 包**（i168 有 5 张表情 `1`~`5`、i168_2 有 7 张 `0`~`6`，均 ~115×108 / 169×218），游戏运行时把它贴到 face 槽。凡 `_rw` 把脸留成白洞的皮肤（如 i168_2）合成后就缺脸→白块；`_rw` 已烤脸的（i168）不受影响。`paintingface/` 共 **2246 包**，受影响子集待扫描。
-   - **修复方案（未动代码）**：① `parse_painting` 额外返回 face 节点的 rect_pid（遍历 `rects` 找 `go_names[pid]=='face'`，即使无 sprite）；② `compose.render()` 末尾，若 `paintingface/<name>` 存在，取默认脸图（`decoded_texture`，默认索引需样本确认，疑 `'1'` 或 `'0'`）按 `boxes[face_pid]` 世界矩形像无 mesh 部件那样 textureRect 拉伸叠到 `_rw` 之上；③ 走 safe-pipeline：临时目录只渲 **i168（对照须逐像素 maxdiff=0）+ i168_2（须修好）** → 扫全量「face rect 区域成品为纯白洞」的受影响子集 → 改前后对比图交用户确认 → 备份换入 → 增量重建 thumbs/index。**风险**：给已烤脸的多数皮肤叠错位置会糊脸，故对照零回退是硬闸门。
-   - **下一步入口**：`compose_paintings_v2.py` 已读到 `layout_all` 返回 `boxes[pid]=(rx,ry,w,h)` 世界 Y-up + `mirrors`，face 叠层 paste 数学可复用 render() 里 531-556 行的非 mesh 部件映射。
+   - **✅ 修复已实现（2026-09-20，`compose_paintings_v2.py`）**：`parse` 后取 face 节点 rect（`go_names[pid]=='face'`）；`render()` 画完部件后，**仅当 face rect 区域是透明洞（`frac_op<0.5`）才**从 `paintingface/<name>` 取默认脸（`FACE_DEFAULT=1`，可 env 覆盖）按 rect 叠上。已加 `compose(save=False)` + `FACE_APPLIED` 全局供扫描判定。**样本双验证**：`i168`（已烤脸）判假不叠→对照 **maxdiff=0 零回退**；`i168_2`（脸洞）判真→脸正确填上（位置/表情对）。⚠️ 洞是**透明(alpha0)**不是白，早期按「不透明白」判据全错，改 frac_op 才对。
+   - **⏳ 进行中（交接点）**：后台 `py -3 .diag/scan_faces.py`（env `FACE_DEFAULT=1`）扫描 **2221 候选**（有 paintingface 包的皮肤）逐个渲染判定脸洞，输出清单 `.diag/face_holes.txt`（进度约 600/2221、已 13 洞、err0，~20 分钟）。**若新会话接手**：先看 `.diag/face_holes.txt` 是否已生成完整；没有就重跑 `scan_faces.py`。扫完后：只对脸洞子集重渲到临时目录 → 改前后对比图交用户确认 → 备份换入 → 增量重建受影响缩略图。**换入前必须用户过目**（safe-pipeline 硬闸门）。
+   - **另需用户勾选**：`story_review.md`（158 剧情角色带缩略图）用户正在勾 `自机? [x]`，勾中者进 `build_gallery_index.reclassify` 的 `EXTRA_SHIP` 白名单重建 index（`npc*` 前缀误伤 `npcsalatuojia_alter` 等 META 自机）。
 
 > 诊断产物/缓存均在 `.diag/`（不入库，本机可继续用）。画廊前端改动走 `gallery_src/` → `scripts/deploy_gallery.py`。
 

@@ -39,6 +39,7 @@ _manifest = None
 _env_cache = {}      # bundle_name -> env / False
 _obj_cache = {}      # (bundle, path_id) -> UnityPy object
 _img_cache = {}      # (bundle, path_id) -> PIL RGBA (flip=False)
+FACE_APPLIED = {}    # bundle_name -> 是否触发了 paintingface 脸洞叠层（扫描用）
 
 
 def manifest():
@@ -114,6 +115,33 @@ def decoded_texture(bundle_name, path_id):
     img = get_image_from_texture2d(o.read(), flip=False)
     _img_cache[key] = img
     return img
+
+
+def paintingface_face(bundle_name, want="1"):
+    """从 paintingface/<name> 取指定表情名(默认 '1')的 Sprite 纹理 -> (PIL RGBA Y-up, (w,h))。
+    找不到该表情名则退回数字名最小的一张；无包返回 None。"""
+    env = load_bundle("paintingface/" + bundle_name)
+    if not env:
+        return None
+    spr = {}
+    for o in env.objects:
+        if o.type.name == "Sprite":
+            s = o.read()
+            spr[str(s.m_Name)] = s
+    chosen = spr.get(str(want))
+    if chosen is None:
+        nums = sorted([k for k in spr if k.isdigit()], key=int)
+        if nums:
+            chosen = spr[nums[0]]
+    if chosen is None:
+        return None
+    rd = getattr(chosen, "m_RD", None)
+    tex = getattr(rd, "texture", None) if rd is not None else None
+    tex_pid = getattr(tex, "m_PathID", 0) if tex is not None else 0
+    img = decoded_texture("paintingface/" + bundle_name, tex_pid)
+    if img is None:
+        return None
+    return img.convert("RGBA"), (img.width, img.height)
 
 
 # ---------------------------------------------------------------- 渲染
@@ -485,8 +513,8 @@ def is_lighting(arr):
     return white.mean() >= 0.80
 
 
-def compose(bundle_name, out_dir, faces=None):
-    """合成一个皮肤。faces=None 只出默认脸；faces=[..] 额外输出差分。"""
+def compose(bundle_name, out_dir, faces=None, save=True):
+    """合成一个皮肤。faces=None 只出默认脸；faces=[..] 额外输出差分。save=False 只渲染判定不落盘。"""
     # 每个 bundle 处理前释放解码缓存（4096² ASTC 一张 ~64MB，长跑必须清）
     _env_cache.clear()
     _obj_cache.clear()
@@ -498,6 +526,11 @@ def compose(bundle_name, out_dir, faces=None):
     boxes, mirrors, roots = layout_all(rects, father_map, children_map)
     order = draw_order(rects, father_map, children_map)
     rank = {p: i for i, p in enumerate(order)}
+
+    # face 节点：GameObject 名为 'face' 的 RectTransform（其 m_Sprite 常为空，故不在 parts 里）。
+    # 真脸在独立 paintingface/<name> 包，需按此节点世界矩形叠回，否则 _rw 留脸洞者出白块。
+    face_pid = next((rp for rp in rects if go_names.get(rp) == "face"), None)
+    FACE_DEFAULT = os.environ.get("FACE_DEFAULT", "1")
 
     # 画布 = root 矩形范围
     allb = list(boxes.values())
@@ -555,15 +588,47 @@ def compose(bundle_name, out_dir, faces=None):
                 py = int(round(ch - (wy0 + wh)))
                 canvas.paste(img, (px, py), img)
                 cinfo.append(f"{part['name'] or pid}")
+        # ---- 叠 paintingface 默认脸（仅当 face 节点区域是「不透明近白洞」时才叠，避免动到已烤脸的皮肤）----
+        if face_pid is not None and face_pid in boxes:
+            rx, ry, rw, rh = boxes[face_pid]
+            fpx = int(round(rx)); fpy = int(round(ch - (ry + rh)))
+            fww = max(1, int(round(rw))); fwh = max(1, int(round(rh)))
+            x0 = max(0, fpx); y0 = max(0, fpy)
+            x1 = min(cw, fpx + fww); y1 = min(ch, fpy + fwh)
+            if x1 > x0 + 8 and y1 > y0 + 8:
+                reg = np.asarray(canvas.crop((x0, y0, x1, y1))).astype(int)
+                frac_op = (reg[..., 3] > 250).mean()
+                # 洞判据：face 区域几乎没画东西（`_rw` 把脸留成透明洞）→ 需叠 paintingface 脸。
+                # 已烤脸的皮肤该区域是画满的（frac_op≈1），不叠。
+                is_hole = frac_op < 0.5
+            else:
+                is_hole = False
+            if is_hole:
+                fx = paintingface_face(bundle_name, FACE_DEFAULT if face_override is None else face_override)
+                if fx is not None:
+                    fimg, (fw, fh) = fx
+                    mx, my = mirrors.get(face_pid, (False, False))
+                    fimg = fimg.transpose(Image.FLIP_TOP_BOTTOM)   # Y-up -> PIL Y-down
+                    if mx:
+                        fimg = fimg.transpose(Image.FLIP_LEFT_RIGHT)
+                    if my:
+                        fimg = fimg.transpose(Image.FLIP_TOP_BOTTOM)
+                    if (fimg.width, fimg.height) != (fww, fwh):
+                        fimg = fimg.resize((fww, fwh), Image.BILINEAR)
+                    canvas.paste(fimg, (fpx, fpy), fimg)
+                    cinfo.append(f"face-overlay:{FACE_DEFAULT if face_override is None else face_override}")
         return canvas, cinfo
 
     os.makedirs(out_dir, exist_ok=True)
     canvas, cinfo = render()
+    face_applied = any(str(x).startswith("face-overlay") for x in cinfo)
+    FACE_APPLIED[bundle_name] = face_applied
     base = canvas.crop(canvas.getbbox() or (0, 0, cw, ch))
     out = os.path.join(out_dir, f"{bundle_name}.png")
-    base.save(out)
-    print(f"✓ {bundle_name}: {len(parts)} 部件 / 画出 {len(cinfo)} 层 / "
-          f"画布 {cw}x{ch} -> {base.size}  {out}")
+    if save:
+        base.save(out)
+        print(f"✓ {bundle_name}: {len(parts)} 部件 / 画出 {len(cinfo)} 层 / "
+              f"画布 {cw}x{ch} -> {base.size}  {out}")
 
     # 表情差分：找 face 部件所在包，列出全部 Sprite
     if faces:
