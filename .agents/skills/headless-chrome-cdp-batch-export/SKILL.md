@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。
-version: 1.0.0
+version: 1.1.0
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -40,6 +40,15 @@ version: 1.0.0
 3. **WebGL 走软渲染**：无头环境 GPU 不可用，WebGL 页面会黑屏或崩溃。加 `--enable-unsafe-swiftshader --use-angle=swiftshader` 强制 SwiftShader 软渲染。实测 2400px 长边约 2s/张，可接受；输出尺寸设上限防纹理超限。
 4. **`toBlob` 需要 `preserveDrawingBuffer:true`**：WebGL 上下文创建时必须传 `preserveDrawingBuffer: true`，否则事件循环清空帧缓冲后 `toBlob`/`toDataURL` 拿到黑图或空图。批量循环里逐项 `dispose()` 纹理/资源，防 4096² 页纹理堆爆显存。
 5. **`Runtime.evaluate` 前须等页面就绪**：`/json` 出现 tab ≠ 页面加载完成。探针若在目标 DOM（如 `#prog`）存在前发送，evaluate 返回 null 或抛异常。驱动脚本应对 `null` 探针结果做容错重试，或先 evaluate 一个存在性检查再进入正常轮询。
+
+## 验证类任务的额外坑（做"批量断言"而非"批量导出"时）
+
+1. **断言要读运行时状态，别用画面代理指标**。判"动画/交互是否生效"要读引擎内部状态（如 Live2D 的 `motionManager.state.currentGroup`、Spine 的 `anim.getCurrent`）。帧哈希/`drawImage` 比对两头都骗人：无头环境 rAF 被节流 → **假阴性**；而 physics/眨眼等常驻动画让帧一直变化 → **假阳性**（曾据此误判"动画正常"）。
+2. **异步生效要等一拍再断言**。触发函数内部常含 `fetch`（如 Live2D 加载 motion JSON），调用后立刻读状态会拿到空值 → 误判失败。加 ~1.5s 等待再采样。另注意某些状态会**自动回落**（idle 播完 `currentGroup` 归 null），所以"值变了"才是被触发的证据。
+3. **冷启动要先轮询等待页面全局变量**。删过 profile 后页面加载变慢，`/json` 有 tab、甚至 `evaluate` 能跑，都不代表数据脚本已执行；直接访问 `window.<DATA>` 会 `ReferenceError`。探针开头写 `for(let i=0;i<80 && !window.GALLERY;i++) await t(300)`。
+4. **两个 chrome 实例并发跑 CDP 会互相抢**，表现为 `Execution context was destroyed`。批量验证串行执行，或确保端口/profile 完全隔离且不重叠运行。
+5. **清理残留 chrome 必须按 `--user-data-dir` 精确匹配命令行再 kill**：`Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | ? { $_.CommandLine -like '*<你的profile目录>*' }`。**绝不能按进程名全杀**——会误杀用户自己的浏览器。
+6. **跨坐标空间的自动化探针，断言要落在产品语义上**。若探针要自己算目标坐标（模型单位 → 屏幕 → 再被页面反解回单位），往返误差在极端坐标处会被放大，导致"我猜它不该命中"类断言恒失败。改断言成产品契约（如"有判定区的模型任何点击都不该播出兜底动作组"）。
 
 ## 验证
 

@@ -1,0 +1,120 @@
+---
+name: live2d-web-runtime-integration
+description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
+version: 1.0.0
+---
+
+# Live2D 网页运行时集成
+
+## Overview
+
+把 Cubism 4 的 `.model3.json` 模型在浏览器里渲染成可交互、会播动作的 Live2D。核心难点不在"加载出来"，而在**动作真的在播**、**点击部位触发对应反应**、**构图不越界**——这三处各有一个会静默失败的陷阱。
+
+## 适用判断
+
+- 页面里已有/可放 `live2dcubismcore.min.js` 等运行时，要让模型动起来 → 用本流程
+- 只是把模型贴图当静态图展示 → 不需要运行时，直接 `<img src="texture_00.png">`
+- 要产出的不是"网页里的模型"而是从游戏包还原模型文件本身 → 先走 `unity-assetbundle-painting-restore`
+
+## 1. 运行时三件套与版本组合
+
+必须**按序**加载，且版本要成对（新 pixi 会破坏 display 适配层）：
+
+1. `live2dcubismcore.min.js`（Cubism Core，实测 5.1.0）
+2. `pixi.min.js`（实测 **6.5.2**）
+3. `pixi-live2d-display-cubism4.min.js`（实测 **0.4.0**）
+
+- **别用 pixi 7 / display 0.5**：本项目实测 pixi 6.5.2 + display 0.4.0 是可用组合。
+- 国内网络：`live2dcubismcore.min.js` 可从 l2d 系站点直链取；pixi 与 display 走 npmmirror 的 **tgz 下载后解包取 `dist/`**（registry 元数据接口可能被拦）。下载细节见 `cn-blocked-resource-mirror-fetch`。
+- 全部放本地 `vendor/live2d/`，**别用 `P`（资源相对路径前缀）拼 vendor**：若 vendor 与页面同目录，用 `./vendor/live2d/…`。判定办法是在页面里 `fetch('../vendor/…')` 与 `fetch('/<页面目录>/vendor/…')` 对比状态码，**别信 curl 的绝对路径**（curl 的 200 会掩盖相对路径错误）。
+- 懒加载（点标签才加载）比顶部 `<script>` 好：用 `loadScriptOnce(src)`（按 `script[data-x]` 去重并缓存 Promise），避免首屏拖慢与重复注入。
+
+## 2. 加载模型
+
+```js
+const mdl = await PIXI.live2d.Live2DModel.from('<dir>/<name>.model3.json', { autoInteract: false });
+app.stage.addChild(mdl);
+```
+
+- `autoInteract: false` 时库自带的 hit test/视线跟随都关掉，交互自己实现（见 §4）。
+- 需要 `FileReferences.Motions` 的组名列表：`mdl.internalModel.motionManager.definitions`（键即组名）。
+
+## 3. 动作播放：三个必踩陷阱
+
+### 3.1 `startMotion` 的 index 不能传 `null`
+
+```js
+mm.startMotion(group, null, false)   // ✗ 静默失败，什么都不播
+mm.startMotion(group, 0, MP.FORCE)   // ✓
+```
+
+库内部会取 `motion[group][index]`；传 `null` 得到 `undefined` 后**直接 return false，不报错**。`priority` 也不能传 `false`——会被当成 0，低于当前优先级同样被拒。用 `PIXI.live2d.MotionPriority.FORCE`（枚举 NONE/IDLE/NORMAL/FORCE = 0/1/2/3）。
+
+### 3.2 判"有没有在播"要读运行时状态，且要等一拍
+
+`startMotion` 内部要 `fetch` 动作 JSON，调用后立刻读会拿到空值：
+
+```js
+mm.startMotion(g, 0, MP.FORCE);
+await new Promise(r => setTimeout(r, 1500));
+const playing = mm.state.currentGroup === g;   // 唯一可靠判据
+```
+
+**帧哈希/drawImage 比对不能当判据**：无头环境 rAF 被节流会**假阴性**；而 physics 与眨眼会让画面逐帧变化，造成"动作在播"的**假阳性**。另外注意：idle 播完后 `state.currentGroup` 会**自动归 null**，所以"值变了"才说明有东西被触发。
+
+### 3.3 销毁与泄漏
+
+`app.destroy(true,{children:true,baseTexture:true,texture:true})` 不会移除 `window` 级监听。把所有监听存进状态对象并提供 `off()`，切换标签/关闭弹窗时统一调用：
+
+```js
+state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.removeEventListener('pointermove', onMove); ... };
+```
+
+## 4. 按部位点击触发（HitAreas）
+
+游戏里的 Live2D 是**点击部位**触发（不是悬停）。数据在 `model3.json` 顶层 `HitAreas`：
+
+```json
+[{"Id":"TouchHead","Name":"Head"}, {"Id":"TouchBody","Name":"Body"}, {"Id":"TouchSpecial","Name":"Special"}]
+```
+
+- **`HitAreas[].Name` 通常就是动作组名**（本项目 256 模型 768 个判定区对 `FileReferences.Motions` 键 **768/768 精确匹配**）。先跑一次全库统计验证这个假设，别凭直觉找 `tap*` 组——多数模型根本没有裸 `tap` 组，于是"点哪儿都不动"。
+- 取判定几何：`idx = coreModel.getDrawableIndex(a.Id)`，再 `coreModel.getDrawableVertexPositions(idx)`（模型单位，x/y 交替）。**点击瞬间实时读，不要缓存**——框会随呼吸/物理每帧位移，缓存坐标会点空。
+- 坐标换算：`const lp = mdl.toLocal(new PIXI.Point(屏幕x - wrapRect.left, 屏幕y - wrapRect.top)); const 单位 = lp.x / internalModel.pixelsPerUnit`。
+- **用包围盒，别用三角面**：本项目实测改用 Cubism 原生"点在三角面内"后反而更差——部分模型的 Touch 三角面**连自己的顶点重心都不包含**（数据不规整）。包围盒实测 767/768。
+- 多个框同时包含时（部位框常重叠/嵌套）取**归一化中心距离**最小者：`s = dist(点, 框中心) / max(半宽,半高)`。注意"按顺序取第一个"会让大框（如 Head）永远压住小框；"取最小框"在另一种模型上又错——两种规则各有反例，选一个并记录已知歧义，不要为个别样本过拟合。
+- 容差只给 **2%**（吸收测试派发延迟的几十毫秒位移）。给到 8% 会把视觉上明显空白的角落判成命中——Live2D 画布四周有大量透明边距，模型单位范围比可见内容大得多。
+- **兜底动作只给没有 `HitAreas` 的模型**。有判定区却点框外，就什么都不播（与游戏一致）。否则点哪儿都蹦一个 `touch_drag*`，观感极差。
+
+## 5. 构图与 fit 的两个陷阱
+
+1. **别用 `mdl.width` 当模型尺寸**：pixi-live2d-display 下它可能返回 1 或被污染的包围盒（个别模型被巨型离屏 quad 撑到百万像素）。可靠基准是 `internalModel.width / internalModel.height`（= Cubism 画布单位 × `pixelsPerUnit`，如 8000×8000）。
+2. **`fit()` 必须幂等**：`DisplayObject.width` 已含 `scale`。若在 fit 里用 `mdl.width` 算缩放，`ResizeObserver` 二次触发时会**正反馈放大**，画面糊成局部特写。做法：加载后缓存未缩放尺寸（或直接用 `internalModel.width`），维护 `baseK(适配) × z(用户缩放)` 与偏移 `ox/oy`，`apply()` 统一由这三者算 scale 与位置；`fit()` 只是把 `z/ox/oy` 归零后 `apply()`。
+
+## 6. 交互层反模式
+
+- **不要 `preventDefault` 劫持裸滚轮**。鼠标经过模型时用户可能正在滚页面，被劫持后页面不动、模型一路放大并累积平移，看起来像"模型自己乱动、位置不对"。改成 **Ctrl/⌘/Alt + 滚轮**才缩放，并在提示文案里写明。
+- 拖拽必须处理 `pointercancel` 与 `window blur`，否则拖拽态卡住，之后每次鼠标移动都在平移模型。
+- 平移量要钳制（如 `max(wrapW,wrapH)*0.6`），防止把模型拖出视野再也找不回。
+- 位移 < 6px 视为"点击"而非"拖拽"，用来触发动作。
+
+## 7. 无头验证判据（配合 CDP）
+
+批量验证 260 个模型时的做法（驱动细节见 `headless-chrome-cdp-batch-export`）：
+
+- 页面内串行遍历：`await renderLive2D(ship, sk)` → 等 1.5~2s → 读 `state.currentGroup` 与 `motionManager.definitions` 数。每轮先 `stopLive2D()` 释放，否则 WebGL 上下文/纹理堆积。
+- 断言落在**产品语义**上，不要落在"我猜它不该命中"上。例：断言"有判定区的模型任何点击都不该播出 `touch_*/tap*` 兜底组"，而不是"点某个自算的空白点不该有反应"——后者会因 `toGlobal → 屏幕坐标 → toLocal` 往返误差在极端点被放大而恒失败。
+- 冷启动（删过 profile 后）页面里访问 `window.GALLERY` 之类全局数据要先轮询等待，否则 `ReferenceError`。
+- **两个 chrome 实例并发跑 CDP 会互相抢**，报 `Execution context was destroyed`；批量验证要串行。
+- 清理残留 chrome 必须按 `--user-data-dir` 精确匹配进程命令行再 kill，**绝不能按进程名全杀**（会误杀用户自己的浏览器）。
+
+## 8. 落地检查清单
+
+- [ ] 三件套版本成对且按序加载；vendor 相对路径在页面上下文里 `fetch` 验证过
+- [ ] `startMotion` 显式 index + `MotionPriority.FORCE`
+- [ ] 用 `state.currentGroup`（等待后）证明动作真的在播，不靠帧比对
+- [ ] fit 基准取 `internalModel.width`，且 fit 幂等（ResizeObserver 多次触发不放大）
+- [ ] 部位命中实时读框；兜底只给无 HitAreas 的模型；容差 2%
+- [ ] 裸滚轮不被劫持；`pointercancel`/`blur` 解除拖拽；平移钳制
+- [ ] `stopLive2D()` 里 `app.destroy()` + `off()` 都做
+- [ ] 无头批量验证：全量命中率与失败清单，含"无判定区"模型列表
