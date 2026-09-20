@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-19（mesh 越框裁头修复换入 55 张；Spine 全屏 CG 231/231 接入画廊；元数据官方数据源与 Live2D 运行时已备妥，交接见 §6 第 5~7 条）
+> **生成时间**: 2026-09-19（§6 第5~6条元数据重建进入实施：`scripts/build_ship_meta.py` 只读诊断跑通，桥接路径与覆盖率已实测校正；标签表就绪待用户拍两个决策后 `--write`。Live2D 运行时已备妥。交接见 §6 第 5~7 条）
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
 
 ---
@@ -102,12 +102,14 @@
 2. ✅ **i404 型「背景缝隙」（2026-09-19）**：无 mesh 部件误用 `mRawSpriteSize` 当画框，改 textureRect 拉伸铺满 RectTransform，10 张换入（备份 `framefix_20260919/`）。painting 本身即半景特写，完整 CG 走 Spine 线（第 4 条）。
 3. ✅ **mesh 越框裁头（2026-09-19，用户报「库尔斯克缺块」）**：`rasterize_mesh` 把内容钳在画框内，而 mesh 顶点可合法越框（kuersike_rw 头部伸出框顶 713px）→ 改按内容 AABB 输出（安全钳 ±2~3 倍框）。扫描 4490 包：84 皮肤越框、**55 张画面实际变化已换入**（29 张越框部分全透明逐像素同旧图；5 张画布按预期变大找回内容）；对照 5 皮肤 maxdiff=0。备份 `Output/_OLD_bak/meshfix_20260919/`，清单 `.diag/mesh_overflow.txt`，对比图 `.diag/cmp_meshfix/`。
 4. ✅ **Spine 动态 + 全屏 CG 导出（2026-09-19）**：viewer 三修（相机视口 `camera.setViewport`、`my` 变量遮蔽 TDZ、0 秒空动画过滤+默认 normal）+ JSON 骨架支持；`cg_export.html` 两段式构图批量导出 **231/231** → `Output/CG_v2/`，画廊默认展示 CG 可切原件，缩略图 `<key>_cg.webp`。详见 WORKFLOWS WF-14。
-5. ⏳ **元数据重建（当前主攻，方案已定，数据已到手）**：
-   - **数据源**：社区解密快照 LYLCLIMBER/azurlane-data（国服 9.7.381，唯一版本）。被墙拉取通道已验证：`https://gh-proxy.com/https://raw.githubusercontent.com/LYLCLIMBER/azurlane-data/main/versions/9.7.381/<file>.json`（api.github.com 亦可走 gh-proxy.com；ghproxy.net 只能代理 raw）。**本地已缓存**：`.diag/azdata_ship_data_statistics.json`(4119 舰) / `.diag/azdata_ship_data_template.json` / `.diag/azdata_ship_skin_template.json`(2863 皮肤)。
-   - **桥接关键**：`ship_skin_template[皮肤ID].painting` = bundle 拼音 ID（如 `kuersike`），同记录含 `name`(中文)、`ship_group`、`voice_actor`、`desc`("重巡洋舰—库尔斯克"→舰种中文兜底)；`ship_data_statistics[舰ID]` 含 `name/english_name/nationality/rarity/type/skin_id`。**不再需要拼音猜测**。
-   - **覆盖率实测**：4490 bundle 直接命中 92.3%；`_n/_hx/_hei/_alter` 后缀推导后 ~97%。剩余：下架联动舰（2b/a2/DOA 系→现有 `ship_name_map` 兜底）、快照后新皮肤（_ex/_wjz/_idolns/_heihua/_shophx→从基名继承）、个别怪例（chicheng_2..4、dahuangfengii、akasita 等→manual 覆盖表）。
-   - **实施**：新建 `scripts/build_ship_meta.py` 产出 `Output/ship_meta.json`（bundleID→{cn,en,faction,type,rarity,voice_actor,category}）；`nationality/rarity/type` 若为数值 ID 先打印值域对照中文；`build_gallery_index.py` 改读 ship_meta（替换 SHIP_NAME_MAP+meta_by_cn 链路）。旧 `ship_name_map.py` 812 条仅 407 条自洽，降级为兜底。
-6. ⏳ **剧情角色与舰船分级（与第 5 条同一次重建做）**：`ship_group` 不在 `ship_data_statistics` 键集 → `category:"story"`（爱酱 aijiang*、TB娘、领航员、NPC 系等），否则 `"ship"`；index.json 落字段；前端筛选器加「舰船/剧情角色」分组，网格分区展示。
+5. 🟡 **元数据重建（实施中：诊断脚本已跑通，待落 `--write`）**：
+   - **脚本**：`scripts/build_ship_meta.py` 已建（默认 `--diag` 只读，`--write` 才产 `Output/ship_meta.json`）。运行：`PYTHONIOENCODING=utf-8 python scripts/build_ship_meta.py`。产物键=画廊 bundleID（Paintings_v2/Spine_v2/Live2D/CG_v2 目录名并集，共 4492），值=`{cn,en,faction,type,rarity,voice_actor,category,base_painting,source}`。
+   - **桥接路径（⚠️已实测校正，覆盖 §6 旧假设）**：磁盘 stem —剥变体后缀(`_n/_hx/_hei/_alter/数字/ii·iii·iv` 等)→ 基 `painting` → `skin[painting].ship_group` →（`stats.skin_id` 命中皮肤的组，实测 4118/4119）→ 舰级 `nationality/rarity/type/english_name`。**旧记录里“用 `ship_group` 直接反查 stats”不成立**（1270 个 ship_group 仅 268 落在 stats 键）；**变体皮肤须经 `ship_group` 归并到舰**，不能靠自身 skin.id。
+   - **覆盖率实测**（Paintings_v2 磁盘 4486 stem）：`painting` 直命中 2493（55.6%）+ 剥后缀 1756 = **4249 解析（94.6%）**；残 **243**（联动下架舰 2b/a2/haixiao_doa/hamanii… + 快照后新皮 _wjz/_ex/_idolns + 剧情角色 aijiang*/领航员/灵扬者/npc* + error13/unknown）。分类：**ship 4035 / story 457**。
+   - **数值码→中文标签表已就绪**（维基一致投票 + `english_name` 前缀 IJN/KMS 佐证）：nationality 1白鹰 2皇家 3重樱 4铁血 5东煌 6撒丁帝国 7北方联合 8自由鸢尾 9维希教廷 11郁金王国 96飓风 97余烬·META 98科研原型(布里系) 102~115=各联动；rarity 2普通 3稀有 4精锐 5超稀有 6海上传奇·决战方案 18超稀有；type 1驱逐 2轻巡 3重巡 4战巡 5战列 6轻航 7航母 8潜艇 10航战 12维修 13重炮 18超巡 19运输 22/23/24风帆。**待回填进脚本常量**。
+   - **⏳ 两个待用户决策的开口**（决定后才 `--write`）：① `voice_actor` 皮肤表只是数字 id，**CV 姓名表未缓存** → (a)存数字id / (b)用 `cn-blocked-resource-mirror-fetch` 补抓 voice 姓名表映射中文声优 / (c)丢弃；② 98科研原型 / 111~115 新联动等非核心码：经验名+兜底原样保留 vs 逐个人工核。
+   - **下一步**：用户拍板 → 写常量表 + `--write` 出 ship_meta.json（贴 3~5 条验收）→ 改 `build_gallery_index.py`（替换 `SHIP_NAME_MAP+meta_by_cn` 链路，改前备份 `index.json`）→ 前端分组。旧 `ship_name_map.py` 812 条仅 407 自洽，降级为兜底。
+6. 🟡 **剧情角色与舰船分级（与第 5 条同一次重建做）**：分类口径已定为「经 `ship_group` 反查到 stats（可获得舰船）→ `category:"ship"`，否则 `"story"`」（**非**旧记录写的“ship_group 是否在 stats 键集”）。脚本已产出 category，ship/story=4035/457。待做：落进 index.json 字段；前端筛选器加「舰船/剧情角色」分组、网格分区展示。
 7. ⏳ **Live2D 动作播放接入（运行时已下载就位）**：`Output/gallery_v2/vendor/live2d/` 已有 `live2dcubismcore.min.js`(5.1.0，l2d.su 直链) + `pixi.min.js`(6.5.2) + `pixi-live2d-display-cubism4.min.js`(0.4.0)（后两个走 npmmirror tgz；pixi6.5.2+display0.4.0 组合）。待做：index.html Live2D 标签懒加载三脚本 → `PIXI.Application` + `Live2DModel.from(model3.json)` → 播放 motions/（244/256 有真实动画）；先 1-2 个模型样本验收再全量。模型资产零缺口（§9.5 已核查）。
 8. ⏸️ **missd（D小姐）「黑影」——用户暂搁置**。
 
