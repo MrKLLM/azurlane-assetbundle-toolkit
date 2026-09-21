@@ -150,7 +150,8 @@
    - **权威映射（本轮新逆向）**：curve idx ↔ `AnimationClip.m_ClipBindingConstant.genericBindings[i]` 同序，`binding.path = crc32("Parameters/<GameObject名>")`（部件 `crc32("Parts/"+名)`）。跨模型 946,274 绑定解析率 99.77%，91.7% clip 参数序号严格递增。`CubismParameter.m_Name` 为空，真名在 GameObject，`_unmanagedIndex` 才是参数序号。
    - **修了什么**：`extract_motions.py` 重写（去护栏/参考姿态帧作 t=0 基准/crc32 权威 Target+Id/真实 Duration+Loop/Unity 切线→Cubism 贝塞尔且 dv≈0 退化线性/**按运行时消费方式重放的结构自检**/解出 0 条即报错退出）；`reconstruct_live2d.py` 不再写占位壳；`fix_model3.py` 剪悬空引用 + `L2D_OUT_DIR` 开关；前端 fit 基准改 `internalModel.width/height`、非 idle 动作按时长回落 idle（须 FORCE）。
    - **官方"拼接逻辑"落地**：79 模型的 **PartOpacity**（换装/部件可见性）曲线已写进 motion3.json——实测运行时 `pixi-live2d-display 0.4.0` **不读 pose3.json / model3 的 Pose**，只认 motion 的 `Target:"PartOpacity"`，故只能走这条路。
-   - **换入与校验**：临时目录 `.diag/l2d_new` 全量重跑 → 审计 shell 0 / misassign 0 → 浏览器 A/B（`scripts/diag/l2d_ab.py`）证实旧数据 `ParamEyeLOpen=0`（闭眼静止）、新数据正常眨眼 → `apply_live2d_motions.py --yes` 换入（旧数据 **move** 备份 `Output/_OLD_bak/l2d_motion_20260921_141226/`）。曲线总数 179,072 → **856,870**；生产目录复核：7295 文件 / 0 空壳 / 0 未引用 / 0 悬空引用。
+   - **换入与校验**：临时目录 `.diag/l2d_new` 全量重跑 → 审计 shell 0 / misassign 0 → 浏览器 A/B（`scripts/diag/l2d_ab.py`）逐条驱动抽验 9 个模型：旧数据出现 `ParamEyeLOpen=0` 静止闭眼、`heitaizi_2` 旧侧直接加载失败，新数据正常眨眼/呼吸 → `apply_live2d_motions.py --yes` 换入（旧数据 **move** 备份 `Output/_OLD_bak/l2d_motion_20260921_141226/`）。曲线总数 179,072 → **856,870**；生产目录复核：7295 文件 / 0 空壳 / 0 未引用 / 0 悬空引用。
+   - ⚠️ **未完成的全量浏览器回归**：`scripts/diag/l2d_sweep.py` 已升级为内容判据（curveCount>0 且目标值变化），但它把 45~260 个模型塞进**一次** `Runtime.evaluate` 驱动，实测换数据后卡在第一条不返回（A/B 逐条驱动则正常）——已在脚本头写明「别把它当已通过的空壳检验」。全量浏览器回归请改成 Python 侧逐条 evaluate 后再跑；本轮结论依据是**全量文件级审计 + 9 模型 A/B**。
    - **⚠️ 此前 §6.7 的「260/260 动作启动、767/768 命中」判据作废**：`currentGroup` 变了不代表动作有效，空壳也能启动。判据已升级为「`_motionData.curveCount>0` 且曲线目标值随时间变化」（`scripts/diag/l2d_sweep.py` 已改）。
    - 详见 `docs/TROUBLESHOOTING.md` §17；技能 `live2d-web-runtime-integration` 已补 §6.5「motion 权威映射」与 §7 内容判据。
 

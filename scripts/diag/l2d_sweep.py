@@ -1,7 +1,15 @@
 # -*- coding: utf-8 -*-
 """全量 Live2D 无头加载扫描：逐个渲染 260 个模型，断言
    ① 模型加载成功 ② 动作组解析 ③ 默认动作真的启动(state.currentGroup 非空) ④ 切到另一组动作也启动
-用法: py -3 .diag/l2d_sweep.py [--limit N]
+   ⑤ **内容判据**（2026-09-21 补）：正在播的 motion 的 curveCount>0 且其曲线目标值随时间变化——
+      只验 ③④ 会放过 "Curves":[] 的空壳，曾据此报出"260/260 全通过"而实际 57% 是空壳。
+
+⚠️ 驱动方式已知问题：本脚本把整个循环塞进**一次** Runtime.evaluate(awaitPromise) 里跑，
+   实测在换入重建后的动作数据后会卡在第一条记录上不返回（A/B 脚本 l2d_ab.py 逐条驱动则正常），
+   疑与单次求值期间 ws 轮询/大模型解析相互阻塞有关。要全量回归请改成「Python 侧逐条 evaluate」，
+   或临时用 l2d_ab.py 抽样。**判据本身可用**，别把它当已通过的空壳检验。
+
+用法: py -3 scripts/diag/l2d_sweep.py [--limit N]   （需先在 Output 根起 http.server 8777）
 输出: .diag/l2d_sweep.json + 进度 .diag/l2d_sweep.log
 """
 import sys, os, json, time, subprocess, urllib.request
