@@ -176,7 +176,84 @@
 
 ---
 
-### WF-7: Live2D 动作数据提取与参数映射
+### WF-7: Live2D 动作提取与安全重建（权威映射 + 换入管线）
+
+**日期**: 2026-06-20（旧版）→ **2026-09-21 重写**（旧版的参数映射是错的，见「禁止」）
+**目标**: 从 Unity `AnimationClip` 还原可用的 Cubism `motion3.json`，并在**不毁掉既有正确产物**的前提下安全换入
+**适用场景**: Live2D 动作"不动 / 乱飘 / 乱闪"排查、动作层重生成、新增 live2d bundle 补齐、游戏版本更新后动作重跑
+
+#### 一、权威映射（先记事实，再谈步骤）
+
+1. `m_StreamedClip` 的 **curve index 与 `AnimationClip.m_ClipBindingConstant.genericBindings[i]` 同序**。
+2. `genericBindings[i].path = crc32("Parameters/<GameObject名>")`（参数）/ `crc32("Parts/<GameObject名>")`（部件）。
+   实测跨模型 946,274 个绑定解析率 **99.77%**，不是 sdbm/djb2/FNV/CRC-16。
+3. 属性哈希分目标类型：`3702945584`=`Parameter.Value` → `Target:"Parameter"`；
+   `2353026298`=`Part.Opacity` → `Target:"PartOpacity"`（官方换装/部件可见性，**79 模型有**）；
+   `4109387685`=疑 Drawable 颜色/透明度，Web 运行时无对应 target → 跳过并计数（占 0.226%）。
+4. `CubismParameter` 组件 `m_Name` 为空，**真名挂在 GameObject 上**；`_unmanagedIndex` 才是 moc3 参数序号，
+   且被动画化的序号**稀疏**（`lingbo/idle` = 0,1,2,8,9,12,13,14,15,18,21,22,23,26,27）。
+
+#### 二、步骤（命令按序，均可直接复制）
+
+1. **重生成到临时目录**（绝不可先写正式目录）：
+   `L2D_OUT_DIR="D:\Azur Lane Assets\.diag\l2d_new" PYTHONIOENCODING=utf-8 py -3 scripts/extract_motions.py --all`
+   → 退出码 1 是预期的，但**失败清单必须只包含资产层本就为空的 clip**（当前 7 条：`*_3/effect`、`wuqi_3/idle11` 等）。
+   出现别的失败就是解析器又退化，先修再往下走。
+2. **全量审计**（内容判据，不是状态标签）：
+   `L2D_OUT_DIR="...\.diag\l2d_new" py -3 scripts/diag/l2d_motion_audit.py`
+   → 要求 `misassign 0`；`shell` 只允许等于第 1 步的真空清单；顺带看 `part_opacity_curves`、`src_dur` 是否非 0。
+3. **换入前做浏览器 A/B 对照**（此时 old=旧数据、new=新数据才有意义）：
+   先在 Output 根起 `py -3 -m http.server 8791 -b 127.0.0.1 -d Output`，再
+   `py -3 scripts/diag/l2d_ab.py <模型> --motion idle`
+   → 至少选 1 个"全空壳"模型（应看到旧侧参数纹丝不动、新侧在动）+ 1 个带 PartOpacity 的模型。
+   这一步是用来抓"文件看着合法但运行时拒收"的问题——贝塞尔段序 bug 就是这么发现的。
+4. **备份换入**（只动 `motion/`，moc3/贴图/physics/model3 不碰）：
+   `py -3 scripts/apply_live2d_motions.py`（干跑看曲线总数变化）→ 加 `--yes` 执行。
+   旧数据按时间戳目录 **move** 到 `Output/_OLD_bak/l2d_motion_<ts>/`，回滚 = 把目录挪回去。
+5. **对齐 model3 引用 + 生产复核**：
+   `py -3 scripts/fix_model3.py`（剔除指向缺失文件的动作引用）
+   然后三项必须为 0：空壳文件数、未被引用的 motion 文件数、被引用但不存在的文件数。
+6. **同步前端**：改了 `gallery_src/` 就 `py -3 scripts/deploy_gallery.py`；
+   用户侧用 `启动资产浏览器.bat`（自带 no-cache，避免"还是旧界面"）。
+7. **补新 bundle / 新增模型**（例如尚未还原的 9 个）：
+   `py -3 scripts/reconstruct_live2d.py --name X` → `py -3 scripts/extract_motions.py --name X`
+   → `py -3 scripts/fix_model3.py` → 审计该模型 → `build_gallery_index.py` + `make_thumbs.py` 增量 → 抽验。
+   ⚠️ index/thumbs 是全量重建产物，跑前确认没有在途改动（见 WF-15 白名单）。
+
+#### 三、禁止（每条都对应一次真实事故）
+
+- **禁止给 StreamedClip 的 `numKeys` 设上限**：帧 0 是 `time=-3.4e38` 的参考姿态帧，一帧写完全部曲线
+  （大模型 380~520 key），护栏会在帧 0 崩掉整条动作 → 实测曾致 **5037/8154(61.8%) 空壳**。只能靠 `+inf` 结束符 + 缓冲区边界停。
+- **禁止按"curve idx == 参数序号（从 0 连续）"或按组件枚举顺序取参数名**：必然错位（眼睛数据写进眉毛参数）。
+- **禁止写 `"Curves": []` 之类占位产物**：它结构合法、能"播"，会把失败伪装成成功——这是本 bug 潜伏一年多的根因。
+  缺失就让它显式缺失（404/报错），`reconstruct_live2d.py` 已按此改。
+- **禁止用 `state.currentGroup` 判断动作是否有效**：空壳也能启动。要判 ① `curveCount>0` ② 曲线目标值随时间变化。
+- **禁止出 `pose3.json` 承载换装逻辑**：`pixi-live2d-display 0.4.0` 不读它（`"Pose"` 出现 0 次），只能走 motion3 的 `Target:"PartOpacity"`。
+- **贝塞尔段序必须是 `[1, c1x, c1y, c2x, c2y, 终点time, 终点value]`**（终点在最后，无第 5 个"interpolation"字段）；
+  `segments` 按 `Meta.TotalSegmentCount` 预分配，计数少一位就抛 `basePointIndex of undefined`，前端只表现为"这模型不动"。
+  `extract_motions.py` 已内置"按运行时消费方式重放"的结构自检，别绕过它。
+
+#### 四、验证工具与已知遗留
+
+| 工具 | 用途 |
+|---|---|
+| `scripts/diag/l2d_motion_audit.py` | 全量健康审计（空壳/错位/PartOpacity/时长），`L2D_OUT_DIR` 可指向任意产物目录 |
+| `scripts/diag/l2d_ab.py` | 同一模型新旧 motion 的渲染级 A/B（**只在换入前构成对照**） |
+| `scripts/diag/l2d_diff_dirs.py` | 两个产物目录逐 clip gained/changed/lost |
+| `scripts/apply_live2d_motions.py` | 干跑/备份换入 |
+
+遗留：`l2d_sweep.py` 判据已升级为内容判据，但它把整轮循环塞进**一次** `Runtime.evaluate`，换数据后会卡住 → 全量浏览器回归需改成 Python 侧逐条驱动；
+0.226% 绑定（疑 Drawable 颜色）无 target 可映射，跳过；`HitAreas` 仍由 `Touch*` drawable 推导，未用官方 `CubismRaycastable`；表情 `CubismExpressionController` 未还原。
+
+**踩坑记录**: 详见 `docs/TROUBLESHOOTING.md` §17（空壳+错位双根因、crc32 破译过程、贝塞尔段序自伤与被 A/B 抓出）
+
+**涉及文件**: `scripts/extract_motions.py`、`scripts/reconstruct_live2d.py`、`scripts/fix_model3.py`、`scripts/apply_live2d_motions.py`、`scripts/deploy_gallery.py`、`gallery_src/index.html`、`scripts/diag/l2d_motion_audit.py`、`scripts/diag/l2d_ab.py`
+
+---
+
+#### 附：旧版 WF-7 原文（2026-06-20，已作废，仅备查）
+
+**（原标题）WF-7: Live2D 动作数据提取与参数映射**
 
 **日期**: 2026-06-20
 **目标**: 从 AnimationClip StreamedClip 提取真实 motion3.json 数据
@@ -202,6 +279,10 @@
 - moc3 参数数量可能少于 motion 期望的数量（版本不匹配）
 
 **涉及文件**: `scripts/extract_motions.py`
+
+---
+
+> 作废理由：第 6 步「从 moc3 提取参数名建立索引→名称映射」+ 踩坑里按偏移猜参数名，是本次 3117 条曲线名全错位的根源；「sentinel+curveCount 8 字节头」实为参考姿态帧的 time+numKeys。
 
 ---
 

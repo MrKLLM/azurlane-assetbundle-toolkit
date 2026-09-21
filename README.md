@@ -50,7 +50,7 @@ docs/                # 操作手册 / 工作流 / 踩坑 / 工具说明 / 归档
 | `compose_paintings_v2.py` | ★ 静态立绘 v2 合成（数据驱动） |
 | `extract_spine_v2.py` | ★ Spine 动态立绘 v2 提取 |
 | `run_v2_full.py` | v2 全量批跑编排 |
-| `reconstruct_live2d.py` / `fix_model3.py` / `extract_motions.py` | Live2D 还原 |
+| `reconstruct_live2d.py` / `fix_model3.py` / `extract_motions.py` / `apply_live2d_motions.py` | Live2D 还原与动作重建（流程见 `docs/WORKFLOWS.md` WF-7） |
 | `build_gallery_index.py` / `make_thumbs.py` | 生成本地浏览平台数据与缩略图（含 CG_v2） |
 | `deploy_gallery.py` | `gallery_src/` 前端源码 → `Output/gallery_v2/` 部署同步 |
 | `gallery_src/cg_export.html` | Spine setup pose 全屏 CG 批量导出页（配 `_gallery_server.py --export` / 无头 Chrome） |
