@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""修复所有 Live2D model3.json 文件为 Live2DViewerEX 兼容格式"""
+"""修复所有 Live2D model3.json 文件为 Live2DViewerEX / Web 运行时兼容格式。
+
+输出目录可用 L2D_OUT_DIR 覆盖（用于先在临时目录验证再换入正式目录）。
+"""
 
 import os
 import json
 
-OUTPUT_DIR = r"D:\Azur Lane Assets\Output\Live2D"
+OUTPUT_DIR = os.environ.get("L2D_OUT_DIR") or r"D:\Azur Lane Assets\Output\Live2D"
 
 fixed = 0
 for model_name in sorted(os.listdir(OUTPUT_DIR)):
@@ -70,14 +73,53 @@ for model_name in sorted(os.listdir(OUTPUT_DIR)):
         refs['Physics'] = f"{model_name}.physics3.json"
         changed = True
 
-    # 修复 Motions: 添加 FadeInTime/FadeOutTime
-    if 'Motions' in refs:
-        for group_name, motions in refs['Motions'].items():
-            for motion in motions:
+    # 修复 Motions: 添加 FadeInTime/FadeOutTime；并**剔除指向不存在文件的动作组**
+    # （碧蓝有极少数 clip 在资产层就是空的，如 *_3 的 effect / wuqi_3 的 idle11；
+    #   extract_motions.py 现在不再为此写空壳，留着引用只会在下拉里出现"点了没反应"的死项）
+    refs['Motions'] = refs.get('Motions') or {}
+    pruned = 0
+    for group_name in list(refs['Motions'].keys()):
+        keep = []
+        for motion in refs['Motions'][group_name] or []:
+            fp = os.path.join(model_dir, motion.get('File', ''))
+            if motion.get('File') and os.path.isfile(fp):
                 if 'FadeInTime' not in motion:
                     motion['FadeInTime'] = 0.5
                     motion['FadeOutTime'] = 0.5
                     changed = True
+                keep.append(motion)
+            else:
+                pruned += 1
+        if keep:
+            if refs['Motions'][group_name] != keep:
+                refs['Motions'][group_name] = keep
+                changed = True
+        else:
+            del refs['Motions'][group_name]
+            changed = True
+    if pruned:
+        print(f"  {model_name}: 剔除 {pruned} 条指向缺失文件的动作引用")
+
+    # 补登记：磁盘上存在但 model3.json 没引用的动作文件
+    # （权威提取能解出的 clip 比旧占位清单多——实测多 852 条，不补就永远选不到）
+    mdir = os.path.join(model_dir, 'motion')
+    referenced = {os.path.normpath(m.get('File', '')) for ms in refs['Motions'].values() for m in (ms or [])}
+    added = 0
+    if os.path.isdir(mdir):
+        for fn in sorted(os.listdir(mdir)):
+            if not fn.endswith('.motion3.json'):
+                continue
+            rel = os.path.join('motion', fn)
+            if os.path.normpath(rel) in referenced:
+                continue
+            group = fn[:-len('.motion3.json')]
+            refs['Motions'].setdefault(group, [])
+            refs['Motions'][group].append({'File': rel.replace('\\', '/'),
+                                           'FadeInTime': 0.5, 'FadeOutTime': 0.5})
+            added += 1
+    if added:
+        print(f"  {model_name}: 补登记 {added} 条未引用的动作")
+        changed = True
 
     if changed:
         model['FileReferences'] = refs

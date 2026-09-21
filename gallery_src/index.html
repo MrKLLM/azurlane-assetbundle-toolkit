@@ -371,9 +371,13 @@ async function renderLive2D(s, sk){
     const mdl=await L2M.from(P+model+'/'+sk.live2dBase+'.model3.json',{autoInteract:false});
     if(my.cancelled||seq!==_l2seq){ app.destroy(true,{children:true}); return; }
     app.stage.addChild(mdl);
-    /* fit 必须用「未缩放尺寸」：mdl.width 已含 scale，直接用它会在 ResizeObserver 二次触发时正反馈放大 */
+    /* fit 基准必须用 internalModel.width/height（= Cubism 画布单位 × pixelsPerUnit）。
+       mdl.width 取的是渲染包围盒：个别模型有巨型离屏 quad，bbox 被撑到几百万像素，
+       用它算适配系数会让模型偏小/跑出视野，看起来像「模型乱飘、位置不对」。 */
     let baseK=1, z=1, ox=0, oy=0;
-    const natW=mdl.width/mdl.scale.x, natH=mdl.height/mdl.scale.y;
+    const im=mdl.internalModel;
+    const natW=(im && im.width>1 ? im.width : (mdl.width/Math.max(1e-6,mdl.scale.x)))||1;
+    const natH=(im && im.height>1 ? im.height : (mdl.height/Math.max(1e-6,mdl.scale.y)))||1;
     const apply=()=>{ mdl.scale.set(baseK*z);
       mdl.x=(wrap.clientWidth-natW*baseK*z)/2+ox; mdl.y=(wrap.clientHeight-natH*baseK*z)/2+oy; };
     function fit(){ const cw=wrap.clientWidth||1, ch=wrap.clientHeight||1;
@@ -382,15 +386,36 @@ async function renderLive2D(s, sk){
     const groups=Object.keys((mdl.internalModel.motionManager.definitions)||{});
     const mm=mdl.internalModel.motionManager;
     const MP=(PIXI.live2d&&PIXI.live2d.MotionPriority)||{IDLE:1,NORMAL:2,FORCE:3};
+    const idleGroup=['idle','main','home'].find(g=>groups.includes(g))||groups[0]||null;
     /* startMotion 必须显式给 index：传 null 会让库取 motion[group][null] → undefined 而静默失败；
        priority 也不能传 false（会被当 0 而低于当前优先级被拒） */
     const play=g=>{ if(!g) return false; try{ return mm.startMotion(g,0,MP.FORCE)!==false; }catch(e){ return false; } };
+    /* 官方 motion 大多 Loop=true（游戏里由状态机切走），网页里若一直播完不回落，
+       点一次部位就永远重复那个反应，看着像「乱动/乱闪」。按动作自身时长定时回落到 idle。
+       回落必须用 FORCE：库的 state.reserve() 会拒绝低于当前优先级的请求（IDLE=1 < FORCE=3 直接被拒）。 */
+    const _durCache={}; let _rvTok=0;
+    async function motionMs(g){
+      try{
+        const d=(mm.definitions[g]||[])[0]; if(!d||!d.File) return 4000;
+        if(_durCache[d.File]) return _durCache[d.File];
+        const r=await fetch(P+model+'/'+d.File); if(!r.ok) return 4000;
+        const j=await r.json(); const sec=(j&&j.Meta&&+j.Meta.Duration)||0;
+        const ms=Math.max(1200, sec*1000+300); _durCache[d.File]=ms; return ms;
+      }catch(e){ return 4000; }
+    }
+    const scheduleIdle=g=>{
+      if(!idleGroup||g===idleGroup) return;
+      const tok=++_rvTok;
+      motionMs(g).then(ms=>{ if(my.cancelled||tok!==_rvTok) return;
+        setTimeout(()=>{ if(my.cancelled||tok!==_rvTok) return;
+          try{ if(mm.startMotion(idleGroup,0,MP.FORCE)!==false && sel) sel.value=idleGroup; }catch(e){} }, ms); });
+    };
     const bar=document.getElementById('l2bar');
     bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     sel.innerHTML=groups.map(g=>`<option value="${g}">${g}</option>`).join('');
-    sel.onchange=()=>play(sel.value);
-    document.getElementById('l2Replay').onclick=()=>play(sel.value);
+    sel.onchange=()=>{ if(play(sel.value)) scheduleIdle(sel.value); };
+    document.getElementById('l2Replay').onclick=()=>{ const g=sel.value; if(play(g)) scheduleIdle(g); };
     document.getElementById('l2Fit').onclick=fit;
     document.getElementById('l2Full').onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else viewEl.requestFullscreen().catch(()=>{}); };
     const ro=new ResizeObserver(fit); ro.observe(wrap);
@@ -432,7 +457,7 @@ async function renderLive2D(s, sk){
       const name=hitAt(lp.x/ppu, lp.y/ppu);
       const g = name && (groups.includes(name) ? name : groups.find(x=>x.toLowerCase()===name.toLowerCase())) || (name?null:fallbackG);
       if(!g) return;
-      if(play(g)){ sel.value=g; const pill=document.getElementById('l2Hit');
+      if(play(g)){ scheduleIdle(g); sel.value=g; const pill=document.getElementById('l2Hit');
         if(pill) pill.textContent=(name?'部位 '+name+' → ':'')+g; } };
     const onCancel=()=>{ dragging=false; };
     /* 缩放必须按住 Ctrl(或 ⌘/Alt)：裸滚轮要留给页面滚动。
@@ -458,7 +483,7 @@ async function renderLive2D(s, sk){
       wrap.removeEventListener('pointercancel',onCancel);
       window.removeEventListener('pointercancel',onCancel); window.removeEventListener('blur',onCancel);
       window.removeEventListener('pointermove',onMove); window.removeEventListener('pointerup',onUp); };
-    const def=['idle','main','home'].find(g=>groups.includes(g))||groups[0];
+    const def=idleGroup;
     if(sel.value!==def) sel.value=def||'';
     play(def);
   }catch(e){ if(my.cancelled||seq!==_l2seq)return;

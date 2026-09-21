@@ -98,7 +98,37 @@ state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.remov
 - 平移量要钳制（如 `max(wrapW,wrapH)*0.6`），防止把模型拖出视野再也找不回。
 - 位移 < 6px 视为"点击"而非"拖拽"，用来触发动作。
 
+## 6.5 motion 数据从哪来：Unity AnimationClip → motion3.json 的权威映射
+
+（从 Unity AssetBundle 侧还原动作时的正确姿势，2026-09-21 碧蓝航线实测）
+
+- **curve index ↔ `m_ClipBindingConstant.genericBindings[i]` 同序**；且
+  `genericBindings[i].path = crc32("Parameters/<GameObject名>")`，部件是 `crc32("Parts/"+名)`。
+  实测 946274 个绑定的解析率 99.77%（未解析的 0.226% 是第三类属性哈希，运行时无对应 motion target，只能跳过）。
+  不是 sdbm/djb2/FNV——别再试别的哈希函数。
+- `CubismParameter` 组件的 `m_Name` 是**空**的：真名挂在 **GameObject** 上，`_unmanagedIndex` 才是
+  moc3 参数序号。被动画化的序号是**稀疏**的（实测 `lingbo/idle` = 0,1,2,8,9,12,13,14,15,18,…），
+  所以**绝不能假设 "curve idx == 参数序号（从 0 连续）"**——这是"眼睛数据写进眉毛参数"的来源，
+  模型会照常动，只是动得面目全非（乱飘/乱闪/个别没反应）。按组件枚举顺序取参数名同样是错的。
+- StreamedClip 的**帧 0 是 `time=-3.4e38` 的参考姿态帧，一帧合法写完全部曲线**（大模型一帧 380~520 个 key）。
+  任何 `if numKeys > N: break` 之类的"合理性护栏"都会在帧 0 崩掉整条动作；
+  只能靠 `+inf` 结束符 + 缓冲区边界停。该帧要当作各曲线 t=0 的基准值，而不是当普通关键帧丢掉。
+- **贝塞尔段序：`[1, c1x, c1y, c2x, c2y, 终点time, 终点value]` —— 终点在最后**，官方没有第 5 个"interpolation"字段。
+  且 `segments` 数组是按 `Meta.TotalSegmentCount` **预分配**的：计数少算一位，浏览器里就抛
+  `Cannot set properties of undefined (setting 'basePointIndex')`，而前端只表现为"这个模型点了没反应"。
+  → 写完必须按运行时的消费方式重放一遍自检（首对 l+=2/点+1，线性 l+=3/点+1，贝塞尔 l+=7/点+3）。
+- Unity 切线换 Cubism 归一化控制点时，`dv≈0` 会把控制点顶到 `by=14.9` 这种量级反而抖；
+  `|dv| < 1e-3·max(1,|v0|,|v1|)` 或 `|by|>3` 时退化成线性段。
+- 运行时**完全不读 `pose3.json` / model3 的 `Pose` 键**（该字符串在 pixi-live2d-display 里出现 0 次），
+  但支持 motion3 的 `Target:"PartOpacity"` → 换装/部件可见性只能写进 motion3.json，出 pose3 是死路。
+
 ## 7. 无头验证判据（配合 CDP）
+
+- **判"动作真的有效"要同时满足两条**：① 正在播的 motion 的 `_motionData.curveCount > 0`；
+  ② 取该 motion 自己的曲线 Id，`getParameterValueById` / `getPartOpacityById` 的值随时间变化。
+  只看 `state.currentGroup` 变了没有，会让 `"Curves": []` 的空壳全部绿灯通过
+  （本项目就曾因此报出"260/260 全通过"，而实际 57% 是空壳、其余曲线名全错）。
+  按部位点击的断言同理：别只断言组名标签，要断言内容。
 
 批量验证 260 个模型时的做法（驱动细节见 `headless-chrome-cdp-batch-export`）：
 

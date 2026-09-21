@@ -284,28 +284,14 @@ def reconstruct_model(bundle_path, output_dir):
     with open(os.path.join(model_dir, f"{name}.model3.json"), "w", encoding="utf-8") as f:
         json.dump(model3, f, indent=2, ensure_ascii=False)
 
-    # 6. 生成 motion 占位文件（实际动作数据需要从 AnimationClip 提取）
-    for clip_name in motion_names:
-        motion_data = {
-            "Version": 3,
-            "Meta": {
-                "Duration": 3.0,
-                "Fps": 30.0,
-                "Loop": True,
-                "AreBeziersRestricted": True,
-                "CurveCount": 0,
-                "TotalSegmentCount": 0,
-                "TotalPointCount": 0,
-                "UserDataCount": 0,
-                "TotalUserDataSize": 0
-            },
-            "Curves": [],
-            "Segments": [],
-            "UserData": [],
-            "Physics": None
-        }
-        with open(os.path.join(motion_dir, f"{clip_name}.motion3.json"), "w") as f:
-            json.dump(motion_data, f, indent=2)
+    # 6. 动作数据由 scripts/extract_motions.py 生成。
+    #    ⚠️ 这里**不再**写 "Curves": [] 占位文件：占位文件长得像合法 motion3.json，
+    #    提取失败时会静默留下空壳（实测曾让 5037/8154 条动作变成"能播但不动"），
+    #    缺失的动作文件应当是显式的 404/报错，而不是伪装成数据。
+    missing = [c for c in motion_names
+               if not os.path.isfile(os.path.join(motion_dir, f"{c}.motion3.json"))]
+    if missing:
+        print(f"[i] {name}: {len(missing)} 条动作待 extract_motions.py 生成")
 
     return True, ""
 

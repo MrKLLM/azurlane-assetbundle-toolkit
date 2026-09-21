@@ -175,7 +175,7 @@ Details:
 
 ---
 
-## 9. Motion extraction quality issues
+## 9. Motion extraction quality issues（✅ 已解决，见 §17）
 
 **Date**: 2026-06-20
 **Symptom**: Eye animations stick, some models dont trigger, motion quality varies
@@ -200,7 +200,7 @@ Known issues:
 
 ---
 
-## 10. StreamedClip binary format not fully reverse-engineered
+## 10. StreamedClip binary format not fully reverse-engineered（✅ 已解决，见 §17）
 
 **Date**: 2026-06-20
 **Symptom**: Motion extraction produces empty or corrupted data for some models
@@ -219,9 +219,103 @@ Affected behavior:
 - Some models have 0 curves in extracted motions
 - Motion quality varies between models
 
-**Status**: Needs further research
+**Status**: ✅ 已于 2026-09-21 彻底解决，见 §17（护栏误杀帧 0 + 曲线名按位置猜）
 **Reference**: AssetStudio source code at github.com/Perfare/AssetStudio
 **Files**: scripts/extract_motions.py
+
+---
+
+
+## 17. Live2D「有的乱飘/有的乱闪/点了没反应」= 57% 动作是空壳 + 其余曲线名全部错位
+
+**Date**: 2026-09-21
+**Symptom**: 画廊 Live2D 部分模型乱飘、部分乱闪、部分点了没反应；而无头批量验证却报 260/260 全通过
+**Root Cause**: 提取管线的两处**静默失败**（都不在前端；前端只是把坏数据如实渲染出来）
+
+### 根因一：护栏误杀帧 0 → 整条动作退化成空壳
+
+`extract_motions.py` 旧护栏 `if num_keys < 0 or num_keys > 100: break`。但 StreamedClip 的
+**帧 0 是 time=-3.4e38 的「参考姿态帧」，一帧合法写完全部曲线** —— 碧蓝大模型 200~800 个参数，
+实测帧 0 有 111~515 个 key（`aerbien_3` 为 381~515），必然触发护栏 → `frames=[]` →
+`extract_motion()` 返回 None → **不覆盖** `reconstruct_live2d.py` 写好的 `"Curves": []` 占位文件。
+占位文件结构完全合法（Duration 兜底 3.0、Loop True），运行时"能播"，但什么都不动。
+
+实测规模：**8154 条 clip 里 5037 条（61.8%）是空壳**；260 个模型中 16 个全空壳、219 个半空壳。
+
+### 根因二：曲线名靠位置猜，与真实参数对不上
+
+旧逻辑假设 *curve index == moc3 参数序号（从 0 连续）*。真实关系是：
+
+```
+m_StreamedClip 的 curve index  <->  AnimationClip.m_ClipBindingConstant.genericBindings[i]
+genericBindings[i].path = crc32("Parameters/<GameObject名>")  -> Target=Parameter
+                          crc32("Parts/<GameObject名>")       -> Target=PartOpacity（部件可见性）
+```
+
+`CubismParameter` 组件的 `m_Name` 是**空**的（真名挂在 GameObject 上），`_unmanagedIndex` 才是
+moc3 参数序号。于是被动画化的参数序号是**稀疏**的：`lingbo/idle` 真实为
+`0,1,2,8,9,12,13,14,15,18,21,22,23,26,27`，旧实现却按 0..14 连续取名 →
+**眼睛数据写进 `ParamBrowLY`、手臂数据写进 `PARAM_Smile_eye`**。
+实测 **0/8154** 条 clip 满足 dense 前提，即 3117 个"非空壳"文件的曲线名**无一正确**。
+
+独立裁判（不依赖我自己的映射）：用 Cubism 通用取值域查越域 —— 旧数据 **23.1%** 越域
+（`ParamCheek` 78%、`ParamMouthOpenY` 61%、`ParamEyeLOpen` 47%），新数据 **2.9%**（仅眼开度，
+说明这些模型眼开度合法上限 >1）。越域值在运行时被 clamp → 就是"点了没反应"。
+
+跨模型验证：946274 个绑定用 crc32 解析，未解析仅 **0.226%**；**91.7%** 的 clip 解出的参数序号
+严格递增（若 curve idx 与 binding 无关则概率约 1/n!，不可能）—— 映射链成立。
+
+### 为什么无头验证没抓到
+
+判据用错了：`l2d_sweep.py` 看 `motionManager.state.currentGroup` 变化 = "动作启动了"，
+**空壳也会启动**；`hit_verify.py` 看 `currentGroup == 部位名`，同样只看标签。
+两者都不看 Curves 条数与曲线名，于是"767/768 全中"与"数据全错"同时成立。
+→ **动效类验证的判据必须是内容（Curves 条数、Id 是否命中 moc3 参数表），不是状态机标签。**
+
+### 官方资产里确实有「拼接逻辑」，且有两处硬约束
+
+bundle 内组件实测：`CubismPart`×12~363 + `CubismPartColorsEditor` + `CubismFadeController` +
+`CubismPoseController` + `CubismExpressionController` + `CubismEyeBlinkController` +
+`CubismMouthController`/`CubismCriSrcMouthInput` + `CubismLookParameter` + `CubismMaskController` +
+`CubismRaycastable`（**真实点击区**；我们现在拿 `Touch*` drawable 猜）。
+
+1. 运行时 pixi-live2d-display 0.4.0 **完全不读 model3.json 的 `Pose`/pose3.json**
+   （字符串 `"Pose"` 在该 js 中出现 0 次），但**支持 motion3.json 的 `Target:"PartOpacity"`**
+   → 换装/部件可见性**必须写进 motion3.json**，出 pose3.json 是死路。
+   实测 79 个模型带这类曲线（`gaoxiong_7` 3548 条、`xukufu_2` 462、`bisimai_2` 351）。
+2. 第三类绑定属性哈希 `4109387685`（疑 Drawable 颜色/透明度）运行时无对应 motion target，
+   占全部绑定 **0.226%** → 按用户决策跳过并记录。
+
+### 修法（三处，全部代码级、零逐角色调参）
+
+1. `scripts/extract_motions.py` 重写映射核心：去护栏（靠 `+inf` 结束符 + 缓冲区边界）、
+   参考姿态帧当 t=0 基准值、crc32 绑定解析定 Target/Id、真实 Duration/Loop、
+   Unity 切线→Cubism 归一化贝塞尔（|dv| 过小或控制点 >3 时退化线性，防过冲抖动，
+   实测未防护时 `by1=14.93`）、**解出 0 条曲线即报错退出，绝不静默**。
+2. `scripts/reconstruct_live2d.py` **不再写 `"Curves": []` 占位文件** —— 缺文件应当显式 404，
+   而不是伪装成合法数据（这是本次能潜伏一年多的根本原因）。
+3. `gallery_src/index.html`：fit 基准改用 `internalModel.width/height`（`mdl.width` 是渲染包围盒，
+   个别模型被巨型离屏 quad 撑爆 → 模型偏小/跑出视野，观感即"乱飘"）；
+   非 idle 动作按其时长定时回落 idle —— **回落必须用 FORCE**，
+   库的 `state.reserve()` 会直接拒绝低于当前优先级的请求（IDLE=1 < FORCE=3）。
+
+### 附带踩坑：自己新写的贝塞尔段序也被 A/B 抓出来了
+
+首次重跑后 A/B 显示新产物 `currentGroup=null`、参数纹丝不动 —— 运行时抛
+`Cannot set properties of undefined (setting 'basePointIndex')`。原因：motion3.json 的贝塞尔段
+**官方段序是 `[1, c1x, c1y, c2x, c2y, 终点time, 终点value]`（终点在最后）**，
+运行时每段消费 `l+=7` 并把 3 个点对读成 `(c1, c2, dest)`、用 `basePointIndex+3` 定位下一段起点。
+我按 `[1, c1x,c1y,c2x,c2y, interpolation=0, t, v]` 写（多塞一个"插值"字段）导致整体错位，
+而 `segments` 数组是按 `Meta.TotalSegmentCount` **预分配**的 → 越界写成 undefined。
+教训：**产物里凡有"运行时按 Meta 计数预分配数组"的字段，计数必须精确**；
+已在 `extract_motions.py` 加结构自检（按运行时消费方式重放一遍，计数不符直接抛错）。
+
+**Files**: scripts/extract_motions.py、scripts/reconstruct_live2d.py、scripts/fix_model3.py、gallery_src/index.html
+
+**Tool**: `scripts/diag/l2d_motion_audit.py`（全量健康审计，`L2D_OUT_DIR` 可指向任意产物目录）、
+`scripts/diag/l2d_ab.py`（同一模型旧/新 motion 的**渲染级 A/B**：搭 `_ab` 硬链接壳目录 + 无头 CDP，
+        手动 `PIXI.Ticker.shared.tick()`+`app.render()` 后才能观测到动画；就是它抓出了上面那个段序 bug）
+**Verification**: 新产物应 0 shell / 0 misassign；越域率 23.1% → 2.9%
 
 ---
 

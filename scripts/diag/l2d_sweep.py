@@ -84,6 +84,26 @@ BOOT = r"""
       if(other){ mm.startMotion(other,0,(PIXI.live2d.MotionPriority||{FORCE:3}).FORCE); await t(600);
                  rec.switchedTo=mm.state.currentGroup; rec.switchOK=(mm.state.currentGroup===other); }
       else rec.switchedTo='only-one-group';
+      /* 内容判据（关键）：currentGroup 变了不代表动作有效——"Curves":[] 的空壳照样能启动。
+         必须看正在播的动作到底带了几条曲线、这些曲线的目标值是否随时间真的变化。
+         无头 rAF 被节流，要手动 PIXI.Ticker.shared.tick()+app.render() 才会推进。 */
+      try{
+        const g=(mm.state&&mm.state.currentGroup)||other;
+        const mo=g&&mm.motionGroups&&mm.motionGroups[g]&&mm.motionGroups[g][0];
+        const md=mo&&mo._motionData;
+        rec.curveCount=md?(md.curveCount||0):0;
+        rec.motionLoaded=!!mo;
+        const core=m.internalModel.coreModel;
+        const read=(cv)=>{ if(cv.type===2) return ()=>{try{return core.getPartOpacityById(cv.id)}catch(e){return null}};
+                           return ()=>{try{return core.getParameterValueById(cv.id)}catch(e){return null}}; };
+        const probes=(md&&md.curves?Array.from(md.curves):[]).slice(0,6).map(read);
+        const snap=()=>probes.map(f=>{const v=f(); return (typeof v==='number')?v:null;});
+        const b4=snap();
+        for(let k=0;k<6;k++){ try{ PIXI.Ticker.shared.tick(performance.now()); app.render(); }catch(e){} await t(120); }
+        const af=snap();
+        rec.paramMoved=b4.some((v,i)=> v!=null && af[i]!=null && Math.abs(af[i]-v)>1e-4);
+        rec.contentOK=(rec.curveCount>0 && rec.paramMoved===true);
+      }catch(e){ rec.contentErr=(''+(e&&e.message||e)).slice(0,120); rec.contentOK=false; }
       rec.tex=(m.internalModel.textures||[]).length;
       rec.w=Math.round(m.width); rec.h=Math.round(m.height);
       __RES.push(rec);
@@ -119,8 +139,14 @@ json.dump(data, open(OUT, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
 fails = [r for r in data if r.get('fail')]
 nomot = [r['key'] for r in data if not r.get('fail') and not r.get('defGroup')]
 nosw = [r['key'] for r in data if r.get('switchedTo') and r.get('switchOK') is False]
+# 内容判据：动作到底带曲线、且目标值真的随时间变化（空壳在这一步必挂）
+shellish = [r['key'] for r in data if r.get('motionLoaded') is not False and not r.get('curveCount')]
+static = [r['key'] for r in data if r.get('curveCount') and r.get('paramMoved') is False]
 print(f"\n总计 {len(data)} | 失败 {len(fails)} | 默认动作未启动 {len(nomot)} | 切动作未生效 {len(nosw)}")
+print(f"内容判据: 零曲线(空壳) {len(shellish)} | 有曲线但目标值不动 {len(static)}")
 print('失败:', [(r['key'], r['fail']) for r in fails][:20])
 print('默认动作未启动:', nomot[:30])
 print('切动作未生效:', nosw[:30])
+print('零曲线(空壳):', shellish[:30])
+print('有曲线但不动:', static[:30])
 ws.close(); proc.terminate()
