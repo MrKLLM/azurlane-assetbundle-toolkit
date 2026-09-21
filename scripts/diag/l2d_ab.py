@@ -9,6 +9,10 @@ skin.live2d 路径加载，比较同一动作下的画面差异与参数轨迹�
       不给 --motion 时依次跑 idle / touch_head / main_1。
 输出: .diag/l2d_ab_shots/<model>_<side>_<motion>.png + 终端报告
 结束后可安全删除 Output/Live2D/_ab（仅本脚本生成的硬链接壳目录）。
+
+⚠️ 只能在**换入前**用它做新旧对照：换入后 old 侧读的就是正式目录里的新数据，
+   与 new 侧同源，两侧必然一致，此时的差异/无差异都不说明任何问题。
+   另外 load 后固定等 9s，超大模型偶发"无模型"假失败，重试即可。
 """
 import sys, os, json, time, base64, shutil, subprocess, urllib.request
 
