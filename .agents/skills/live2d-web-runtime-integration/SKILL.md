@@ -129,6 +129,7 @@ state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.remov
   只看 `state.currentGroup` 变了没有，会让 `"Curves": []` 的空壳全部绿灯通过
   （本项目就曾因此报出"260/260 全通过"，而实际 57% 是空壳、其余曲线名全错）。
   按部位点击的断言同理：别只断言组名标签，要断言内容。
+- **采样必须在 clip 时长内高频密采，不能在载入若干秒后才比对两点**：本项目运行时把**每条 idle 都解析成 `isLoop:false`**（与 motion3 的 `Meta.Loop:true` 无关），idle 播完一遍即回静帧、`state.currentGroup` 归 null、参数回落到基准。若"载入→等 9~12s→两次快照逐参数相减"，短 idle（5~8s）早已播完 ⇒ 假报 `moved=0`（曾据此误判新换入的 `bunao_3`/`guanghui_9` 坏了）。**正确做法**：载入并进入该 clip 后，每 ~420ms 推一帧（手动 `PIXI.Ticker.shared.tick()+app.render()`）、**累积每个参数跨帧 min/max**，判据=「播放窗口内 `max-min>1e-3` 的参数条数 > 0」。另注意手动 `startMotion(group,0,FORCE)` 会与页面自动播相互打断，验证"用户打开即所见"时**别再手动 startMotion**，直接密采。
 
 批量验证 260 个模型时的做法（驱动细节见 `headless-chrome-cdp-batch-export`）：
 
