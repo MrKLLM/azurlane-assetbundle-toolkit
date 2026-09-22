@@ -139,7 +139,7 @@
 **日期**: 2026-06-20
 **目标**: 让还原的 Live2D 模型支持点击交互触发动画
 **适用场景**: 从 Unity AssetBundle 还原的 Live2D 模型需要在 Live2DViewerEX 中可交互
-> ⚠️ **两处过时**：第 3 步「按 64 字节条目偏移猜参数名」已被 2026-09-21 证伪并作废（改用 `genericBindings`/crc32 权威映射，见 WF-7）；第 4 步只提到搜 `Touch*` 字符串，**没写组名匹配规则** → 结果只覆盖了组名为 `Head/Body/Special` 的老模型，`touch_*` 命名的 13 个模型至今拿占位 Id（`TROUBLESHOOTING.md` §18）。
+> ⚠️ **两处过时**：第 3 步「按 64 字节条目偏移猜参数名」已被 2026-09-21 证伪并作废（改用 `genericBindings`/crc32 权威映射，见 WF-7）；第 4 步只提到搜 `Touch*` 字符串，**没写组名匹配规则** → 旧的一次性路径只覆盖了组名为 `Head/Body/Special` 的老模型（`TROUBLESHOOTING.md` §18 已于 2026-09-22 修复：`fix_model3.py` 现按「moc3 含 Touch<X> ∩ 真实存在的动作组」生成真判定区，13 个 `touch_*` 模型不再走占位）。
 
 **步骤**:
 1. 修复 model3.json 格式（fix_model3.py）:
@@ -222,7 +222,7 @@
    ⚠️ index/thumbs 是全量重建产物，跑前确认没有在途改动（见 WF-15 白名单）。
    - **建议仍先写到临时目录**：`reconstruct_live2d.py --name X --out <tmp>` + `L2D_OUT_DIR=<tmp>` 跑后两步（`reconstruct` 用 `--out`、另两个用环境变量），验证过了再复制进 `Output/Live2D/`；新增模型没有旧数据，回滚 = 删目录。
    - ⚠️ **审计脚本对"部分目录"会给出假象**：`l2d_motion_audit.py` 按**源包目录 269 个**遍历，磁盘上没有的算 shell → 只建了 9 个时全量跑会报 `shell 7302/8154`。必须**逐模型** `py -3 scripts/diag/l2d_motion_audit.py <模型>`（只支持单模型参数）。
-   - **`reconstruct_live2d.py` 两处已知副作用**（第 3 步的 `fix_model3.py` 会顺手补上，别漏跑）：① `model3.json` 的 `Physics` 引用判据是 `os.listdir(".")` 里有没有含 "physics" 的文件（不是模型目录！）→ 直接生成的新模型不带 Physics，靠 `fix_model3.py:70-74` 修；② `HitAreas` 只会被 `fix_model3.py` 补成占位 Id（`HitArea/HitArea2`），**没有**按 moc3 `Touch*` 生成真判定区 → 新模型点部位会退化成「点哪儿都蹦一个 `touch_drag*`」的兜底（`TROUBLESHOOTING.md` §16），根因与修法见 §18。
+   - **`reconstruct_live2d.py` 两处已知副作用**（第 3 步的 `fix_model3.py` 会顺手补上，别漏跑）：① `model3.json` 的 `Physics` 引用判据是 `os.listdir(".")` 里有没有含 "physics" 的文件（不是模型目录！）→ 直接生成的新模型不带 Physics，靠 `fix_model3.py:70-74` 修；② `HitAreas`：`fix_model3.py` 过去只补占位 Id（`HitArea/HitArea2`）；**2026-09-22 起已升级为生成真判定区**（moc3 `Touch<X>` drawable ∩ 真实动作组，Name 用实际组名，只替换占位、不动既有正确值），新模型点部位按头/身/特精确命中，见 §18 / WF-7 第 3 步后段。
    - **2026-09-21 已做完到「换入前」这一步**（用户决定暂不换入）：9 个模型建在 `.diag/l2d_new9/`，**852 clip / 0 空壳 / 0 错位 / 87,266 曲线**（`shi_3` 含 365 条 PartOpacity），逐模型审计全绿；总计 467MB。⚠️ `.diag/` 是可清理区，**清理前先确认这批已换入**；若已被清，按本步命令重建（源包 `files/AssetBundles/live2d/` 269 个齐全，可重跑）。换入后还需：复制到 `Output/Live2D/` → `build_gallery_index.py`（9 张卡的 `live2d` 字段自动补上，`ship_meta.json` 无需改，中文名已在）→ `make_thumbs.py`（正图未变，预计全 skip）→ 浏览器内容判据抽验 + 截图。
 
 #### 三、禁止（每条都对应一次真实事故）
@@ -248,7 +248,7 @@
 | `scripts/apply_live2d_motions.py` | 干跑/备份换入 |
 
 遗留：`l2d_sweep.py` 判据已升级为内容判据，但它把整轮循环塞进**一次** `Runtime.evaluate`，换数据后会卡住 → 全量浏览器回归需改成 Python 侧逐条驱动；
-0.226% 绑定（疑 Drawable 颜色）无 target 可映射，跳过；`HitAreas` 现库里是**另一条一次性路径**按 `Touch*` drawable 写的（未用官方 `CubismRaycastable`），且只覆盖组名为 `Head/Body/Special` 的老模型——`reconstruct_live2d.py`+`fix_model3.py` 这条现役管线**不生成真判定区**，`touch_*` 命名的新皮肤（13 个模型）拿的是占位 Id，见 `TROUBLESHOOTING.md` §18；表情 `CubismExpressionController` 未还原。
+0.226% 绑定（疑 Drawable 颜色）无 target 可映射，跳过；`HitAreas` 现库里全部按 `Touch*` drawable 生成（未用官方 `CubismRaycastable`）；`fix_model3.py` 于 2026-09-22 起在现役管线内生成真判定区（moc3 Touch<X> ∩ 真实动作组，覆盖 `Head/Body/Special` 与 `touch_*` 两种命名，13 模型已修，全库 806/807，唯 `z46_3` 嵌套框歧义），见 `TROUBLESHOOTING.md` §18；表情 `CubismExpressionController` 未还原。
 
 **踩坑记录**: 详见 `docs/TROUBLESHOOTING.md` §17（空壳+错位双根因、crc32 破译过程、贝塞尔段序自伤与被 A/B 抓出）
 

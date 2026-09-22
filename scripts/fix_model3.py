@@ -49,17 +49,9 @@ for model_name in sorted(os.listdir(OUTPUT_DIR)):
                 del group['Id']
                 changed = True
 
-    # 修复 HitAreas: 从 FileReferences 移到顶层
+    # 修复 HitAreas: 若在 FileReferences 里，先移到顶层（生成真实判定区的逻辑在下方 Motions 定稿后）
     if 'HitAreas' in refs:
-        hit_areas = refs.pop('HitAreas')
-        if hit_areas and isinstance(hit_areas[0], dict):
-            pass  # 已经是正确格式
-        elif not hit_areas:
-            hit_areas = [{"Id": "HitArea", "Name": "Head"}, {"Id": "HitArea2", "Name": "Body"}]
-        model['HitAreas'] = hit_areas
-        changed = True
-    elif 'HitAreas' not in model:
-        model['HitAreas'] = [{"Id": "HitArea", "Name": "Head"}, {"Id": "HitArea2", "Name": "Body"}]
+        model['HitAreas'] = refs.pop('HitAreas')
         changed = True
 
     # 修复 Expressions: 删除空数组（我们没有 .exp3.json 文件）
@@ -120,6 +112,52 @@ for model_name in sorted(os.listdir(OUTPUT_DIR)):
     if added:
         print(f"  {model_name}: 补登记 {added} 条未引用的动作")
         changed = True
+
+    # ===== 真实 HitAreas 生成（§6.11 根因修复）=====
+    # 规则（docs/TROUBLESHOOTING.md §18）：moc3 里存在的 `Touch<X>` drawable ↔ 该模型真实存在的动作组。
+    #   - Id 必须是可被前端 getDrawableIndex 解析的 **drawable**（碧蓝统一命名 TouchHead/TouchBody/TouchSpecial）；
+    #   - Name 必须落在该模型 Motions 里真实存在的动作组名（老模型常为 Head/Body/Special，新皮肤为 touch_*）。
+    # 保守起见：**只替换占位 HitAreas**（Id 全部 ∈ {HitArea, HitArea2} 或为空），
+    #   已带正确真实 HitAreas 的模型一律不动 → 256 个既有正确产物逐字段零变化。
+    PLACEHOLDER_IDS = {"HitArea", "HitArea2"}
+    TOUCH_AREAS = {
+        "Head":    ["Head", "tapHead", "tap_head", "touch_head", "head"],
+        "Body":    ["Body", "tapBody", "tap_body", "touch_body", "body"],
+        "Special": ["Special", "tapSpecial", "tap_special", "touch_special", "special"],
+    }
+    cur_hits = model.get("HitAreas") or []
+    cur_ids = {a.get("Id") for a in cur_hits}
+    is_placeholder = (not cur_hits) or (cur_ids and cur_ids <= PLACEHOLDER_IDS)
+    if is_placeholder:
+        moc3_path = os.path.join(model_dir, f"{model_name}.moc3")
+        try:
+            with open(moc3_path, "rb") as f:
+                moc3_bytes = f.read()
+        except OSError:
+            moc3_bytes = b""
+        groups = list(refs.get("Motions", {}).keys())
+        gset = set(groups)
+        glower = {g.lower(): g for g in groups}
+
+        def pick_group(cands):
+            for c in cands:
+                if c in gset:
+                    return c
+                if c.lower() in glower:
+                    return glower[c.lower()]
+            return None
+
+        real_hits = []
+        for area, cands in TOUCH_AREAS.items():
+            if ("Touch" + area).encode() not in moc3_bytes:
+                continue                      # moc3 无此触摸 drawable
+            nm = pick_group(cands)
+            if nm:
+                real_hits.append({"Id": "Touch" + area, "Name": nm})
+        if real_hits and real_hits != cur_hits:
+            model["HitAreas"] = real_hits
+            changed = True
+            print(f"  {model_name}: 生成真实 HitAreas {[h['Name'] for h in real_hits]}（原为占位）")
 
     if changed:
         model['FileReferences'] = refs
