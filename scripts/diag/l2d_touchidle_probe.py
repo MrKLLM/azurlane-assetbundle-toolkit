@@ -63,9 +63,14 @@ JS = r"""(async(args)=>{ const key=args[0], grp=args[1];
                  w:+(x1-x0).toFixed(3), h:+(y1-y0).toFixed(3)}; }
     return o; };
   const before=snap();
-  const MP=(PIXI.live2d&&PIXI.live2d.MotionPriority)||{IDLE:1,NORMAL:2,FORCE:3};
-  mm.startMotion(grp,0,MP.FORCE);
-  await t(4000);
+  /* 必须走页面自己的 play()（下拉框 onchange），不能直接 mm.startMotion ——
+     后者绕过前端交互层，测不到「播完复位」这类挂在 play 上的逻辑（2026-09-23 曾因这个假阴性误判修复无效）。 */
+  const sel=document.getElementById('l2Motion');
+  if(!sel) return JSON.stringify({key, grp, err:'动作下拉框不存在，无法走真实播放路径'});
+  sel.value=grp; sel.onchange();
+  await t(2000);
+  const started=mm.state.currentGroup;      /* 确认真播上了，避免把静默失败读成「没复位」 */
+  await t(2000);
   const mid=snap();
   await t(6000);
   const after=snap();
@@ -82,6 +87,7 @@ JS = r"""(async(args)=>{ const key=args[0], grp=args[1];
     if(d>0.3) moved.push([k,+d.toFixed(2), [a.cx,a.cy], [b.cx,b.cy]]); }
   moved.sort((x,y)=>y[1]-x[1]);
   return JSON.stringify({key, grp, canvas:[+cux.toFixed(2),+cuy.toFixed(2)],
+    started:started,
     idleNow:mm.state.currentGroup, before:stat(before), mid:stat(mid), after:stat(after),
     movedCount:moved.length, movedSample:moved.slice(0,10)}, null, 1);
 })"""

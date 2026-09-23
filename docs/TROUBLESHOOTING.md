@@ -603,8 +603,98 @@ moc3 里的 `Touch*` 标记远不止 Head/Body/Special——安土有 **76 个**
 参考版比我们在插值上多出的只有 **642 条贝塞尔段**（约占段数 7%）。用四种候选切线公式拟合它的控制点，最高只命中 **16.7%**（且那是"切线=0"的平凡情形）——**它的控制点来自我们拿不到的数据**（l2d.su 大概率有游戏原始 Live2D 发行包里的 motion3.json，我们手上只有 Unity AssetBundle）。
 所以可达上限 = 曲线集合 100% 一致 + 关键帧时间/值 100% 一致 + 约 93% 段类型一致，剩余用线性弦近似（表现为缓动略少）。`l2d_ref_diff.py` 的 WARN 线因此校准在 **12%**（安土实测 3.8%~9.6%）。
 
-### 仍未解决（交接给下一位）
-**播完 `touch_idle*` 后全部判定区飞出画布且不恢复**：实测画布 20×16，静止态 57 个判定区里已有 **53 个在画布外**（只有核心 3 个 + `touch_idle1` 真可点，其余是编辑器遗留的停放标记）；播完 `touch_idle1`（4.65s、252 条曲线、Loop=false）后 **57 个全部出画**，核心三个一起被甩到同一点 `(-36.37, -52.81)`，回到 idle 后**不恢复** → 用户报的"到 1 层以后就没有判定区了"。
-方向：那个整体位移参数被 `touch_idle1` 动画，但**不在 idle 的 278 条绑定集里**，clip 播完后没有任何曲线把它写回去；游戏侧靠状态机（`change_in`/`home`）复位，我们没有状态机。候选修法：(a) 播非 idle 动作前快照全部参数值，回落 idle 时把「idle 不驱动」的参数写回快照；(b) 判定区几何在出画/塌缩时回退到加载时的静止位快照；(c) 接受（游戏侧同样会移走，只是它会复位）。
+### ✅ 已解决（2026-09-23 补记）：播完 `touch_idle*` 后判定区集体出画、回 idle 不恢复
 
-**涉及文件**: `scripts/extract_motions.py`（新增 `L2D_MOTION_ABSOLUTE_CP` / `L2D_MOTION_EMIT_CONST` / `L2D_MOTION_BEZIER_CLIP` 开关）、`scripts/fix_model3.py`（淡入淡出/EyeBlink·LipSync 组/Touch* 判定区三项）、`gallery_src/index.html`（运行时四补丁 + 四边形命中 + 动作下拉排序）；新入库取证/验收工具 7 个：`l2d_ref_diff.py`（**权威基准比对，全量验收就靠它**）、`l2d_after_fix_check.py`、`l2d_restart_cadence.py`、`l2d_param_ranges.py`、`l2d_hit_overlap.py`、`l2d_touchidle_probe.py`、`l2d_fidelity_probe2.py`。流程更新见 WF-16。
+**根因**：Cubism 只对"本 clip 有曲线的"参数施权，**缺曲线的参数停在上一个动作留下的值上**。
+`touch_idle1`（4.65s、252 条曲线、Loop=false）驱动的参数里有 **15 条是 `idle`（278 条绑定集）从不驱动的**，
+其中含整体位移 → clip 末帧值永久残留 → 57 个判定区全部被甩出画布（核心三个一起到 `(-36.37,-52.81)`）。
+静止态实测本就 53/57 在画布外（编辑器遗留的停放标记，只有核心 3 个 + `touch_idle1` 真可点），
+所以"进 1 层之后点哪儿都没反应"。游戏侧靠 `change_in`/`home` 状态机复位，Web 运行时没有状态机 → 同一份数据在游戏里不暴露。
+**定位手段**：对 motion3.json 求 `{Curves[Target=="Parameter"].Id}` 的差集（该 clip 集 − idle 集），不靠猜。
+⚠️ `Id` 有两种形态（纯字符串 / `{string:…}`），判据要兜两种。
+
+**修法**（`gallery_src/index.html:428-493`）：在 §已有的 `createMotion` 补丁里顺手登记每组驱动的参数集（零额外请求），
+`play()` 记 `played` 组名，回到 idle（或队列空）后由一个 ticker 把「播过的 clip 驱动、idle 不驱动」的参数
+**线性写回 moc3 默认值**（`getParameterDefaultValue`）。三道防误伤约束：① 只碰这批参数，物理/眨眼/口型一律不动；
+② 只在回 idle 时触发；③ 先等 `REST_DELAY=400ms` 让上一条 clip 淡出跑完，再 `REST_MS=700ms` 渐变（硬赋值会跳帧）。
+
+**踩坑（两条，第二条更耗时间）**：
+- **`paramSets[idleGroup]` 为空 ⇒ 复位永远不触发**，且是 `if (!idleS) return` 的**静默**失效。库的预加载分支为
+  `switch(config.motionPreload){ default: e=[this.groups.idle] }`，`motionPreload:'ALL'` 或组名恰为库默认 `Idle` 的模型必踩
+  （本项目组名是小写 `idle`、而 `mm.groups.idle` 要到补丁里才改成小写，默认路径不预加载故躲过）。
+  对策：另 fetch 一次 idle 各条 json 登记参数集，顺带补 `Meta.Loop`；**判据必须显式断言 `paramSets[idleGroup].size>0`**。
+- **验证脚本绕过页面入口会造出假阴性**：复位逻辑挂在页面的 `play()` 上，探针若直接 `mm.startMotion(g,0,FORCE)`
+  就整层绕过它，于是"修复无效"其实是"根本没进被改的那段代码"——**曾据此把一个正确的修复误判成无效**。
+  现 `l2d_touchidle_probe.py` 改成 `sel.value=grp; sel.onchange()`，并回读 `mm.state.currentGroup`
+  以区分「静默失败」与「没复位」；入口不存在时**显式报错**，不许回落假路径。
+
+**已排除的假设**：(a) 快照"进动作前的全部参数值"再回写 —— 不需要，这批参数在静止态本就没人动，
+moc3 默认值 ≡ 静止位，且与快照时机无关；(b) 判定区几何回退到加载时快照 —— 治标，模型真被移走了画面仍错；
+(c) 接受 —— 否决，游戏侧会复位，我们不做就是功能缺失。
+
+**验证**：`scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1` → before 出画 53 / mid 57（clip 确实生效）/
+after **53（与 before 相等）**，位移 >0.3 的判定区数 **0**；`interact_verify.py` 同期仍 ALL PASS。
+
+**涉及文件**: `scripts/extract_motions.py`（新增 `L2D_MOTION_ABSOLUTE_CP` / `L2D_MOTION_EMIT_CONST` / `L2D_MOTION_BEZIER_CLIP` 开关）、`scripts/fix_model3.py`（淡入淡出/EyeBlink·LipSync 组/Touch* 判定区三项）、`gallery_src/index.html`（运行时四补丁 + 非 idle 参数残留复位 + 四边形命中 + 动作下拉排序）；新入库取证/验收工具 7 个：`l2d_ref_diff.py`（**权威基准比对，全量验收就靠它**）、`l2d_after_fix_check.py`、`l2d_restart_cadence.py`、`l2d_param_ranges.py`、`l2d_hit_overlap.py`、`l2d_touchidle_probe.py`、`l2d_fidelity_probe2.py`。流程更新见 WF-16。可复用做法见 `.agents/skills/live2d-web-runtime-integration/SKILL.md` §3.8 与 §7.2。
+
+---
+
+## §22. `sharecfgdata/*` 打不开：不是 UnityFS、也非混淆密码，而是「索引表 + 切片读」的自定义二进制容器
+
+**症状**：34 张配置表（含字幕要的 **`ship_skin_words` 皮肤台词表**）UnityPy 解析出 0 对象；表名能猜到、文本拿不到。此前只能记一句「自定义加密、本机无解」，导致台词/声优名/阵营名表/385 新皮肤归属全部卡死。
+
+**根因（2026-09-23 逆向确认，`tools/sharecfg_re/` 独立小项目）**：这套表**大概率不是加密**，而是走 `LuaConfDataReader` 的随机访问容器。证据来自 `libil2cpp.so` + `global-metadata.dat` 的 metadata（素材**全在本机 `files/il2cpp/`，不需要跑模拟器**）：
+
+- 类 `LuaConfDataReader` 的字段直接暴露格式：`static readonly byte[] Header_32` / `Header_64` / `Footer`（`scripts32`/`scripts64` 的魔数与尾标）、`Dictionary<string, BinaryReader> readerDict`（每文件一个随机访问 reader）；
+- **`ReadData(string configName, int startPos, int size)` 按 (偏移,长度) 取切片** → 正好解释密文里那段「4 字节一条记录、第二字节缓慢递减 `ff ff ff ff fe fd fc…`」是**索引表**；
+- `ReadBufferFromCSharp(configName, startPos, size)` 是 C#→**Lua** 桥 → **解析/解码逻辑在 Lua 侧，C# 只交字节**；
+- 上层入口是全局 `FileHelper.ReadCfgFile(string path)`（112 字节薄封装，旁有 `ReadBytes`）。
+
+**已排除的假设（详细表在 `tools/sharecfg_re/README.md`，此处只留结论 + 判据）**：
+UnityFS；单字节常量 XOR/加/减；短重复密钥 XOR（周期 1–32，按周期分组 IC **无尖峰**）；位置线性变换（`xor i` / `±i` / `i>>2` / `i>>8`）；前一字节自同步（`xor prev`/`~prev`/`sub prev`，滞后 1–8）；裸 zlib / raw deflate / bz2 / lz4.block（偏移 0–63）；UTF-16 明文；单字母表替换（IC 被打平）；**7 个 32-hex 串当 AES-128 密钥**（×4 偏移 ×4 模式 = 112 组合，最高可打印 0.385 ≈ 随机 0.37，全噪声）；**`scripts32`^`scripts64` 两时间垫**（零率正好 1/256，最长零段仅 32 字节，无从反推密钥流）。
+关键实测数字：密文**熵 6.73**（真压缩/强加密 ≈ 8.0）、**IC 0.015**（明文 0.044 / 随机 0.0039）。
+
+**误报纠偏（别再按这两个名字追）**：`XorShift64` 是 `Unity.Collections.xxHash3`（Unity 自带哈希）、`Decrypt128` 是 `System.Security.Cryptography.AesTransform`（.NET 自带 AES），都不是游戏的解密器。同理 `DecryptValue`/`DecryptKeyExchange`/`DecryptData` 全在 `System.Security.Cryptography`；`DecryptAcb`/`SetDecryptionKey` 属 `CriWare.*`（那是 ACB 音频线，见 WF-17）。
+
+**解决方案 / 唯一验收判据**：见 `tools/sharecfg_re/`（README 含目标、判据、已排除假设、推进路线）。**判据只有一条：解出的 `ship_skin_template` 必须与 `.diag/azdata_ship_skin_template.json` 逐字段一致**——有一张已知明文在手，任何候选算法都要立刻拿它自证，不许「看起来像明文」就宣布成功。
+
+**踩坑**：
+- `libil2cpp.so` 的 `Machine` 是 **X86-64**（不是 ARM64）→ **本机 objdump 就能反汇编**，不用再装反汇编工具。
+- Il2CppDumper v6.7.46 **原生支持 `Metadata Version: 31`**（此前担心只到 v29 是多虑）。跑完报 `Unhandled exception: Cannot read keys when either application does not have a console` 是「Press any key to exit」在 stdin 重定向下的**已知报错，产物已完整**，别当失败。
+- dumper 同时报 `WARNING: find JNI_OnLoad` + `ERROR: This file may be protected.` → 可能有保护层，**方法 RVA 必须自检后再信**（实测 `LuaConfDataReader..cctor` 的 RVA 落在前置 thunk 上，真身在 +0x2D 处）。
+- `Header_32/64/Footer` 在 so/metadata 里**没有连续字节串**（是 `.cctor` 用立即数逐字节构造的），只能靠反汇编取。
+- **metadata 头 20 对 (offset,count) 全部自洽** = version 31 是正常的高版本，不是被改过头；别再花时间怀疑头被混淆。
+
+**涉及文件**：`files/il2cpp/{libil2cpp.so,Metadata/global-metadata.dat}`、`files/AssetBundles/sharecfgdata/*`（34 张）、`tools/sharecfg_re/**`（独立小项目）、`tools/Il2CppDumper/`（第三方 dumper）、`.diag/sharecfg_re/dump/`（`dump.cs` 124.6 万行 / `script.json` / `il2cpp.h` / `DummyDll/`，在 gitignore）
+
+## §23. CRIWARE ACB 语音导出静默丢数据：`-o x.wav` 对多子流容器只解 subsong 1（附 vgmstream flag 权威语义 + 全量映射统计）
+
+**日期**: 2026-09-23　**状态**: ✅ 根因定位 + 正确命令实测，脚本 `scripts/extract_live2d_voice.py` 已入库；**全量导出尚未执行**（磁盘上仅安土 1 个样本 = 29 个 ogg）
+
+**流程与关键事实**（Live2D 包内 0 AudioClip、一个 `.b` = 一条船全部 cue、`painting`→`cv-{skin_id//10}.b`、cue 名 ≡ 动作组名、变体/排除规则、前端 `Sound` 接线与判据）**见 `docs/WORKFLOWS.md` WF-17**，此处只记 WF-17 没有的**证据、命令语义与统计数字**，避免两处漂移。
+
+**现象**: `scripts/export_cue_audio.py`（2026-06-21）跑完全目录后每艘船只落 **1 个 wav**，文件名都叫 `detail`。当时当成"这些 ACB 里就一条语音"接受，实际是 **98% 的语音根本没解**。
+
+**根因**: `vgmstream-cli` 对 ACB 这类多子流容器，**不给 `-S` 时只解码 subsong 1**；`-o` 不带 `?n` 通配时所有输出还会挤进同一文件名。全程**不报错、退出码 0、产物结构合法**——伪装成功型静默失败。同一文件 A/B 实测（`cv-30409.b` = 安土，容器内 64 个 cue）：
+
+| 命令 | 产物 |
+|---|---|
+| `vgmstream-cli -o out.wav in.acb`（6 月写法） | **1 个** wav：`stream name: detail`，10.922 s，963,396 B |
+| `vgmstream-cli -i -S 0 -o "dir/?n.wav" in.acb` | **64 个** wav，文件名即 cue 名（`home.wav`/`main_1.wav`/…） |
+
+**各 flag 的权威含义（取自 `vgmstream-cli r2117` 自身 usage，别再靠试错猜）**：
+- `-S N`：end subsong，**`-S 0` = 全部**。不给 = 只到第 1 条 —— 本次丢数据的唯一真凶。
+- `-o` 通配：`?n`=stream name、`?s`=subsong、`?f`=infile。按 cue 名落盘才能后续按名匹配。
+- `-i`：忽略 loop 信息、整条只播一遍（默认 `-l 2.0` 即循环两遍 → 时长翻倍）。**本批语音实测无 loop 点**：同一条 cue 加/不加 `-i` 输出均 963,396 B，但个别带 loop 点的条目会中招，故保留 `-i`。
+- `-m` **不带参数**（只打印元数据不解码）：`-m3` 报 `unknown option`；要按流名遍历用 `-I`（打 JSON）。
+- 编码实测 `encoding: CRI HCA`。`libatrac9.dll` 只是 r2117 构建里附带的库（当初拿它做可用性冒烟），**不代表本批语音是 ATRAC9**。
+
+**否证一条常见找错地方的说法**: cue 名住在 **`CueNameTable`**（@UTF 表，`cv-30409.b` 实测含该串）；社区文档常说的 **`!CueName` 标记在 40 个抽样 `cv-*.b` 中 0 命中**。按 `!CueName` 找会得到"这包没有名字表"的假结论。
+
+**全量只读扫描（`--report`，零写入，2026-09-23）**: 270 个 Live2D 皮肤 → **253 命中 ACB / 17 无 ACB / 解码异常 0**；cue 池共 **18,777** 条，单包 **29~169 条（中位 70）**；按动作组筛后计划导出 **5,914** 个文件。PCM 每船约 67 MB → 必须转 `libopus 48k`（约 1/10）。
+
+**脚本自身的坑（复跑前必读）**: `--report` 后的**位置参数不生效**，只认 `--only k1,k2`——写成 `--report antu_2` 会**静默全扫 270 个 ACB**（数分钟；只读不写，但会覆盖 `.diag/_l2d_voice_report.json`）。
+
+**待裁定**: `touch_body→touch_1`、`touch_special→touch_2` 仍是语义推断；`sharecfgdata/ship_skin_words` 一旦解出（见 §22，在途）即可给出权威映射，届时同步修 WF-17 与本条。
+
+**涉及文件**: `scripts/extract_live2d_voice.py`（本次入库：`--report` 只读 / `--key` 样本 / `L2D_VOICE_ALL=1` 全量 → `Output/Audio/L2D/<皮肤>/<cue>.ogg` + `Output/gallery_v2/l2d_voice.json`）、`scripts/export_cue_audio.py`（中招的旧脚本，留作对照）、`.diag/azdata_ship_skin_template.json`（**承重文件勿删**，白名单见 WF-15）；vgmstream 在国内网络下的取工具/换源步骤见技能 `cn-blocked-resource-mirror-fetch`。

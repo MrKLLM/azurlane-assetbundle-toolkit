@@ -343,6 +343,12 @@ function renderVoice(){
   s.voices.forEach(v=>{const fn=v.split('/').pop();const cat=(fn.match(/cv-\d+(-\w+)?\.wav/)||[])[1]||'';h+=`<div class="aud"><span class="lbl">${cat?cat.replace('-',''):'默认'}</span><audio controls preload="none" src="${P+v}"></audio></div>`;});
   h+='</div>'; viewEl.innerHTML=h;
 }
+/* Live2D 动作语音映射表 l2d_voice.json（由 scripts/extract_live2d_voice.py 从 cue/cv-*.b 导出）。
+   结构 {皮肤key: {动作组: [相对 P 的音频路径...]}}，同组多条 = 游戏里的随机变体。 */
+let _voiceP=null;
+function loadVoiceMap(){ return _voiceP||(_voiceP=(async()=>{
+    try{ const r=await fetch('./l2d_voice.json'); if(!r.ok) return {};
+      const j=await r.json(); return (j&&typeof j==='object')?j:{}; }catch(e){ return {}; } })()); }
 /* ---------- Live2D（pixi 6.5.2 + pixi-live2d-display 0.4.0 + cubismcore 5.1.0，均为 vendor/live2d/ 本地脚本） ---------- */
 let l2State = null;
 function stopLive2D(){ if(l2State){ l2State.cancelled=true; if(l2State.off)try{l2State.off()}catch(e){}
@@ -401,6 +407,12 @@ async function renderLive2D(s, sk){
     const mm=mdl.internalModel.motionManager;
     const MP=(PIXI.live2d&&PIXI.live2d.MotionPriority)||{IDLE:1,NORMAL:2,FORCE:3};
     const idleGroup=['idle','main','home'].find(g=>groups.includes(g))||groups[0]||null;
+    /* ---------- 动作语音 ----------
+       库原生支持 motion 定义里的 Sound 字段（Cubism4MotionManager.startMotion 里
+       getSoundFile(def) → SoundManager.add/play，并自动 dispose 上一条），所以只注入
+       definitions[g][0].Sound 即可，不必自己管 Audio 元素。resolveURL 的基准是 model3.json
+       所在目录，故下面给的是绝对 URL，避免 ../ 层级算错。 */
+    const voice=Object.create(null);
     /* ---------- 运行时保真三补丁（2026-09-23 无头取证，见 docs/TROUBLESHOOTING.md §21） ----------
        ① 采纳 Meta.Loop：vendored pixi-live2d-display 0.4.0 定义了 setIsLoop() 但全 bundle 无调用点，
           Meta.Loop 被无视 → idle 播完即停。此前靠前端定时器「假装循环」，实测该定时器与运行时
@@ -413,18 +425,31 @@ async function renderLive2D(s, sk){
           一直静默失效（这才是 ① 存在的原因）。补上后由运行时逐帧接管，零定时器、零冻结。
        ③ 库的 _startMotion 每次先 queueManager.stopAllMotions() 把旧动作瞬间掐死 → 姿态硬跳。
           队列管理器 startMotion 内部本来就会给现存条目 setFadeOut，去掉那行 stop 即恢复官方交叉淡化。 */
+    /* 每个 group 实际驱动的参数名集合，在 createMotion 拿到原始 json 时顺手登记（零额外请求）。
+       下面的「残留复位」和 motion3.json 的曲线绑定集是同一份数据，不另开文件。 */
+    const paramSets=Object.create(null);
+    const curveId=(c)=>{ const i=c&&c.Id; return typeof i==='string'? i : (i&&i.string)||null; };
     const origCreateMotion=mm.createMotion.bind(mm);
     mm.createMotion=(json,group,def)=>{ const m=origCreateMotion(json,group,def);
       if(group===idleGroup&&json&&json.Meta&&json.Meta.Loop&&m.setIsLoop){
         m.setIsLoop(true); if(m.setIsLoopFadeIn) m.setIsLoopFadeIn(false); }
+      try{ if(json&&json.Curves){ const s=paramSets[group]||(paramSets[group]=new Set());
+          for(const c of json.Curves) if(c.Target==='Parameter'){ const id=curveId(c); if(id) s.add(id); } } }catch(e){}
       return m; };
     mm.groups.idle=idleGroup;
     mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }catch(e){}
       return mm.queueManager.startMotion(m,false,performance.now()); };
-    /* idle 若在挂上 ① 之前就被预加载了，读一次 Meta.Loop 补打标记（浏览器已缓存该文件） */
-    (async()=>{ try{ const d=(mm.definitions[idleGroup]||[])[0]; if(!d||!d.File) return;
-        const r=await fetch(P+model+'/'+d.File); if(!r.ok) return; const j=await r.json();
-        if(!(j&&j.Meta&&j.Meta.Loop)) return;
+    /* idle 若在挂上 ① 之前就被预加载了（库的 motionPreload 默认就是 'idle'，createMotion 补丁
+       来不及登记它），补读一次 json：既打 Meta.Loop 标记，也登记 idle 驱动的参数集合 ——
+       下面的残留复位要靠这个集合当闸门，缺了它就永远不会复位。 */
+    (async()=>{ try{ const defs=(mm.definitions[idleGroup]||[]).slice(0,8); if(!defs.length) return;
+        const s=paramSets[idleGroup]||(paramSets[idleGroup]=new Set()); let loop=false;
+        for(const d of defs){ if(!d||!d.File) continue;
+          const r=await fetch(P+model+'/'+d.File); if(!r.ok) continue; const j=await r.json();
+          if(!(j&&j.Curves)) continue;
+          for(const c of j.Curves) if(c.Target==='Parameter'){ const id=curveId(c); if(id) s.add(id); }
+          if(j.Meta&&j.Meta.Loop) loop=true; }
+        if(!loop) return;
         for(const m of (mm.motionGroups[idleGroup]||[])){ if(m&&m.setIsLoop){
           m.setIsLoop(true); if(m.setIsLoopFadeIn) m.setIsLoopFadeIn(false); } }
       }catch(e){} })();
@@ -435,11 +460,52 @@ async function renderLive2D(s, sk){
     /* startMotion 必须显式给 index：传 null 会让库取 motion[group][null] → undefined 而静默失败。
        用户触发的动作一律 FORCE：库的 state.reserve() 会拒绝 ≤ 当前优先级的请求（idle 占 IDLE=1），
        不 FORCE 就连点第二个部位都放不出来。回落 idle 交给运行时（见 ②），不再需要定时器。 */
-    const play=g=>{ if(!g) return false; try{ mm.startMotion(g,0,MP.FORCE); return true; }catch(e){ return false; } };
+    const played=new Set();
+    const play=g=>{ if(!g) return false;
+      try{ /* 同组多条 = 游戏里的随机变体；无语音的组必须显式清掉，否则上一条的 Sound 会串台 */
+        const d=(mm.definitions[g]||[])[0];
+        if(d) d.Sound=(voice[g]&&voice[g][(Math.random()*voice[g].length)|0])||void 0;
+        mm.startMotion(g,0,MP.FORCE);
+        if(g!==idleGroup) played.add(g); return true; }catch(e){ return false; } };
+    /* ---------- 非 idle 动作的参数残留复位（docs/TROUBLESHOOTING.md §21 末段） ----------
+       touch_idle1（安土「午夜的瑰色电梯」）动画 252 条曲线，其中 15 条 idle 从不驱动；clip 播完
+       没有任何曲线把它们写回去 → 整体位移停在末帧 → 57 个判定区全部被甩出画布，用户「进去就出不来」。
+       游戏侧靠 change_in/home 状态机复位，我们没有状态机，于是按「刚播过的 clip 驱动、而 idle 不驱动」
+       的参数回落到 moc3 默认值（= 加载时的静止位，因为这些参数在静止态本就没人动）。
+       两条约束防止误伤：① 只碰播过的 clip 驱动过的参数，物理/眨眼/口型等 clip 无关参数一律不动；
+       ② 只在回到 idle（或队列空）时才复位，且先等 REST_DELAY 让上一条 clip 的淡出跑完，再线性渐变过去。 */
+    const REST_DELAY=400, REST_MS=700, cm=im.coreModel;
+    let rest=null;
+    const restTick=()=>{ const cg=mm.state&&mm.state.currentGroup;
+      if(cg&&cg!==idleGroup){ rest=null; return; }
+      if(!rest){ const idleS=paramSets[idleGroup]; if(!idleS||!played.size) return;
+        const want=new Set(); played.forEach(g=>{ (paramSets[g]||new Set()).forEach(p=>{ if(!idleS.has(p)) want.add(p); }); });
+        played.clear();
+        const items=[];
+        want.forEach(p=>{ let i=-1; try{ i=cm.getParameterIndex(p); }catch(e){}
+          if(i>=0) try{ items.push([i, cm.getParameterValueByIndex(i), cm.getParameterDefaultValue(i)]); }catch(e){} });
+        if(!items.length) return;
+        rest={items, t0:performance.now()+REST_DELAY}; return; }
+      const el=performance.now()-rest.t0; if(el<0) return;
+      const k=Math.min(1, el/REST_MS);
+      for(const it of rest.items) try{ cm.setParameterValueByIndex(it[0], it[1]+(it[2]-it[1])*k); }catch(e){}
+      if(k>=1) rest=null; };
+    app.ticker.add(restTick);
     const bar=document.getElementById('l2bar');
-    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn">判定区</button><button id="l2PanelBtn">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn">判定区</button><button id="l2PanelBtn">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
-    sel.innerHTML=groups.map(g=>`<option value="${g}">${g}</option>`).join('');
+    const fillSel=()=>{ const cur=sel.value;
+      sel.innerHTML=groups.map(g=>`<option value="${g}">${g}${voice[g]?'（语音）':''}</option>`).join('');
+      if(cur) sel.value=cur; };
+    fillSel();
+    /* 表是异步来的（本地小文件），回填后只刷新下拉标签与语音计数，不阻塞模型加载主流程 */
+    loadVoiceMap().then(m=>{ const e=m[sk.key]||{};
+      for(const g in e) if(Array.isArray(e[g])&&e[g].length)
+        voice[g]=e[g].map(p=>new URL(P+p,location.href).href);
+      const vp=document.getElementById('l2Voice');
+      const n=Object.keys(voice).length;
+      if(vp) vp.textContent=n?('语音 '+n+' 组'):'该皮肤无语音表';
+      fillSel(); });
     sel.onchange=()=>{ play(sel.value); };
     document.getElementById('l2Replay').onclick=()=>{ play(sel.value); };
     document.getElementById('l2Fit').onclick=fit;
@@ -594,7 +660,11 @@ async function renderLive2D(s, sk){
       window.removeEventListener('pointermove',onMove); window.removeEventListener('pointerup',onUp); };
     const def=idleGroup;
     if(sel.value!==def) sel.value=def||'';
-    play(def);   /* 循环与「播完回 idle」全部交给运行时（见上方补丁 ①②），前端不再挂任何定时器 */
+    /* 语音表回填之前先别开播：否则模型刚就绪那一瞬播的动作（含 idle）拿不到 Sound，
+       表现成「第一个动作没声音，之后才有」。表是本地小文件，通常几毫秒就到。 */
+    loadVoiceMap().then(()=>{ if(my.cancelled||seq!==_l2seq) return;
+      if(!played.size && !(mm.state&&mm.state.currentGroup)) play(def); });
+    /* 循环与「播完回 idle」全部交给运行时（见上方补丁 ①②），前端不再挂任何定时器 */
   }catch(e){ if(my.cancelled||seq!==_l2seq)return;
     viewEl.innerHTML=`<div class="note">Live2D 加载失败：${e&&(e.stack||e.message||e)}</div>`; return; }
 }

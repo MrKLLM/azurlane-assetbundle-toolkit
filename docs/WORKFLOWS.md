@@ -610,8 +610,10 @@ py -3 scripts/diag/hit_verify.py
 py -3 scripts/diag/l2d_after_fix_check.py antu_2 yingrui_3   # 四项体检：breath=0 / isLoop / 30s 不冻结 / 点部位回落 idle
 py -3 scripts/diag/l2d_restart_cadence.py antu_2 30          # 看 startMotion 调用次数与 currentGroup=null 采样数
 py -3 scripts/diag/l2d_hit_overlap.py antu_2                  # 判定区重叠 + 淡入淡出实际值 + eyeBlink 是否创建
-py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 判定区是否被动画移出画布（已知未决问题）
+py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复位是否生效：判据 after 出画数==before、位移>0.3 的框数=0
 ```
+⚠️ 该探针**必须走页面自己的 `play()`**（`sel.value=grp; sel.onchange()`），直接 `mm.startMotion` 会绕过复位逻辑所在的
+前端交互层，把正确的修复读成无效（2026-09-23 真实误判过一次）；且要回读 `mm.state.currentGroup` 区分「静默失败」与「没复位」。
 
 **判据**:
 - `l2d_ref_diff` 必须 **PASS**：组/曲线集合零缺失、**关键帧零不一致**、偏差中位 ≤0.5、偏差>0.5 占比 ≤12%（WARN 线按安土实测 3.8%~9.6% 的贝塞尔天花板校准）。
@@ -627,3 +629,46 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 判定区是否�
 - 页面脚本未就绪时先轮询 `window.GALLERY && typeof openShip==='function'`，只等 `GALLERY` 会在偶发时序下报 `openShip is not defined`。
 
 **涉及文件**: `gallery_src/index.html`、`scripts/deploy_gallery.py`、`scripts/diag/{l2d_coord_forensics,l2d_inspector_verify,interact_verify,hit_verify}.py`、`TROUBLESHOOTING.md` §19/§20
+
+---
+
+### WF-17: Live2D 动作语音导出与接线（ACB cue → 动作组 → 浏览器出声）
+
+**日期**: 2026-09-23
+**目标**: 让 Live2D 动作带配音（同游戏），并把导出管线固化成可复用脚本。
+**适用场景**: 用户反馈「动作没有声音 / 语音没接上 / 新皮肤缺语音」，或要给 Spine/静态皮肤补配音。
+
+**关键事实（每条都踩过，别再重来）**:
+- Live2D 包内**没有任何音频**（antu_2 对象统计 2671 MonoBehaviour / 104 AnimationClip / **0 AudioClip**）。语音在独立的 CRIWARE `files/AssetBundles/cue/cv-*.b` 里。
+- **一个 `.b` = 一条船的全部语音 bank（45~170 条带名字的 cue）**。2026-06 那次 `export_cue_audio.py` 用 `vgmstream-cli -o x.wav file.acb` **只取了第 1 条**（`detail`），其余全丢 → 每船只剩 3 个 wav，还靠一张 719 条的社区 `CV_MAP` 归船名（安土都不在表里 → `voices=[]`）。**这是个潜伏已久的老 bug**，Spine/静态皮肤的配音也一直是缺的。
+- **cue 名与 model3.json 的动作组名逐字同名**：`home/login/mail/main_1..4/mission_complete/touch_head` 全部精确命中，**不需要游戏配置**就能对上。
+- 皮肤 → ACB：`.diag/azdata_ship_skin_template.json` 的 `painting` 字段 = 磁盘皮肤名 → skin id → **`cv-{skin_id // 10}.b`**。270 个 Live2D 皮肤里 **253 个**命中现有 ACB。
+- 音频编码是 **CRI HCA**（不是 ATRAC9），vgmstream 可解；一个 ACB 里 `stream count` = cue 数，`stream name` = cue 名。
+
+**怎么做**:
+```bash
+py -3 scripts/extract_live2d_voice.py --report --only antu_2   # 只列映射，不写任何文件
+py -3 scripts/extract_live2d_voice.py --key antu_2             # 单皮肤小样本
+L2D_VOICE_ALL=1 py -3 scripts/extract_live2d_voice.py          # 全量（必须显式开环境变量）
+```
+脚本**拒绝默认全量**。产物：`Output/Audio/L2D/<皮肤>/<cue>.ogg`（opus 48k）+ `Output/gallery_v2/l2d_voice.json`（`{皮肤: {动作组: [相对 P 的音频路径...]}}`，同组多条 = 随机变体）。
+
+**前端接线**（`gallery_src/index.html`）：vendored `pixi-live2d-display` 0.4.0 **原生支持 motion 定义的 `Sound` 字段**（`startMotion` 里 `getSoundFile(def)` → `SoundManager.add/play`，并自动 dispose 上一条），**只需注入 `definitions[g][0].Sound`**，不要自己管 Audio 元素；`resolveURL` 的基准是 model3.json 所在目录，故注入**绝对 URL**。
+> ⚠️ 该库**没有**音频驱动口型（全 bundle 无 `AnalyserNode`/`AudioContext`/`setLipSyncValue`）。要做口型得自己接 WebAudio 取包络写 `ParamMouthOpenY`。
+
+**判据**（量真实可观测状态，别用代理指标）:
+- 探针 `scripts/diag/l2d_voice_probe.py` 量的是：`definitions[g][0].Sound` 非空 + `mm.currentAudio` 存在 + **`paused=false` 且 `currentTime` 前进** + `err=null` + 无 `Failed to play audio` 警告。
+- ⚠️ **无头 Chrome 是空声卡，`paused=false` 只证明 Audio 元素起来了，证明不了用户能听见** —— 真实出声必须靠用户耳朵验收，这一点不许拿探针结果顶替。
+- 界面旁证：下拉框里有语音的组标「（语音）」，状态栏 pill 显示「语音 N 组」。
+
+**踩坑记录**:
+- **改完不部署等于没改**：语音接线代码写完没跑 `deploy_gallery.py`，用户复测仍报「一点声音都没有」，白查一轮。改 `gallery_src/index.html` 后**必须** `py -3 scripts/deploy_gallery.py` 并核对 md5 与源一致。
+- **探针必须走页面真实入口**：直接调库的 `mm.startMotion` 会绕过页面自己的 `play()`，凡是挂在 `play` 上的逻辑（动作语音、参数复位）都测不到 → **假阴性**。要走下拉框 `sel.onchange()` 这类真实用户路径。
+- **语音表异步加载的竞态**：模型刚就绪那一瞬播的动作（含 idle）会拿不到 `Sound`，表现成「第一个动作没声、之后才有」。修法是把开局 `play(def)` 挪到 `loadVoiceMap()` resolve 之后，并加 `!played.size && !mm.state.currentGroup` 守卫，避免覆盖用户已触发的动作。
+- `touch_body → touch_1`、`touch_special → touch_2` 是**按「普通触摸 / 特殊触摸」语义推的**，不是从游戏配置读到的（配置包见 `TROUBLESHOOTING.md` §22）。同名匹配的 9 组可信；这两条要人工试听裁定。
+- 后缀约定：`X` / `X_1` / `X_2` = 同一触发的随机变体；**`_exNNNN` 是活动限定台词、`vocal_*` 是歌曲人声，都不该在点模型时放**（脚本已排除）。
+- 音量走库的 `SoundManager._volume` 默认 0.5。
+- vgmstream 本机路径 `C:\Users\KLLM\AppData\Local\vgmstream\vgmstream-cli.exe`（2026-09-23 经 gh-proxy 镜像重装 r2117，含 `libatrac9.dll`）；**丢过一次**，导出脚本跑之前要先确认它在。
+- 解压全部 cue 后只转码需要的那几个（一个 ACB 全解出 64 条 = 67MB PCM，全量 253 皮肤会到 17GB）→ 只导动作组对得上的，转 opus 48k。
+
+**涉及文件**: `scripts/extract_live2d_voice.py`、`gallery_src/index.html`（Sound 注入 + 下拉「（语音）」标签 + 语音 pill + 开局播放竞态修复）、`scripts/diag/l2d_voice_probe.py`、`Output/Audio/L2D/`、`Output/gallery_v2/l2d_voice.json`、`TROUBLESHOOTING.md` §22

@@ -1,0 +1,59 @@
+#!/bin/sh
+# 提交闸门：暂存区改了 scripts/** 或 gallery_src/** 但没同时暂存任何文档 → 拦下。
+#
+# 规则出自 AGENTS.md「阶段收尾必做清单」第 2 条（改代码必须同步文档）。
+#   正本：scripts/git-hooks/pre-commit（可版本化）
+#   生效副本：.git/hooks/pre-commit（git 不跟踪该目录，换机器或重新 clone 后必须重装：
+#     cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit）
+#   改逻辑只改正本，改完记得重新 copy。
+#
+# 绕行（确属无需改文档的提交：纯重命名/格式化/试验性提交）：
+#     DOC_CHECK_SKIP=1 git commit ...
+# 绕行会打印一行警告，不静默放行。
+#
+# 自测用法（不动真实暂存区）：
+#     T=$(mktemp); export GIT_INDEX_FILE=$T; git read-tree HEAD
+#     touch scripts/_selftest.tmp docs/_selftest.tmp
+#     git add scripts/_selftest.tmp && ./scripts/git-hooks/pre-commit        # 期望 exit 1
+#     git add docs/_selftest.tmp   && ./scripts/git-hooks/pre-commit        # 期望 exit 0
+#     rm -f scripts/_selftest.tmp docs/_selftest.tmp $T; unset GIT_INDEX_FILE
+
+if [ -n "$DOC_CHECK_SKIP" ]; then
+    echo "[pre-commit] ⚠️ 已用 DOC_CHECK_SKIP=1 绕过文档同步检查 —— 请确认本次确属无需改文档的提交。" >&2
+    exit 0
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACMRD)
+
+code_files=""
+has_code=0
+has_doc=0
+for f in $staged; do
+    case "$f" in
+        scripts/*|gallery_src/*)
+            has_code=1
+            code_files="$code_files
+    $f" ;;
+        PROJECT_STATUS.md|docs/*)
+            has_doc=1 ;;
+    esac
+done
+
+if [ "$has_code" = "1" ] && [ "$has_doc" = "0" ]; then
+    cat >&2 <<EOF
+[pre-commit] 提交被拦下：改了代码但没同步任何文档。
+
+本次暂存的代码文件:$code_files
+
+按 AGENTS.md「阶段收尾必做清单」第 2 条，至少要落一条（按「文档写入路由」）:
+    状态/指标变化          -> PROJECT_STATUS.md 对应 \`### 2.X\` 就地更新 + 顶部生成时间
+    新的可复用流程        -> docs/WORKFLOWS.md 新增 WF-n（含判据、踩坑记录、涉及文件）
+    新的问题→根因→修法   -> docs/TROUBLESHOOTING.md 新增 §n
+    否证结论（试过并排除的假设）-> 写进对应条目的「已排除的假设」，避免下个会话重跑
+
+确属无需改文档时绕行:  DOC_CHECK_SKIP=1 git commit ...
+EOF
+    exit 1
+fi
+
+exit 0

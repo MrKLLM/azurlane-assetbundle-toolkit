@@ -11,7 +11,9 @@
 # 游戏源数据与生成产物（体积大 + 版权，使用者自备）
 files/
 Output/
-tools/
+tools/*
+# 例外：sharecfgdata 逆向是本项目自研小项目，必须入库（tools/ 其余是第三方二进制，不入库）
+!tools/sharecfg_re/
 .micode/
 .mimocode/
 .trash/

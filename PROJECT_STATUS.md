@@ -183,7 +183,7 @@
 6. **声优中文姓名补全**：`ship_meta.json` 的 `voice_actor` 现为数字 id（皮肤表只给 id，CV 姓名表未缓存）。以后需要显示声优名时，从 azurlane-data 或游戏配置补一张 `voice_actor_id → 中文声优` 表回填（§6 第 5 条决策①）。
 7. ⚠️ **阵营「晶环联盟」码待定——原方案前提已证伪，挂起待决策（2026-09-20）**：
    - ~~待资产同步后从游戏配置解析~~ → **同步已完成**（9.7.385，95 文件，2026-09-20，mumu_sync diff 归零）；但今日实测游戏 `sharecfgdata/*` 配置包为**自定义加密**（非 UnityFS，非常量 XOR，UnityPy 解析出 0 对象），本机无解法；azurlane-data 社区快照最新提交仍 **9.7.381**（无 385、无阵营名表）。→ **目前不存在任何可直读的 385 解密配置源**。
-   - **挂起三选一待用户定**：**A** 逆向 sharecfgdata 加密（需从游戏二进制挖密钥，成本不确定）｜**B** 以 381 为基础走旁路（维基/其它社区数据/从美术包推断，省力但不完整）｜**C** 搁置（晶环联盟与新皮肤 `mile_3`/`aierdeliqi_9` 的归属均标「待补」，381 能解析的照常用）。
+   - **✅ 已定走 A（2026-09-23，独立小项目 `tools/sharecfg_re/`）**：逆向 sharecfgdata。**已定位真目标** = 台词表 `sharecfgdata/ship_skin_words`（字幕文本源）+ 入口 `LuaConfDataReader.ReadData(configName, startPos, size)` / `ReadBufferFromCSharp`。**关键结论：C# 侧只是按 (startPos,size) 取切片的搬运工，零解密零解码，真正解析在 Lua 侧**（`scripts32/scripts64`，熵 8.000）。素材全在本机 `files/il2cpp/{libil2cpp.so 121.8MB, Metadata/global-metadata.dat 18.2MB}`（x86-64，本机 objdump 可反汇编），**不需要跑模拟器**；Il2CppDumper v6.7.46 已跑通（原生支持 metadata v31），产物在 `.diag/sharecfg_re/dump/`。已排除的假设与判据全在 `tools/sharecfg_re/README.md` 与 `docs/TROUBLESHOOTING.md` §22。唯一验收判据：解出的 `ship_skin_template` 必须与 `.diag/azdata_ship_skin_template.json` 逐字段一致。**下一步主战场 = 解 scripts32/64，不是继续挖 C#。**
    - 现状维持：ship_meta 前端仍归「其他」。同理受影响：385 新皮肤在 381 快照无记录，归属也卡在同一决策上。
    - 不受影响、可独立推进：§6 交接点 B→C→D 主线；以及「385 变更美术的定向重建」（立绘/Spine/Live2D 包本身是明文 UnityFS，已同步在手）。**（2026-09-20 已完成，见头部）**
 8. ✅ **ship_meta `{namecode:XX}` 占位符名（已于 2026-09-20 随 B 根因修复关闭）**：根因=`build_ship_meta.py` 舰名取 `ship_skin_template.name`（皮肤名，含占位符）——**改取 `ship_data_statistics.name`（0 占位符）**后，237 个 ship 级占位符全归零、名称与阵营自洽（`weizhang`→尾张、`xinzexi`→新泽西 等）。残余 ~52 占位符全为 `story` 类（NPC/剧情/2b 联动变体，本就无 stats 舰名，非缺漏）。详见 §6 第 5 条 B 已完成。
@@ -198,9 +198,16 @@
    4. 验收：**`py -3 scripts/diag/l2d_ref_diff.py --all` 必须 PASS**（判据：组/曲线零缺失、**关键帧零不一致**、偏差中位 ≤0.5、偏差>0.5 占比 ≤12%）。参考库只覆盖部分模型，404 自动跳过。
    5. 回归：WF-16 五件套全跑，`hit_verify` 基线 **806/807**。⚠️ 判定区从 3 个扩到几十个后 `hit_verify` 断言范围变大，**基线可能需重新标定**——先读 §21「与核心三框零重叠」的实测结论再判断是否真回退。
    6. 派生产物：`make_thumbs.py` 遇已存在文件会 skip（换图必须删旧 webp）；index 若受动作数影响需重跑 `build_gallery_index.py` + `deploy_gallery.py`。
-   **两个已知未决问题**（不要当成新引入的 bug）：
-   - 播完 `touch_idle*` 后全部判定区飞出画布且不恢复（整体位移参数不在 idle 的绑定集里，游戏侧靠状态机复位）。三个候选修法见 §21 末段。
+   **一个已知未决问题**（不要当成新引入的 bug）：
    - 参考版约 **7% 的贝塞尔段无法从 Unity 数据还原**（四种切线候选公式最高只拟合 16.7%，且那是平凡情形）→ 只能用线性弦近似，表现为缓动略少。**这是数据源天花板，别再攻**。
+   ~~播完 `touch_idle*` 后判定区集体出画不恢复~~ → **2026-09-23 已修**：非 idle 参数残留复位（`gallery_src/index.html` 的 `paramSets` 登记 + 回 idle 后写回 moc3 默认值），探针 after 出画数回到 53 == before、位移 0；根因与两条踩坑见 §21 末段，可复用做法见技能 `live2d-web-runtime-integration` §3.8/§7.2。
+10. ⏳ **Live2D 动作语音：全量导出 + 出声验收 + 技能沉淀（2026-09-23）**
+   管线与判据见 **`docs/WORKFLOWS.md` WF-17**，命令语义与实测证据见 **`docs/TROUBLESHOOTING.md` §23**。现状：`scripts/extract_live2d_voice.py` **已写但未入库**，产物只有安土 1 个样本（29 个 ogg），**253 个皮肤全量未跑**；`scripts/diag/l2d_voice_probe.py` 同样未入库。
+   **两个闸门（过了才动技能）**：
+   1. **耳朵验收**：无头 Chrome 是空声卡，探针 `paused=false` 证明不了用户听得见 → 需实听确认「点动作有声音」。
+   2. **全量数字**：`L2D_VOICE_ALL=1` 跑完 253 皮肤（只转对得上动作组的 cue，opus 48k ≈ PCM 的 1/10），拿到最终命中/缺失/体积数字。
+   **顺带待裁定**：`touch_body→touch_1`、`touch_special→touch_2` 两条别名现为语义推断；`ship_skin_words` 若解出（§22 在途）即可给权威映射。
+   **技能沉淀决议（勿再新建）**：自动推荐连发 4 条（`criware-acb-live2d-voice-extraction` / `criware-acb-voice-extraction` / `criware-acb-voice-bank-extraction` / `criware-voice-cue-extraction`）实为**同一份内容的四个副本**，相对 WF-17 净新增仅三点（库原生 `definitions[g][0].Sound` 注入、本库无音频驱动口型、语音表异步到达的首播竞态）。闸门过了之后**并进 `live2d-web-runtime-integration` 新开 §9「动作语音」**，与 WF-17/§23 重复的段落一律改为引用；若坚持独立技能，命名取 #3。⚠️ 该技能住在项目 `.agents/skills/`，而 `skill_manage` 只认用户技能目录 → **须直接改文件**。落笔时修掉两处事实：`-i` 不是"不给就时长翻倍"（本批语音实测无 loop 点），以及探针脚本要先入库才能被技能引用。
 
 ---
 
