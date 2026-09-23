@@ -525,4 +525,4 @@ return Image.fromarray(out_arr).transpose(Image.FLIP_TOP_BOTTOM)
 
 **连带发现**：无头下 idle 看守者轮换间隙（每次 startMotion 重 fetch 动作文件 ~1.5s）会使 `currentGroup` 短暂为 null——`interact_verify` 的「空白点击不播动作」断言须把 `after=null` 视为通过（null=重取数间隙，非动作触发）。
 
-**涉及文件**: `gallery_src/index.html`、`scripts/diag/hit_verify.py`、`scripts/diag/interact_verify.py`；技能 `live2d-web-runtime-integration` §4 已补坐标系换算条目。
+**涉及文件**: `gallery_src/index.html`、`scripts/diag/hit_verify.py`、`scripts/diag/interact_verify.py`；**可复用工具已入库**：`scripts/diag/l2d_coord_forensics.py`（坐标系取证，可见头/胸/髋三点反查）、`scripts/diag/l2d_inspector_verify.py`（判定区可视化+参数面板验收）；技能 `live2d-web-runtime-integration` §4 已补坐标系换算条目，流程见 `docs/WORKFLOWS.md` WF-16。

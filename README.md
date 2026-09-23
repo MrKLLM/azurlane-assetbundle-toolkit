@@ -52,7 +52,7 @@ docs/                # 操作手册 / 工作流 / 踩坑 / 工具说明 / 归档
 | `run_v2_full.py` | v2 全量批跑编排 |
 | `reconstruct_live2d.py` / `fix_model3.py` / `extract_motions.py` / `apply_live2d_motions.py` | Live2D 还原与动作重建（流程见 `docs/WORKFLOWS.md` WF-7） |
 | `build_gallery_index.py` / `make_thumbs.py` | 生成本地浏览平台数据与缩略图（含 CG_v2） |
-| `deploy_gallery.py` | `gallery_src/` 前端源码 → `Output/gallery_v2/` 部署同步 |
+| `deploy_gallery.py` | `gallery_src/` 前端源码 → `Output/gallery_v2/` 部署同步（Live2D 网页交互改动流程与回归见 `docs/WORKFLOWS.md` WF-16） |
 | `gallery_src/cg_export.html` | Spine setup pose 全屏 CG 批量导出页（配 `_gallery_server.py --export` / 无头 Chrome） |
 | `scrape_wiki_fast.py` / `generate_ship_database.py` / `ship_name_map.py` | 舰船 wiki 数据与中文名映射 |
 | `mumu_sync.py` / `mumu_adb.py` | 与模拟器增量同步资产 |

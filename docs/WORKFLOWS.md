@@ -564,3 +564,52 @@
 
 #### 涉及文件
 `scripts/mumu_sync.py`, `scripts/mumu_adb.py`, `scripts/export_dependency_manifest.py`, `scripts/compose_paintings_v2.py`, `scripts/extract_spine_v2.py`, `scripts/reconstruct_live2d.py`, `scripts/extract_motions.py`, `scripts/build_ship_meta.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `scripts/deploy_gallery.py`, `scripts/diag/run_cg_export.py`, `scripts/diag/l2d_sweep.py`, `scripts/diag/l2d_verify.py`, `scripts/diag/l2d_click.py`, `scripts/diag/hit_verify.py`, `scripts/diag/make_face_cmp.py`, `scripts/diag/make_review_sheet.py`, `scripts/diag/scan_faces.py`, `scripts/diag/dedup_*.py`, `PROJECT_STATUS.md §6/§9/§10`
+
+---
+
+### WF-16: Live2D 画廊前端交互改动与回归验证（改哪里 → 怎么验证才算过）
+
+**日期**: 2026-09-23
+**目标**: 改动 `gallery_src/index.html` 的 Live2D 交互层（命中判定、动作、检查器 UI）后，用「不循环论证」的方式证明改动真的对。
+**适用场景**: 用户反馈「点部位触发错动作 / 动作被切 / 模型发死 / 判定框画错位置」，或要加 Live2D 相关 UI。
+
+**改哪里**:
+| 层 | 文件 | 说明 |
+|---|---|---|
+| 前端源码（唯一权威） | `gallery_src/index.html` | 改完必须部署 |
+| 部署 | `scripts/deploy_gallery.py` | 同步到 `Output/gallery_v2/`（运行目录，gitignore）；幂等，改完核对哈希一致 |
+| 服务器 | `Output/gallery_v2/_gallery_server.py`（8777，已在跑则复用） | 回归脚本都打 `http://127.0.0.1:8777/gallery_v2/index.html` |
+| 模型数据 | `Output/Live2D/<key>/` | 前端直读（`P="..\/"`），无副本 |
+
+**四条必须记住的硬规则（每条对应一次真实事故）**:
+1. **坐标系必须换算**：`getDrawableVertexPositions()` 是 V（Cubism 原生：画布中心原点、y 向上），`toLocal()/pixelsPerUnit` 是 P（左上原点、y 向下）。换算 `Vx=Px-cux/2`、`Vy=cuy/2-Py`（`cux=im.width/ppu`）。混用 → 点胸口触发头部动作（TROUBLESHOOTING §20）。
+2. **命中必须先做包含判定**再就近取框，框外返回 null（否则点空白/任意处都触发最近部位，动作被反复打断，用户感受=「做得快/赶」，§19）。
+3. **idle 看守者不能删**：运行时 `setIsLoop()` 无调用点，`Meta.Loop` 失效，所有动作只播一轮；靠 `armIdleLoop` 按 `Duration-120ms` 重开实现循环（§19）。
+4. **验证不能自洽闭环**：合成点击若用被测映射的逆生成，永远全绿。必须用独立锚点（可见语义点反查 / 截图目视）——`l2d_coord_forensics.py` 就是干这个的。
+
+**回归四件套（按顺序跑）**:
+```bash
+# 0) 部署
+py -3 scripts/deploy_gallery.py
+# 1) 坐标系取证：head→Head / chest→Special / hip→Body，identityHits 必须全空
+py -3 scripts/diag/l2d_coord_forensics.py lafeiii_3
+# 2) 检查器验收（判定区/参数面板/滑杆往返/过滤器）
+py -3 scripts/diag/l2d_inspector_verify.py lafeiii_3
+# 3) 交互五项（滚轮/缩放/取消拖拽/空白点击不播/点部位命中）
+py -3 scripts/diag/interact_verify.py
+# 4) 全量按部位点击（约 25 分钟，269 皮肤；基线 806/807，唯一 z46_3 框嵌框歧义）
+py -3 scripts/diag/hit_verify.py
+```
+
+**判据**:
+- 坐标系偏移即视为失败（张冠李戴比「不触发」更糟）。
+- `interact_verify` 的空白点击断言：`after=null` 视为通过（=idle 看守者重取数据的间隙，不是触发动作）。
+- `hit_verify` 全量期望 **806/807**；若掉到 800 以下，说明包含判定或坐标换算被改坏。
+- 无头环境 fetch/parse 比真机慢（约 1.5s），idle 轮换间隙明显；**别把无头掉帧当成 bug**。
+
+**踩坑记录**:
+- 无头验证脚本的 JS 以 `})` 结尾再在 Python 侧拼 `(key)` 调用；写成 `})()` 再拼会变成「调用返回值的返回值」报 `not a function`。
+- 归档到 `scripts/diag/` 的脚本 `ROOT` 要三层 dirname（`.diag/` 里的是两层）。
+- 页面脚本未就绪时先轮询 `window.GALLERY && typeof openShip==='function'`，只等 `GALLERY` 会在偶发时序下报 `openShip is not defined`。
+
+**涉及文件**: `gallery_src/index.html`、`scripts/deploy_gallery.py`、`scripts/diag/{l2d_coord_forensics,l2d_inspector_verify,interact_verify,hit_verify}.py`、`TROUBLESHOOTING.md` §19/§20

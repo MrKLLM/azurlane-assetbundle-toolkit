@@ -56,6 +56,7 @@
 > 旧数据备份 `Output/_OLD_bak/l2d_motion_20260921_141226/`。详见 `docs/TROUBLESHOOTING.md` §17。
 > ⚠️ 旧结论「B 类 12 模型属 motion 质量、资产无缺口」作废：除上述 7 条外均可解出，是解析器缺陷不是资产缺陷。
 已知限制：StreamedClip 未完全逆向；HitAreas 用 moc3 `Touch<X>` drawable 而非官方 `CubismRaycastable` 真点击区（**2026-09-22 §6.11 修后全部 269 模型均带真实 HitAreas**，仅 `z46_3` Special 框嵌 Body 属模型自带歧义）；0.226% 绑定（疑 Drawable 颜色）运行时无对应 target，跳过。
+> **网页交互层状态（2026-09-23 §6.12）**：点击命中已修「包含判定 + V/P 坐标系换算」，idle 有看守者循环，另有判定区可视化与参数·部件检查器；改前端前**必读 WF-16**（四条硬规则 + 回归四件套）。
 ⏳ **9 个 bundle 已于 2026-09-22 换入**：benningdun_2 / bunao_3 / feiteliekaer_4 / gangyishawa_3 / guanghui_9 / pulimaosi_3 / sebao_2 / shi_3 / wuzang_4——9 张卡的 `live2d` 字段已进 index.json，`Output/Live2D` 现 **269 个模型**。换入后逐字段 diff 证**非 live2d 字段零变化**（ship/skin 集合不变、仅 9 卡 +9 live2d 项）；**内容判据全绿：9/9 模型加载 + idle 驱动参数（加密采样各 45/57/90/58/143/50/29/75/144 条参数值变化）**。⚠️ 关键教训：运行时把每条 idle 解析成 `isLoop:false`（全 269 模型一致的既有管线特性，非本轮引入），idle 只播一次即回静；故**验证必须在播放窗口内高频采样**，若等 ~12s 后两次快照比对会因短 idle(5~8s) 已播完回到静帧而假报 `moved=0`（本轮曾据此误判 bunao_3/guanghui_9，密采证伪）。临时产物 `.diag/l2d_new9/`（467MB）已冗余可清理。
 
 ### 2.6 Spine 动态立绘 ✅（v2 提取 + 全屏 CG 导出 + viewer 修复，2026-09-19）
@@ -107,7 +108,7 @@
 
 **核心脚本**：`scan_assets.py`、`export_assets.py`、`export_cue_audio.py`、`reconstruct_live2d.py`/`fix_model3.py`/`extract_motions.py`(★2026-09-21 权威映射重写)/`apply_live2d_motions.py`(★临时目录→备份换入)、`compose_paintings_v2.py`(★v2)、`extract_spine_v2.py`(★v2)、`export_dependency_manifest.py`、`build_gallery_index.py`、`make_thumbs.py`、`deploy_gallery.py`(gallery_src→Output)、`mumu_sync.py`、`ship_name_map.py`、`scrape_wiki_fast.py`。
 
-**可复用诊断/验证工具 `scripts/diag/`**（16 件）：`scan_faces.py`(脸洞扫描)、`make_face_cmp.py`/`make_review_sheet.py`(改前后对比图/复核总表)、`l2d_motion_audit.py`(★全量动作健康审计：空壳/错位/PartOpacity/时长，`L2D_OUT_DIR` 可审任意产物目录)、`l2d_ab.py`(★同一模型新旧 motion 的渲染级 A/B，**只在换入前构成对照**)、`l2d_diff_dirs.py`(★两个产物目录逐 clip gained/changed/lost)、`l2d_sweep.py`(★全量加载+动作内容判据扫描；**2026-09-22 重写为 Python 侧逐条 evaluate + 每 N 模型重载页面**，修掉旧版「单次 evaluate 卡第一条不返回」与「单 Chrome ~110 后 WebGL 断连」，全库 269/269 一次跑通)、`l2d_verify.py`/`l2d_click.py`(抽样与真实点击路径无头校验)、`hit_verify.py`(按部位点击触发断言，支持 `--only`)、`interact_verify.py`(滚轮/拖拽/兜底五项交互断言)、`run_cg_export.py`(Spine CG 批量导出驱动)、`dedup_plan.py`/`dedup_apply.py`/`dedup_httpverify.py`(硬链去重三件套)、`gen_story_md.py`(复核清单生成)。**游戏版本更新怎么跑 → WF-15**；**Live2D 动作重建怎么跑 → WF-7**。
+**可复用诊断/验证工具 `scripts/diag/`**（18 件）：`scan_faces.py`(脸洞扫描)、`make_face_cmp.py`/`make_review_sheet.py`(改前后对比图/复核总表)、`l2d_motion_audit.py`(★全量动作健康审计：空壳/错位/PartOpacity/时长，`L2D_OUT_DIR` 可审任意产物目录)、`l2d_ab.py`(★同一模型新旧 motion 的渲染级 A/B，**只在换入前构成对照**)、`l2d_diff_dirs.py`(★两个产物目录逐 clip gained/changed/lost)、`l2d_sweep.py`(★全量加载+动作内容判据扫描；**2026-09-22 重写为 Python 侧逐条 evaluate + 每 N 模型重载页面**，修掉旧版「单次 evaluate 卡第一条不返回」与「单 Chrome ~110 后 WebGL 断连」，全库 269/269 一次跑通)、`l2d_verify.py`/`l2d_click.py`(抽样与真实点击路径无头校验)、`hit_verify.py`(按部位点击触发断言，支持 `--only`；2026-09-23 起合成点击经 V2P 走**真实路径**)、`interact_verify.py`(滚轮/拖拽/兜底/空白/部位五项交互断言)、`l2d_coord_forensics.py`(★**2026-09-23 新增**：坐标系取证——可见头/胸/髋三点反查应落 Head/Special/Body，专治「张冠李戴」且不构成自洽闭环)、`l2d_inspector_verify.py`(★**2026-09-23 新增**：判定区可视化+参数·部件面板+滑杆往返+过滤器四项验收)、`run_cg_export.py`(Spine CG 批量导出驱动)、`dedup_plan.py`/`dedup_apply.py`/`dedup_httpverify.py`(硬链去重三件套)、`gen_story_md.py`(复核清单生成)。**游戏版本更新怎么跑 → WF-15**；**Live2D 动作重建怎么跑 → WF-7**；**Live2D 网页交互改动/回归怎么跑 → WF-16**。
 
 **文档**（导航见根目录 `README.md`，写入路由见 `AGENTS.md`）：
 - `docs/DEV_LOG.md` 操作手册 · `docs/WORKFLOWS.md` 可复用工作流 · `docs/TROUBLESHOOTING.md` 踩坑 · `docs/ERRORS.log` 错误流水
@@ -162,6 +163,14 @@
    - **修法（已实施进 `fix_model3.py`）**：HitAreas = 「moc3 含 `Touch<X>` drawable」∩「该模型真实存在的动作组（候选 `X`/`tap_X`/`touch_x`/小写回落，Name 用**实际组名**）」；**保守只替换占位 HitAreas（Id ⊆ {HitArea,HitArea2}）→ 256 个既有正确产物一律不动**。
    - **验收全绿**：① 跑 `fix_model3.py` 全库 → 逐字节 diff 证**仅 13 个 model3.json 变、且只 `HitAreas` 字段变**（256 个 mtime 未动）；② `hit_verify.py` 全库分块复跑覆盖 **269/269**、**806/807 命中**（较基线 767/768 净增 39 = 13 模型×3 新启用，全部命中）；③ **13 个模型点头/身/特各 3/3 命中**；点框外不播（前端 `fallbackG=hitAreas.length?null:...`，判定区非空后兜底自动关闭）。**唯一残留 1 例仍是 `z46_3` Special 框嵌 Body 框**（§6.7/§16 已知歧义，非本轮引入、未回退）。旧 index 无需重建（model3.json 画廊直读）。回滚备份 `.diag/m3_snap/*.bak`。明细见 `docs/TROUBLESHOOTING.md` §18。
 
+12. ✅ **Live2D 网页交互根因三连修 + l2d.su 三件套移植（2026-09-23，用户实测反馈）**：
+   - **① 命中缺包含判定**：`hitAt` 取「全图最近框」→ 点画布任意处都触发最近部位，动作被反复打断（用户感受「快/赶着完成」）。修：框内包含（2% 容差）才参与竞选，框外 null。连带查出 `interact_verify` 断言键笔误（查 `noFallbackGroup`，实际是 `noAction`）→「点空白不播」半年来**恒绿灯从未真验**。
+   - **② 运行时永不循环**：vendored pixi-live2d-display 0.4.0 cubism4 模块 `setIsLoop()` **只有定义、全 bundle 无调用点** → `Meta.Loop` 无效，**所有动作（含 idle）只播一轮**，idle 4s 后回静帧。修：前端 **idle 看守者 `armIdleLoop`**（按 `Duration-120ms` 交叉淡入重开，token 与 `scheduleIdle` 互锁，销毁作废）。
+   - **③ 坐标系张冠李戴（最深的一个）**：`getDrawableVertexPositions()` = V（Cubism 原生：画布中心原点、y 向上），`toLocal()/ppu` = P（左上原点、y 向下），差「平移半边+Y 翻转」。旧命中与 `hit_verify` 在**同一错误映射下自洽闭环** → 806/807 全绿但点胸口实际触发头部动作。修：产品侧 `P2V` 统一换算；验证脚本 `V2P` 合成点击（测真路径）；新增 `l2d_coord_forensics.py` 用「可见头/胸/髋三点反查」当**不经过被测映射的独立锚点**。
+   - **三件套移植**（对齐 l2d.su）：**判定区可视化**（彩色框+标签，ticker 逐帧跟随呼吸/物理；蓝=Head 绿=Body 橙=Special）、**参数·部件检查器**（464 参数滑杆+270 部件透明度，含过滤/一键复位；手调参数=变相表情系统，部分替代未还原的 `CubismExpressionController`）、右键防误触。
+   - **验证**：`l2d_coord_forensics` head→Head/chest→Special/hip→Body 全中且 identity 全空；`l2d_inspector_verify` 四项全 true；`interact_verify` 4 模型 ALL PASS；`hit_verify` 全量 **269 皮肤 806/807**（唯一 `z46_3` 框嵌框歧义，模型自带）。**⚠️ §6.11 与 §6.7 的「767/768 / 806/807」旧口径都建立在错误坐标映射上——数字同为 806/807，但含义已从「自洽闭环」升级为「与可见内容对齐」。**
+   - 详见 `docs/TROUBLESHOOTING.md` §19/§20、`docs/WORKFLOWS.md` **WF-16**、技能 `live2d-web-runtime-integration` §3.2b/§4/§8。提交 `36a9c40` → `30514d7`。
+
 > 诊断产物/缓存均在 `.diag/`（不入库，本机可继续用）。画廊前端改动走 `gallery_src/` → `scripts/deploy_gallery.py`。
 
 
@@ -189,7 +198,7 @@
 当前主线: v2 数据驱动管线（§9）+ gallery_v2（§10）
 下一步: [具体任务]
 ```
-要点：静态立绘 / Spine 已由 v2 全量收官，Live2D 动作层已于 2026-09-21 按权威映射重建完毕。接手前先读 §9 理解「游戏数据自洽、不要猜坐标/不要按位置猜参数名」这一核心结论。**验动效一律看内容**（曲线条数、Id 是否命中参数表、值是否随时间变化），不要只看 `currentGroup`/组名标签——空壳也能"启动"，这个坑已踩过一次（`docs/TROUBLESHOOTING.md` §17、`docs/WORKFLOWS.md` WF-7）。历史 v1 调试见 `docs/archive/`，一般无需再读。
+要点：静态立绘 / Spine 已由 v2 全量收官，Live2D 动作层已于 2026-09-21 按权威映射重建完毕，**2026-09-23 网页交互层三个根因（命中包含判定 / idle 循环 / V-P 坐标系）已修并回归**。接手前先读 §9 理解「游戏数据自洽、不要猜坐标/不要按位置猜参数名」这一核心结论。**验动效一律看内容**（曲线条数、Id 是否命中参数表、值是否随时间变化），不要只看 `currentGroup`/组名标签——空壳也能"启动"，这个坑已踩过一次（`docs/TROUBLESHOOTING.md` §17、`docs/WORKFLOWS.md` WF-7）。**验交互一律用独立锚点**——合成点击若与被测映射同源会自洽闭环、全绿也说明不了对齐（§20、WF-16）。历史 v1 调试见 `docs/archive/`，一般无需再读。
 
 ---
 
