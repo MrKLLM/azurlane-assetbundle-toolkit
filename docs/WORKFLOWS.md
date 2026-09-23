@@ -633,6 +633,8 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
     `document.scripts` 里**没有 `src=` 的标签**（只有 Chrome 自己的两个大内联脚本）、
     `readyState` 却是 `complete`、`typeof openShip==='undefined'`。
     四条同时成立 = **服务器不在**，别再查页面代码或 CDP。
+    **现成工具**：`py -3 scripts/diag/page_sanity_check.py` 一次打印这四条 + 全部 CDP target，
+    跑任何 CDP 回归前先扫它一眼，能省掉一整轮误查（本次就是靠它定位的）。
   - **为什么容易误判成代码问题**：`readyState=complete` 会让人以为页面加载成功了；而错误页也是"完整文档"。
   - **已排除的假设（都实测过，别再重走）**：① 就绪等待写成同步空转 → 改成带 `await` 的轮询 + 对 `err` 重试 3 次**仍报同一错**；
     ② `ev()` 缺 `awaitPromise` → 核实**本来就有**；③ CDP 落在陈旧/隔离 context → `Page.navigate` 重新提交文档**也没救回来**。
