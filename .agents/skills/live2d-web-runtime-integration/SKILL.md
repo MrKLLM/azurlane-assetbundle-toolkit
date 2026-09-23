@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
-description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.0.0
+description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
+version: 1.2.0
 ---
 
 # Live2D 网页运行时集成
@@ -39,7 +39,7 @@ app.stage.addChild(mdl);
 - `autoInteract: false` 时库自带的 hit test/视线跟随都关掉，交互自己实现（见 §4）。
 - 需要 `FileReferences.Motions` 的组名列表：`mdl.internalModel.motionManager.definitions`（键即组名）。
 
-## 3. 动作播放：三个必踩陷阱
+## 3. 动作播放：八个必踩陷阱（3.1–3.8）
 
 ### 3.1 `startMotion` 的 index 不能传 `null`
 
@@ -62,35 +62,118 @@ const playing = mm.state.currentGroup === g;   // 唯一可靠判据
 
 **帧哈希/drawImage 比对不能当判据**：无头环境 rAF 被节流会**假阴性**；而 physics 与眨眼会让画面逐帧变化，造成"动作在播"的**假阳性**。另外注意：idle 播完后 `state.currentGroup` 会**自动归 null**，所以"值变了"才说明有东西被触发。
 
-### 3.2b 这个运行时的 Loop 是坏的：`_isLoop` 永远是 false（0.4.0 实测）
+### 3.3 `Meta.Loop` 被忽略 → 但**不要**用前端定时器假装循环
 
-pixi-live2d-display 0.4.0 的 cubism4 模块里 `setIsLoop()` **只有定义、没有任何调用点**（对 min bundle 全文搜索证实），`Meta.Loop:true` 被完全无视——**每条 motion（含 idle）都只播一轮**，idle 播完即回静帧、参数回落基准。这不是数据问题，别去改 motion3.json。
+vendored 0.4.0 的 cubism4 模块里 `setIsLoop()` **有定义、全 bundle 无调用点**，`Meta.Loop:true` 被无视，
+动作播完即停。用定时器"到点重开"是**陷阱**：`startMotion` 是 async（返回 Promise），
+`mm.startMotion(...) !== false` **恒成立**，于是被 `state.reserve()` 以
+`"Motion is already playing"` 拒绝时前端完全无感，而重开定时器又照原周期重新武装 →
+实测 idle 播 9.1s 后**冻结 9.2s**（`currentGroup=null`、队列 0 条、参数纹丝不动），50% 占空比。
 
-前端兜底（看守者模式，已验证有效）：
-
+正确修法（三行，交回运行时）：
 ```js
-const armIdleLoop = () => { const tok = ++idleTok;
-  motionMs(idleGroup).then(ms => {                    // 读 motion3 的 Meta.Duration
-    setTimeout(() => {
-      const cur = mm.state.currentGroup || null;
-      if (cur === null || cur === idleGroup) {        // 没别的动作在播才重开
-        mm.startMotion(idleGroup, 0, MP.FORCE);        // 提前 ~120ms 交叉淡入=无缝循环
-        armIdleLoop();                                 // 自我再武装
-      }                                               // 否则让该动作的回落定时器接管后重新武装
-    }, Math.max(300, ms - 120));
-  });
-};
+// ① 把 Meta.Loop 灌进 CubismMotion 本体（核心会自己做时间回绕：f>duration 就减 duration）
+const orig = mm.createMotion.bind(mm);
+mm.createMotion = (json, group, def) => { const m = orig(json, group, def);
+  if (group === idleGroup && json?.Meta?.Loop && m.setIsLoop) {
+    m.setIsLoop(true); m.setIsLoopFadeIn?.(false); }   // ← 后者必须设！
+  return m; };
+// ② 对齐库自带的"播完自动回 idle"：默认值是 'Idle'，与我们的 'idle' 不匹配 → 一直静默失效
+mm.groups.idle = idleGroup;
 ```
+⚠️ **`setIsLoopFadeIn(false)` 不能漏**：否则每次回绕都会 `setFadeInStartTime(now)`，
+淡入权重每循环归零重爬一遍，观感 = "每隔 N 秒身子被拽回去"。
+设了 ①② 之后**前端不需要任何动作计时器**，回落 idle 由库逐帧接管。
 
-要点：① 每次 idle 启动（初始播放、动作回落）后都要重新武装；② 非 idle 动作的回落定时器（按时长+300ms 回 idle）保留，两者用 token 防重入、回落前检查 `currentGroup` 避免双启；③ 组件销毁时 token++ 作废全部挂起定时器；④ 每次 `startMotion` 都会重新 fetch+parse motion 文件（该库**无任何缓存**），轮换边界有短暂掉帧，真机可接受。
+### 3.4 `_startMotion` 里的 `stopAllMotions()` 让动作切换**完全没有交叉淡化**
 
-### 3.3 销毁与泄漏
+库的 cubism4 管理器每次起动作都先 `queueManager.stopAllMotions()` → 旧动作被瞬间掐死，
+姿态硬跳（观感 = "动作不对、身子拧着、穿模"）。而队列管理器自己的 `startMotion`
+**本来就会给现存条目 `setFadeOut()`** —— 所以只要不再调 stop 就恢复官方交叉淡化：
+```js
+mm._startMotion = (m, onFinished) => { try{ m.setFinishedMotionHandler(onFinished); }catch(e){}
+  return mm.queueManager.startMotion(m, false, performance.now()); };
+```
+配合 3.3 的循环动作要注意：`_isLoop=true` 时 `getDuration()` 返回 −1 → `endTime=-1` →
+淡出权重恒 1；但条目被 `setFadeOut` 触发淡出时 `startFadeOut` 会把 `endTime<0` 改成
+`now+fadeOut`，所以**循环动作仍能正常淡出退场**，不会赖着不走。
+
+### 3.5 运行时自加的 Cubism2 式「呼吸层」——Cubism4 模型必须关掉
+
+`Cubism4InternalModel` **无条件**挂 `CubismBreath`，每帧在动作**之后**再 ADD 五个参数：
+`ParamAngleX ±7.5°@6.5s / Y ±4°@3.5s / Z ±5°@5.5s / ParamBodyAngleX ±2°@15.5s / ParamBreath ±0.25@3.2s`。
+而 Cubism4 模型的动作**本来就自带**这些参数的动画（碧蓝全库 74~85% 的 idle 有）→ **头部双驱动**，
+观感 = "一直在有点快地动、不自然"。铁证：游戏侧 bundle 的 MonoBehaviour 组件清单
+（`CubismMoc/Model/Parameter/PhysicsController/Raycaster/MouthController/Live2dChar`）里**根本没有 Breath**。
+```js
+internalModel.breath?.setParameters([]);   // 关掉，播放完全等于动作数据本身
+```
+（`updateFocus()` 也是每帧 ADD，但 `autoInteract:false` 时 focusController 恒为 0，无害。）
+
+### 3.6 判定区/淡入淡出/Groups 别自己拍脑袋，跟权威实现对齐
+
+model3.json 里三处最容易自以为是：
+- **淡入淡出**：给每条动作硬写 `FadeInTime/FadeOutTime:0.5` 会让"回落 idle"比运行时默认
+  （idle 组 **2s**、其余 0.5s）快 4 倍 → 反应没收尾就被拽回去。**不写**才交给运行时默认。
+  若 idle 带大量定值曲线，2s 淡出会在点击后继续拖尾 2 秒把参数往回拽 → 显式拆开
+  `FadeInTime:2.0, FadeOutTime:0.5`（库里这两值默认共用同一个 idle 常量，只能显式覆盖）。
+- **`Groups`** 缺 `EyeBlink`/`LipSync` 时 `internalModel.eyeBlink` 直接是 undefined（模型不眨眼）。
+- **`HitAreas` 不止 Head/Body/Special**：moc3 里可能有几十个 `Touch*` 标记（碧蓝安土有 76 个：
+  `TouchDrag1-24`、`TouchIdle1-47`）。只登记三个 → 点其它区域毫无反应。
+  补登时务必实测**新框与核心框是否重叠**（安土实测零重叠才敢上）。
+
+### 3.7 销毁与泄漏
 
 `app.destroy(true,{children:true,baseTexture:true,texture:true})` 不会移除 `window` 级监听。把所有监听存进状态对象并提供 `off()`，切换标签/关闭弹窗时统一调用：
 
 ```js
 state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.removeEventListener('pointermove', onMove); ... };
 ```
+
+### 3.8 clip 驱动过的参数无人回写 → 模型整体移位、判定区全丢（"进去就出不来"）
+
+**症状**：某个动作（安土 `touch_idle1`）播完之后判定区集体失效。实测画布 20×16 模型单位，静止态 57 个判定区已有 53 个在画布外（编辑器遗留的停放标记，只有核心 3 个 + `touch_idle1` 真可点）；播完这条 clip 后 **57 个全部出画**，核心三个一起被甩到同一点 `(-36.37,-52.81)`，回到 idle 也不恢复。
+
+**根因**：Cubism 只对"本 clip 有曲线的"参数施权，**缺曲线的参数停在上一个动作留下的值上**。该 clip 252 条曲线里 **15 条 `idle` 从不驱动**（含整体位移）→ clip 末帧值永久残留。游戏侧靠 `change_in`/`home` 状态机复位，Web 运行时没有状态机，所以同一份数据在游戏里不暴露。（导出侧同一条机制见 §6.5「`m_ConstantClip` 定值曲线不是惰性的」。）
+
+**定位 = 参数集求差，不靠猜**：对 motion3.json 取 `{c.Id | c.Target=="Parameter"}`，算 `clip集 − idle集`。
+⚠️ `Id` 有两种形态，纯字符串 或 `{string:"ParamX"}`，判据要兜两种：
+```js
+const curveId = c => typeof c.Id === 'string' ? c.Id : (c.Id && c.Id.string) || null;
+```
+差集非空即锁定嫌疑人。
+
+**修法**：复用 §3.3 那个 `createMotion` 补丁顺手登记每组参数集（零额外请求），`play()` 里 `if (g !== idleGroup) played.add(g)`，再用一个 ticker 回写：
+
+```js
+const restTick = () => { const cg = mm.state?.currentGroup;
+  if (cg && cg !== idleGroup) { rest = null; return; }               // ② 只在回 idle/队列空时才动
+  if (!rest) { const idleS = paramSets[idleGroup]; if (!idleS || !played.size) return;
+    const want = new Set();                                          // ① 只碰播过的 clip 驱动过的参数
+    played.forEach(g => (paramSets[g] || new Set()).forEach(p => { if (!idleS.has(p)) want.add(p); }));
+    played.clear(); const items = [];
+    want.forEach(p => { let i = -1; try { i = cm.getParameterIndex(p); } catch (e) {}
+      if (i >= 0) try { items.push([i, cm.getParameterValueByIndex(i), cm.getParameterDefaultValue(i)]); } catch (e) {} });
+    if (!items.length) return;
+    rest = { items, t0: performance.now() + REST_DELAY }; return; }  // ③ 先等上一条淡出跑完
+  const el = performance.now() - rest.t0; if (el < 0) return;
+  const k = Math.min(1, el / REST_MS);
+  for (const it of rest.items) try { cm.setParameterValueByIndex(it[0], it[1] + (it[2] - it[1]) * k); } catch (e) {}
+  if (k >= 1) rest = null; };
+app.ticker.add(restTick);   // REST_DELAY=400, REST_MS=700
+```
+
+三道防误伤约束：① 只处理「播过的 clip 驱动、idle 不驱动」的参数，物理/眨眼/口型等 clip 无关参数一律不动；
+② 只在回到 idle（或队列空）时触发；③ 先等 `REST_DELAY` 让淡出跑完，再线性渐变过去（硬赋值会跳帧）。
+目标值取 **moc3 默认值**（`getParameterDefaultValue`）而非"进动作前的快照"：这些参数在静止态本就没人动，
+默认值 ≡ 静止位，且与快照时机无关。
+
+**坑：`paramSets[idleGroup]` 为空 ⇒ 复位永远不触发**（那个 `if (!idleS) return` 是静默的）。
+当 idle 的 motion 在补丁挂上**之前**就被创建时发生——库的预加载分支是
+`switch (config.motionPreload) { default: e = [this.groups.idle] }`，所以 `motionPreload:'ALL'`
+或组名恰为库默认的 `Idle` 时必踩。本项目组名是小写 `idle` 而 `mm.groups.idle` 要到 §3.3 的补丁里才被改成小写，
+默认路径不预加载、侥幸躲过——但**判据必须显式断言 `paramSets[idleGroup]?.size > 0`**。
+兜底做法：另 fetch 一次 idle 各条 json 登记参数集，顺带补 `Meta.Loop`（同一份 json，别开第二条管线）。
 
 ## 4. 按部位点击触发（HitAreas）
 
@@ -103,15 +186,37 @@ state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.remov
 - **`HitAreas[].Name` 通常就是动作组名**（本项目 256 模型 768 个判定区对 `FileReferences.Motions` 键 **768/768 精确匹配**）。先跑一次全库统计验证这个假设，别凭直觉找 `tap*` 组——多数模型根本没有裸 `tap` 组，于是"点哪儿都不动"。
 - 取判定几何：`idx = coreModel.getDrawableIndex(a.Id)`，再 `coreModel.getDrawableVertexPositions(idx)`（模型单位，x/y 交替）。**点击瞬间实时读，不要缓存**——框会随呼吸/物理每帧位移，缓存坐标会点空。
 - 坐标换算：`const lp = mdl.toLocal(new PIXI.Point(屏幕x - wrapRect.left, 屏幕y - wrapRect.top)); const 单位 = lp.x / internalModel.pixelsPerUnit`。
-- **用包围盒，别用三角面**：本项目实测改用 Cubism 原生"点在三角面内"后反而更差——部分模型的 Touch 三角面**连自己的顶点重心都不包含**（数据不规整）。包围盒实测 767/768。
-- 多个框同时包含时（部位框常重叠/嵌套）取**归一化中心距离**最小者：`s = dist(点, 框中心) / max(半宽,半高)`。注意"按顺序取第一个"会让大框（如 Head）永远压住小框；"取最小框"在另一种模型上又错——两种规则各有反例，选一个并记录已知歧义，不要为个别样本过拟合。
-- ⚠️ **必须先做「点在框内」包含判定，再谈就近取框**（2026-09-23 碧蓝航线实测踩坑）：曾写成「全图取最近框」而无包含判定 → 点画布任意位置（含视觉空白处）都触发最近部位动作，用户报"悬停/乱触发、动作赶着做完"（动作被反复打断的观感）。正确顺序：`|mx-cx|<=半宽+容差 && |my-cy|<=半高+容差` 才参与竞选，全不命中返回 null。
-- 回归脚本断言键名必须与脚本实际输出键名一致：曾把输出 `noAction` 断言成不存在的 `noFallbackGroup` → 该项**恒不触发、永远绿灯**，"点空白不播"半年未被执行过。改判据后必须用一个已知失败样本验证断言确实会变红。
+- **判定形状 = 部件的真实四边形（两三角），不是它的轴对齐包围盒**（2026-09-23 二次修订，推翻本条旧结论）。
+  游戏侧 `CubismRaycaster` 就是对 `Touch*` 部件做三角形 raycast。这些标记是 4 顶点不可见 quad，
+  **部分模型的 quad 是斜的**：四边形面积/包围盒面积比 = `yingrui_3` 0.489~0.755、`z46_3` 0.645~0.942，
+  用包围盒等于把判定区放大最多 2 倍 → 点旁边空地也触发（用户报"有些点击不准"）。
+  正矩形模型（碧蓝安土 `antu_2` 等，比值 1.000）两种判定**逐点等价**，零行为变化。
+  ⚠️ **本条旧结论"三角面反而更差、包围盒 767/768"是错的**：那次实测是在**坐标系换算还没修对**时做的，
+  且试图用 `coreModel.getDrawableIndices()` —— **该方法在 live2dcubismcore 的 Model 包装上根本不存在**
+  （只有 `core.drawables.indices[i]`），拿到 undefined 后判定全崩，被误当成"三角面数据不规整"。
+  正确做法：4 顶点按**三角带序**拆成 `(v0,v1,v2)+(v1,v3,v2)`，无需索引缓冲；实测 5 个模型
+  `带序面积 == 凸包面积`，证明带序假设成立。包围盒只当**快速预筛**用。
+- **顶点序是三角带，画多边形必须换环序**：`getDrawableVertexPositions` 给的是 `(TR,TL,BR,BL)` 带序，
+  直接 `drawPolygon(v0,v1,v2,v3)` 会连成**自交蝴蝶结**。无自交环序是 `[0,1,3,2]`。
+- 多个框同时包含时（部位框常重叠/嵌套）取**面积最小的框**（最具体的部位优先）。
+  旧的"归一化中心距离就近取"在嵌套框上会选到大框；改最小面积后安土等正矩形模型行为不变，
+  `yingrui_3`/`z46_3` 的斜框误伤被剔掉（实测收窄 26.4%）。
 - 容差只给 **2%**（吸收测试派发延迟的几十毫秒位移）。给到 8% 会把视觉上明显空白的角落判成命中——Live2D 画布四周有大量透明边距，模型单位范围比可见内容大得多。
-- **兜底动作只给没有 `HitAreas` 的模型**。有判定区却点框外，就什么都不播（与游戏一致）。否则点哪儿都蹦一个 `touch_drag*`，观感极差。
-- ⚠️ **两套坐标系必须换算，别当同一空间用**（2026-09-23 实测踩坑，证据 `.diag/_probe_affine.json`）：`getDrawableVertexPositions()` 返回 **V=Cubism 原生坐标**（画布中心原点、**y 向上**），`toLocal()/pixelsPerUnit` 得 **P**（左上原点、y 向下）。换算：`Vx=Px-cux/2`、`Vy=cuy/2-Py`（`cux=im.width/ppu`、`cuy=im.height/ppu`）。拿 V 框直接包含 P 点（或反之）→ 点胸口触发头部动作；画 overlay 画到角落。**防自洽闭环陷阱**：合成验证点击若用「被测映射的逆」生成，测试永远绿——必须留一个不经过被测映射的锚点（可见语义点反查 / 截图目视）。
-- **参数/部件检查器**：`core._parameterIds`/`core._partIds` 是 wrapper 自有名字数组（字符串）；`getParameterCount/getParameter{Minimum,Maximum,Default}Value(i)/getParameterValueByIndex/setParameterValueByIndex`、`getPartCount/getPartOpacityByIndex/setPartOpacityByIndex` 齐全，但**没有** `getParameterId/getPartId(i)`。滑杆手调参数=变相表情系统；注意播放中的动作每帧覆写它驱动的参数。
-- **判定区可视化 overlay**：Graphics 挂 stage 同级，坐标用 `stage = mdl.pos + P*ppu*mdl.scale`（apply() 无旋转无锚点时成立）；每帧 ticker 里重画以跟随呼吸/物理位移。
+- **兜底动作只给没有 `HitAreas` 的模型**。有判定区却点框外，就什么都不播（与游戏一致）。否则点哪儿都蹦一个 `touch_drag*`，观感极差。前端配套：`fallbackG = hitAreas.length ? null : <兜底组>`——`hitAreas` 非空时把兜底组设为 `null`，才会出现"点框外不播"；否则形同空壳。
+
+## 4.5 生成真实 HitAreas（修补占位 Id，2026-09-22 碧蓝航线实测）
+
+§4 讲的是**消费**已有 HitAreas；本节讲**如何为占位模型批量生成正确 HitAreas**（`fix_model3.py` 一类管线）。典型根因：还原管线早期只往 `model3.json` 补占位 Id `HitArea/HitArea2`，而前端 `getDrawableIndex("HitArea")` 取不到 drawable → 判定区被过滤成空 → 点部位退化成兜底乱播。
+
+- **保守只替换占位 Id**：仅当某模型现有 `HitAreas[].Id ⊆ {HitArea, HitArea2}` 时才改写；已带正确 Id 的模型**一律不动**。这样"256 个既有模型零回退"是**构造性保证**（压根不进改写分支），不靠事后校验兜底。
+- **`Id`**：碧蓝统一用 `TouchHead/TouchBody/TouchSpecial`，须能被 `getDrawableIndex(a.Id)` 解析（返回值 `≥0`）。**改写前先逐字节探针确认该 drawable 真的在 moc3 里**——判据是 `getDrawableIndex("TouchHead") >= 0` **且** `getDrawableVertexPositions(idx)` 非空（如 4 点 = `vlen=8`）。只有**部件名**（Part）不算，必须是**drawable**，否则前端仍取不到框。
+- **`Name`**：必须是**该模型真实存在的动作组**，即能在 `FileReferences.Motions` 的键里找到。按候选顺序取第一个命中的（小写回落，兼容不同命名世代）：
+  - `Head → [Head, head, tapHead, taphead, tap_head, touch_head, TapHead]`
+  - `Body → [Body, body, tapBody, tapbody, tap_body, touch_body, TapBody]`
+  - `Special → [Special, special, tapSpecial, tapspecial, tap_special, touch_special, TapSpecial]`
+  经验：老模型组名是 `Head/Body/Special`，新换入模型是 `touch_head/touch_body/touch_special`——两代都要覆盖，只认其一就是"点哪儿都不动"的来源。
+- **改后必须证"仅该字段变"**：跑前对全部 `model3.json` 快照 `(path, mtime, sha256)` 清单，跑 `fix_model3` 后 diff → 断言"**仅 N 个文件变、且每个文件仅 `HitAreas` 字段变**"（顶层键集合不变、`changed_fields == ['HitAreas']`）。任何其它字段被顺带改动 = 回退，立即排查。
+- **收尾**：`hit_verify --only <这批 key>` 逐个证 **3/3 命中**（点击各 drawable 框中心 → `state.currentGroup == HitAreas[].Name`）；再全库复跑确认命中数增量 == 新启用的判定区数（本项目 13 模型 × 3 = +39，768→807、767→806，同一 `z46_3` 嵌套框歧义为既有非回退项）。
 
 ## 5. 构图与 fit 的两个陷阱
 
@@ -140,16 +245,64 @@ state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.remov
 - StreamedClip 的**帧 0 是 `time=-3.4e38` 的参考姿态帧，一帧合法写完全部曲线**（大模型一帧 380~520 个 key）。
   任何 `if numKeys > N: break` 之类的"合理性护栏"都会在帧 0 崩掉整条动作；
   只能靠 `+inf` 结束符 + 缓冲区边界停。该帧要当作各曲线 t=0 的基准值，而不是当普通关键帧丢掉。
-- **贝塞尔段序：`[1, c1x, c1y, c2x, c2y, 终点time, 终点value]` —— 终点在最后**，官方没有第 5 个"interpolation"字段。
-  且 `segments` 数组是按 `Meta.TotalSegmentCount` **预分配**的：计数少算一位，浏览器里就抛
-  `Cannot set properties of undefined (setting 'basePointIndex')`，而前端只表现为"这个模型点了没反应"。
-  → 写完必须按运行时的消费方式重放一遍自检（首对 l+=2/点+1，线性 l+=3/点+1，贝塞尔 l+=7/点+3）。
-- Unity 切线换 Cubism 归一化控制点时，`dv≈0` 会把控制点顶到 `by=14.9` 这种量级反而抖；
-  `|dv| < 1e-3·max(1,|v0|,|v1|)` 或 `|by|>3` 时退化成线性段。
+- **⚠️⚠️ 贝塞尔控制点是「绝对 (时间, 值)」，不是归一化分数**（2026-09-23 血泪根因）。
+  段序仍是 `[1, c1x, c1y, c2x, c2y, 终点time, 终点value]`（终点在最后，官方没有第 5 个
+  "interpolation" 字段），但运行时解析器是**直读不做任何还原**：
+  ```js
+  case Bezier:
+    points[a]   = new j(seg[l+1], seg[l+2])   // (时间, 值) —— 绝对坐标
+    points[a+1] = new j(seg[l+3], seg[l+4])
+    points[a+2] = new j(seg[l+5], seg[l+6])
+  ```
+  若按归一化写 `[1, 1/3, by1, 2/3, by2, t, v]`，控制点会被读成「t=0.333 **秒**、值=0.667」——
+  落在段外且值接近 0 → **每条贝塞尔都先猛蹿到≈0 再跳到目标值**。表现为"部件各动各的、
+  像刚学建模的人做的、穿模"，而**曲线数/时长/参数名/量程全部校验都能通过**，极难自察。
+  正确写法 = Unity 三次 Hermite 的等价控制多边形：
+  `c1=(t0+dt/3, v0+outSlope·dt/3)`、`c2=(t1−dt/3, v1−inSlope·dt/3)`。
+- **但"格式正确"≠"效果正确"**：Unity **密集键**（相邻键 ≪ 周期）的那对切线字段本就不该当 Hermite
+  切线用，照上面算会飞出几百个参数单位。碧蓝实测三种写法对权威基准的逐曲线偏差（121 点采样）：
+  | 写法 | 偏差中位 | 偏差>0.5 的曲线 | 最甚 |
+  |---|---|---|---|
+  | 归一化控制点 | 1.376 | 92/98 | 9.35 |
+  | 绝对控制点·全贝塞尔 | 0 | 88/278 | **296** |
+  | **关键帧 + 线性**（采用） | 0 | 11/278 | 1.95 |
+  → 从 Unity AnimationClip 反解时，**默认就该发线性段**；`|dv|<1e-3·max(1,|v0|,|v1|)` 的退化线性
+  与 `|by|>3` 拉直都是掩盖格式错误的权宜，别当成优化保留。
+- **`Meta` 要对齐**：`Fps` 取 `AnimationClip.m_SampleRate`（别硬编码 30）；`AreBeziersRestricted:true`
+  的含义是"控制点横向恒在 1/3、2/3"→ 运行时走朴素参数化求值（不解三次方程），与上面的发法自洽。
+- **⚠️ Unity 曲线分装在三个容器，只读 `m_StreamedClip` 会丢数据**：
+  `m_Clip.data` 有 `m_StreamedClip` / `m_DenseClip` / `m_ConstantClip`，
+  而 `genericBindings` 的顺序 = **[streamed][dense][constant]**（实测 98+0+180=278 且名字零冲突）。
+  `m_ConstantClip` 是"整段保持定值"的曲线，**不是惰性的**：Cubism 只对"本 clip 有曲线的"参数施权，
+  缺曲线的参数在切动作时**停在上一个动作留下的值上** → 被 `touch_*` 动过的手臂回不到静止位 → 部件错位。
+  参考实现的 `idle` 曲线数正是 streamed+constant 之和。**务必一并导出定值曲线**
+  （`Segments:[0, v, 0, duration, v]`，每条 1 段 2 点）。
 - 运行时**完全不读 `pose3.json` / model3 的 `Pose` 键**（该字符串在 pixi-live2d-display 里出现 0 次），
   但支持 motion3 的 `Target:"PartOpacity"` → 换装/部件可见性只能写进 motion3.json，出 pose3 是死路。
 
 ## 7. 无头验证判据（配合 CDP）
+
+### 7.0 自研管线必须找**外部权威实现**做基准，自证清白一定会漏
+
+**教训**：碧蓝 Live2D 的 motion3.json 控制点格式错了整整一个量级（见 §6.5），但
+曲线数、时长、参数名映射、量程、空壳率**全部校验通过**，`hit_verify` 也是 806/807 全绿——
+因为这些都只验证"结构自洽"，不验证"和原作一样"。用户反馈"部件各动各的、像刚学建模的人做的"
+持续了好几轮，我先后误判成呼吸层、误判成插值护栏，**直到拿到同模型的权威导出才一次锁定**。
+
+可用的外部基准（同一批游戏模型、成熟 Cubism 实现）：
+```
+https://static.l2d.su/azurlane/live2d/<key>/<key>.model3.json
+https://static.l2d.su/azurlane/live2d/<key>/motions/<组>.motion3.json   # 注意 motions/ 复数
+```
+路径规律是从它的 SPA bundle（`/assets/index-*.js`）里 grep `model3.json` 模板反查出来的；
+只覆盖部分模型（抽样 8/14），404 就跳过。比对**逐曲线按运行时真实语义采样求值**
+（linear 插值 / stepped 取起点 / bezier 在 `AreBeziersRestricted` 下用归一化时间直接当贝塞尔参数），
+判据：组与曲线集合零缺失、**关键帧零不一致**、偏差中位 ≤0.5、偏差>0.5 占比 ≤12%
+（12% 是按"结构完全正确时的真实残差"校准的，不是拍脑袋）。
+
+**没有外部基准时的次优锚点**：① 目标实现的录屏/截图做目视基准；② 用**不经过被测映射**的
+可见语义点反查（如"屏幕上的头/胸/髋三点应分别落入对应判定框"）；③ 逐字段 diff 对照组证零回退。
+只做"自己算一遍再和自己比"的回归 = 验证自洽性，不是验证正确性。
 
 - **判"动作真的有效"要同时满足两条**：① 正在播的 motion 的 `_motionData.curveCount > 0`；
   ② 取该 motion 自己的曲线 Id，`getParameterValueById` / `getPartOpacityById` 的值随时间变化。
@@ -166,14 +319,43 @@ state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.remov
 - **两个 chrome 实例并发跑 CDP 会互相抢**，报 `Execution context was destroyed`；批量验证要串行。
 - 清理残留 chrome 必须按 `--user-data-dir` 精确匹配进程命令行再 kill，**绝不能按进程名全杀**（会误杀用户自己的浏览器）。
 
+### 7.1 全库规模（数百模型）必须分批起新 Chrome
+
+上面"每轮 `stopLive2D()` 释放"只能撑一小段：**单个 headless Chrome 顺序加载约 110 个模型后 WebGL 上下文耗尽**，CDP 连接断，报 `Connection to remote host was lost`（标签崩溃），与 `l2d_sweep` 的"单次 evaluate 卡住/断连"同类。靠单进程 + 手动释放扛不住全库，必须**换成分批新进程**：
+
+- **切批**：用 `--only "k1,k2,..."` 逗号清单把模型切成 **~40 个一批**（本项目 269 → 4 批），**每批一个全新 Chrome**（每次调用只起一次进程），而不是一个长循环从头跑到尾。
+- **冷启动首模型易报错**：每批新进程加载的第一个模型常撞 `window.GALLERY 未就绪` / `stopLive2D is not defined`（harness artifact，非模型问题）。对策：给每批 `--only` 清单**头部塞一个已知良好的预热模型**（如 `lingbo`，不计入统计），或对报错的首项单独复跑；一旦 warm 起来同模型即 3/3。
+- **汇总口径 = 按 key 去重取最优**：合并所有分批日志，同一模型 key 在任一批 `ok` 即算 `ok`，避免某批崩溃漏记被误判成回退。
+- 实测：分批后 **269/269 覆盖、806/807 命中**，唯一 miss `z46_3`（Special 框嵌套在 Body 内）是 §4 记录的既有"归一化中心距离"歧义，非本轮回退。
+
+### 7.2 验证前端自己挂的逻辑，必须驱动页面的真实入口
+
+复位、淡出、随机变体这类逻辑挂在页面的 `play()` 上（下拉框 onchange / 点击 handler / 按钮）。
+探针直接 `mm.startMotion(g,0,FORCE)` 会**整层绕过它**，于是"复位没生效"其实是"根本没进被改的那段代码"——
+2026-09-23 本项目就据此把一个**正确的**修复误判成无效。
+
+```js
+const sel = document.getElementById('l2Motion');
+if (!sel) return JSON.stringify({ err: '动作下拉框不存在，无法走真实播放路径' });  // 不许回落假路径
+sel.value = grp; sel.onchange();                        // ✓ 真实路径
+// mm.startMotion(grp, 0, MP.FORCE);                    // ✗ 绕过前端交互层
+const started = mm.state.currentGroup;                  // 必须回读：区分「静默失败」与「没复位」
+```
+
+handler 缺失时探针要**显式报错**，绝不回落到 `mm.startMotion` 继续测——回落等于自造假阴性。
+验收判据（工具 `scripts/diag/l2d_touchidle_probe.py`）：before 出画 53 → mid 57（clip 生效）→
+after **53（与 before 相等）**，且位移 >0.3 的判定区数 = **0**。
+
 ## 8. 落地检查清单
 
 - [ ] 三件套版本成对且按序加载；vendor 相对路径在页面上下文里 `fetch` 验证过
 - [ ] `startMotion` 显式 index + `MotionPriority.FORCE`
 - [ ] 用 `state.currentGroup`（等待后）证明动作真的在播，不靠帧比对
 - [ ] fit 基准取 `internalModel.width`，且 fit 幂等（ResizeObserver 多次触发不放大）
-- [ ] 部位命中实时读框；**先做框内包含判定再就近取框**；兜底只给无 HitAreas 的模型；容差 2%
-- [ ] idle 持续 Alive：看守者已武装且回归脚本能证明「加载 12s 后 currentGroup 仍为 idle」
+- [ ] 部位命中实时读框；兜底只给无 HitAreas 的模型；容差 2%
 - [ ] 裸滚轮不被劫持；`pointercancel`/`blur` 解除拖拽；平移钳制
 - [ ] `stopLive2D()` 里 `app.destroy()` + `off()` 都做
 - [ ] 无头批量验证：全量命中率与失败清单，含"无判定区"模型列表
+- [ ] 参数残留复位：断言 `paramSets[idleGroup]` 非空；「clip 驱动 − idle 驱动」差集写回 moc3 默认值；复位探针走页面 `play()` 入口，after 出画数 == before 出画数
+- [ ] 全库规模（数百模型）分批起新 Chrome（~40/批），首模型预热重跑、各批日志按 key 去重取最优
+- [ ] 补占位 HitAreas：Id 逐字节确认是 moc3 drawable、Name 取该模型真实存在的组（候选小写回落）、仅替换 Id⊆{HitArea,HitArea2}、改后 sha256 清单证"仅 N 文件且仅 HitAreas 字段变"
