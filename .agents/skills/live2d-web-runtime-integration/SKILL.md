@@ -62,6 +62,28 @@ const playing = mm.state.currentGroup === g;   // 唯一可靠判据
 
 **帧哈希/drawImage 比对不能当判据**：无头环境 rAF 被节流会**假阴性**；而 physics 与眨眼会让画面逐帧变化，造成"动作在播"的**假阳性**。另外注意：idle 播完后 `state.currentGroup` 会**自动归 null**，所以"值变了"才说明有东西被触发。
 
+### 3.2b 这个运行时的 Loop 是坏的：`_isLoop` 永远是 false（0.4.0 实测）
+
+pixi-live2d-display 0.4.0 的 cubism4 模块里 `setIsLoop()` **只有定义、没有任何调用点**（对 min bundle 全文搜索证实），`Meta.Loop:true` 被完全无视——**每条 motion（含 idle）都只播一轮**，idle 播完即回静帧、参数回落基准。这不是数据问题，别去改 motion3.json。
+
+前端兜底（看守者模式，已验证有效）：
+
+```js
+const armIdleLoop = () => { const tok = ++idleTok;
+  motionMs(idleGroup).then(ms => {                    // 读 motion3 的 Meta.Duration
+    setTimeout(() => {
+      const cur = mm.state.currentGroup || null;
+      if (cur === null || cur === idleGroup) {        // 没别的动作在播才重开
+        mm.startMotion(idleGroup, 0, MP.FORCE);        // 提前 ~120ms 交叉淡入=无缝循环
+        armIdleLoop();                                 // 自我再武装
+      }                                               // 否则让该动作的回落定时器接管后重新武装
+    }, Math.max(300, ms - 120));
+  });
+};
+```
+
+要点：① 每次 idle 启动（初始播放、动作回落）后都要重新武装；② 非 idle 动作的回落定时器（按时长+300ms 回 idle）保留，两者用 token 防重入、回落前检查 `currentGroup` 避免双启；③ 组件销毁时 token++ 作废全部挂起定时器；④ 每次 `startMotion` 都会重新 fetch+parse motion 文件（该库**无任何缓存**），轮换边界有短暂掉帧，真机可接受。
+
 ### 3.3 销毁与泄漏
 
 `app.destroy(true,{children:true,baseTexture:true,texture:true})` 不会移除 `window` 级监听。把所有监听存进状态对象并提供 `off()`，切换标签/关闭弹窗时统一调用：
@@ -83,6 +105,8 @@ state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.remov
 - 坐标换算：`const lp = mdl.toLocal(new PIXI.Point(屏幕x - wrapRect.left, 屏幕y - wrapRect.top)); const 单位 = lp.x / internalModel.pixelsPerUnit`。
 - **用包围盒，别用三角面**：本项目实测改用 Cubism 原生"点在三角面内"后反而更差——部分模型的 Touch 三角面**连自己的顶点重心都不包含**（数据不规整）。包围盒实测 767/768。
 - 多个框同时包含时（部位框常重叠/嵌套）取**归一化中心距离**最小者：`s = dist(点, 框中心) / max(半宽,半高)`。注意"按顺序取第一个"会让大框（如 Head）永远压住小框；"取最小框"在另一种模型上又错——两种规则各有反例，选一个并记录已知歧义，不要为个别样本过拟合。
+- ⚠️ **必须先做「点在框内」包含判定，再谈就近取框**（2026-09-23 碧蓝航线实测踩坑）：曾写成「全图取最近框」而无包含判定 → 点画布任意位置（含视觉空白处）都触发最近部位动作，用户报"悬停/乱触发、动作赶着做完"（动作被反复打断的观感）。正确顺序：`|mx-cx|<=半宽+容差 && |my-cy|<=半高+容差` 才参与竞选，全不命中返回 null。
+- 回归脚本断言键名必须与脚本实际输出键名一致：曾把输出 `noAction` 断言成不存在的 `noFallbackGroup` → 该项**恒不触发、永远绿灯**，"点空白不播"半年未被执行过。改判据后必须用一个已知失败样本验证断言确实会变红。
 - 容差只给 **2%**（吸收测试派发延迟的几十毫秒位移）。给到 8% 会把视觉上明显空白的角落判成命中——Live2D 画布四周有大量透明边距，模型单位范围比可见内容大得多。
 - **兜底动作只给没有 `HitAreas` 的模型**。有判定区却点框外，就什么都不播（与游戏一致）。否则点哪儿都蹦一个 `touch_drag*`，观感极差。
 
@@ -145,7 +169,8 @@ state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.remov
 - [ ] `startMotion` 显式 index + `MotionPriority.FORCE`
 - [ ] 用 `state.currentGroup`（等待后）证明动作真的在播，不靠帧比对
 - [ ] fit 基准取 `internalModel.width`，且 fit 幂等（ResizeObserver 多次触发不放大）
-- [ ] 部位命中实时读框；兜底只给无 HitAreas 的模型；容差 2%
+- [ ] 部位命中实时读框；**先做框内包含判定再就近取框**；兜底只给无 HitAreas 的模型；容差 2%
+- [ ] idle 持续 Alive：看守者已武装且回归脚本能证明「加载 12s 后 currentGroup 仍为 idle」
 - [ ] 裸滚轮不被劫持；`pointercancel`/`blur` 解除拖拽；平移钳制
 - [ ] `stopLive2D()` 里 `app.destroy()` + `off()` 都做
 - [ ] 无头批量验证：全量命中率与失败清单，含"无判定区"模型列表

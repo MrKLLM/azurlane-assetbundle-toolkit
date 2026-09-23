@@ -115,7 +115,7 @@ for k in ['anninvwang_2', 'aersasi_2', 'aersasi_3', 'lafeiii_3']:
     try:
         d = json.loads(out)
         bad = [x for x in ('plainWheelNoop', 'ctrlWheelZooms', 'cancelStopsDrag') if d.get(x) is False]
-        if d.get('emptyClick', {}).get('noFallbackGroup') is False: bad.append('emptyClick')
+        if d.get('emptyClick', {}).get('noAction') is False: bad.append('emptyClick')
         if d.get('headClick') and d['headClick'].get('ok') is False: bad.append('headClick')
         if bad: allok = False; print('  ✗ 未通过:', bad)
         else: print('  ✓ 全部通过')

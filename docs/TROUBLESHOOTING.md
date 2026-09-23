@@ -489,3 +489,21 @@ return Image.fromarray(out_arr).transpose(Image.FLIP_TOP_BOTTOM)
 
 **涉及文件**: 一次性验证脚本（未入库，`.diag/l2d9_diag*.py`）；权威判据已并入技能 `live2d-web-runtime-integration` §7。`scripts/diag/l2d_sweep.py` 已按本条重写（2026-09-22）：**Python 侧逐条 evaluate**（修掉旧版单次 evaluate 卡第一条不返回 + 单 Chrome ~110 后 WebGL 断连）、**每 60 模型重载页面**、内容判据改为**播放窗口内密采全参数取跨帧 min/max**，全库 **269/269 通过、0 静态**；并同法修 §6.11 里 bunao_3/guanghui_9 的「idle 不动」误判。
 
+
+## §19. Live2D「动作做得快/赶着完成 + 悬停乱触发」双击根因（用户 2026-09-23 实测反馈）
+
+**日期**: 2026-09-23　**状态**: ✅ 已修复并回归（前端层，不动任何 motion 数据）
+
+**现象**: 用户反馈 Live2D 「点击一次后动作快快的，像是赶着完成；鼠标悬停其他部位自动触发其他动作，原来的动作还没做完就被切，也是做得赶赶的」，并怀疑网页端不适合做 Live2D（参照 l2d.su）。
+
+**根因一（悬停/乱触发）**: `gallery_src/index.html` 的 `hitAt` **没有「点在框内」包含判定**，取的是「全图最近框」——点画布任意位置（含视觉空白处）都会触发最近部位的动作，动作被反复打断，观感即「做得赶/快/没做完就切」。而 §6.7 引以为据的回归脚本 `interact_verify.py` 有个致命笔误：输出键是 `noAction`，断言却查不存在的 `noFallbackGroup` → 该项**恒不触发、永远绿灯**，「点空白不播」半年未被真正验证过。
+
+**根因二（idle 早夭，动画判据之外的体感元凶）**: vendored pixi-live2d-display 0.4.0 的 cubism4 模块 **`setIsLoop()` 只有定义、全 bundle 无调用点**（字符串搜索证实），`Meta.Loop:true` 被无视 → **任何动作只播一轮**，idle 4s 后模型回静帧（§18 已观察到此现象当时仅当作"验证判据注意项"）。用户打开皮肤看到的多是「静帧+物理」，点击后动作播完又回静帧，与游戏里 idle 常驻的观感差距巨大。
+
+**排查要点（复现证据链）**: ① 无头探针给 `mm.startMotion` 打钩 + `currentGroup` 时间线：点部位后动作**完整播满自身时长**（12.7s 不早退），证明不是速度快而是被切；② 纯 `pointermove`（无按键）悬停**零触发**、`mdl.eventNames` 无库层监听（autoInteract 确已关）——「悬停」实为点空白处误触最近部位；③ 静默 12s 采样：初始 idle 只活一轮即 `currentGroup=null`；④ 运行时包内搜 `setIsLoop(` 仅 1 处=定义本身。
+
+**修复**: ① `hitAt` 加包含判定（2% 容差，框外一律 null；框重叠时归一化中心距就近取框保留）；② 新增 **idle 看守者** `armIdleLoop`：idle 每次启动后按 `Meta.Duration-120ms` 重开一轮（交叉淡入无缝循环），与 `scheduleIdle`（非 idle 动作按时长回落）以 token 互锁、组件销毁时作废；③ `onDown`/`onUp` 加 `e.button!==0` 右键防误触；④ `interact_verify.py` 断言键改正为 `noAction`。
+
+**验证**: 修复后无头复测——idle 看守者生效（12s 静默采样 `currentGroup` 全程 idle，参数持续驱动）、`interact_verify.py` 4 模型全过（**修正后的**空白点击断言 `noAction:true` 首次真正变绿）、`hit_verify.py` 全量 269 皮肤复跑（见 PROJECT_STATUS）。
+
+**涉及文件**: `gallery_src/index.html`（部署 `scripts/deploy_gallery.py` 同步 `Output/gallery_v2/`）、`scripts/diag/interact_verify.py`；经验已并入技能 `live2d-web-runtime-integration` §3.2b/§4/§8。
