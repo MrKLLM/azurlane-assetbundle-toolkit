@@ -46,6 +46,20 @@ OUTPUT_DIR = os.environ.get("L2D_OUT_DIR") or r"D:\Azur Lane Assets\Output\Live2
 ERROR_LOG = r"D:\Azur Lane Assets\docs\ERRORS.log"
 
 USE_LINEAR = bool(os.environ.get("L2D_MOTION_LINEAR"))
+# 贝塞尔控制点裁剪阈值（历史护栏，2026-09-23 定性：**它是在掩盖下面的格式错误，不是优化**）
+#   旧实现把控制点写成归一化分数，运行时按绝对(时间,值)直读 → 每个贝塞尔都失控；
+#   当时观察到"贝塞尔抖"，于是加这条 >3 拉直的护栏，误打误撞把大部分坏段降级成了线性。
+#   现状：默认仍保持 3.0（保证既有产物逐字节不变，对照组实测 104/104 一致），
+#   但**已验收的正确配方是 L2D_MOTION_LINEAR=1（关键帧+线性）**，见下面 ABSOLUTE_CP 的说明。
+BEZIER_CLIP = float(os.environ.get("L2D_MOTION_BEZIER_CLIP", "3.0"))
+# 绝对控制点开关：置 1 时按 Cubism 规范写**绝对 (时间,值)** 控制点并忽略上面的裁剪护栏。
+# ⚠️ 格式上这才是对的写法，但**未通过权威基准验收**：安土实测它对参考版有 88/278 条曲线
+#    偏差>0.5、最甚 296 个参数单位（Unity 密集键的切线本身就不该当 Hermite 切线用）。
+#    已验收并换入的是 L2D_MOTION_LINEAR=1（关键帧+线性）。本开关仅留作后续实验。
+ABSOLUTE_CP = bool(os.environ.get("L2D_MOTION_ABSOLUTE_CP"))
+# 是否把 m_ConstantClip 里的「整段定值」曲线也导出（参考版 idle 曲线数 278 = 98 动画 + 180 定值）。
+# 作用：切动作时这些参数会被显式拉回该 clip 的定值，而不是停在上一个动作留下的值上。
+EMIT_CONST = bool(os.environ.get("L2D_MOTION_EMIT_CONST"))
 
 PARAM_PREFIX = "Parameters/"
 PART_PREFIX = "Parts/"
@@ -177,8 +191,14 @@ def parse_streamed_clip(streamed_clip):
     return frames
 
 
-def build_motion(clip, targets, verbose=False):
-    """AnimationClip → motion3.json dict；解不出任何曲线返回 None（调用方必须报错）。"""
+def build_motion(clip, targets, verbose=False, const_info=None):
+    """AnimationClip → motion3.json dict；解不出任何曲线返回 None（调用方必须报错）。
+
+    const_info = (起始下标, 定值列表)：m_ConstantClip 里的「整段保持定值」曲线。
+    参考实现（l2d.su 权威导出）把它们一并写入 motion3.json —— 它们不是惰性的：
+    切动作时 Cubism 只对「本 clip 有曲线的」参数施加权重，缺曲线就**停在上一个
+    动作留下的值上**，于是被 touch_* 动过的手臂等参数回不到静止位 → 部件互相错位。
+    """
     muscle = getattr(clip, "m_MuscleClip", None)
     if not muscle or not getattr(muscle, "m_Clip", None):
         return None
@@ -229,7 +249,8 @@ def build_motion(clip, targets, verbose=False):
             scale = max(1.0, abs(v0), abs(v))
             by1 = (outs0 * dt / 3.0) / dv if abs(dv) > 1e-3 * scale else None
             by2 = 1.0 - (ins * dt / 3.0) / dv if by1 is not None else None
-            if USE_LINEAR or by1 is None or max(abs(by1), abs(by2)) > 3.0:
+            clipped = (not ABSOLUTE_CP) and BEZIER_CLIP > 0 and by1 is not None and max(abs(by1), abs(by2)) > BEZIER_CLIP
+            if USE_LINEAR or by1 is None or clipped:
                 # 线性: [type=0, time, value]
                 segs.extend([0, t, v])
                 total_seg += 1
@@ -242,6 +263,30 @@ def build_motion(clip, targets, verbose=False):
             #    并用 basePointIndex+3 定位下一段起点 → 终点必须在**最后**。
             #    多插一个"interpolation=0"或把终点写前面，都会整体错位并撑爆按
             #    TotalSegmentCount 预分配的 segments 数组（报 basePointIndex undefined）。
+            # ⚠️⚠️ 段格式（2026-09-23 用 l2d.su 权威导出反查 + 运行时解析器源码双重证实）：
+            #    Cubism motion3.json 的贝塞尔控制点是**绝对 (时间, 值)**，运行时
+            #    `points[a]=new j(seg[l+1],seg[l+2])` 直读、不做任何归一化还原。
+            #    旧实现写的是归一化分数（0.333/by1/0.667/by2），于是控制点被当成
+            #    「t=0.333 秒、值=0.667」——落在段外且值接近 0，每条贝塞尔都先猛蹿到 0
+            #    再跳到目标值 → 部件乱摆、互相不协调（用户报的「像刚学建模的人做的」）。
+            #    正确写法 = Unity 三次 Hermite 的精确等价控制多边形：
+            #        c1 = (t0 + dt/3, v0 + outSlope0*dt/3)
+            #        c2 = (t1 - dt/3, v1 - inSlope1 *dt/3)
+            if ABSOLUTE_CP:
+                c1x = t0 + dt / 3.0
+                c1y = v0 + outs0 * dt / 3.0
+                c2x = t - dt / 3.0
+                c2y = v - ins * dt / 3.0
+                if not (-1e-6 <= (c1x - t0) <= dt + 1e-6 and -1e-6 <= (c2x - t0) <= dt + 1e-6):
+                    segs.extend([0, t, v])   # 时间轴出格 → 退回线性（运行时要求 x 单调）
+                    total_seg += 1
+                    n_pts += 1
+                    continue
+                segs.extend([1, c1x, c1y, c2x, c2y, t, v])
+                total_seg += 1
+                n_pts += 3
+                total_bezier += 1
+                continue
             bx1 = min(0.999, max(0.001, 1.0 / 3.0))
             bx2 = min(0.999, max(0.001, 2.0 / 3.0))
             segs.extend([1, bx1, by1, bx2, by2, t, v])
@@ -288,11 +333,29 @@ def build_motion(clip, targets, verbose=False):
         st = getattr(muscle, "m_StartTime", 0.0) or 0.0
         sp = getattr(muscle, "m_StopTime", 0.0) or 0.0
         duration = round(sp - st, 3) if sp > st else 0.0
+
+    # 定值曲线：整段保持该 clip 指定的值（1 段线性 = 2 点），让参数在切换动作时回到静止位
+    n_const = 0
+    if EMIT_CONST and const_info and duration > 0:
+        ci, cvals = const_info
+        for k, val in enumerate(cvals):
+            gi = ci + k
+            tgt = targets[gi] if gi < len(targets) else None
+            if not tgt:
+                continue
+            target, pid = tgt
+            curves.append({"Target": target, "Id": pid,
+                           "Segments": [0.0, float(val), 0, duration, float(val)]})
+            total_seg += 1
+            total_pts += 2
+            n_const += 1
+
+    sample_rate = getattr(clip, "m_SampleRate", 0.0) or 30.0
     return {
         "Version": 3,
         "Meta": {
             "Duration": duration,
-            "Fps": 30.0,
+            "Fps": float(sample_rate),
             "Loop": bool(getattr(muscle, "m_LoopTime", False)),
             "AreBeziersRestricted": True,
             "CurveCount": len(curves),
@@ -339,6 +402,7 @@ def process_model(model_name, verbose=False):
     ok = fail = 0
     failed = []
     skipped_targets = 0
+    dense_curves = 0
     n_part = 0
     for clip in clips:
         name = getattr(clip, "m_Name", "")
@@ -346,8 +410,21 @@ def process_model(model_name, verbose=False):
             continue
         targets, unresolved = build_binding_targets(clip, targets_lookup)
         skipped_targets += unresolved
+        # genericBindings 的分段顺序 = [streamed][dense][constant]（实测 98+0+180=278 且名字零冲突）
+        const_info = None
+        if EMIT_CONST:
+            try:
+                _cd = clip.m_MuscleClip.m_Clip.data
+                _off = _cd.m_StreamedClip.curveCount + _cd.m_DenseClip.m_CurveCount
+                _vals = list(_cd.m_ConstantClip.data or [])
+                if _vals:
+                    const_info = (_off, _vals)
+                if _cd.m_DenseClip.m_CurveCount:
+                    dense_curves += _cd.m_DenseClip.m_CurveCount
+            except Exception:
+                pass
         try:
-            motion = build_motion(clip, targets, verbose=verbose)
+            motion = build_motion(clip, targets, verbose=verbose, const_info=const_info)
         except Exception as e:
             motion = None
             detail = f"{type(e).__name__}: {e}"
@@ -368,6 +445,8 @@ def process_model(model_name, verbose=False):
             print(f"    {name:<22} curves={m['CurveCount']:<5} dur={m['Duration']:<8} loop={m['Loop']}")
 
     msg = f"成功 {ok} / 失败 {fail}" + (f" / PartOpacity曲线 {n_part}" if n_part else "")
+    if dense_curves:
+        msg += f" / ⚠️未导出的 dense 曲线 {dense_curves}"
     if skipped_targets:
         msg += f" / 跳过不可解析绑定 {skipped_targets}"
     return (fail == 0 and ok > 0), msg, failed
@@ -388,6 +467,10 @@ def main():
     print(f"[*] 输出目录: {OUTPUT_DIR}" + ("  (临时)" if os.environ.get("L2D_OUT_DIR") else ""))
     if USE_LINEAR:
         print("[*] L2D_MOTION_LINEAR=1 → 线性插值")
+    if ABSOLUTE_CP:
+        print("[*] L2D_MOTION_ABSOLUTE_CP=1 → 贝塞尔控制点写绝对(时间,值)【Cubism 规范】")
+    if EMIT_CONST:
+        print("[*] L2D_MOTION_EMIT_CONST=1 → 一并导出 m_ConstantClip 定值曲线")
 
     if args.test:
         models, verbose = [args.test], True

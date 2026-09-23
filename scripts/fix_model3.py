@@ -159,6 +159,73 @@ for model_name in sorted(os.listdir(OUTPUT_DIR)):
             changed = True
             print(f"  {model_name}: 生成真实 HitAreas {[h['Name'] for h in real_hits]}（原为占位）")
 
+    # ===== 与权威参考实现对齐的三项补齐（2026-09-23，基准 l2d.su 的 antu_2 导出）=====
+    # ① 淡入淡出：旧版给每条动作硬写 FadeInTime/FadeOutTime=0.5。运行时的默认是
+    #    「非 idle 组 500ms、idle 组 2000ms」(config.motionFadingDuration / idleMotionFadingDuration)，
+    #    硬写 0.5 让回落 idle 快了 4 倍 → 反应没收尾就被拽回去（用户报「闪过东西 / 像两个动作」）。
+    #    参考版一条都不写 → 非 idle 组一律删掉，交回运行时默认。
+    #    ⚠️ idle 组例外，必须显式拆开写：库里 fade-in / fade-out 共用同一个 idle 默认值 2s，
+    #    而 idle 现在带全部定值曲线（安土 278 条），淡出 2s 意味着点完部位后 idle 仍拖尾 2 秒、
+    #    把 278 个参数往回拽 → 反应动作开头出现「手臂自己动一下」。
+    #    故 idle 取 FadeInTime=2.0（回落到待机要柔）+ FadeOutTime=0.5（被打断要快）。
+    for g, entries in refs.get('Motions', {}).items():
+        for e in entries:
+            if g == 'idle':
+                if e.get('FadeInTime') != 2.0 or e.get('FadeOutTime') != 0.5:
+                    e['FadeInTime'] = 2.0
+                    e['FadeOutTime'] = 0.5
+                    changed = True
+            elif 'FadeInTime' in e or 'FadeOutTime' in e:
+                e.pop('FadeInTime', None)
+                e.pop('FadeOutTime', None)
+                changed = True
+
+    # ② Groups：参考版带 EyeBlink / LipSync 两组。没有它们，运行时的眨眼/口型模块
+    #    根本不会创建（我们此前"模型不眨眼"的原因；口型则由游戏侧音频驱动）。
+    try:
+        with open(os.path.join(model_dir, f"{model_name}.moc3"), 'rb') as f:
+            moc3_bytes = f.read()
+    except OSError:
+        moc3_bytes = b''
+    if moc3_bytes:
+        want_groups = []
+        eb = [p for p in ('ParamEyeLOpen', 'ParamEyeROpen') if p.encode() in moc3_bytes]
+        if len(eb) == 2:
+            want_groups.append({"Target": "Parameter", "Name": "EyeBlink", "Ids": eb})
+        if b'ParamMouthOpenY' in moc3_bytes:
+            want_groups.append({"Target": "Parameter", "Name": "LipSync", "Ids": ["ParamMouthOpenY"]})
+        cur_groups = model.get('Groups') or []
+        have = {g.get('Name') for g in cur_groups}
+        add = [g for g in want_groups if g['Name'] not in have]
+        if add:
+            model['Groups'] = cur_groups + add
+            changed = True
+
+    # ③ 判定区补全：moc3 里的 Touch* 标记远不止 Head/Body/Special（安土有 76 个：
+    #    TouchDrag1-24、TouchIdle1-47…）。参考版在运行期按 Touch 前缀生成全部判定区，
+    #    我们只登记了 3 个 → 点电梯按钮等区域没反应或触发错动作。
+    #    保守规则：只补「moc3 有该 Touch<X> 部件 且 存在同名 touch_<x> 动作组」的条目，
+    #    已有的条目一律保留不改（避免动到已验收的 806/807 基线）。
+    if moc3_bytes:
+        import re as _re
+        groups = list(refs.get('Motions', {}).keys())
+        gexact = set(groups)
+        cur_hits = model.get("HitAreas") or []
+        known = {h.get('Id') for h in cur_hits}
+        extra = []
+        for mm in _re.finditer(rb'Touch[ -~]{1,20}?(?=[^\x20-\x7e])', moc3_bytes):
+            tid = mm.group(0).decode()
+            if tid in known:
+                continue
+            cand = 'touch_' + _re.sub(r'(?<!^)(?=[A-Z])', '_', tid[5:]).lower()
+            cand = cand.replace('__', '_')
+            if cand in gexact:
+                extra.append({"Id": tid, "Name": cand})
+        if extra:
+            model["HitAreas"] = cur_hits + extra
+            changed = True
+            print(f"  {model_name}: 补登记 {len(extra)} 个 Touch* 判定区（如 {extra[0]['Id']}→{extra[0]['Name']}）")
+
     if changed:
         model['FileReferences'] = refs
         with open(model3_path, 'w', encoding='utf-8') as f:

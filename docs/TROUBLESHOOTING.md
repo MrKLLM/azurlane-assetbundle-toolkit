@@ -526,3 +526,85 @@ return Image.fromarray(out_arr).transpose(Image.FLIP_TOP_BOTTOM)
 **连带发现**：无头下 idle 看守者轮换间隙（每次 startMotion 重 fetch 动作文件 ~1.5s）会使 `currentGroup` 短暂为 null——`interact_verify` 的「空白点击不播动作」断言须把 `after=null` 视为通过（null=重取数间隙，非动作触发）。
 
 **涉及文件**: `gallery_src/index.html`、`scripts/diag/hit_verify.py`、`scripts/diag/interact_verify.py`；**可复用工具已入库**：`scripts/diag/l2d_coord_forensics.py`（坐标系取证，可见头/胸/髋三点反查）、`scripts/diag/l2d_inspector_verify.py`（判定区可视化+参数面板验收）；技能 `live2d-web-runtime-integration` §4 已补坐标系换算条目，流程见 `docs/WORKFLOWS.md` WF-16。
+
+## §21. Live2D「部件各动各的、像刚学建模的人做的」总根因：motion3.json 贝塞尔控制点写成了归一化分数
+
+**日期**: 2026-09-23　**状态**: ✅ 安土样本已修复并经权威基准验收（`l2d_ref_diff.py` PASS）；⚠️ **全量重导未执行**，见 PROJECT_STATUS §6 待办
+
+**背景**: 用户报三症状——① 初始就一直在有点快地动；② 点击触发的动作不太准、有点穿模；③ 总体不自然、动作应该更慢。前两轮我先后误判为「呼吸层」和「by>3 拉直护栏」，都被实测否掉。**转折点：用户提供 l2d.su 参考查看器的录屏**，据此拿到同模型的权威 motion3.json 作外部基准，才把问题一次锁定。
+
+### 权威基准怎么拿（下次直接用）
+l2d.su 静态 CDN 挂着同批模型的原始导出，路径规律（从 `/assets/index-*.js` 里 grep `model3.json` 模板反查得到）：
+```
+https://static.l2d.su/azurlane/live2d/<key>/<key>.model3.json
+https://static.l2d.su/azurlane/live2d/<key>/motions/<group>.motion3.json   # 注意是 motions/，我们是 motion/
+```
+只覆盖部分模型（抽样 8/14 命中）。验收工具已入库：`scripts/diag/l2d_ref_diff.py`。
+
+### 根因①（主因，影响所有贝塞尔段）：控制点单位错了一个量级
+`scripts/extract_motions.py` 旧实现把贝塞尔控制点按**归一化分数**写出：
+`Segments: [1, 1/3, by1, 2/3, by2, t, v]`。但运行时解析器是**直读绝对坐标**、不做任何还原：
+```js
+case Bezier:
+  points[a]   = new j(seg[l+1], seg[l+2])   // (时间, 值) —— 无归一化还原
+  points[a+1] = new j(seg[l+3], seg[l+4])
+  points[a+2] = new j(seg[l+5], seg[l+6])
+```
+于是控制点被读成「**t=0.333 秒、值=0.667**」。对一个跨 7.5→8.983 秒的段，控制点落在区间之外、值接近 0 → **每条贝塞尔都先猛蹿到≈0 再跳到目标值**。这就是"部件各动各的"的全部来源。
+正确写法是 Unity Hermite 的等价控制多边形（绝对坐标）：`c1=(t0+dt/3, v0+out·dt/3)`、`c2=(t1−dt/3, v1−in·dt/3)`。
+
+**⚠️ 但"格式正确"不等于"验收通过"。** 实测三种写法对参考版的逐曲线偏差（安土 idle，121 点采样）：
+| 写法 | 偏差中位 | 偏差>0.5 的曲线 | 最甚 |
+|---|---|---|---|
+| ① 归一化控制点（旧线上） | 1.376 | 92/98 | ParamAngleZ 9.35 |
+| ② 绝对控制点·全贝塞尔 | 0 | **88/278** | **296**（头发角参数） |
+| ③ **关键帧+线性（已采用）** | 0 | 11/278 | 1.95 |
+
+②虽然符合 Cubism 规范，但 Unity **密集键**的切线字段本就不该当 Hermite 切线用（算出的曲线会飞出去），
+所以**最终验收配方是 `L2D_MOTION_LINEAR=1 L2D_MOTION_EMIT_CONST=1`**，不是 `ABSOLUTE_CP`。
+`extract_motions.py` 里两个开关都留着，注释已标明哪个通过验收。
+
+**量化验收（安土 idle，逐曲线 121 点采样比对参考版）**：线上旧版偏差中位 **1.376**、92/98 条曲线偏差>0.5、最甚 `ParamAngleZ` 差 **9.35°**；修正后偏差中位 **0.0**。
+
+### 根因②：只读 `m_StreamedClip`，丢掉 `m_ConstantClip` 的定值曲线
+Unity AnimationClip 的曲线分装在三处，`genericBindings` 顺序 = **[streamed][dense][constant]**（安土 idle 实测 98+0+180=278，且名字零冲突）。旧管线只读 streamed → **安土 idle 只导出 98/278 条曲线**。
+定值曲线不是惰性的：Cubism 只对「本 clip 有曲线的」参数施权，缺曲线的参数在切动作时**停在上一个动作留下的值上**，于是被 `touch_*` 动过的手臂/身体回不到静止位 → 部件错位。参考版 idle 的 `CurveCount` 正是 **278**。
+补全后：安土 104 个动作曲线总数 9441 → **29945**，`idle` 与参考版逐字段一致（278 条 / 1962 段）。
+
+### 根因③：运行时三坑（前端侧，与数据无关但同样致命）
+1. **`Meta.Loop` 被忽略**：vendored `pixi-live2d-display` 0.4.0 定义了 `setIsLoop()` 但全 bundle 无调用点。旧代码用前端定时器"假装循环"，而 `startMotion` 是 async（返回 Promise）→ `!==false` 恒成立 → **被 `state.reserve` 以"Motion is already playing"拒绝时前端毫无察觉**，实测 idle 播 9.1s 后**冻结 9.2s**（`currentGroup=null`、队列 0 条、参数纹丝不动）。修法：给 CubismMotion 本体 `setIsLoop(true)` + **`setIsLoopFadeIn(false)`**（不设后者则每次回绕重置淡入起点，权重归零重爬，观感=每隔 N 秒被拽回去）。
+2. **`mm.groups.idle` 默认 `'Idle'`** 与我们的 `'idle'` 不匹配 → 库自带的"动作播完自动回 idle"一直静默失效（这才是需要①的原因）。对齐后前端**零定时器**，冻结消失。
+3. **`_startMotion` 每次先 `queueManager.stopAllMotions()`** → 旧动作被瞬间掐死、**完全没有交叉淡化**。队列管理器 `startMotion` 内部本来就会给现存条目 `setFadeOut`，删掉那行 stop 即恢复官方行为。
+实测：修复后 30s 内 `startMotion` 调用 **0 次**、`currentGroup=null` 采样 **0 个**。
+
+### 根因④：运行时自加的 Cubism2 式呼吸层
+`Cubism4InternalModel` 无条件挂 `CubismBreath`，每帧在动作**之后**再 ADD `ParamAngleX ±7.5°@6.5s / Y ±4°@3.5s / Z ±5°@5.5s / BodyAngleX ±2°@15.5s / ParamBreath ±0.25@3.2s`。而全库 74~85% 的 idle **本就自带动这些参数的曲线** → 头部双驱动。铁证：安土 bundle 的 MonoBehaviour 组件清单是官方 Unity Cubism SDK（`CubismMoc/Model/Parameter/PhysicsController/Raycaster/MouthController/CriSrcMouthInput/Live2dChar`），**没有任何 Breath 组件**。修法：`im.breath.setParameters([])`。
+
+### 根因⑤：命中判定用包围盒，而标记四边形可以是斜的
+游戏侧是 `CubismRaycaster` 对 `Touch*` 部件做**三角形 raycast**。这些标记是 4 顶点不可见 quad；安土是正矩形（四边形面积/包围盒=1.000，两种判定逐点等价），但 `yingrui_3` 只有 **0.489~0.755**、`z46_3` 0.645~0.942 → 包围盒把判定区放大最多 2 倍，点旁边空地也触发。修法：包围盒预筛 + 两三角包含（strip 序 `v0v1v2`+`v1v3v2`）、重叠取最小框。
+**⚠️ 顶序必须按三角带处理**：直接 `drawPolygon(v0,v1,v2,v3)` 会画成自交蝴蝶结（顶点序是 TR,TL,BR,BL）；无自交环序是 `[0,1,3,2]`。已实测 5 个模型 `stripArea == 凸包面积`，证明带序假设成立。
+
+### 根因⑥：判定区只登记 3 个 + 淡入淡出被硬写
+moc3 里的 `Touch*` 标记远不止 Head/Body/Special——安土有 **76 个**（TouchDrag1-24、TouchIdle1-47）。`fix_model3.py` 原来只映射三个 → 点电梯按钮等区域毫无反应。现补登后安土 3 → **57 个**（实测与核心三框**零重叠**，不改判已有点击）。
+另外旧版给 104 条动作全部硬写 `FadeInTime/FadeOutTime: 0.5`，而参考版一条都不写、交给运行时默认（**idle 2s / 动作 0.5s**）→ 回落 idle 快了 4 倍，反应没收尾就被拽回去。现已改为：非 idle 全删；**idle 显式拆开 `FadeInTime:2.0 / FadeOutTime:0.5`**（库里 fade-in/out 共用同一个 idle 默认值，而 idle 现在带 278 条曲线，淡出 2s 会在点击后继续拖尾 2 秒把参数往回拽 = 用户报的"手臂乱动一下"）。
+参考版还有 `Groups: EyeBlink[ParamEyeLOpen,ParamEyeROpen] / LipSync[ParamMouthOpenY]`，我们缺 → `internalModel.eyeBlink` 一直是 undefined（模型不眨眼）。补上后 blink=true。
+
+### 已排除的假设（别再走这些弯路）
+- **参数映射错**：`l2d_motion_audit.py antu_2` = 104/104 ok、空壳 0%、错配 0%、时长与源一致。
+- **假参数名**：`Param42`/`Param44` 这类看着像占位符的名字**是 moc3 里的真名**（美术自动生成），98/98 条曲线 Id 都能在 moc3 字符串表命中。
+- **值被硬钳**：98/98 条曲线的动画范围都在 moc3 合法量程内。
+- **重名/禁用参数**：425 个 CubismParameter 名字唯一、`m_Enabled` 全为 1。
+- **阶梯段缺失**：参考版 1070 条阶梯段里 **1067 条两端值相同**（与线性完全等价），真跳变仅 3 条且都在 1 帧内 → 补它没有视觉收益。
+- **切线字段读错**：`f1=入切线 / f2=出切线 / f4=值` 已由「首键值 == 参考帧基准 98/98」钉死；用它们算 Hermite 与导出文件里的贝塞尔可精确互推。
+- **PartOpacity 丢失**：安土四个动作参考版与我们都是纯 Parameter，零 PartOpacity。
+- **`ParamMouthOpenY=1` 这条定值曲线不该补成"张嘴"**：游戏口型由 `CubismMouthController`+`CubismCriSrcMouthInput` 音频驱动，补上只会让嘴一直张着。
+
+### 天花板（不是 bug，别再去攻）
+参考版比我们在插值上多出的只有 **642 条贝塞尔段**（约占段数 7%）。用四种候选切线公式拟合它的控制点，最高只命中 **16.7%**（且那是"切线=0"的平凡情形）——**它的控制点来自我们拿不到的数据**（l2d.su 大概率有游戏原始 Live2D 发行包里的 motion3.json，我们手上只有 Unity AssetBundle）。
+所以可达上限 = 曲线集合 100% 一致 + 关键帧时间/值 100% 一致 + 约 93% 段类型一致，剩余用线性弦近似（表现为缓动略少）。`l2d_ref_diff.py` 的 WARN 线因此校准在 **12%**（安土实测 3.8%~9.6%）。
+
+### 仍未解决（交接给下一位）
+**播完 `touch_idle*` 后全部判定区飞出画布且不恢复**：实测画布 20×16，静止态 57 个判定区里已有 **53 个在画布外**（只有核心 3 个 + `touch_idle1` 真可点，其余是编辑器遗留的停放标记）；播完 `touch_idle1`（4.65s、252 条曲线、Loop=false）后 **57 个全部出画**，核心三个一起被甩到同一点 `(-36.37, -52.81)`，回到 idle 后**不恢复** → 用户报的"到 1 层以后就没有判定区了"。
+方向：那个整体位移参数被 `touch_idle1` 动画，但**不在 idle 的 278 条绑定集里**，clip 播完后没有任何曲线把它写回去；游戏侧靠状态机（`change_in`/`home`）复位，我们没有状态机。候选修法：(a) 播非 idle 动作前快照全部参数值，回落 idle 时把「idle 不驱动」的参数写回快照；(b) 判定区几何在出画/塌缩时回退到加载时的静止位快照；(c) 接受（游戏侧同样会移走，只是它会复位）。
+
+**涉及文件**: `scripts/extract_motions.py`（新增 `L2D_MOTION_ABSOLUTE_CP` / `L2D_MOTION_EMIT_CONST` / `L2D_MOTION_BEZIER_CLIP` 开关）、`scripts/fix_model3.py`（淡入淡出/EyeBlink·LipSync 组/Touch* 判定区三项）、`gallery_src/index.html`（运行时四补丁 + 四边形命中 + 动作下拉排序）；新入库取证/验收工具 7 个：`l2d_ref_diff.py`（**权威基准比对，全量验收就靠它**）、`l2d_after_fix_check.py`、`l2d_restart_cadence.py`、`l2d_param_ranges.py`、`l2d_hit_overlap.py`、`l2d_touchidle_probe.py`、`l2d_fidelity_probe2.py`。流程更新见 WF-16。

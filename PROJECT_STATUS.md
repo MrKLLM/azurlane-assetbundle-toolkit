@@ -1,6 +1,7 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-23（本轮：**Live2D 交互根因三连修 + l2d.su 三件套移植**。① `hitAt` 缺「点在框内」判定 → 点空白触发最近部位被打断（用户报"悬停乱触发/做得赶"），回归脚本 `interact_verify` 断言键笔误致恒绿灯；② vendored pixi-live2d-display 0.4.0 cubism4 模块 `setIsLoop()` 有定义无调用 → `Meta.Loop` 失效、**所有动作只播一轮**，前端加 **idle 看守者**（时长-120ms 交叉淡入重开）解决；③ **坐标系大坑**：`getDrawableVertexPositions` 返回 V=Cubism 原生（中心原点/y向上），`toLocal/ppu` 是 P（左上/y向下），差「平移半边+Y翻转」——旧命中与测试脚本在同一错误映射下**自洽闭环**（点胸口实际触发头部动作但 806/807 全绿）；已统一 P2V/V2P 换算（证据 `.diag/_probe_affine.json`），修复后判定框贴模型、真实路径全量回归。同日移植 l2d.su 三件套：**判定区可视化**（彩色框+标签逐帧跟随物理）+ **参数·部件检查器**（464 参数滑杆+270 部件透明度，变相表情系统，含过滤/复位）。验证=12s 静默采样 currentGroup 全程 idle、interact_verify 4 模型全过、hit_verify 全量复跑见下、判定区截图比对。详见 §19/§20。上一轮 2026-09-22：**换入此前重建待发的 9 个 Live2D bundle** → `Output/Live2D` 达 269 模型；逐字段 diff 证零回退、9/9 内容判据全绿。上一轮 2026-09-21 主线：**Live2D 动作层根因重建**——旧产物 5037/8154 条是空壳、其余 3117 条曲线名全错位，即用户所见"乱飘/乱闪/没反应"；
+> **生成时间**: 2026-09-23 16:20（本轮：**Live2D 动作数据根因修复（§21）+ 运行时四补丁**。① 主因=`motion3.json` 的贝塞尔控制点被写成**归一化分数**，而运行时按**绝对(时间,值)**直读不做还原 → 每条贝塞尔都先猛蹿到≈0 再跳目标值，即用户所见"部件各动各的、像刚学建模的人做的"；安土 idle 逐曲线采样比对权威基准，偏差中位 **1.376 → 0.0**。② 只读 `m_StreamedClip` 丢掉 `m_ConstantClip` 的 180 条定值曲线 → 切动作时参数回不到静止位（`genericBindings` 序=[streamed][dense][constant]；补全后 idle 曲线 98→278，与参考版逐字段一致）。③ **外部权威基准=l2d.su 同模型导出**（`https://static.l2d.su/azurlane/live2d/<key>/motions/<组>.motion3.json`，覆盖约 8/14），验收工具已入库 `scripts/diag/l2d_ref_diff.py`。④ 运行时四补丁：采纳 `Meta.Loop`+对齐 `groups.idle`（**废除 idle 看守者**——实测原方案因 async 返回值判错导致 idle 播 9.1s 后**冻结 9.2s**）、删 `_startMotion` 里的 `stopAllMotions` 恢复交叉淡化、关闭运行时自加的 Cubism2 假呼吸层（安土 bundle 组件清单里**没有 Breath**）、命中判定由包围盒改真实四边形（斜框模型判定区收窄最多 2 倍，正矩形模型逐点不变）。⑤ model3 三项对齐：淡入淡出交回运行时默认（idle 2s/动作 0.5s，idle 单独拆为 FadeIn 2.0/FadeOut 0.5）、补 `EyeBlink`/`LipSync` 组（此前模型不眨眼）、判定区 3→**57**（与核心三框零重叠）。⚠️ **仅 `antu_2` 换入验证，其余 268 个模型仍是旧数据 → 全量重导已交接，见 §6 第 9 条**；天花板=参考版 7% 贝塞尔段无法从 Unity 数据还原。
+> 上一轮 2026-09-23：**Live2D 交互根因三连修 + l2d.su 三件套移植**。① `hitAt` 缺「点在框内」判定 → 点空白触发最近部位被打断（用户报"悬停乱触发/做得赶"），回归脚本 `interact_verify` 断言键笔误致恒绿灯；② vendored pixi-live2d-display 0.4.0 cubism4 模块 `setIsLoop()` 有定义无调用 → `Meta.Loop` 失效、**所有动作只播一轮**，前端加 **idle 看守者**（时长-120ms 交叉淡入重开）解决；③ **坐标系大坑**：`getDrawableVertexPositions` 返回 V=Cubism 原生（中心原点/y向上），`toLocal/ppu` 是 P（左上/y向下），差「平移半边+Y翻转」——旧命中与测试脚本在同一错误映射下**自洽闭环**（点胸口实际触发头部动作但 806/807 全绿）；已统一 P2V/V2P 换算（证据 `.diag/_probe_affine.json`），修复后判定框贴模型、真实路径全量回归。同日移植 l2d.su 三件套：**判定区可视化**（彩色框+标签逐帧跟随物理）+ **参数·部件检查器**（464 参数滑杆+270 部件透明度，变相表情系统，含过滤/复位）。验证=12s 静默采样 currentGroup 全程 idle、interact_verify 4 模型全过、hit_verify 全量复跑见下、判定区截图比对。详见 §19/§20。上一轮 2026-09-22：**换入此前重建待发的 9 个 Live2D bundle** → `Output/Live2D` 达 269 模型；逐字段 diff 证零回退、9/9 内容判据全绿。上一轮 2026-09-21 主线：**Live2D 动作层根因重建**——旧产物 5037/8154 条是空壳、其余 3117 条曲线名全错位，即用户所见"乱飘/乱闪/没反应"；
 > 已按 `crc32("Parameters/<GO>")↔genericBindings` 权威映射全量重生成（曲线总数 179,072→856,870，审计 0 空壳 / 0 错位），
 > 并把此前整层丢弃的**部件可见性(PartOpacity/换装拼接)曲线**写进 motion3.json（79 模型）。详见 §2.5、§9.5、`docs/TROUBLESHOOTING.md` §17。
 > 同日闭环：§6.7 全量 260 皮肤部位点击验证 767/768、§6.9 脸部白块 34 张换入、story_review 31 条自机落地、§8 变体后缀语义纠正、WF-15 增量重跑 + 13 个诊断工具入库。历史流水已移出本文件至 `docs/archive/`）
@@ -56,7 +57,8 @@
 > 旧数据备份 `Output/_OLD_bak/l2d_motion_20260921_141226/`。详见 `docs/TROUBLESHOOTING.md` §17。
 > ⚠️ 旧结论「B 类 12 模型属 motion 质量、资产无缺口」作废：除上述 7 条外均可解出，是解析器缺陷不是资产缺陷。
 已知限制：StreamedClip 未完全逆向；HitAreas 用 moc3 `Touch<X>` drawable 而非官方 `CubismRaycastable` 真点击区（**2026-09-22 §6.11 修后全部 269 模型均带真实 HitAreas**，仅 `z46_3` Special 框嵌 Body 属模型自带歧义）；0.226% 绑定（疑 Drawable 颜色）运行时无对应 target，跳过。
-> **网页交互层状态（2026-09-23 §6.12）**：点击命中已修「包含判定 + V/P 坐标系换算」，idle 有看守者循环，另有判定区可视化与参数·部件检查器；改前端前**必读 WF-16**（四条硬规则 + 回归四件套）。
+> **网页交互层状态（2026-09-23 §6.12 + §21）**：点击命中已修「四边形包含 + V/P 坐标系换算」，idle 循环已交回运行时（前端零定时器），动作切换恢复交叉淡化，运行时自加的假呼吸层已关闭，另有判定区可视化与参数·部件检查器；改前端前**必读 WF-16**（五条硬规则 + 回归五件套）。
+> ⚠️ **§21 是动作数据的根因修复，目前只在 `antu_2` 一个模型上换入验证**（`l2d_ref_diff.py` PASS）。**其余 268 个模型仍是旧数据**，含两个已知系统性错误：贝塞尔控制点写成归一化分数（→ 部件各动各的）、只读 `m_StreamedClip` 丢掉定值曲线（→ 切动作时参数回不到静止位）。全量重导待办见 §6.13。
 ⏳ **9 个 bundle 已于 2026-09-22 换入**：benningdun_2 / bunao_3 / feiteliekaer_4 / gangyishawa_3 / guanghui_9 / pulimaosi_3 / sebao_2 / shi_3 / wuzang_4——9 张卡的 `live2d` 字段已进 index.json，`Output/Live2D` 现 **269 个模型**。换入后逐字段 diff 证**非 live2d 字段零变化**（ship/skin 集合不变、仅 9 卡 +9 live2d 项）；**内容判据全绿：9/9 模型加载 + idle 驱动参数（加密采样各 45/57/90/58/143/50/29/75/144 条参数值变化）**。⚠️ 关键教训：运行时把每条 idle 解析成 `isLoop:false`（全 269 模型一致的既有管线特性，非本轮引入），idle 只播一次即回静；故**验证必须在播放窗口内高频采样**，若等 ~12s 后两次快照比对会因短 idle(5~8s) 已播完回到静帧而假报 `moved=0`（本轮曾据此误判 bunao_3/guanghui_9，密采证伪）。临时产物 `.diag/l2d_new9/`（467MB）已冗余可清理。
 
 ### 2.6 Spine 动态立绘 ✅（v2 提取 + 全屏 CG 导出 + viewer 修复，2026-09-19）
@@ -185,6 +187,20 @@
    - 现状维持：ship_meta 前端仍归「其他」。同理受影响：385 新皮肤在 381 快照无记录，归属也卡在同一决策上。
    - 不受影响、可独立推进：§6 交接点 B→C→D 主线；以及「385 变更美术的定向重建」（立绘/Spine/Live2D 包本身是明文 UnityFS，已同步在手）。**（2026-09-20 已完成，见头部）**
 8. ✅ **ship_meta `{namecode:XX}` 占位符名（已于 2026-09-20 随 B 根因修复关闭）**：根因=`build_ship_meta.py` 舰名取 `ship_skin_template.name`（皮肤名，含占位符）——**改取 `ship_data_statistics.name`（0 占位符）**后，237 个 ship 级占位符全归零、名称与阵营自洽（`weizhang`→尾张、`xinzexi`→新泽西 等）。残余 ~52 占位符全为 `story` 类（NPC/剧情/2b 联动变体，本就无 stats 舰名，非缺漏）。详见 §6 第 5 条 B 已完成。
+9. ⏳ **【已交接·最高优先】Live2D 动作数据全量重导（§21 根因修复，2026-09-23）**
+   根因、证据、已排除假设、天花板全部写在 **`docs/TROUBLESHOOTING.md` §21**；操作与判据在 **`docs/WORKFLOWS.md` WF-16**。安土 `antu_2` 已作为样本换入并通过权威基准验收，**其余 268 个模型仍是旧数据**。
+   **待做（按序）**：
+   1. 备份：`Output/Live2D/*/motion/` 整目录 → `Output/_OLD_bak/l2d_motion_pre_21_<日期>/`（Output 不在版本控制内，**必须备份**）。
+   2. 全量重导：`L2D_MOTION_LINEAR=1 L2D_MOTION_EMIT_CONST=1 py -3 scripts/extract_motions.py --all`
+      ⚠️ **必须用 `L2D_MOTION_LINEAR=1`（关键帧+线性），不是 `ABSOLUTE_CP`**——安土实测：线性版对参考版偏差中位 0.0、>0.5 占比 3.8%~9.6%；而绝对贝塞尔版有 88/278 条曲线偏差>0.5、最甚 296 个参数单位（更差）。`ABSOLUTE_CP` 只是留给后续实验的开关，未通过验收。
+      ⚠️ 该脚本直接写 `Output/Live2D`，**先用 `L2D_OUT_DIR` 指到临时目录试跑几个模型**，再沿用 `apply_live2d_motions.py`「只换 `motion/` 子目录」的做法换入。退出码非 0 = 有 clip 解出 0 曲线，绝不静默。
+   3. 全量补 model3：`py -3 scripts/fix_model3.py`（幂等；本轮新增三项——非 idle 删硬写淡入淡出、idle 拆成 `FadeInTime:2.0/FadeOutTime:0.5`、补 EyeBlink/LipSync 组、补登全部 `Touch*` 判定区）。
+   4. 验收：**`py -3 scripts/diag/l2d_ref_diff.py --all` 必须 PASS**（判据：组/曲线零缺失、**关键帧零不一致**、偏差中位 ≤0.5、偏差>0.5 占比 ≤12%）。参考库只覆盖部分模型，404 自动跳过。
+   5. 回归：WF-16 五件套全跑，`hit_verify` 基线 **806/807**。⚠️ 判定区从 3 个扩到几十个后 `hit_verify` 断言范围变大，**基线可能需重新标定**——先读 §21「与核心三框零重叠」的实测结论再判断是否真回退。
+   6. 派生产物：`make_thumbs.py` 遇已存在文件会 skip（换图必须删旧 webp）；index 若受动作数影响需重跑 `build_gallery_index.py` + `deploy_gallery.py`。
+   **两个已知未决问题**（不要当成新引入的 bug）：
+   - 播完 `touch_idle*` 后全部判定区飞出画布且不恢复（整体位移参数不在 idle 的绑定集里，游戏侧靠状态机复位）。三个候选修法见 §21 末段。
+   - 参考版约 **7% 的贝塞尔段无法从 Unity 数据还原**（四种切线候选公式最高只拟合 16.7%，且那是平凡情形）→ 只能用线性弦近似，表现为缓动略少。**这是数据源天花板，别再攻**。
 
 ---
 

@@ -584,28 +584,42 @@
 **四条必须记住的硬规则（每条对应一次真实事故）**:
 1. **坐标系必须换算**：`getDrawableVertexPositions()` 是 V（Cubism 原生：画布中心原点、y 向上），`toLocal()/pixelsPerUnit` 是 P（左上原点、y 向下）。换算 `Vx=Px-cux/2`、`Vy=cuy/2-Py`（`cux=im.width/ppu`）。混用 → 点胸口触发头部动作（TROUBLESHOOTING §20）。
 2. **命中必须先做包含判定**再就近取框，框外返回 null（否则点空白/任意处都触发最近部位，动作被反复打断，用户感受=「做得快/赶」，§19）。
-3. **idle 看守者不能删**：运行时 `setIsLoop()` 无调用点，`Meta.Loop` 失效，所有动作只播一轮；靠 `armIdleLoop` 按 `Duration-120ms` 重开实现循环（§19）。
+3. **idle 循环交给运行时，前端不许挂定时器**（2026-09-23 二次修订，旧"看守者"方案已废弃）：`Meta.Loop` 被 vendored 库忽略，但正确修法是给 CubismMotion 本体 `setIsLoop(true)` + `setIsLoopFadeIn(false)`，并把 `mm.groups.idle` 对齐成实际组名（库默认 `'Idle'`），让库自带的"播完自动回 idle"生效。旧方案用 `armIdleLoop` 定时器按 `Duration-120ms` 重开，而 `startMotion` 是 async → `!==false` 恒成立 → **被 `state.reserve` 拒绝时前端无感**，实测造成 idle 播 9.1s 后**冻结 9.2s**。改后 30s 内 `startMotion` 调用 0 次、`currentGroup=null` 采样 0 个（§21）。
 4. **验证不能自洽闭环**：合成点击若用被测映射的逆生成，永远全绿。必须用独立锚点（可见语义点反查 / 截图目视）——`l2d_coord_forensics.py` 就是干这个的。
+5. **动作数据必须有外部权威基准，别自证清白**：`motion3.json` 的贝塞尔控制点是**绝对 (时间,值)**，运行时直读不做归一化还原；写成归一化分数会让每条贝塞尔都先猛蹿到≈0 再跳目标值，而**曲线集合/时长/参数名全部校验都能通过**（§21）。唯一能抓出它的是同模型的权威导出：`scripts/diag/l2d_ref_diff.py` 拉 l2d.su 的 `motions/<group>.motion3.json` 逐曲线采样比对。
 
-**回归四件套（按顺序跑）**:
+**回归五件套（按顺序跑）**:
 ```bash
 # 0) 部署
 py -3 scripts/deploy_gallery.py
-# 1) 坐标系取证：head→Head / chest→Special / hip→Body，identityHits 必须全空
+# 1) 权威基准比对（数据层唯一硬判据；参考库只覆盖部分模型，404 自动跳过）
+py -3 scripts/diag/l2d_ref_diff.py antu_2 --clips idle,touch_head,touch_body,touch_special
+py -3 scripts/diag/l2d_ref_diff.py --all          # 全量验收
+# 2) 坐标系取证：head→Head / chest→Special / hip→Body，identityHits 必须全空
 py -3 scripts/diag/l2d_coord_forensics.py lafeiii_3
-# 2) 检查器验收（判定区/参数面板/滑杆往返/过滤器）
+# 3) 检查器验收（判定区/参数面板/滑杆往返/过滤器）
 py -3 scripts/diag/l2d_inspector_verify.py lafeiii_3
-# 3) 交互五项（滚轮/缩放/取消拖拽/空白点击不播/点部位命中）
+# 4) 交互五项（滚轮/缩放/取消拖拽/空白点击不播/点部位命中）
 py -3 scripts/diag/interact_verify.py
-# 4) 全量按部位点击（约 25 分钟，269 皮肤；基线 806/807，唯一 z46_3 框嵌框歧义）
+# 5) 全量按部位点击（约 25 分钟，269 皮肤；基线 806/807，唯一 z46_3 框嵌框歧义）
 py -3 scripts/diag/hit_verify.py
 ```
 
+**改动作数据/交互层后的补充体检（都是只读，几十秒）**:
+```bash
+py -3 scripts/diag/l2d_after_fix_check.py antu_2 yingrui_3   # 四项体检：breath=0 / isLoop / 30s 不冻结 / 点部位回落 idle
+py -3 scripts/diag/l2d_restart_cadence.py antu_2 30          # 看 startMotion 调用次数与 currentGroup=null 采样数
+py -3 scripts/diag/l2d_hit_overlap.py antu_2                  # 判定区重叠 + 淡入淡出实际值 + eyeBlink 是否创建
+py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 判定区是否被动画移出画布（已知未决问题）
+```
+
 **判据**:
+- `l2d_ref_diff` 必须 **PASS**：组/曲线集合零缺失、**关键帧零不一致**、偏差中位 ≤0.5、偏差>0.5 占比 ≤12%（WARN 线按安土实测 3.8%~9.6% 的贝塞尔天花板校准）。
 - 坐标系偏移即视为失败（张冠李戴比「不触发」更糟）。
 - `interact_verify` 的空白点击断言：`after=null` 视为通过（=idle 看守者重取数据的间隙，不是触发动作）。
 - `hit_verify` 全量期望 **806/807**；若掉到 800 以下，说明包含判定或坐标换算被改坏。
 - 无头环境 fetch/parse 比真机慢（约 1.5s），idle 轮换间隙明显；**别把无头掉帧当成 bug**。
+- `interact_verify` 偶发 `Execution context was destroyed` 是多个无头 Chrome 实例抢 profile 的假失败，**重跑一次即可**，不要当成回归。
 
 **踩坑记录**:
 - 无头验证脚本的 JS 以 `})` 结尾再在 Python 侧拼 `(key)` 调用；写成 `})()` 再拼会变成「调用返回值的返回值」报 `not a function`。

@@ -397,62 +397,61 @@ async function renderLive2D(s, sk){
     function fit(){ const cw=wrap.clientWidth||1, ch=wrap.clientHeight||1;
       baseK=Math.min(cw/natW, ch/natH); z=1; ox=0; oy=0; apply(); }
     fit();
-    const groups=Object.keys((mdl.internalModel.motionManager.definitions)||{});
+    const groups=Object.keys((mdl.internalModel.motionManager.definitions)||{}).sort();
     const mm=mdl.internalModel.motionManager;
     const MP=(PIXI.live2d&&PIXI.live2d.MotionPriority)||{IDLE:1,NORMAL:2,FORCE:3};
     const idleGroup=['idle','main','home'].find(g=>groups.includes(g))||groups[0]||null;
-    /* startMotion 必须显式给 index：传 null 会让库取 motion[group][null] → undefined 而静默失败；
-       priority 也不能传 false（会被当 0 而低于当前优先级被拒） */
-    const play=g=>{ if(!g) return false; try{ return mm.startMotion(g,0,MP.FORCE)!==false; }catch(e){ return false; } };
-    /* ⚠️ 运行时缺陷兜底（2026-09-23 实测证实，见 docs/TROUBLESHOOTING.md §19）：
-       vendored pixi-live2d-display 0.4.0 的 cubism4 模块定义了 setIsLoop() 但全 bundle 无调用点，
-       Meta.Loop=true 被无视 → 任何动作（含 idle）都只播一轮即停（idle 4s 后模型回静帧）。
-       故由前端「看守」idle：到点若没在播其它动作就交叉淡入重开一轮，实现游戏那样的持续待机动画。
-       官方 motion 大多 Loop=true（游戏里由状态机切走），网页里若一直播完不回落，
-       点一次部位就永远重复那个反应，看着像「乱动/乱闪」。按动作自身时长定时回落到 idle。
-       回落必须用 FORCE：库的 state.reserve() 会拒绝低于当前优先级的请求（IDLE=1 < FORCE=3 直接被拒）。 */
-    const _durCache={}; let _rvTok=0, _idleTok=0;
-    async function motionMs(g){
-      try{
-        const d=(mm.definitions[g]||[])[0]; if(!d||!d.File) return 4000;
-        if(_durCache[d.File]) return _durCache[d.File];
-        const r=await fetch(P+model+'/'+d.File); if(!r.ok) return 4000;
-        const j=await r.json(); const sec=(j&&j.Meta&&+j.Meta.Duration)||0;
-        const ms=Math.max(1200, sec*1000+300); _durCache[d.File]=ms; return ms;
-      }catch(e){ return 4000; }
-    }
-    /* idle 看守者：每次 idle 启动后武装一次；提前 120ms 交叉淡入重开（无缝循环），
-       若到点时恰有其它动作在播则不打扰（它的 scheduleIdle 会回落 idle 并重新武装） */
-    const armIdleLoop=()=>{ if(!idleGroup) return; const tok=++_idleTok;
-      motionMs(idleGroup).then(ms=>{ if(my.cancelled||tok!==_idleTok) return;
-        setTimeout(()=>{ if(my.cancelled||tok!==_idleTok) return;
-          const cur=mm.state.currentGroup||null;
-          if(cur===null||cur===idleGroup){
-            try{ if(mm.startMotion(idleGroup,0,MP.FORCE)!==false && sel) sel.value=idleGroup; }catch(e){}
-            armIdleLoop(); } }, Math.max(300,ms-120)); }); };
-    const scheduleIdle=g=>{
-      if(!idleGroup||g===idleGroup) return;
-      const tok=++_rvTok;
-      motionMs(g).then(ms=>{ if(my.cancelled||tok!==_rvTok) return;
-        setTimeout(()=>{ if(my.cancelled||tok!==_rvTok) return;
-          const cur=mm.state.currentGroup||null;
-          if(cur!==null&&cur!==g) return;            // 已被看守者接管（idle 已在播）则不重复启动
-          try{ if(mm.startMotion(idleGroup,0,MP.FORCE)!==false && sel) sel.value=idleGroup; }catch(e){}
-          armIdleLoop(); }, ms); });
-    };
+    /* ---------- 运行时保真三补丁（2026-09-23 无头取证，见 docs/TROUBLESHOOTING.md §21） ----------
+       ① 采纳 Meta.Loop：vendored pixi-live2d-display 0.4.0 定义了 setIsLoop() 但全 bundle 无调用点，
+          Meta.Loop 被无视 → idle 播完即停。此前靠前端定时器「假装循环」，实测该定时器与运行时
+          清空 currentGroup 抢跑（startMotion 是 async，返回 Promise 使 !==false 恒成立，
+          被 state.reserve 拒绝也当成功），9.1s 播放后冻结 9.2s。交回 CubismMotion 本体后，
+          核心自己做时间回绕（f>duration 就减 duration），无缝、无淡入、无打断。
+          注意 setIsLoopFadeIn(false) 必须一起设：否则每次回绕都会 setFadeInStartTime → 权重
+          每循环归零重爬一次，观感=每隔 N 秒「身子被拽回去」。
+       ② mm.groups.idle 默认 'Idle' 与我们的 'idle' 不匹配 → 库自带的「动作播完自动回 idle」
+          一直静默失效（这才是 ① 存在的原因）。补上后由运行时逐帧接管，零定时器、零冻结。
+       ③ 库的 _startMotion 每次先 queueManager.stopAllMotions() 把旧动作瞬间掐死 → 姿态硬跳。
+          队列管理器 startMotion 内部本来就会给现存条目 setFadeOut，去掉那行 stop 即恢复官方交叉淡化。 */
+    const origCreateMotion=mm.createMotion.bind(mm);
+    mm.createMotion=(json,group,def)=>{ const m=origCreateMotion(json,group,def);
+      if(group===idleGroup&&json&&json.Meta&&json.Meta.Loop&&m.setIsLoop){
+        m.setIsLoop(true); if(m.setIsLoopFadeIn) m.setIsLoopFadeIn(false); }
+      return m; };
+    mm.groups.idle=idleGroup;
+    mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }catch(e){}
+      return mm.queueManager.startMotion(m,false,performance.now()); };
+    /* idle 若在挂上 ① 之前就被预加载了，读一次 Meta.Loop 补打标记（浏览器已缓存该文件） */
+    (async()=>{ try{ const d=(mm.definitions[idleGroup]||[])[0]; if(!d||!d.File) return;
+        const r=await fetch(P+model+'/'+d.File); if(!r.ok) return; const j=await r.json();
+        if(!(j&&j.Meta&&j.Meta.Loop)) return;
+        for(const m of (mm.motionGroups[idleGroup]||[])){ if(m&&m.setIsLoop){
+          m.setIsLoop(true); if(m.setIsLoopFadeIn) m.setIsLoopFadeIn(false); } }
+      }catch(e){} })();
+    /* ④ 关掉运行时自加的 Cubism2 式呼吸层：游戏侧组件清单（CubismMoc/Model/PhysicsController/
+          Raycaster/Live2dChar）里根本没有 Breath，而 74~85% 的 idle 已自带动 ParamAngleX/Y/Z +
+          ParamBodyAngleX 曲线，这层会在动作之后再叠 ±4~7.5° 的 3.2~6.5s 高频摆动 → 头部双驱动。 */
+    if(im.breath&&im.breath.setParameters) im.breath.setParameters([]);
+    /* startMotion 必须显式给 index：传 null 会让库取 motion[group][null] → undefined 而静默失败。
+       用户触发的动作一律 FORCE：库的 state.reserve() 会拒绝 ≤ 当前优先级的请求（idle 占 IDLE=1），
+       不 FORCE 就连点第二个部位都放不出来。回落 idle 交给运行时（见 ②），不再需要定时器。 */
+    const play=g=>{ if(!g) return false; try{ mm.startMotion(g,0,MP.FORCE); return true; }catch(e){ return false; } };
     const bar=document.getElementById('l2bar');
     bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn">判定区</button><button id="l2PanelBtn">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     sel.innerHTML=groups.map(g=>`<option value="${g}">${g}</option>`).join('');
-    sel.onchange=()=>{ if(play(sel.value)) scheduleIdle(sel.value); };
-    document.getElementById('l2Replay').onclick=()=>{ const g=sel.value; if(play(g)) scheduleIdle(g); };
+    sel.onchange=()=>{ play(sel.value); };
+    document.getElementById('l2Replay').onclick=()=>{ play(sel.value); };
     document.getElementById('l2Fit').onclick=fit;
     document.getElementById('l2Full').onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else viewEl.requestFullscreen().catch(()=>{}); };
     const ro=new ResizeObserver(fit); ro.observe(wrap);
     /* 部位命中：model3.json 的 HitAreas[].Name 就是动作组名（全库 768/768 精确匹配）。
-       用「点击瞬间实时读取的部件包围盒」而不是加载时算好的三角面：
-       ① 框会随呼吸/物理位移动，缓存坐标会点空；② 部位框彼此重叠/嵌套（有的模型 Head 框大到压住 Body），
-       按顺序或按最小框都会点错 → 取「归一化中心距离最近」的包含框（点在哪就最像哪个部位）。 */
+       用「点击瞬间实时读取的部件包围盒」而不是加载时算好的三角面：框会随呼吸/物理位移动，缓存坐标会点空。
+       判定形状 = 部件的**真实四边形**（两三角），不是它的轴对齐包围盒：
+       游戏侧 CubismRaycaster 就是对 Touch* 标记做三角形 raycast；这些标记是 4 顶点的不可见 quad，
+       部分模型（yingrui_3 四边形/包围盒面积比 0.49、z46_3 0.65）的 quad 是**斜的**，
+       用包围盒等于把判定区放大最多 2 倍 → 点旁边空地也触发，就是用户报的「有些点击不准」。
+       正矩形标记（安土等大多数）两种判定逐点等价，零行为变化。重叠时取面积最小的框（最具体的部位）。 */
     const core=mdl.internalModel.coreModel, ppu=mdl.internalModel.pixelsPerUnit||1;
     /* ⚠️ 两套坐标系（2026-09-23 实测，证据 .diag/_probe_affine.json）：
        getDrawableVertexPositions 返回 V=Cubism 原生坐标（画布中心为原点、y 向上），
@@ -465,41 +464,53 @@ async function renderLive2D(s, sk){
       let idx=-1; try{ idx=core.getDrawableIndex(a.Id); }catch(e){}
       return idx<0 ? null : {name:a.Name, idx};
     }).filter(Boolean);
-    const hitAt=(mx,my)=>{ let best=null, bestS=Infinity;
-      for(const ha of hitAreas){
-        const p=core.getDrawableVertexPositions(ha.idx); if(!p||!p.length) continue;
-        let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-        for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
-        /* ⚠️ 必须「在框内」才命中（容差 2%，只吸收派发事件间隙几十毫秒的呼吸/物理位移）。
-           旧实现取「全图最近框」、无包含判定 → 点画布任意位置（含视觉空白处）都触发最近部位，
-           动作被反复打断，就是用户报的「悬停/乱触发 + 做得赶」（2026-09-23 修复）。
-           实测对比：改用 Cubism 三角面精确判定反而更差（部分模型的 Touch 部件顶点数据不规整，
-           如 yingrui_3/z46_3 的三角面连自己的重心都不包含），故用包围盒。 */
-        const hw=Math.max(1e-6,(x1-x0)/2), hh=Math.max(1e-6,(y1-y0)/2);
-        if(mx<x0-hw*0.02||mx>x1+hw*0.02||my<y0-hh*0.02||my>y1+hh*0.02) continue;
-        const cx=(x0+x1)/2, cy=(y0+y1)/2;
-        const s=Math.hypot((mx-cx)/hw,(my-cy)/hh);        // 0=正中；多个框包含时取最贴近中心的
-        if(s<bestS){ bestS=s; best=ha.name; } }
+    const triIn=(x,y,a,b,c)=>{ const d=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1]);
+      if(Math.abs(d)<1e-12) return false;
+      const l=((b[1]-c[1])*(x-c[0])+(c[0]-b[0])*(y-c[1]))/d, m=((c[1]-a[1])*(x-c[0])+(a[0]-c[0])*(y-c[1]))/d;
+      return l>=-0.02&&m>=-0.02&&(l+m)<=1.04; };
+    const triArea=(a,b,c)=>Math.abs((b[0]-a[0])*(c[1]-a[1])-(c[0]-a[0])*(b[1]-a[1]))/2;
+    /* 实时几何：顶点 + 包围盒 + 四边形面积（strip 序 v0v1v2 / v1v3v2）；非四边形标记退回包围盒 */
+    const geomOf=(ha)=>{ const p=core.getDrawableVertexPositions(ha.idx); if(!p||!p.length) return null;
+      let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+      for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
+      const g={x0,y0,x1,y1,quad:null};
+      if(p.length===8){ const v=[[p[0],p[1]],[p[2],p[3]],[p[4],p[5]],[p[6],p[7]]];
+        g.quad={v, area:triArea(v[0],v[1],v[2])+triArea(v[1],v[3],v[2])}; }
+      return g; };
+    const hitAt=(mx,my)=>{ let best=null, bestA=Infinity;
+      for(const ha of hitAreas){ const g=geomOf(ha); if(!g) continue;
+        /* 包围盒预筛，容差 2%：只吸收派发事件间隙几十毫秒的呼吸/物理位移 */
+        const hw=Math.max(1e-6,(g.x1-g.x0)/2), hh=Math.max(1e-6,(g.y1-g.y0)/2);
+        if(mx<g.x0-hw*0.02||mx>g.x1+hw*0.02||my<g.y0-hh*0.02||my>g.y1+hh*0.02) continue;
+        if(g.quad){ const v=g.quad.v;
+          if(!triIn(mx,my,v[0],v[1],v[2])&&!triIn(mx,my,v[1],v[3],v[2])) continue;
+          if(g.quad.area<bestA){ bestA=g.quad.area; best=ha.name; } }
+        else { const a=(g.x1-g.x0)*(g.y1-g.y0); if(a<bestA){ bestA=a; best=ha.name; } } }
       return best; };
     /* 兜底只给「没有判定区」的模型用；有 HitAreas 的模型点空白处不播任何动作（与游戏一致），
        否则会随机触发一个 touch_drag* 动作，用户会觉得「点哪都乱动」 */
     const fallbackG=hitAreas.length ? null : (groups.find(g=>/^(tap|touch)/i.test(g))||null);
-    /* ---------- 判定区可视化（l2d.su 同款）：把 HitAreas 包围盒画在模型上 ---------- */
+    /* ---------- 判定区可视化（l2d.su 同款）：把 HitAreas 的**真实四边形**画在模型上 ----------
+       画包围盒会让人以为「框里都能点」，而实际判定已按四边形走 → 可视化必须与判定同源（geomOf）。 */
     const AREA_COL={head:0x4fc3f7,body:0x81c784,special:0xffb74d};
     const areaG=new PIXI.Graphics(); areaG.visible=false; app.stage.addChild(areaG);
     const areaTs=hitAreas.map(()=>{ const tx=new PIXI.Text('',{fontSize:11,fill:0xffffff,stroke:0x0a0d18,strokeThickness:3});
       tx.visible=false; app.stage.addChild(tx); return tx; });
     const drawAreas=()=>{ areaG.clear();
-      hitAreas.forEach((ha,i)=>{ const p=core.getDrawableVertexPositions(ha.idx); if(!p||!p.length){ areaTs[i].visible=false; return; }
-        let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-        for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
+      hitAreas.forEach((ha,i)=>{ const g=geomOf(ha); if(!g){ areaTs[i].visible=false; return; }
         /* V(顶点原生) → P → stage 像素：P=(Vx+cux/2, cuy/2-Vy)，stage = mdl.pos + P*ppu*scale。
            apply() 只设 mdl.scale/x/y（无旋转无锚点），手工映射即可（等价 toGlobal(P*ppu) 且更可控）。 */
         const s=mdl.scale.x;
-        const gx0=mdl.x+(x0+cux/2)*ppu*s, gy0=mdl.y+(cuy/2-y0)*ppu*s;
-        const gx1=mdl.x+(x1+cux/2)*ppu*s, gy1=mdl.y+(cuy/2-y1)*ppu*s;
+        const toStage=(vx,vy)=>[mdl.x+(vx+cux/2)*ppu*s, mdl.y+(cuy/2-vy)*ppu*s];
+        /* 顶点是**三角带序** (v0,v1,v2,v3)=(TR,TL,BR,BL)，按原序连环会画成自交的蝴蝶结；
+           与命中判定同语义 = 三角形 (v0,v1,v2)+(v1,v3,v2)，其无自交环序是 [0,1,3,2]。 */
+        const pts=g.quad?[0,1,3,2].map(k=>toStage(g.quad.v[k][0],g.quad.v[k][1]))
+                        :[toStage(g.x0,g.y1),toStage(g.x1,g.y1),toStage(g.x1,g.y0),toStage(g.x0,g.y0)];
+        const flat=[]; pts.forEach(p=>flat.push(p[0],p[1]));
         const col=AREA_COL[(ha.name||'').toLowerCase().replace(/^touch_/,'')]||0xba68c8;
-        areaG.lineStyle(1.5,col,0.9).beginFill(col,0.07).drawRect(gx0,gy0,gx1-gx0,gy1-gy0).endFill();
+        areaG.lineStyle(1.5,col,0.9).beginFill(col,0.07).drawPolygon(flat).endFill();
+        const gx0=Math.min(...pts.map(p=>p[0])), gy0=Math.min(...pts.map(p=>p[1]));
+        const gy1=Math.max(...pts.map(p=>p[1]));
         const tx=areaTs[i]; tx.text=ha.name; tx.style.fill=col; tx.visible=true;
         tx.position.set(Math.max(2,Math.min(gx0,wrap.clientWidth-72)), gy0-15>=2?gy0-15:gy1+3); }); };
     let areaViz=false;
@@ -555,7 +566,7 @@ async function renderLive2D(s, sk){
       const name=hitAt(pv.x, pv.y);
       const g = name && (groups.includes(name) ? name : groups.find(x=>x.toLowerCase()===name.toLowerCase())) || (name?null:fallbackG);
       if(!g) return;
-      if(play(g)){ scheduleIdle(g); sel.value=g; const pill=document.getElementById('l2Hit');
+      if(play(g)){ sel.value=g; const pill=document.getElementById('l2Hit');
         if(pill) pill.textContent=(name?'部位 '+name+' → ':'')+g; } };
     const onCancel=()=>{ dragging=false; };
     /* 缩放必须按住 Ctrl(或 ⌘/Alt)：裸滚轮要留给页面滚动。
@@ -583,8 +594,7 @@ async function renderLive2D(s, sk){
       window.removeEventListener('pointermove',onMove); window.removeEventListener('pointerup',onUp); };
     const def=idleGroup;
     if(sel.value!==def) sel.value=def||'';
-    play(def);
-    armIdleLoop();
+    play(def);   /* 循环与「播完回 idle」全部交给运行时（见上方补丁 ①②），前端不再挂任何定时器 */
   }catch(e){ if(my.cancelled||seq!==_l2seq)return;
     viewEl.innerHTML=`<div class="note">Live2D 加载失败：${e&&(e.stack||e.message||e)}</div>`; return; }
 }
