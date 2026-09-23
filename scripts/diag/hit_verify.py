@@ -50,7 +50,13 @@ def ev(e, t=120):
     if r.get('exceptionDetails'): return json.dumps({'err': str(r['exceptionDetails'].get('text'))[:180]})
     return r.get('result', {}).get('value')
 
-ev("for(let i=0;i<80 && !window.GALLERY;i++){}; 'ready'")
+# 就绪等待必须真的等：旧写法 `for(let i=0;i<80 && !window.GALLERY;i++){}` 是同步空转，
+# 微秒级就跑完等于没等，且只查 GALLERY 不查 stopLive2D -> 前若干模型必报
+# "GALLERY is not defined" / "stopLive2D is not defined"（2026-09-23 实测冷启动必现）。
+ev("(async()=>{ for(let i=0;i<200 && !(window.GALLERY && typeof openShip==='function'"
+   " && typeof stopLive2D==='function' && typeof renderLive2D==='function');i++)"
+   " await new Promise(r=>setTimeout(r,300));"
+   " return (typeof GALLERY!=='undefined' && typeof stopLive2D==='function')?'ready':'NOT READY'; })()")
 JS = r"""(async key => { try{
   const t=ms=>new Promise(r=>setTimeout(r,ms));
   let ship=null, sk=null;
@@ -86,9 +92,14 @@ JS = r"""(async key => { try{
 """
 ok_models = 0; rows = []
 for k in cands:
-    out = ev(f"({JS})({json.dumps(k)})")
-    try: d = json.loads(out)
-    except Exception: d = {'key': k, 'raw': str(out)[:200]}
+    for _attempt in range(3):   # 冷启动 / 偶发 WebGL 断连会返回 err，重试而不是记成失败
+        out = ev(f"({JS})({json.dumps(k)})")
+        try: d = json.loads(out)
+        except Exception: d = {'key': k, 'raw': str(out)[:200]}
+        if not d.get('err'):
+            break
+        print(f'  ↻ {k} 第{_attempt+1}次 err={str(d.get("err"))[:60]}，2s 后重试', flush=True)
+        time.sleep(2)
     rows.append(d)
     if d.get('hitOK') and d.get('hitOK') == d.get('nAreas'): ok_models += 1
     print(json.dumps(d, ensure_ascii=False), flush=True)

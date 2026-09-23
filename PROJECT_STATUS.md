@@ -189,6 +189,9 @@
 8. ✅ **ship_meta `{namecode:XX}` 占位符名（已于 2026-09-20 随 B 根因修复关闭）**：根因=`build_ship_meta.py` 舰名取 `ship_skin_template.name`（皮肤名，含占位符）——**改取 `ship_data_statistics.name`（0 占位符）**后，237 个 ship 级占位符全归零、名称与阵营自洽（`weizhang`→尾张、`xinzexi`→新泽西 等）。残余 ~52 占位符全为 `story` 类（NPC/剧情/2b 联动变体，本就无 stats 舰名，非缺漏）。详见 §6 第 5 条 B 已完成。
 9. ⏳ **【已交接·最高优先】Live2D 动作数据全量重导（§21 根因修复，2026-09-23）**
    根因、证据、已排除假设、天花板全部写在 **`docs/TROUBLESHOOTING.md` §21**；操作与判据在 **`docs/WORKFLOWS.md` WF-16**。安土 `antu_2` 已作为样本换入并通过权威基准验收，**其余 268 个模型仍是旧数据**。
+   **2026-09-23 实测复核（确认仍是 1/269，且给出可复现判据）**：`Output/Live2D/*/motion/*.motion3.json` 最后修改日期分布 = **2026-09-21：268 个模型 / 2026-09-23：1 个模型**；`idle` 曲线条数 `antu_2=278`（新，含 `m_ConstantClip` 定值曲线）对 `yingrui_3=117`、`lafeiii_3=109`、`jian_3=120`、`z46_3=86`、`ninghai_4=76`、`taiyuan_2=75`、`qiye_7=41`（旧，只读 streamed）。
+   ⚠️ **这不只是画质问题**：§21 根因② 说明「缺曲线的参数切动作时会停在上一个动作留下的值上」，而旧模型 idle 只有 41~120 条曲线（安土 278 条）→ **其余 268 个模型的非 idle 参数残留只会比安土更严重**。本轮修的「参数残留复位」目前**只在安土一个模型上实测过**，全量重导与它是同一件事的两半。
+   **建议顺序：先做本项全量重导，再重标定 `hit_verify` 基线**（重导会改判定区数量与动作，顺序反过来基线要重测两遍）。
    **待做（按序）**：
    1. 备份：`Output/Live2D/*/motion/` 整目录 → `Output/_OLD_bak/l2d_motion_pre_21_<日期>/`（Output 不在版本控制内，**必须备份**）。
    2. 全量重导：`L2D_MOTION_LINEAR=1 L2D_MOTION_EMIT_CONST=1 py -3 scripts/extract_motions.py --all`
@@ -196,16 +199,19 @@
       ⚠️ 该脚本直接写 `Output/Live2D`，**先用 `L2D_OUT_DIR` 指到临时目录试跑几个模型**，再沿用 `apply_live2d_motions.py`「只换 `motion/` 子目录」的做法换入。退出码非 0 = 有 clip 解出 0 曲线，绝不静默。
    3. 全量补 model3：`py -3 scripts/fix_model3.py`（幂等；本轮新增三项——非 idle 删硬写淡入淡出、idle 拆成 `FadeInTime:2.0/FadeOutTime:0.5`、补 EyeBlink/LipSync 组、补登全部 `Touch*` 判定区）。
    4. 验收：**`py -3 scripts/diag/l2d_ref_diff.py --all` 必须 PASS**（判据：组/曲线零缺失、**关键帧零不一致**、偏差中位 ≤0.5、偏差>0.5 占比 ≤12%）。参考库只覆盖部分模型，404 自动跳过。
-   5. 回归：WF-16 五件套全跑，`hit_verify` 基线 **806/807**。⚠️ 判定区从 3 个扩到几十个后 `hit_verify` 断言范围变大，**基线可能需重新标定**——先读 §21「与核心三框零重叠」的实测结论再判断是否真回退。
+   5. 回归：WF-16 五件套全跑，`hit_verify` 基线 **806/807**。⚠️ 判定区从 3 个扩到几十个后 `hit_verify` 断言范围变大，**基线必须重新标定**——先读 §21「与核心三框零重叠」的实测结论再判断是否真回退。
+      **2026-09-23 现状：基线尚未重标定。** 本轮跑出的 `821/843` **不可用作基线**——真实断言数应是 **861**（`843 = 262×3 + antu_2 的 57 + 6 个模型被记成 0`），那 6 个「nAreas=0」经核实是**脚手架误读**（8777 服务器当时不在跑，Chrome 返回导航失败页），产品侧这 6 个模型的 HitAreas 都是 3 个。已知的真实待查项是 **17 个模型的 `Body→Special`**（含旧基线里的 `z46_3`）与 **antu_2 的 5 处 57 框内歧义**。判别式与根因见 WF-16 踩坑段。
    6. 派生产物：`make_thumbs.py` 遇已存在文件会 skip（换图必须删旧 webp）；index 若受动作数影响需重跑 `build_gallery_index.py` + `deploy_gallery.py`。
    **一个已知未决问题**（不要当成新引入的 bug）：
    - 参考版约 **7% 的贝塞尔段无法从 Unity 数据还原**（四种切线候选公式最高只拟合 16.7%，且那是平凡情形）→ 只能用线性弦近似，表现为缓动略少。**这是数据源天花板，别再攻**。
    ~~播完 `touch_idle*` 后判定区集体出画不恢复~~ → **2026-09-23 已修**：非 idle 参数残留复位（`gallery_src/index.html` 的 `paramSets` 登记 + 回 idle 后写回 moc3 默认值），探针 after 出画数回到 53 == before、位移 0；根因与两条踩坑见 §21 末段，可复用做法见技能 `live2d-web-runtime-integration` §3.8/§7.2。
 10. ⏳ **Live2D 动作语音：全量导出 + 出声验收 + 技能沉淀（2026-09-23）**
-   管线与判据见 **`docs/WORKFLOWS.md` WF-17**，命令语义与实测证据见 **`docs/TROUBLESHOOTING.md` §23**。现状：`scripts/extract_live2d_voice.py` **已写但未入库**，产物只有安土 1 个样本（29 个 ogg），**253 个皮肤全量未跑**；`scripts/diag/l2d_voice_probe.py` 同样未入库。
-   **两个闸门（过了才动技能）**：
-   1. **耳朵验收**：无头 Chrome 是空声卡，探针 `paused=false` 证明不了用户听得见 → 需实听确认「点动作有声音」。
-   2. **全量数字**：`L2D_VOICE_ALL=1` 跑完 253 皮肤（只转对得上动作组的 cue，opus 48k ≈ PCM 的 1/10），拿到最终命中/缺失/体积数字。
+   管线与判据见 **`docs/WORKFLOWS.md` WF-17**，命令语义与实测证据见 **`docs/TROUBLESHOOTING.md` §23**。
+   **✅ 2026-09-23 两个闸门都已过**：
+   1. **耳朵验收已过**：用户实听确认「点动作有声音」（此前一轮报"完全无声"实为**改完没部署**，见 WF-17 踩坑首条）。
+   2. **全量已跑完**：`--all` 覆盖 270 个 Live2D 皮肤 → **253 个命中 ACB 并导出**、**17 个无 ACB**、**0 个"有 ACB 但动作组零交集"**；产物 **5914 个 ogg / 323 MB**，映射表 `Output/gallery_v2/l2d_voice.json` 含 **253 个皮肤**。
+   脚本已入库（commit `727fe04`）：`scripts/extract_live2d_voice.py`（新增 `--all` 旗标——原先只认 `L2D_VOICE_ALL=1` 环境变量，用 `Start-Process` 脱离进程起时不继承环境变量，导致第一次"看起来起起来了"实际直接走用法分支 `exit 1`）、`scripts/diag/l2d_voice_probe.py`。
+   **仍待办**：① `touch_body→touch_1` / `touch_special→touch_2` 两条别名仍是语义推断，待用户按耳朵裁定（**改映射即可、不必重导音频**，因为文件名用 cue 名）；② **口型未做**（vendored 库无音频驱动口型，需自接 WebAudio 包络写 `ParamMouthOpenY`）；③ **Spine 与静态立绘的配音仍缺**——同一批 ACB 里有 `detail`/`get`/`expedition`/`task`/`profile`/`upgrade`/`feeling1-5`/`present_like`/`title` 等触发名，数据在手未导出未接线；④ 详情页语音归并还依赖那张 719 条的社区 `CV_MAP`（安土都不在表里 → `voices=[]`），可改用 skin id 推导一并修掉。
    **顺带待裁定**：`touch_body→touch_1`、`touch_special→touch_2` 两条别名现为语义推断；`ship_skin_words` 若解出（§22 在途）即可给权威映射。
    **技能沉淀决议（勿再新建）**：自动推荐连发 4 条（`criware-acb-live2d-voice-extraction` / `criware-acb-voice-extraction` / `criware-acb-voice-bank-extraction` / `criware-voice-cue-extraction`）实为**同一份内容的四个副本**，相对 WF-17 净新增仅三点（库原生 `definitions[g][0].Sound` 注入、本库无音频驱动口型、语音表异步到达的首播竞态）。闸门过了之后**并进 `live2d-web-runtime-integration` 新开 §9「动作语音」**，与 WF-17/§23 重复的段落一律改为引用；若坚持独立技能，命名取 #3。⚠️ 该技能住在项目 `.agents/skills/`，而 `skill_manage` 只认用户技能目录 → **须直接改文件**。落笔时修掉两处事实：`-i` 不是"不给就时长翻倍"（本批语音实测无 loop 点），以及探针脚本要先入库才能被技能引用。
 

@@ -626,7 +626,24 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
 **踩坑记录**:
 - 无头验证脚本的 JS 以 `})` 结尾再在 Python 侧拼 `(key)` 调用；写成 `})()` 再拼会变成「调用返回值的返回值」报 `not a function`。
 - 归档到 `scripts/diag/` 的脚本 `ROOT` 要三层 dirname（`.diag/` 里的是两层）。
-- 页面脚本未就绪时先轮询 `window.GALLERY && typeof openShip==='function'`，只等 `GALLERY` 会在偶发时序下报 `openShip is not defined`。
+- 页面脚本未就绪时先轮询 `window.GALLERY && typeof openShip==='function'`，只等 `GALLERY` 会在偶发时序下报 `openShip is not defined`。**轮询必须带 `await`**（同步空转循环等于没等）。
+- ✅ **脚手架「日志开头若干行报 `GALLERY is not defined`」根因已定位（2026-09-23）：不是脚手架代码，是 `8777` 画廊服务器没在跑。**
+  Chrome 连不上时把 tab 换成**自己的导航失败错误页**，于是页面全局永远不会出现。
+  - **一刀切判别式**（比看异常文本可靠得多）：`document.title` 变成**主机名**（`127.0.0.1` 而不是「碧蓝航线资产浏览器」）、
+    `document.scripts` 里**没有 `src=` 的标签**（只有 Chrome 自己的两个大内联脚本）、
+    `readyState` 却是 `complete`、`typeof openShip==='undefined'`。
+    四条同时成立 = **服务器不在**，别再查页面代码或 CDP。
+  - **为什么容易误判成代码问题**：`readyState=complete` 会让人以为页面加载成功了；而错误页也是"完整文档"。
+  - **已排除的假设（都实测过，别再重走）**：① 就绪等待写成同步空转 → 改成带 `await` 的轮询 + 对 `err` 重试 3 次**仍报同一错**；
+    ② `ev()` 缺 `awaitPromise` → 核实**本来就有**；③ CDP 落在陈旧/隔离 context → `Page.navigate` 重新提交文档**也没救回来**。
+  - **可复用的自查手法（这条站得住）**：先看失败行是否**恰好集中在日志开头**——是 → 环境/冷启动；分散 → 才怀疑产品。
+    再核对「失败对象的输入侧数据是否真的缺」：本次靠查这 6 个模型 `model3.json` 的 HitAreas 数量（都是 3 个）
+    一步排除了产品回退。
+- ⚠️ **杀回归脚本必须连 Chrome 一起杀，且清理脚本要按整条命令行匹配。** `--user-data-dir` 的值**含空格且常不带引号**
+  （`D:\Azur Lane Assets/.diag/chrome_hitv`），用正则去截 `--user-data-dir=(...|[^ ]*)` 只会截到 `D:\Azur` 而漏杀。
+  正确做法：`CommandLine -match 'Azur Lane Assets' -and CommandLine -match 'chrome_hitv|chrome_galprobe|...'`。
+  本次实测：只杀 python 主进程后残留 **4 组无头 Chrome 占着 CDP 端口 9342/9377/9378/9379**，
+  正是「多个无头 Chrome 抢 profile → 偶发假失败」的来源。
 
 **涉及文件**: `gallery_src/index.html`、`scripts/deploy_gallery.py`、`scripts/diag/{l2d_coord_forensics,l2d_inspector_verify,interact_verify,hit_verify}.py`、`TROUBLESHOOTING.md` §19/§20
 

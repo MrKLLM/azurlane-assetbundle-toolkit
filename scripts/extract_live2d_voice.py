@@ -190,7 +190,7 @@ if __name__ == '__main__':
     if '--key' in argv:
         keys = [x for x in argv[argv.index('--key') + 1].split(',') if x]
         sys.exit(run(keys, True))
-    if os.environ.get('L2D_VOICE_ALL') == '1':
+    if os.environ.get('L2D_VOICE_ALL') == '1' or '--all' in argv:
         keys = [d for d in sorted(os.listdir(L2D_DIR)) if not d.startswith('_')]
         if only:
             keys = [k for k in keys if k in only]
