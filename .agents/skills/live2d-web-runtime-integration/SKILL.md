@@ -109,6 +109,9 @@ state.off = () => { ro.disconnect(); wrap.removeEventListener(...); window.remov
 - 回归脚本断言键名必须与脚本实际输出键名一致：曾把输出 `noAction` 断言成不存在的 `noFallbackGroup` → 该项**恒不触发、永远绿灯**，"点空白不播"半年未被执行过。改判据后必须用一个已知失败样本验证断言确实会变红。
 - 容差只给 **2%**（吸收测试派发延迟的几十毫秒位移）。给到 8% 会把视觉上明显空白的角落判成命中——Live2D 画布四周有大量透明边距，模型单位范围比可见内容大得多。
 - **兜底动作只给没有 `HitAreas` 的模型**。有判定区却点框外，就什么都不播（与游戏一致）。否则点哪儿都蹦一个 `touch_drag*`，观感极差。
+- ⚠️ **两套坐标系必须换算，别当同一空间用**（2026-09-23 实测踩坑，证据 `.diag/_probe_affine.json`）：`getDrawableVertexPositions()` 返回 **V=Cubism 原生坐标**（画布中心原点、**y 向上**），`toLocal()/pixelsPerUnit` 得 **P**（左上原点、y 向下）。换算：`Vx=Px-cux/2`、`Vy=cuy/2-Py`（`cux=im.width/ppu`、`cuy=im.height/ppu`）。拿 V 框直接包含 P 点（或反之）→ 点胸口触发头部动作；画 overlay 画到角落。**防自洽闭环陷阱**：合成验证点击若用「被测映射的逆」生成，测试永远绿——必须留一个不经过被测映射的锚点（可见语义点反查 / 截图目视）。
+- **参数/部件检查器**：`core._parameterIds`/`core._partIds` 是 wrapper 自有名字数组（字符串）；`getParameterCount/getParameter{Minimum,Maximum,Default}Value(i)/getParameterValueByIndex/setParameterValueByIndex`、`getPartCount/getPartOpacityByIndex/setPartOpacityByIndex` 齐全，但**没有** `getParameterId/getPartId(i)`。滑杆手调参数=变相表情系统；注意播放中的动作每帧覆写它驱动的参数。
+- **判定区可视化 overlay**：Graphics 挂 stage 同级，坐标用 `stage = mdl.pos + P*ppu*mdl.scale`（apply() 无旋转无锚点时成立）；每帧 ticker 里重画以跟随呼吸/物理位移。
 
 ## 5. 构图与 fit 的两个陷阱
 

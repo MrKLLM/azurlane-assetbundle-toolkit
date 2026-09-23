@@ -46,6 +46,7 @@ JS = r"""(async(key)=>{ try{
   const l2=[...document.querySelectorAll('#mTabs .tab')].find(x=>x.dataset.k==='live2d');
   l2.click(); await t(6500);
   const app=l2State.app, m=app.stage.children[0], im=m.internalModel, core=im.coreModel, ppu=im.pixelsPerUnit||1, mm=im.motionManager;
+  const cux2=im.width/ppu, cuy2=im.height/ppu;   // 画布单位边长：V(中心原点/y向上)↔P(左上/y向下) 换算用
   const wrap=document.getElementById('l2wrap'), rect=wrap.getBoundingClientRect();
   const hitAreas=im.settings.hitAreas||[];
   const cx=rect.left+rect.width/2, cy=rect.top+rect.height/2;
@@ -86,16 +87,18 @@ JS = r"""(async(key)=>{ try{
         let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for(let k=0;k+1<pp.length;k+=2){x0=Math.min(x0,pp[k]);y0=Math.min(y0,pp[k+1]);x1=Math.max(x1,pp[k]);y1=Math.max(y1,pp[k+1]);}
         const ex=(x1-x0)*0.02, ey=(y1-y0)*0.02;
         if(ox2>=x0-ex&&ox2<=x1+ex&&oy2>=y0-ey&&oy2<=y1+ey){ inside=true; ox2-=2; oy2-=1.5; break; } } } }
-  const og=m.toGlobal(new PIXI.Point(ox2*ppu, oy2*ppu));
+  const og=m.toGlobal(new PIXI.Point((ox2+cux2/2)*ppu, (cuy2/2-oy2)*ppu));   // V(顶点原生,中心原点/y向上)→P→global，与产品 hitAt 的 P2V 互逆
   const e1={bubbles:true,cancelable:true,pointerId:9,clientX:rect.left+og.x,clientY:rect.top+og.y,button:0};
   wrap.dispatchEvent(new PointerEvent('pointerdown',e1)); window.dispatchEvent(new PointerEvent('pointerup',e1));
-  await t(700); out.emptyClick={probeUnits:[+ox2.toFixed(1),+oy2.toFixed(1)], before:g0, after:st().grp, noAction: st().grp===g0};
+  await t(700); out.emptyClick={probeUnits:[+ox2.toFixed(1),+oy2.toFixed(1)], before:g0, after:st().grp,
+    /* null=idle 看守者轮换重取数的间隙（无头下 fetch 慢更明显），不算触发动作 */
+    noAction: st().grp===g0 || st().grp===null};
 
   // ⑤ 点 Head 中心：应播 Head
   const hi=core.getDrawableIndex((im.settings.hitAreas||[])[0]?.Id);
   if(hi>=0){ const p=core.getDrawableVertexPositions(hi); let sx=0,sy=0,n=0;
     for(let k=0;k+1<p.length;k+=2){sx+=p[k];sy+=p[k+1];n++;}
-    const g=m.toGlobal(new PIXI.Point(sx/n*ppu, sy/n*ppu));
+    const g=m.toGlobal(new PIXI.Point((sx/n+cux2/2)*ppu, (cuy2/2-sy/n)*ppu));   // V→P→global，与 hitAt 互逆
     const e2={bubbles:true,cancelable:true,pointerId:10,clientX:rect.left+g.x,clientY:rect.top+g.y,button:0};
     wrap.dispatchEvent(new PointerEvent('pointerdown',e2)); window.dispatchEvent(new PointerEvent('pointerup',e2));
     await t(900);

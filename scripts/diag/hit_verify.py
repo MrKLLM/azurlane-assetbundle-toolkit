@@ -63,9 +63,12 @@ JS = r"""(async key => { try{
   const areas=(im.settings.hitAreas||[]).map(a=>{ let i=-1; try{i=core.getDrawableIndex(a.Id);}catch(e){}
     return i<0?null:{Name:a.Name, idx:i}; }).filter(Boolean);
   const centerOf=(a)=>{ const p=core.getDrawableVertexPositions(a.idx); if(!p||!p.length) return null;
-    /* 探针取顶点平均：与产品侧「包围盒包含」判定同语义（三角面重心对斜置框会落在盒外，测的是另一种语义） */
+    /* 探针取顶点平均：与产品侧「包围盒包含」判定同语义（三角面重心对斜置框会落在盒外，测的是另一种语义）。
+       ⚠️ 顶点是 V=Cubism 原生坐标（中心原点/y向上），须先 V2P（Px=Vx+cux/2，Py=cuy/2-Vy）再 toGlobal，
+       与产品侧 hitAt 的 P2V 互逆（2026-09-23 坐标系修正，证据 .diag/_probe_affine.json） */
     let sx=0,sy=0,n=0; for(let k=0;k+1<p.length;k+=2){sx+=p[k];sy+=p[k+1];n++;}
-    const g=m.toGlobal(new PIXI.Point(sx/n*ppu, sy/n*ppu));   // 点击瞬间重算：框会随呼吸/物理位移
+    const cux=im.width/ppu, cuy=im.height/ppu;
+    const g=m.toGlobal(new PIXI.Point((sx/n+cux/2)*ppu, (cuy/2-sy/n)*ppu));   // 点击瞬间重算：框会随呼吸/物理位移
     return [r.left+g.x, r.top+g.y]; };
   const res=[];
   for(const a of areas){

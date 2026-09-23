@@ -507,3 +507,22 @@ return Image.fromarray(out_arr).transpose(Image.FLIP_TOP_BOTTOM)
 **验证**: 修复后无头复测——idle 看守者生效（12s 静默采样 `currentGroup` 全程 idle，参数持续驱动）、`interact_verify.py` 4 模型全过（**修正后的**空白点击断言 `noAction:true` 首次真正变绿）、`hit_verify.py` 全量 269 皮肤复跑（见 PROJECT_STATUS）。
 
 **涉及文件**: `gallery_src/index.html`（部署 `scripts/deploy_gallery.py` 同步 `Output/gallery_v2/`）、`scripts/diag/interact_verify.py`；经验已并入技能 `live2d-web-runtime-integration` §3.2b/§4/§8。
+
+## §20. Live2D 点击命中「张冠李戴」真根因：顶点坐标系与屏幕坐标系差一次「平移+Y翻转」
+
+**日期**: 2026-09-23　**状态**: ✅ 已修复（前端换算 + 两个验证脚本坐标修正），全量回归见 PROJECT_STATUS
+
+**背景**: §19 修复「全图最近框无包含判定」后，做 l2d.su 同款「判定区可视化」时发现框画在画布左上角而非模型上，深挖牵出更大的坑：
+
+**两套坐标系（实测证据 `.diag/_probe_affine.json`）**：
+- `coreModel.getDrawableVertexPositions()` 返回 **V = Cubism 原生坐标**：以画布中心为原点、**y 轴向上**，量纲为画布单位（本项目模型 = 18×18）。
+- `mdl.toLocal()` 再除 `pixelsPerUnit` 得 **P 坐标**：左上角原点、**y 轴向下**，量纲同为画布单位。
+- 换算：`Vx = Px - cux/2`，`Vy = cuy/2 - Py`（`cux=im.width/ppu`，`cuy=im.height/ppu`）。验证：可见头/胸/髋三点经翻转映射后分别落入 Head/Special/Body 框，恒等映射全部脱靶。
+
+**为什么此前的命中系统「测试全绿但用户感受乱」**：旧代码把 V 框与 P 点当同一空间比较，而 hit_verify 的合成点击也用同一错误映射（`toGlobal(顶点*ppu)`），**自洽闭环**——点永远「命中」自己那份几何，却与屏幕上看得见的内容完全错位（lafeiii_3 上点胸口实际触发头部动作）。回归脚本全部自洽时，绿不代表对。**教训：验证点击路径必须有一个不经过被测映射的锚点（如截图目视/可见语义点反查），否则只是在验证自洽性。**
+
+**修复**：产品侧 `hitAt` 入口统一 `P2V` 换算；判定区可视化 `V→P→stage` 手工仿射（`stage = mdl.pos + P*ppu*scale`，apply() 无旋转无锚点故安全）；`hit_verify.py`/`interact_verify.py` 合成点击改 `V2P` 后派发（与产品互逆，测的才是真路径）。
+
+**连带发现**：无头下 idle 看守者轮换间隙（每次 startMotion 重 fetch 动作文件 ~1.5s）会使 `currentGroup` 短暂为 null——`interact_verify` 的「空白点击不播动作」断言须把 `after=null` 视为通过（null=重取数间隙，非动作触发）。
+
+**涉及文件**: `gallery_src/index.html`、`scripts/diag/hit_verify.py`、`scripts/diag/interact_verify.py`；技能 `live2d-web-runtime-integration` §4 已补坐标系换算条目。

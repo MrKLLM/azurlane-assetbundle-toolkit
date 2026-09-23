@@ -90,6 +90,20 @@ main{flex:1;overflow:auto;padding:14px}
 .close:hover{background:var(--acc);border-color:var(--acc)}
 .spine-bar{position:absolute;left:0;right:0;bottom:0;background:rgba(10,13,24,.85);border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;z-index:5}
 .spine-bar select,.spine-bar button{font-size:12px;padding:4px 8px}
+.spine-bar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+/* Live2D 检查器面板（判定区可视化 + 参数/部件，l2d.su 同款） */
+.l2panel{position:absolute;top:48px;right:8px;width:258px;max-height:calc(100% - 110px);overflow:auto;background:rgba(10,13,24,.93);border:1px solid var(--line);border-radius:8px;z-index:5;font-size:11px;padding:8px;display:none}
+.l2panel.on{display:block}
+.l2panel .pf{position:sticky;top:0;background:rgba(10,13,24,.97);padding:0 0 6px;margin-bottom:2px;z-index:2}
+.l2panel .pf input{width:100%;box-sizing:border-box;background:#141a2c;border:1px solid var(--line);color:var(--txt);border-radius:5px;padding:3px 6px;font-size:11px}
+.l2panel h5{font-size:11px;color:var(--dim);margin:6px 2px 4px;cursor:pointer;user-select:none}
+.l2panel h5::before{content:'▸ '}
+.l2panel h5.open::before{content:'▾ '}
+.l2panel .prow{display:flex;align-items:center;gap:5px;margin-bottom:2px}
+.l2panel .prow .nm{width:100px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c9d4e6}
+.l2panel .prow input[type=range]{flex:1;min-width:0;height:12px}
+.l2panel .prow .vl{width:40px;flex:none;text-align:right;color:#8b96ad;font-size:10px}
+.l2panel .prow button{flex:none;width:17px;height:17px;font-size:9px;padding:0;background:#243049;border:1px solid #3a4a6b;color:#c9d4e6;border-radius:4px;cursor:pointer;line-height:1}
 .audwrap{padding:16px;overflow:auto;height:100%}
 .audwrap h4{font-size:12px;color:var(--dim);margin-bottom:8px}
 .aud{display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:12px}
@@ -361,7 +375,7 @@ async function renderLive2D(s, sk){
   viewEl.innerHTML='<div class="note">正在加载 Live2D 运行时…</div>';
   try{ await loadLive2DRuntime(); }catch(e){ if(my.cancelled||seq!==_l2seq)return; viewEl.innerHTML=`<div class="note">Live2D 运行时加载失败：${e.message}</div>`; return; }
   if(my.cancelled||seq!==_l2seq)return;
-  viewEl.innerHTML='<div id="l2wrap"></div><div class="spine-bar" id="l2bar"><span class="pill">Live2D：'+sk.key+'</span><span class="hint">加载中…</span></div>';
+  viewEl.innerHTML='<div id="l2wrap"></div><div class="l2panel" id="l2panel"></div><div class="spine-bar" id="l2bar"><span class="pill">Live2D：'+sk.key+'</span><span class="hint">加载中…</span></div>';
   const wrap=document.getElementById('l2wrap');
   wrap.style.cssText='position:absolute;inset:0;bottom:44px';
   try{
@@ -427,7 +441,7 @@ async function renderLive2D(s, sk){
           armIdleLoop(); }, ms); });
     };
     const bar=document.getElementById('l2bar');
-    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn">判定区</button><button id="l2PanelBtn">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     sel.innerHTML=groups.map(g=>`<option value="${g}">${g}</option>`).join('');
     sel.onchange=()=>{ if(play(sel.value)) scheduleIdle(sel.value); };
@@ -440,6 +454,13 @@ async function renderLive2D(s, sk){
        ① 框会随呼吸/物理位移动，缓存坐标会点空；② 部位框彼此重叠/嵌套（有的模型 Head 框大到压住 Body），
        按顺序或按最小框都会点错 → 取「归一化中心距离最近」的包含框（点在哪就最像哪个部位）。 */
     const core=mdl.internalModel.coreModel, ppu=mdl.internalModel.pixelsPerUnit||1;
+    /* ⚠️ 两套坐标系（2026-09-23 实测，证据 .diag/_probe_affine.json）：
+       getDrawableVertexPositions 返回 V=Cubism 原生坐标（画布中心为原点、y 向上），
+       而 toLocal()/ppu 得 P=左上角原点、y 向下。换算：Vx=Px-cux/2，Vy=cuy/2-Py。
+       此前把两者当同一空间 → 点胸口触发头部动作（用户报「悬停乱触发」的真因之一）、
+       判定框画到画布角落。所有顶点↔点击的换算必须经 P2V/V2P。 */
+    const cux=im.width/ppu, cuy=im.height/ppu;
+    const P2V=(px,py)=>({x:px-cux/2, y:cuy/2-py});
     const hitAreas=(mdl.internalModel.settings.hitAreas||[]).map(a=>{
       let idx=-1; try{ idx=core.getDrawableIndex(a.Id); }catch(e){}
       return idx<0 ? null : {name:a.Name, idx};
@@ -463,6 +484,63 @@ async function renderLive2D(s, sk){
     /* 兜底只给「没有判定区」的模型用；有 HitAreas 的模型点空白处不播任何动作（与游戏一致），
        否则会随机触发一个 touch_drag* 动作，用户会觉得「点哪都乱动」 */
     const fallbackG=hitAreas.length ? null : (groups.find(g=>/^(tap|touch)/i.test(g))||null);
+    /* ---------- 判定区可视化（l2d.su 同款）：把 HitAreas 包围盒画在模型上 ---------- */
+    const AREA_COL={head:0x4fc3f7,body:0x81c784,special:0xffb74d};
+    const areaG=new PIXI.Graphics(); areaG.visible=false; app.stage.addChild(areaG);
+    const areaTs=hitAreas.map(()=>{ const tx=new PIXI.Text('',{fontSize:11,fill:0xffffff,stroke:0x0a0d18,strokeThickness:3});
+      tx.visible=false; app.stage.addChild(tx); return tx; });
+    const drawAreas=()=>{ areaG.clear();
+      hitAreas.forEach((ha,i)=>{ const p=core.getDrawableVertexPositions(ha.idx); if(!p||!p.length){ areaTs[i].visible=false; return; }
+        let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+        for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
+        /* V(顶点原生) → P → stage 像素：P=(Vx+cux/2, cuy/2-Vy)，stage = mdl.pos + P*ppu*scale。
+           apply() 只设 mdl.scale/x/y（无旋转无锚点），手工映射即可（等价 toGlobal(P*ppu) 且更可控）。 */
+        const s=mdl.scale.x;
+        const gx0=mdl.x+(x0+cux/2)*ppu*s, gy0=mdl.y+(cuy/2-y0)*ppu*s;
+        const gx1=mdl.x+(x1+cux/2)*ppu*s, gy1=mdl.y+(cuy/2-y1)*ppu*s;
+        const col=AREA_COL[(ha.name||'').toLowerCase().replace(/^touch_/,'')]||0xba68c8;
+        areaG.lineStyle(1.5,col,0.9).beginFill(col,0.07).drawRect(gx0,gy0,gx1-gx0,gy1-gy0).endFill();
+        const tx=areaTs[i]; tx.text=ha.name; tx.style.fill=col; tx.visible=true;
+        tx.position.set(Math.max(2,Math.min(gx0,wrap.clientWidth-72)), gy0-15>=2?gy0-15:gy1+3); }); };
+    let areaViz=false;
+    document.getElementById('l2AreasBtn').onclick=()=>{ areaViz=!areaViz;
+      document.getElementById('l2AreasBtn').classList.toggle('on',areaViz);
+      areaG.visible=areaViz; if(!areaViz) areaTs.forEach(t=>t.visible=false); else drawAreas(); };
+    app.ticker.add(()=>{ if(areaViz) drawAreas(); });
+    /* ---------- 参数/部件检查器（l2d.su 同款）：手调参数=变相表情，部件透明度=换装调试 ---------- */
+    const idName=id=>(id&&id.string)||(typeof id==='string'?id:(id&&id.toString())||'?');
+    let panelBuilt=false;
+    document.getElementById('l2PanelBtn').onclick=()=>{ const pn=document.getElementById('l2panel');
+      const on=pn.classList.toggle('on'); document.getElementById('l2PanelBtn').classList.toggle('on',on);
+      if(on&&!panelBuilt){ panelBuilt=true;
+        try{ buildL2Panel(pn); }catch(e){ pn.innerHTML='<div style="padding:10px;color:#f66">面板构建失败：'+(e.message||e)+'</div>'; } } };
+    const buildL2Panel=(pn)=>{
+      const pids=core._parameterIds||[], cids=core._partIds||[];   // 实测 wrapper 的自有数组（元素即名字符串）
+      pn.innerHTML='<div class="pf"><input type="text" placeholder="过滤名称，如 cheek / hong / 脸红拼音…"></div>';
+      const filter=pn.querySelector('.pf input');
+      const mkSec=(title)=>{ const h=document.createElement('h5'); h.textContent=title; h.className='open';
+        const g=document.createElement('div');
+        h.onclick=()=>{ const o=g.style.display!=='none'; g.style.display=o?'none':''; h.classList.toggle('open',!o); };
+        pn.append(h,g); return g; };
+      const mkRow=(nm,min,max,def,get,set)=>{ const r=document.createElement('div'); r.className='prow'; r.dataset.nm=nm.toLowerCase();
+        const n=document.createElement('span'); n.className='nm'; n.title=nm; n.textContent=nm;
+        const s=document.createElement('input'); s.type='range'; s.min=min; s.max=max;
+        s.step=Math.max(0.001,(max-min)/200); s.value=get();
+        const v=document.createElement('span'); v.className='vl'; v.textContent=(+get()).toFixed(2);
+        const b=document.createElement('button'); b.textContent='↺'; b.title='复位默认 ('+def+')';
+        s.oninput=()=>{ set(+s.value); v.textContent=(+s.value).toFixed(2); };
+        b.onclick=()=>{ s.value=def; set(+def); v.textContent=(+def).toFixed(2); };
+        r.append(n,s,v,b); return r; };
+      const gp=mkSec('参数 '+core.getParameterCount());
+      for(let i=0;i<core.getParameterCount();i++){ const nm=idName(pids[i])||('Param'+i);
+        gp.append(mkRow(nm, core.getParameterMinimumValue(i), core.getParameterMaximumValue(i), core.getParameterDefaultValue(i),
+          ()=>core.getParameterValueByIndex(i), x=>core.setParameterValueByIndex(i,x))); }
+      const gc=mkSec('部件 '+core.getPartCount());
+      for(let i=0;i<core.getPartCount();i++){ const nm=idName(cids[i])||('Part'+i);
+        gc.append(mkRow(nm, 0, 1, 1, ()=>core.getPartOpacityByIndex(i), x=>core.setPartOpacityByIndex(i,x))); }
+      filter.oninput=()=>{ const q=filter.value.trim().toLowerCase();
+        pn.querySelectorAll('.prow').forEach(r=>{ r.style.display=(!q||r.dataset.nm.includes(q))?'':'none'; }); };
+    };
     const clampPan=()=>{ const cw=wrap.clientWidth||1, ch=wrap.clientHeight||1;
       const lim=Math.max(cw,ch)*0.6;
       ox=Math.max(-lim,Math.min(lim,ox)); oy=Math.max(-lim,Math.min(lim,oy)); };
@@ -473,7 +551,8 @@ async function renderLive2D(s, sk){
     const onUp=e=>{ if(!dragging) return; dragging=false; if(moved>=6||e.button!==0) return;
       const r=wrap.getBoundingClientRect();
       const lp=mdl.toLocal(new PIXI.Point(e.clientX-r.left, e.clientY-r.top));
-      const name=hitAt(lp.x/ppu, lp.y/ppu);
+      const pv=P2V(lp.x/ppu, lp.y/ppu);
+      const name=hitAt(pv.x, pv.y);
       const g = name && (groups.includes(name) ? name : groups.find(x=>x.toLowerCase()===name.toLowerCase())) || (name?null:fallbackG);
       if(!g) return;
       if(play(g)){ scheduleIdle(g); sel.value=g; const pill=document.getElementById('l2Hit');
