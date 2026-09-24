@@ -667,6 +667,40 @@ UnityFS；单字节常量 XOR/加/减；短重复密钥 XOR（周期 1–32，�
 
 **涉及文件**：`files/il2cpp/{libil2cpp.so,Metadata/global-metadata.dat}`、`files/AssetBundles/sharecfgdata/*`（34 张）、`tools/sharecfg_re/**`（独立小项目）、`tools/Il2CppDumper/`（第三方 dumper）、`.diag/sharecfg_re/dump/`（`dump.cs` 124.6 万行 / `script.json` / `il2cpp.h` / `DummyDll/`，在 gitignore）
 
+### §22 追加（2026-09-24）：三条判据学 + 两处旧记录纠偏
+
+本轮把"能不能不解密就读到明文"彻底判死，并纠正了本节两处旧记录。
+
+- **纠偏 1（第 665 行"只能靠反汇编取"不准确）**：`LuaConfDataReader..cctor`（RVA `0x3C1577A`）不是用立即数逐字节构造，
+  而是 `Array::New(5)/(5)/(0x1a)` + **`RuntimeHelpers.InitializeArray`**，三个 handle 全局各存一个 **FIELD 元数据 token**
+  （`0x80000023` / `0x80000005` / `0x80000027`）。→ 字节真值**在 metadata 的 fieldDefaultValues 里**，
+  这是"v31 索引法没解对"的问题，不是"只能反汇编"的问题。同一形态还出现在 Lua 包解密器 `www()` 里的 **19 字节密钥**。
+- **纠偏 2**：`scripts32` 与 `scripts64` **头 32 字节完全相同** → `Header_32/Header_64` **不可能是各自文件的开头 5 字节**；
+  且新发现的 `www()` 要求输入**末尾 4 字节 = 小端明文长度**，而盘上 `scripts64` 末 4 字节 = `0xB9A00799`（荒谬）
+  → **盘上这份文件不是 `www()` 的直接输入**，中间还有一层封帧。别把"解 scripts64"当成一步就能做的事。
+
+三条判据学（都是"看着像正信号、其实是自己造的"）：
+
+1. **已知明文必须逐表自撞**。第一版拿 `ship_skin_template` 抽的 4634 个中文串去撞 `gametip`/`ship_skin_words`，
+   0 命中就当成"加密证据"——**词表与表内容本来不同源，0 命中不说明任何问题**。重做后：3 张有基准的表用**自己的**词表
+   （UTF-8 / UTF-16LE / UTF-16BE / GBK）自撞，仍 **0 命中**，这次的结论才立得住。
+2. **相关性检验必须配零假设**。"32 张表两两 XOR 零率中位 1.84%（随机基线 0.391%）"当场被我判成"存在共密钥流"。
+   实际：若各表只是**共享字节分布**，预测相等率 = 该分布的 IC = **1.904%**，实测完全落在预测值内；
+   逐列共识度均值仅 0.102（真共享结构应 ≈1.0，实测 8192 列里只有 11 列 >0.9）→ **无共密钥流**。
+   这是本项目 §24「假绿灯」家族的第 4 个实例：**阈值定松 + 没有对照 = 自己给自己发绿灯**。
+3. **差分签名命中 0 也要读对照**。对 lag1/lag2 差分做 XOR/ADD/SUB 三视图搜已知明文串，命中 0 且
+   **阴性对照（拿别表词表）也是 0**，才判"段内恒定密钥（含每条记录换 key）"整类出局。
+   顺带暴露 lag-1 差分对**短周期密钥**不敏感 → 补做周期攻击（用 UTF-8 三字节区间约束做可分求解，p=2..12），仍否证。
+
+净结果：**密文侧全部榨干**（明文 / 常量密钥 / 短周期密钥 / 共密钥流 / 替换 / 标准压缩 / ECB 逐条出局且均带对照），
+定性收敛为"**明文索引 + 逐字段变换**"，而变换实现只可能在 **Lua 侧**或**待解出 key 的 C# 常量**里。
+另：C# 侧"零解密"已由机器码证实（`ReadBufferFromCSharp` = `Path.Combine` + `FileStream` + `BinaryReader`，
+`ReadData` = `Buffer.BlockCopy`；`PathUtil.ReadAllBytes` = `File.ReadAllBytes` 或 `BetterStreamingAssets.ReadAllBytes`），
+并定位到唯一的 byte[]→byte[] 变换 `www()`（RVA `0x3D9CA20`，见 `tools/sharecfg_re/README.md` 调用链）。
+新工具全部入库 `tools/sharecfg_re/`：`08_disasm_method.py`（dump.cs 符号→机器码，ELF 段表 / `.rela.dyn` / 字面量解析、
+`--xref`、`--find`、136652 方法索引缓存）、`09`~`15` 号探针（已知明文自撞 / 共密钥流 / 共识密钥流 / 差分签名 /
+按记录边界试解压 / FDV blob 提取 / 周期 XOR 攻击）。
+
 ## §23. CRIWARE ACB 语音导出静默丢数据：`-o x.wav` 对多子流容器只解 subsong 1（附 vgmstream flag 权威语义 + 全量映射统计）
 
 **日期**: 2026-09-23　**状态**: ✅ 根因定位 + 正确命令实测，脚本 `scripts/extract_live2d_voice.py` 已入库；**全量导出已完成**（2026-09-24 体检实测 253 皮肤 / 5914 ogg / 缺失 0，见 WF-17「产物体检与备份口径」）
