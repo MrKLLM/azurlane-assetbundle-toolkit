@@ -81,3 +81,8 @@ Thumbs.db
 # 本地诊断/一次性验证工作区（截图、headless Chrome profile、扫描中间产物）。
 # 其中「可复用」的工具脚本一律放 scripts/diag/（已入库），本目录只留临时产物。
 .diag/
+
+# 权威外部输入（社区 azdata 快照等）：数据本体属游戏资产（版权 + 使用者自备）不入库，
+# 只入库 MANIFEST 台账；丢了不可复原，所以一律不得放回 .diag/。
+inputs/*/*.json
+!inputs/*/MANIFEST.json

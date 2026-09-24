@@ -656,7 +656,7 @@ UnityFS；单字节常量 XOR/加/减；短重复密钥 XOR（周期 1–32，�
 
 **误报纠偏（别再按这两个名字追）**：`XorShift64` 是 `Unity.Collections.xxHash3`（Unity 自带哈希）、`Decrypt128` 是 `System.Security.Cryptography.AesTransform`（.NET 自带 AES），都不是游戏的解密器。同理 `DecryptValue`/`DecryptKeyExchange`/`DecryptData` 全在 `System.Security.Cryptography`；`DecryptAcb`/`SetDecryptionKey` 属 `CriWare.*`（那是 ACB 音频线，见 WF-17）。
 
-**解决方案 / 唯一验收判据**：见 `tools/sharecfg_re/`（README 含目标、判据、已排除假设、推进路线）。**判据只有一条：解出的 `ship_skin_template` 必须与 `.diag/azdata_ship_skin_template.json` 逐字段一致**——有一张已知明文在手，任何候选算法都要立刻拿它自证，不许「看起来像明文」就宣布成功。
+**解决方案 / 唯一验收判据**：见 `tools/sharecfg_re/`（README 含目标、判据、已排除假设、推进路线）。**判据只有一条：解出的 `ship_skin_template` 必须与 `inputs/azdata/azdata_ship_skin_template.json` 逐字段一致**——有一张已知明文在手，任何候选算法都要立刻拿它自证，不许「看起来像明文」就宣布成功。
 
 **踩坑**：
 - `libil2cpp.so` 的 `Machine` 是 **X86-64**（不是 ARM64）→ **本机 objdump 就能反汇编**，不用再装反汇编工具。
@@ -669,7 +669,7 @@ UnityFS；单字节常量 XOR/加/减；短重复密钥 XOR（周期 1–32，�
 
 ## §23. CRIWARE ACB 语音导出静默丢数据：`-o x.wav` 对多子流容器只解 subsong 1（附 vgmstream flag 权威语义 + 全量映射统计）
 
-**日期**: 2026-09-23　**状态**: ✅ 根因定位 + 正确命令实测，脚本 `scripts/extract_live2d_voice.py` 已入库；**全量导出尚未执行**（磁盘上仅安土 1 个样本 = 29 个 ogg）
+**日期**: 2026-09-23　**状态**: ✅ 根因定位 + 正确命令实测，脚本 `scripts/extract_live2d_voice.py` 已入库；**全量导出已完成**（2026-09-24 体检实测 253 皮肤 / 5914 ogg / 缺失 0，见 WF-17「产物体检与备份口径」）
 
 **流程与关键事实**（Live2D 包内 0 AudioClip、一个 `.b` = 一条船全部 cue、`painting`→`cv-{skin_id//10}.b`、cue 名 ≡ 动作组名、变体/排除规则、前端 `Sound` 接线与判据）**见 `docs/WORKFLOWS.md` WF-17**，此处只记 WF-17 没有的**证据、命令语义与统计数字**，避免两处漂移。
 
@@ -697,4 +697,27 @@ UnityFS；单字节常量 XOR/加/减；短重复密钥 XOR（周期 1–32，�
 
 **待裁定**: `touch_body→touch_1`、`touch_special→touch_2` 仍是语义推断；`sharecfgdata/ship_skin_words` 一旦解出（见 §22，在途）即可给出权威映射，届时同步修 WF-17 与本条。
 
-**涉及文件**: `scripts/extract_live2d_voice.py`（本次入库：`--report` 只读 / `--key` 样本 / `L2D_VOICE_ALL=1` 全量 → `Output/Audio/L2D/<皮肤>/<cue>.ogg` + `Output/gallery_v2/l2d_voice.json`）、`scripts/export_cue_audio.py`（中招的旧脚本，留作对照）、`.diag/azdata_ship_skin_template.json`（**承重文件勿删**，白名单见 WF-15）；vgmstream 在国内网络下的取工具/换源步骤见技能 `cn-blocked-resource-mirror-fetch`。
+**涉及文件**: `scripts/extract_live2d_voice.py`（本次入库：`--report` 只读 / `--key` 样本 / `L2D_VOICE_ALL=1` 全量 → `Output/Audio/L2D/<皮肤>/<cue>.ogg` + `Output/gallery_v2/l2d_voice.json`）、`scripts/export_cue_audio.py`（中招的旧脚本，留作对照）、`inputs/azdata/azdata_ship_skin_template.json`（**承重文件勿删**，白名单与 sha256 台账见 WF-15 / `inputs/azdata/MANIFEST.json`）；vgmstream 在国内网络下的取工具/换源步骤见技能 `cn-blocked-resource-mirror-fetch`。
+
+---
+
+## §24. 三个「假绿灯」同类根因：工具默认值与退出码会让空跑看起来像通过（2026-09-24 全量重导前置排查）
+
+**日期**: 2026-09-24　**状态**: ✅ 三处全部修好并实测
+
+**共性**: 三处都不是算错，而是**默认值/退出码在替人说谎**。同属 §23 那类"伪装成功型静默失败"，但发生在**验收与换入侧**而非导出侧——一旦中招，坏数据会带着"全绿"记录进正式目录。
+
+| # | 位置 | 症状 | 根因 | 修法 |
+|---|---|---|---|---|
+| 1 | `scripts/apply_live2d_motions.py` | 照文档 `L2D_OUT_DIR=<新目录> … --yes` 换入，实际换进去的是**默认目录里的旧数据** | docstring 写 `L2D_OUT_DIR`，代码读 `L2D_SRC_DIR`，两者都无则回落 `.diag/l2d_new`（09-21 修复前的 1.1G 陈旧产物）。**环境变量名写错＝静默用默认**，无任何提示 | ① 两个名字都认（`L2D_SRC_DIR` 优先）；② **不给源目录直接拒绝**（exit 2），取消默认回落；③ 换入前比曲线总数，`新 < 旧` 即判为陈旧产物拦下（exit 3，本次修的是"漏读 constant + 空壳占位"，只可能变多），确需强行换入才用 `L2D_ALLOW_CURVE_DROP=1` |
+| 2 | `scripts/diag/l2d_ref_diff.py` | 在临时目录上跑权威基准比对 → **全部 `[SKIP] 本地无此模型`，退出码却是 0** | ① `evaluate_model` 要求 `<OUT>/<key>/<key>.model3.json`，而 `extract_motions` 只产 `motion/` → 临时目录必然全跳；② 汇总判据是 `ok == len(results) - skip`，全跳时 `0 == 0` 成立 | ① model3.json 缺失时回退读正式目录同名文件（motion 换入流程根本不动 model3.json，回退是**等价取值不是放水**）；② `evaluated == 0` 时打印 `[FAIL] 没有任何模型真正参与比对` 并 exit 1 |
+| 3 | `scripts/diag/l2d_ab.py` | 换入前的新旧渲染 A/B「两侧一致」被当成没问题 | `NEW_ROOT` 硬编码 `.diag/l2d_new`（同一份 09-21 陈旧目录），"新侧"读的其实是旧数据 | `NEW_ROOT` 改跟管线开关 `L2D_OUT_DIR` 走；未显式给出时保留原默认但在文档标注风险 |
+
+**判据（以后跑这条管线一律照此）**：
+- 换入源目录**必须显式**给 `L2D_SRC_DIR`（或 `L2D_OUT_DIR`），并**先干跑**看末行 `曲线总数: 旧 N → 新 M`；M<N 说明源目录选错了，工具已会拦。
+- 权威基准比对**必须看到 `PASS x / 共 y（跳过 z）` 里 `y-z > 0`**；`跳过 == 共` 一律视为没跑。参考库只覆盖约 8/14，`z>0` 正常，`y-z==0` 才是异常。
+- 用 `l2d_ref_diff.py` 比对临时目录时**必须**带 `L2D_OUT_DIR=<临时目录>`，否则比的是正式目录（自证清白）。
+
+**顺带纠正一处过期记录**: §23 头部写"全量导出尚未执行（磁盘上仅安土 1 个样本）"——2026-09-24 实测 `scripts/diag/l2d_voice_inventory.py` 得 **253 皮肤 / 2504 动作组条目 / 5914 ogg，缺失引用 0、孤儿 0**，全量早已落盘。判据以脚本输出为准，不以状态描述为准。
+
+**样本重导实测（`.diag/l2d_fix`，配方 `L2D_MOTION_LINEAR=1 L2D_MOTION_EMIT_CONST=1`）**: `antu_2` 重导 104/104 文件与已换入的生产数据**逐字节一致**（配方确定性的证据）；`aerbien_3` idle 曲线 445/640→**640/640**、关键帧不一致 195→**0**、偏差中位 **2.8817→0.1279**、>0.5 占比 **95.1%→40.8%**（仍超 12% 线，但同模型换入前是 FAIL，属严格改善不是回退）。`gaoxiong_7`/`lingbo` PASS 且偏差中位 0.0。

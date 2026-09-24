@@ -8,7 +8,7 @@
     用 `vgmstream-cli -o x.wav file.acb` 只取了第 1 条（detail），其余全丢了；
   - cue 名与 model3.json 的动作组名**逐字同名**（home/login/mail/main_1..4/mission_complete/
     touch_head），所以不需要游戏配置就能对上；
-  - 皮肤 → ACB 的路子：.diag/azdata_ship_skin_template.json 的 painting 字段 = 磁盘皮肤名，
+  - 皮肤 → ACB 的路子：inputs/azdata/azdata_ship_skin_template.json 的 painting 字段 = 磁盘皮肤名，
     取 skin id // 10 即 cv 号。270 个 Live2D 皮肤里 253 个能命中现有 ACB。
 
 用法:
@@ -28,6 +28,7 @@ L2D_DIR = os.path.join(ROOT, 'Output', 'Live2D')
 OUT_AUDIO = os.path.join(ROOT, 'Output', 'Audio', 'L2D')
 OUT_MAP = os.path.join(ROOT, 'Output', 'gallery_v2', 'l2d_voice.json')
 DIAG = os.path.join(ROOT, '.diag')
+AZDATA = os.path.join(ROOT, 'inputs', 'azdata')   # 权威快照，台账 inputs/azdata/MANIFEST.json
 
 VGMSTREAM = r'C:\Users\KLLM\AppData\Local\vgmstream\vgmstream-cli.exe'
 FFMPEG = shutil.which('ffmpeg') or r'C:\Users\KLLM\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe'
@@ -45,7 +46,7 @@ EXCLUDE = re.compile(r'^(vocal_|.*_ex\d+$)')
 
 def load_skin_index():
     """painting(磁盘皮肤名) → 该皮肤在皮肤表里的 id 列表（升序）。"""
-    p = os.path.join(DIAG, 'azdata_ship_skin_template.json')
+    p = os.path.join(AZDATA, 'azdata_ship_skin_template.json')
     d = json.load(open(p, encoding='utf-8'))
     by = collections.defaultdict(list)
     for k, r in d.items():

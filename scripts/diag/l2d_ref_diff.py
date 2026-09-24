@@ -40,6 +40,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.environ.get("L2D_OUT_DIR") or os.path.join(ROOT, "Output", "Live2D")
+PROD = os.path.join(ROOT, "Output", "Live2D")   # 只重导 motion 时，model3.json 仍从这里取
 DIAG = os.path.join(ROOT, ".diag")
 BASE = "https://static.l2d.su/azurlane/live2d"
 TIMEOUT = 25
@@ -138,6 +139,10 @@ def evaluate_model(key, clips=None, samples=121):
         return {"key": key, "skip": "参考库无此模型"}
     ref_groups = list((ref_m3.get("FileReferences") or {}).get("Motions") or {})
     ours_m3_path = os.path.join(OUT, key, f"{key}.model3.json")
+    if not os.path.isfile(ours_m3_path):
+        # 临时目录只装 motion/（extract_motions 不产 model3.json）。换入流程不动 model3.json，
+        # 所以回退读正式目录的同名文件是等价取值，不是放水——否则本工具在临时目录上会全 SKIP。
+        ours_m3_path = os.path.join(PROD, key, f"{key}.model3.json")
     if not os.path.isfile(ours_m3_path):
         return {"key": key, "skip": "本地无此模型"}
     ours_m3 = json.load(open(ours_m3_path, encoding="utf-8"))
@@ -271,12 +276,17 @@ def main():
 
     ok = sum(1 for r in results if r.get("verdict") == "PASS")
     skip = sum(1 for r in results if r.get("verdict") == "SKIP")
+    evaluated = len(results) - skip
     print(f"\n===== 汇总 =====  PASS {ok} / 共 {len(results)}（跳过 {skip}）")
     path = os.path.join(DIAG, "l2d_ref_diff.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=1)
     print(f"详细结果: {path}")
-    return 0 if ok == len(results) - skip else 1
+    if evaluated == 0:
+        # 全跳过时 0==0 曾经返回 0 = 绿灯，而实际一条都没比对。验收工具不得静默空跑。
+        print("[FAIL] 没有任何模型真正参与比对（全部跳过）→ 判为失败，不是通过")
+        return 1
+    return 0 if ok == evaluated else 1
 
 
 if __name__ == "__main__":

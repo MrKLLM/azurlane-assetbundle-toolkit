@@ -12,12 +12,12 @@
 | `files/il2cpp/Metadata/global-metadata.dat` | 18.2 MB | 魔数 `FAB11BAF` 正常，**version=31**（比常见 24–29 高，待判定是新 Unity 还是被改过头） |
 | `files/il2cpp/Resources/*.dll-resources.dat` | 1 MB | .NET 附属库资源；出现 **Newtonsoft.Json** 与 **I18N.CJK** → 解密后是 JSON 交给 Newtonsoft，且要处理中文编码 |
 | `files/AssetBundles/sharecfgdata/*` | 34 张 | 密文表本身 |
-| `.diag/azdata_ship_{skin_template,data_statistics,data_template}.json` | 9.2 MB | **已知明文**（社区 dump）——自证用的黄金基准 |
+| `inputs/azdata/azdata_ship_{skin_template,data_statistics,data_template}.json` | 9.2 MB | **已知明文**（社区 dump）——自证用的黄金基准 |
 | `files/il2cpp/unity.ver` | 36 B | `447c407d-09a0-4c15-987b-4a8d452240d4`，metadata ↔ so 的配对 id |
 
 ## 判据（唯一验收标准）
 
-**`ship_skin_template` 解密结果必须与 `.diag/azdata_ship_skin_template.json` 逐字段一致。**
+**`ship_skin_template` 解密结果必须与 `inputs/azdata/azdata_ship_skin_template.json` 逐字段一致。**
 
 有一张已知明文的表存在，任何候选算法都要立刻拿它自证——不许「看起来像明文」就宣布成功。解对了再上 `ship_skin_words`。
 

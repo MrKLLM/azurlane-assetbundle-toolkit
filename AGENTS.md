@@ -47,7 +47,7 @@ PROJECT_STATUS.md 各部分进度使用以下格式：
 
 - 脚本位于 `scripts/` 目录；**可复用的诊断/验证/一次性管线工具放 `scripts/diag/`（必须入库）**。
 - `.diag/` 是**临时产物区**（截图、headless Chrome profile、扫描中间件），已写进 `.gitignore`，**不放任何唯一副本的代码**。
-- ⚠️ **清理 `.diag/` 或磁盘前必须先核对 `docs/WORKFLOWS.md` WF-15 的「承重文件白名单」**：其中 `.diag/azdata_*.json` 是 `scripts/build_ship_meta.py` 的唯一权威元数据输入，且社区快照会滞后、游戏配置包 `sharecfgdata/*` 为自定义加密无法本机重取——误删不可复原。
+- ⚠️ **清理磁盘前必须先核对 `docs/WORKFLOWS.md` WF-15 的「承重文件白名单」**：`inputs/azdata/*.json` 是 `scripts/build_ship_meta.py` 的唯一权威元数据输入，且社区快照会滞后、游戏配置包 `sharecfgdata/*` 为自定义加密无法本机重取——误删不可复原。2026-09-24 已从 `.diag/` 迁到 `inputs/azdata/`（数据本体不入库，台账 `inputs/azdata/MANIFEST.json`，校验 `py -3 scripts/diag/check_inputs.py`）。
 - 使用 Python 3.13 + UnityPy 1.25.0
 - 运行前先确认依赖已安装
 - 大批量操作（>1000 文件）先小规模测试

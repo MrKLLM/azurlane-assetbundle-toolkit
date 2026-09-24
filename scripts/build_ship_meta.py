@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """§6 第5~6条：从 azurlane-data 社区缓存重建舰船元数据。
 
-数据源（本机缓存，不入库）：
-  .diag/azdata_ship_skin_template.json    皮肤：painting=磁盘拼音stem, name, ship_group, voice_actor, desc
-  .diag/azdata_ship_data_statistics.json  舰船：name/english_name/nationality/rarity/type/skin_id
+数据源（本机权威快照，不入库，台账见 inputs/azdata/MANIFEST.json）：
+  inputs/azdata/azdata_ship_skin_template.json    皮肤：painting=磁盘拼音stem, name, ship_group, voice_actor, desc
+  inputs/azdata/azdata_ship_data_statistics.json  舰船：name/english_name/nationality/rarity/type/skin_id
 桥：磁盘stem --剥变体后缀--> 基painting --skin--> 基皮肤id --stats.skin_id--> 舰级字段
     （实测 stats.skin_id 命中皮肤 4118/4119；ship_group 不是 stats 外键，仅用于同舰皮肤分组）
 
@@ -15,7 +15,7 @@ import sys, os, re, json, glob, argparse, collections
 sys.stdout.reconfigure(encoding='utf-8')
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-DIAG = os.path.join(ROOT, '.diag')
+AZDATA = os.path.join(ROOT, 'inputs', 'azdata')   # 权威快照，台账 inputs/azdata/MANIFEST.json
 OUT = os.path.join(ROOT, 'Output')
 
 # ---------- 变体后缀（磁盘 stem 上出现、但皮肤表 painting 用基名的情形）----------
@@ -57,8 +57,8 @@ except Exception:
 
 
 def load():
-    skin = json.load(open(os.path.join(DIAG, 'azdata_ship_skin_template.json'), encoding='utf-8'))
-    stats = json.load(open(os.path.join(DIAG, 'azdata_ship_data_statistics.json'), encoding='utf-8'))
+    skin = json.load(open(os.path.join(AZDATA, 'azdata_ship_skin_template.json'), encoding='utf-8'))
+    stats = json.load(open(os.path.join(AZDATA, 'azdata_ship_data_statistics.json'), encoding='utf-8'))
     wpath = os.path.join(OUT, 'WikiData', 'ship_data.json')
     wiki = json.load(open(wpath, encoding='utf-8')) if os.path.exists(wpath) else []
     return skin, stats, wiki

@@ -26,7 +26,9 @@ DEBUG_DIR = os.path.join(ROOT, '.diag', 'chrome_l2d_ab')
 SHOTS = os.path.join(ROOT, '.diag', 'l2d_ab_shots')
 AB = os.path.join(ROOT, 'Output', 'Live2D', '_ab')
 OLD_ROOT = os.path.join(ROOT, 'Output', 'Live2D')
-NEW_ROOT = os.path.join(ROOT, '.diag', 'l2d_new')
+# 新侧目录跟着管线开关走：默认 .diag/l2d_new 是 09-21 修复前的陈旧产物，
+# 照它跑 A/B 会得到「新旧一致」的假结论，故必须显式指L2D_OUT_DIR。
+NEW_ROOT = os.environ.get("L2D_OUT_DIR") or os.path.join(ROOT, '.diag', 'l2d_new')
 os.makedirs(SHOTS, exist_ok=True)
 
 args = [a for a in sys.argv[1:] if not a.startswith('--')]

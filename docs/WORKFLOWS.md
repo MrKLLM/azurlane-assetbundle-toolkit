@@ -527,15 +527,18 @@
 | 文件 | 谁依赖它 | 丢了能否复原 |
 |---|---|---|
 | `scripts/`、`scripts/diag/`、`gallery_src/`、`docs/`、根 `*.md` | —— | ✅ 已入 Git，随时可取 |
-| `.diag/azdata_ship_{skin_template,data_statistics,data_template}.json`、`azdata_{tree,version}.json` | **`scripts/build_ship_meta.py` 的唯一权威输入**（舰名/阵营/舰种/稀有度/CV id 全从这里来） | ⚠️ 半可再生：社区快照会滞后（385 时最新仍 381），且 `sharecfgdata/*` 是**自定义加密**、本机无解 → **务必当源文件保护** |
+| `inputs/azdata/azdata_ship_{skin_template,data_statistics,data_template}.json` + `azdata_version.json` | **`scripts/build_ship_meta.py` / `extract_live2d_voice.py` 的唯一权威输入**（舰名/阵营/舰种/稀有度/CV id 全从这里来），也是 `tools/sharecfg_re` 的已知明文基准 | ⚠️ 半可再生：社区快照会滞后（385 时最新仍 381），且 `sharecfgdata/*` 是**自定义加密**、本机无解 → **务必当源文件保护**。2026-09-24 从 `.diag/` 迁到此处；`sha256` 台账 = `inputs/azdata/MANIFEST.json`，跑前 `py -3 scripts/diag/check_inputs.py` 校验。旧 `.diag/azdata_tree.json` 经核实内容是 14 字节 `Invalid input.`（上游报错残留，非数据），已删不再列入白名单 |
 | `Output/dependency_manifest.json`（~15MB / 86k+ 条） | `compose_paintings_v2`、`extract_spine_v2`（PPtr→包 依赖表） | ✅ 可再生：`export_dependency_manifest.py` |
 | `Output/ship_meta.json` | `build_gallery_index`（元数据主源） | ✅ 可再生：`build_ship_meta.py --write` |
 | `Output/WikiData/ship_data.json` | `build_gallery_index` 兜底 | ✅ 可再生：`scrape_wiki_fast.py`（需外网） |
 | `Output/Paintings_v2`、`Spine_v2`、`Live2D`、`CG_v2`、`Audio`、`gallery_v2/` | 画廊 | ✅ 全量可再生，但**耗时数十小时**，故按 WF-15 增量而非全量 |
 
 > `.diag/` 已写入 `.gitignore`，定位是「临时产物区」；**可复用工具一律放 `scripts/diag/`（入库）**。清理 `.diag` 前必须先跑上表白名单核对。
+> **权威外部输入一律不得放进 `.diag/`**——2026-09-24 起它们住在 `inputs/<来源>/`（数据本体不入库、只入 `MANIFEST.json` 台账），
+> 跑任何依赖它们的管线前先校验：`py -3 scripts/diag/check_inputs.py`（逐文件比 sha256/bytes，缺失或漂移即非零退出）。
 
 #### 步骤
+0. **先验权威输入**：`py -3 scripts/diag/check_inputs.py` 必须 `[PASS]`，再动任何元数据/语音管线。
 1. **只读差异，先不动手**：`python scripts/mumu_sync.py diff` → 输出三类：新增（模拟器有/本地无）、大小不一致（同名但本地旧）、本地独有。记下版本号与数量（385 那次 = 95 文件）。
 2. **同步源包**：`mumu_sync.py sync`（或 `mumu_adb.py pull`）落到 `files/AssetBundles/`。
 3. **重生成官方依赖表**（**最容易漏的一步**）：`python scripts/export_dependency_manifest.py --out Output/dependency_manifest.json`。不重生成 → 新包的 PPtr/externals 解析不到 → 新皮肤合成失败或层级缺失。
@@ -647,7 +650,17 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
   本次实测：只杀 python 主进程后残留 **4 组无头 Chrome 占着 CDP 端口 9342/9377/9378/9379**，
   正是「多个无头 Chrome 抢 profile → 偶发假失败」的来源。
 
-**涉及文件**: `gallery_src/index.html`、`scripts/deploy_gallery.py`、`scripts/diag/{l2d_coord_forensics,l2d_inspector_verify,interact_verify,hit_verify}.py`、`TROUBLESHOOTING.md` §19/§20
+- ⚠️ **每一轮 CDP 批处理都会在 `.diag/` 留一个几百 MB 的无头 Chrome profile**（`--user-data-dir`），39 个就能吃掉 7.7 GB。
+  收尾必跑：`py -3 scripts/diag/clean_diag_profiles.py`（干跑看清单）→ 加 `--yes` 删。三条硬判据全过才删：
+  目录名 `chrome_*` / 无 chrome|msedge 进程命令行引用它 / 最后修改早于 `--min-age`（默认 30 分钟，防误删并发会话在写的）。
+  它只碰 `chrome_*`，`.diag` 下其它产物一律不动——清理 `.diag` 仍要先核对 WF-15 白名单。
+- ⚠️ **跑 `l2d_ref_diff.py` / `l2d_ab.py` 比对临时重导目录时，必须显式带 `L2D_OUT_DIR=<临时目录>`。** 不给的话
+  ref_diff 比的是正式目录（自证清白），`l2d_ab.py` 的"新侧"会读默认的陈旧目录得出"新旧一致"的假结论；
+  而 ref_diff 在只含 `motion/` 的临时目录上曾经**全部 SKIP 却退出 0**。三处假绿灯的根因与判据见 `TROUBLESHOOTING.md` §24。
+
+**收尾**: 一轮 CDP 回归结束后 `py -3 scripts/diag/clean_diag_profiles.py --yes` 清 profile（见上），并确认 `.diag` 里没有本次新写的唯一副本代码（按 AGENTS.md 第 3 步移入 `scripts/diag/` 或删除）。
+
+**涉及文件**: `gallery_src/index.html`、`scripts/deploy_gallery.py`、`scripts/diag/{l2d_coord_forensics,l2d_inspector_verify,interact_verify,hit_verify,page_sanity_check,clean_diag_profiles,l2d_ref_diff,l2d_ab}.py`、`TROUBLESHOOTING.md` §19/§20/§24
 
 ---
 
@@ -661,7 +674,7 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
 - Live2D 包内**没有任何音频**（antu_2 对象统计 2671 MonoBehaviour / 104 AnimationClip / **0 AudioClip**）。语音在独立的 CRIWARE `files/AssetBundles/cue/cv-*.b` 里。
 - **一个 `.b` = 一条船的全部语音 bank（45~170 条带名字的 cue）**。2026-06 那次 `export_cue_audio.py` 用 `vgmstream-cli -o x.wav file.acb` **只取了第 1 条**（`detail`），其余全丢 → 每船只剩 3 个 wav，还靠一张 719 条的社区 `CV_MAP` 归船名（安土都不在表里 → `voices=[]`）。**这是个潜伏已久的老 bug**，Spine/静态皮肤的配音也一直是缺的。
 - **cue 名与 model3.json 的动作组名逐字同名**：`home/login/mail/main_1..4/mission_complete/touch_head` 全部精确命中，**不需要游戏配置**就能对上。
-- 皮肤 → ACB：`.diag/azdata_ship_skin_template.json` 的 `painting` 字段 = 磁盘皮肤名 → skin id → **`cv-{skin_id // 10}.b`**。270 个 Live2D 皮肤里 **253 个**命中现有 ACB。
+- 皮肤 → ACB：`inputs/azdata/azdata_ship_skin_template.json` 的 `painting` 字段 = 磁盘皮肤名 → skin id → **`cv-{skin_id // 10}.b`**。270 个 Live2D 皮肤里 **253 个**命中现有 ACB。
 - 音频编码是 **CRI HCA**（不是 ATRAC9），vgmstream 可解；一个 ACB 里 `stream count` = cue 数，`stream name` = cue 名。
 
 **怎么做**:
@@ -680,8 +693,15 @@ L2D_VOICE_ALL=1 py -3 scripts/extract_live2d_voice.py          # 全量（必须
 - ⚠️ **无头 Chrome 是空声卡，`paused=false` 只证明 Audio 元素起来了，证明不了用户能听见** —— 真实出声必须靠用户耳朵验收，这一点不许拿探针结果顶替。
 - 界面旁证：下拉框里有语音的组标「（语音）」，状态栏 pill 显示「语音 N 组」。
 
-**踩坑记录**:
-- **改完不部署等于没改**：语音接线代码写完没跑 `deploy_gallery.py`，用户复测仍报「一点声音都没有」，白查一轮。改 `gallery_src/index.html` 后**必须** `py -3 scripts/deploy_gallery.py` 并核对 md5 与源一致。
+**产物体检与备份口径**（只读，几秒）:
+```bash
+py -3 scripts/diag/l2d_voice_inventory.py            # 映射表 / 磁盘 ogg / 模型目录 三方对齐
+py -3 scripts/diag/l2d_voice_inventory.py --verbose  # 列缺失引用与孤儿明细
+```
+2026-09-24 实测：映射表 **253 皮肤 / 2504 动作组条目 / 引用 5914** 条，磁盘 **5914** 个 ogg，**缺失引用 0、孤儿 0**，269 个模型里 16 个无语音映射（= `--report` 的 17 无 ACB 减去 `_ab` 这个非模型目录）。
+**口径结论：语音产物不需要单独备份**——`l2d_voice.json` 与 ogg 都由「已入库脚本 + `files/AssetBundles/cue/cv-*.b` + `inputs/azdata` 权威快照」确定性再生（实测 `--report` 与全量导出均可重跑，映射逐条复现）。真正不可复原的是 `inputs/azdata/*.json`，所以口径落在**输入侧**：跑前 `check_inputs.py`（WF-15 步骤 0），产物本身随 `Output/` 大资产整体策略走。
+
+**踩坑记录**:，用户复测仍报「一点声音都没有」，白查一轮。改 `gallery_src/index.html` 后**必须** `py -3 scripts/deploy_gallery.py` 并核对 md5 与源一致。
 - **探针必须走页面真实入口**：直接调库的 `mm.startMotion` 会绕过页面自己的 `play()`，凡是挂在 `play` 上的逻辑（动作语音、参数复位）都测不到 → **假阴性**。要走下拉框 `sel.onchange()` 这类真实用户路径。
 - **语音表异步加载的竞态**：模型刚就绪那一瞬播的动作（含 idle）会拿不到 `Sound`，表现成「第一个动作没声、之后才有」。修法是把开局 `play(def)` 挪到 `loadVoiceMap()` resolve 之后，并加 `!played.size && !mm.state.currentGroup` 守卫，避免覆盖用户已触发的动作。
 - `touch_body → touch_1`、`touch_special → touch_2` 是**按「普通触摸 / 特殊触摸」语义推的**，不是从游戏配置读到的（配置包见 `TROUBLESHOOTING.md` §22）。同名匹配的 9 组可信；这两条要人工试听裁定。

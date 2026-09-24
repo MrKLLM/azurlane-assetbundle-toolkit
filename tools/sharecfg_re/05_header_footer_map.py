@@ -8,7 +8,7 @@
    落点就是「字段默认值 blob 区」，Header_32/Header_64（.cctor 里两个 new byte[5]）应在附近。
 ② **头/尾结构对照**：34 个文件逐个 dump 头 12 字节与尾 8 字节，并用 3 张**已知记录数**的表
    （ship_skin_template=2863 / ship_data_statistics=4119 / ship_data_template=3968，
-   来自 .diag/azdata_*.json）做交叉验证 —— 哪个头字段等于记录数，哪就是「记录数」语义。
+   来自 inputs/azdata/azdata_*.json）做交叉验证 —— 哪个头字段等于记录数，哪就是「记录数」语义。
 
 用法: py -3 tools/sharecfg_re/05_header_footer_map.py
 """

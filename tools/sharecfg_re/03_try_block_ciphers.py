@@ -12,7 +12,7 @@ ECB 必须留在候选里，因为密文的重复块特征正指向它。别当�
 
 AES 走 openssl 子进程（Python 侧 pycryptodome / cryptography 都没装，不为此引入依赖）。
 评分：可打印占比 + JSON 标点占比 + 中文 UTF-8 三连密度。**不自证为成功**——真明文要能解析成
-JSON 且与 .diag/azdata_ship_skin_template.json 逐字段一致（见 README 判据）。
+JSON 且与 inputs/azdata/azdata_ship_skin_template.json 逐字段一致（见 README 判据）。
 """
 import os, sys, shutil, tempfile, subprocess
 

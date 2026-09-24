@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "purpose": "azdata 权威元数据快照的完整性台账。这些 JSON 是 build_ship_meta.py / extract_live2d_voice.py 的唯一权威输入，也是 sharecfgdata 逆向（tools/sharecfg_re）的已知明文黄金基准；上游快照会滞后于游戏版本，且 sharecfgdata 本机无解，故丢失后不可复原。2026-09-24 从临时目录 .diag/ 迁到本目录（.diag 约定为可随时清空）。",
+  "provenance": {
+    "kind": "社区 azdata 快照（上游 dumper 产物，非本机解出）",
+    "upstream_generated_at": "2026-09-13T01:14:34.959074+08:00",
+    "game_resources_version": "9.7.381",
+    "game_base_id": 97,
+    "package_name": "com.bilibili.azurlane",
+    "apk_version_code": 9710,
+    "local_landed_at": "2026-09-19",
+    "retrieval_channel": "未记录（补上取回渠道，否则下个会话无从二次获取）",
+    "note": "游戏已更新到 385+，本快照仍是 381 → 新皮肤的名字/阵营会缺，按 PROJECT_STATUS §6 待办 7 的决策标「待补」，不得瞎猜。"
+  },
+  "files": [
+    {
+      "path": "azdata_ship_skin_template.json",
+      "bytes": 3705234,
+      "sha256": "d70fc3355617e4bb9ab391b95f8b6e6bd968d1802e00d3e3842d803fe8e7cd54",
+      "upstream_records": 2863,
+      "upstream_sha256_matches": true,
+      "role": "皮肤表：painting=磁盘拼音 stem、name、ship_group、voice_actor、desc",
+      "consumers": ["scripts/build_ship_meta.py", "scripts/extract_live2d_voice.py", "tools/sharecfg_re（已知明文基准）"]
+    },
+    {
+      "path": "azdata_ship_data_statistics.json",
+      "bytes": 3810301,
+      "sha256": "7bbf0867b70f2909ad4939c4f91f447ef1ce5736fd9dff24ba83feed24952be2",
+      "upstream_records": 4119,
+      "upstream_sha256_matches": true,
+      "role": "舰船数值表：name/english_name/nationality/rarity/type/skin_id",
+      "consumers": ["scripts/build_ship_meta.py"]
+    },
+    {
+      "path": "azdata_ship_data_template.json",
+      "bytes": 1708791,
+      "sha256": "f4d214c1385b92eab6b01407f1cb4a38726a8e2fc046feb16409ea481943e785",
+      "upstream_records": 3968,
+      "upstream_sha256_matches": true,
+      "role": "舰船模板表（build_ship_meta 的补充字段）",
+      "consumers": ["scripts/build_ship_meta.py"]
+    },
+    {
+      "path": "azdata_version.json",
+      "bytes": 745,
+      "sha256": "b2b1dd346267d7eb21ae40299a425ec91854ca1310265cffbe2136506862bed0",
+      "upstream_records": null,
+      "upstream_sha256_matches": null,
+      "role": "上游自描述的版本 + 各表 records/json_sha256 —— 本台账的 sha256 即由它核对，属独立佐证而非自证",
+      "consumers": ["人工比对版本"]
+    }
+  ],
+  "dropped": [
+    {
+      "path": ".diag/azdata_tree.json",
+      "bytes": 14,
+      "content": "Invalid input.",
+      "reason": "上游 dumper 的报错残留，非数据文件；WF-15 白名单曾把它列为承重文件，已一并更正。"
+    }
+  ],
+  "verify": "py -3 scripts/diag/check_inputs.py   # 逐文件校 sha256/bytes，缺失或漂移即非零退出"
+}
