@@ -2,14 +2,14 @@
 """验证「按部位点击触发对应动作」：对若干模型，把每个 HitArea 的几何中心换算成屏幕坐标，
    派发 pointerdown/pointerup，读 motionManager.state.currentGroup。
 
-   2026-09-24 起每个部位给**四类**结论（旧版只有 ok/not-ok，把工具假设当成了产品缺陷）：
-     HIT       播出的组 = 该部位
-     SHADOWED  播出的是**产品自己的 hitAt** 判出的另一个更小框 → 多个 Touch* 标记几何重叠，
-               按「重叠取面积最小者」是设计，不算失败
-     WIRING    真实派发结果与产品几何判定不一致 → 事件链路真断，**只有这类才算 bug**（退出码 1）
-     OUTSIDE   中心点不在任何可用框内（含退化框被产品侧过滤的情形，见 index.html geomOf）
-   几何判定走 window.__L2_HIT（产品页暴露的同一个 hitAt），探针不复算几何——复算版实测与真实
-   派发有 4/38 条不一致，复算不可信就不许拿它下结论。
+   2026-09-24 A3 裁定后每个部位给**四类**结论（旧版只有 ok/not-ok，把工具假设当成了产品缺陷）：
+     HIT      播出的组 = 该部位
+     INGROUP  播出的是候选集合里的**另一条** → 同一位置挂了多个 Touch 标记，A3 就是随机挑一条（设计，非缺陷）
+     WIRING   真实派发结果**不在**产品自己的候选集合内 → 事件链路真断，**这类才算 bug**（退出码 1）
+     OUTSIDE  中心点不在任何可用框内（退化框已被产品侧 geomOf 挡掉，见 index.html）
+   另给两个总指标：**可点中率**（该部位自己的中心是否落在自己的可用框内）与**随机性抽查**
+   （多候选处连点 6 次：既数出了几条不同动作，也数有几次落在候选外——"点了没反应"必须被量化，不许只报 distinct）。
+   候选集合取自产品暴露的 window.__L2_HITALL，探针不复算几何（复算版实测与真实派发 4/38 条不一致）。
 用法: py -3 scripts/diag/hit_verify.py [--limit N] [--only k1,k2]   # 都不给即全量
 前置: 8777 画廊服务器在跑（否则 Chrome 换成导航失败页，会假报 nAreas=0，见 WF-16 踩坑段）
 """
@@ -90,25 +90,57 @@ JS = r"""(async key => { try{
   for(const a of areas){
     mm.startMotion('idle',0,3); await t(300);           // 先归位，避免上一次残留
     const c=centerOf(a); if(!c){ res.push({area:a.Name, played:null, cls:'NOGEOM'}); continue; }
-    /* 几何判定用**产品自己的** hitAt（window.__L2_HIT），探针不再复算一份——
-       2026-09-24 复算版与真实派发有 4/38 条不一致，复算不可信就不许拿它下结论 */
-    const expected=(window.__L2_HIT? window.__L2_HIT(c.v[0], c.v[1]) : null);
-    const opt={bubbles:true,cancelable:true,pointerId:1,clientX:c.scr[0],clientY:c.scr[1],button:0};
-    wrap.dispatchEvent(new PointerEvent('pointerdown',opt));
-    window.dispatchEvent(new PointerEvent('pointerup',opt));
-    await t(700);
-    const cur=mm.state.currentGroup;
-    /* 四类：HIT 命中自己 / SHADOWED 几何上本就该更小的框赢（重叠标记，非缺陷）
-       / WIRING 真实派发结果与产品几何判定不一致（事件链路真断，这才算 bug）
-       / OUTSIDE 中心点不在任何可用框内（含退化框被产品侧过滤掉的情形） */
+    /* 候选集合取自**产品自己的** hitAll（window.__L2_HITALL），探针不复算几何：
+       复算版实测与真实派发有 4/38 条不一致，复算不可信就不许拿它下结论 */
+    const cand=(window.__L2_HITALL? __L2_HITALL(c.v[0], c.v[1]) : [window.__L2_HIT?__L2_HIT(c.v[0],c.v[1]):null]).filter(Boolean);
+    /* 每次点击都重算坐标：模型在呼吸/物理位移，真人点的永远是「它此刻在的位置」。
+       沿用固定坐标连点会漂出框外，测出来的"点了没反应"是探针伪影（实测 offCand 一度 3/6→1/6）。 */
+    const clickAt=async(pt)=>{ const opt={bubbles:true,cancelable:true,pointerId:1,
+                                 clientX:pt[0],clientY:pt[1],button:0};
+                               wrap.dispatchEvent(new PointerEvent('pointerdown',opt));
+                               window.dispatchEvent(new PointerEvent('pointerup',opt));
+                               await t(700); return mm.state.currentGroup; };
+    const cur=await clickAt(c.scr);
+    /* A3（2026-09-24 用户裁定）：同一位置挂多个 Touch 标记时随机挑一条 →
+       断言从「必须等于自己」改成「必须落在候选集合里」，否则把设计行为当失败 */
     let cls;
-    if(cur===a.Name) cls='HIT';
-    else if(expected===null||expected===undefined) cls='OUTSIDE';
-    else if(cur===expected) cls='SHADOWED';
+    if(!cand.length) cls='OUTSIDE';
+    else if(cur===a.Name) cls='HIT';
+    else if(cand.includes(cur)) cls='INGROUP';
     else cls='WIRING';
-    res.push({area:a.Name, played:cur, geom:expected, cls});
+    res.push({area:a.Name, played:cur, cand, reachable:cand.includes(a.Name), cls});
   }
-  return JSON.stringify({key, nAreas:areas.length, hitOK:res.filter(x=>x.cls==='HIT').length, res});
+  /* ── 阶段 2：随机性抽查（与点击测试互斥，必须分开）──
+     pixi 的动作用户可见推进依赖 ticker，冻结后 currentGroup 不再前进 → 点击测试要求它在跑；
+     而"同一个点连调 8 次看是否换条目"要求几何不动（模型在放 idle，框一直在飘，
+     实测同一位置瞬时候选数在 1~2 之间跳，边跑边测根本测不出随机性）。
+     所以这一阶段**冻结 ticker**，且只调 __L2_HIT、不派发事件。 */
+  /* 阶段 2（冻结）：用网格点统计"真有多少位置是重叠的"，并在一个多候选点上测随机是否生效。
+     只看各部位自己的中心点是不够的——实测 lafeiii_3 静止态下 25 个中心点全都只落在 1 个框里
+     （它当初的错响应源自退化框，已被 geomOf 挡掉），所以必须换一种取点方式才能覆盖重叠区。 */
+  const tk=l2State.app.ticker; tk && tk.stop(); await t(80);
+  let overlap=null, randChk=null;
+  if(window.__L2_HITALL){
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for(const a of areas){ const p=core.getDrawableVertexPositions(a.idx); if(!p||!p.length) continue;
+      for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; } }
+    const N=24, seenMulti=[]; let multi=0, single=0, empty=0, best=null;
+    for(let ix=0; ix<N; ix++) for(let iy=0; iy<N; iy++){
+      const mx=x0+(x1-x0)*(ix+0.5)/N, my=y0+(y1-y0)*(iy+0.5)/N;
+      const cf=window.__L2_HITALL(mx,my)||[];
+      if(!cf.length) empty++; else if(cf.length===1) single++; else { multi++;
+        if(!best || cf.length>best.cf.length) best={mx,my,cf}; } }
+    const totPts=multi+single+empty;
+    overlap={pts:totPts, multi, single, empty,
+             multiPct: totPts? Math.round(1000*multi/totPts)/10 : 0};
+    if(best){ const seq=[]; for(let i=0;i<8;i++) seq.push(window.__L2_HIT(best.mx,best.my));
+      randChk={at:[+best.mx.toFixed(3),+best.my.toFixed(3)], candN:best.cf.length, cand:best.cf,
+               seq, distinct:new Set(seq).size,
+               noRepeatOK:seq.every((v,i)=>i===0||v!==seq[i-1])}; }
+  }
+  tk && tk.start();
+  return JSON.stringify({key, nAreas:areas.length,
+    hitOK:res.filter(x=>x.cls==='HIT').length, overlap, randChk, res});
 }catch(e){ return JSON.stringify({key, err:''+(e.message||e)}); }})
 """
 ok_models = 0; rows = []
@@ -128,12 +160,20 @@ for k in cands:
         cnt[r.get('cls')] = cnt.get(r.get('cls'), 0) + 1
     d['cls_counts'] = cnt
     bad = cnt.get('WIRING', 0) + cnt.get('OUTSIDE', 0) + cnt.get('NOGEOM', 0)
-    if bad:
+    if bad or (d.get('randChk') and d['randChk']['distinct'] < 2):
         print(json.dumps(d, ensure_ascii=False), flush=True)
     else:
-        print(f"  {k:<22} {cnt.get('HIT', 0)}/{d.get('nAreas')} 命中"
-              + (f"  （另有 {cnt['SHADOWED']} 个部位被更小的框合法遮住）" if cnt.get('SHADOWED') else ''),
-              flush=True)
+        rc = d.get('randChk')
+        line = (f"  {k:<22} 命中自己 {cnt.get('HIT', 0)} / 共 {d.get('nAreas')}"
+                f"  随机出同组另一条 {cnt.get('INGROUP', 0)}"
+                f"  点不到自己 {cnt.get('OUTSIDE', 0) + cnt.get('NOGEOM', 0)}"
+                f"  不可达自己中心 {sum(1 for x in d.get('res') or [] if not x.get('reachable'))}")
+        ov = d.get('overlap')
+        if ov:
+            line += f"  | 静止态网格 {ov['pts']} 点: 多候选 {ov['multi']} 单候选 {ov['single']} 无框 {ov['empty']}"
+        if rc:
+            line += f"  | 随机抽查 候选{rc['candN']}→8 次出 {rc['distinct']} 条 不重复={rc.get('noRepeatOK')}"
+        print(line, flush=True)
 tot = sum(r.get('nAreas', 0) for r in rows)
 allres = [x for r in rows for x in (r.get('res') or [])]
 c = {}
@@ -141,15 +181,21 @@ for x in allres:
     c[x.get('cls')] = c.get(x.get('cls'), 0) + 1
 wiring = c.get('WIRING', 0)
 outside = c.get('OUTSIDE', 0) + c.get('NOGEOM', 0)
-print(f"\n模型 {len(cands)} 个 | 全部部位都命中的模型 {ok_models}")
-print(f"部位总计 {tot}：HIT {c.get('HIT', 0)} | SHADOWED(遮住，非缺陷) {c.get('SHADOWED', 0)}"
-      f" | WIRING(事件链路断) {wiring} | OUTSIDE/NOGEOM(点不在任何可用框) {outside}")
-print("判据：WIRING 必须为 0 才算过。SHADOWED 只说明多个 Touch* 标记几何互相重叠"
-      "（产品按「重叠取面积最小者」是设计），2026-09-24 起不再当失败 —— 见 TROUBLESHOOTING §27")
-if wiring or outside:
-    print("需看的明细：")
-    for x in allres:
-        if x.get('cls') in ('WIRING', 'OUTSIDE', 'NOGEOM'):
-            print(f"   [{x['cls']}] {x.get('area')} 实播={x.get('played')} 几何判定={x.get('geom')}")
+reach = sum(1 for x in allres if x.get('reachable'))
+rand = [r.get('randChk') for r in rows if r.get('randChk')]
+rand_fail = [r for r in rand if r['distinct'] < 2 or not r.get('noRepeatOK')]
+print(f"\n模型 {len(cands)} 个 | 全部部位都命中自己的模型 {ok_models}")
+print(f"部位总计 {tot}：HIT(命中自己) {c.get('HIT', 0)} | INGROUP(随机出同组另一条) {c.get('INGROUP', 0)}"
+      f" | WIRING(实播不在候选集合内=链路断) {wiring} | OUTSIDE/NOGEOM {outside}")
+print(f"可点中率（该部位自己的中心落在自己的可用框内）: {reach}/{tot} = "
+      f"{round(100.0 * reach / tot, 1) if tot else 0}%")
+if rand:
+    print(f"随机性抽查（多候选点连调 __L2_HIT 8 次）{len(rand)} 个模型；不合格 {len(rand_fail)} 个: "
+          + (str([(r['candN'], r['distinct']) for r in rand_fail]) if rand_fail
+             else '无 —— 8 次里换了条目且相邻两次不重复'))
+    for r in rand[:3]:
+        print(f"   例 候选{r['candN']} {r['cand']} → 序列 {r['seq']}")
+print("判据：WIRING 必须为 0（A3 下实播必须落在候选集合内）；多候选处连点必须换条目；"
+      "HIT 不再是硬指标——同一位置挂多个标记时随机出别条是设计（2026-09-24 用户裁定 A3，见 §27）")
 ws.close(); proc.terminate()
-sys.exit(1 if wiring else 0)
+sys.exit(1 if (wiring or rand_fail) else 0)

@@ -549,20 +549,33 @@ async function renderLive2D(s, sk){
       const a=g.quad ? g.quad.area : (g.x1-g.x0)*(g.y1-g.y0);
       if(a<1e-6 || Math.min(g.x1-g.x0, g.y1-g.y0)<1e-4) return null;
       return g; };
-    const hitAt=(mx,my)=>{ let best=null, bestA=Infinity;
+    /* 含点候选：所有几何包住这个点的可用框（按登记顺序，附带面积供调试） */
+    const hitAll=(mx,my)=>{ const out=[];
       for(const ha of hitAreas){ const g=geomOf(ha); if(!g) continue;
         /* 包围盒预筛，容差 2%：只吸收派发事件间隙几十毫秒的呼吸/物理位移 */
         const hw=Math.max(1e-6,(g.x1-g.x0)/2), hh=Math.max(1e-6,(g.y1-g.y0)/2);
         if(mx<g.x0-hw*0.02||mx>g.x1+hw*0.02||my<g.y0-hh*0.02||my>g.y1+hh*0.02) continue;
         if(g.quad){ const v=g.quad.v;
           if(!triIn(mx,my,v[0],v[1],v[2])&&!triIn(mx,my,v[1],v[3],v[2])) continue;
-          if(g.quad.area<bestA){ bestA=g.quad.area; best=ha.name; } }
-        else { const a=(g.x1-g.x0)*(g.y1-g.y0); if(a<bestA){ bestA=a; best=ha.name; } } }
-      return best; };
-    /* 探针专用：把**产品自己这个** hitAt 暴露出去（不是另写一份几何）。
-       hit_verify 用它把一个未命中拆成两类：几何上本就该别人赢（被遮）vs 事件链路真断（wiring）。
-       真实点击路径仍然走下面的 pointerdown→hitAt，探针不许绕过它（WF-16 规则）。 */
+          out.push({name:ha.name, area:g.quad.area}); }
+        else out.push({name:ha.name, area:(g.x1-g.x0)*(g.y1-g.y0)}); }
+      return out; };
+    /* A3（2026-09-24 用户裁定，取代旧的「重叠时面积最小者独占」）：
+       美术在同一块位置挂了多个 Touch 标记（点身体同时属于 Body/touch_idle4/touch_drag6…），
+       游戏里点一下是**从这些里随机冒一条**；旧规则让面积最小的那个永远赢，其余标记形同不存在。
+       随机时避开上一次刚播过的那条（只剩一条时不避开）——连点才有"换台词"的观感。 */
+    let _lastHit=null;
+    const hitAt=(mx,my)=>{ const uniq=[...new Set(hitAll(mx,my).map(o=>o.name))];
+      if(!uniq.length){ _lastHit=null; return null; }
+      const pool=uniq.length>1 ? uniq.filter(n=>n!==_lastHit) : uniq;
+      const pick=(pool.length?pool:uniq)[Math.floor(Math.random()*(pool.length||uniq.length))];
+      _lastHit=pick; return pick; };
+    /* 探针专用：把**产品自己的**判定结果暴露出去（不是另写一份几何）。
+       __L2_HITALL = 含点候选集合（A3 的断言基准：实播必须落在集合里）；
+       __L2_HIT    = 单次随机选取结果；__L2_HITUSE = 可用（非退化）框清单，供可视化对齐。
+       真实点击路径仍走下面的 pointerdown→hitAt，探针不许绕过它（WF-16 规则）。 */
     window.__L2_HIT=(x,y)=>hitAt(x,y);
+    window.__L2_HITALL=(x,y)=>hitAll(x,y).map(o=>o.name);
     /* 产品自己的「可用判定框」清单（=几何非退化、能参与竞选的那些）。
        验证脚本拿它对齐"画了几个框"，而不是自己再算一遍面积——判定/可视化/探针必须同一个源。 */
     window.__L2_HITUSE=()=>hitAreas.filter(h=>!!geomOf(h)).map(h=>h.name);

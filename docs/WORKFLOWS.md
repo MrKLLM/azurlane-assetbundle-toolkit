@@ -659,6 +659,8 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
   目录名 `chrome_*` / 无 chrome|msedge 进程命令行引用它 / 最后修改早于 `--min-age`（默认 30 分钟，防误删并发会话在写的）。
   它只碰 `chrome_*`，`.diag` 下其它产物一律不动——清理 `.diag` 仍要先核对 WF-15 白名单。
 - **登记/新增 HitArea 必须做几何校验**（2026-09-24 §27）：`fix_model3.py` 早期只判断 `"Touch"+名` 这段字节是否出现在 moc3 里，于是**零面积标记、彼此重合的标记**也被登记成部位框；而前端「重叠取面积最小者」会让面积≈0 的框**永远抢赢**合法大框（真人又点不中它）。前端已在 `geomOf` 里挡掉退化框（判定与可视化同源），源头校验仍待补进 `fix_model3.py`。取证工具：`py -3 scripts/diag/l2d_hit_geom_forensics.py [key ...]`（逐框：自己是否接受自己的中心点 + 谁赢）与 `--scan-all`（全库退化/同几何统计，落 `.diag/l2d_hit_geom_scan.json`）。
+- **A3（重叠即随机）之后 `hit_verify` 的断言口径**：断言对象从「必须等于自己」改成**「实播必须落在产品 `window.__L2_HITALL` 的候选集合内」**，只有落在集合外才是 `WIRING`（真 bug、非零退出码）；`HIT`（等于自己）与 `INGROUP`（同组另一条）都不算失败。另报两个总指标：**可点中率**与**静止态网格重叠统计**。
+  测法两条硬规矩：① 候选集合**每次点击时重算**（模型在呼吸，旧集合会虚报「点了没反应」）；② 随机性必须在**冻结 `app.ticker`** 后测（不冻结则同一位置瞬时候选数会跳，`distinct=1` 是假信号），而点击测试又必须让 ticker 跑 → 所以分两阶段。见 §27「A3 实施记录」。
 - **断言要区分「几何上本就该别人赢」与「链路真断」**：`hit_verify.py` 现给四类 `HIT / SHADOWED / WIRING / OUTSIDE`，**只有 WIRING（真实派发 ≠ 产品 `hitAt` 判定）算 bug、才给非零退出码**；`SHADOWED` 是多个 `Touch*` 标记几何重叠的必然结果（产品按最具体优先是设计）。几何判定一律调产品暴露的 `window.__L2_HIT`，**探针不许自己复算一份几何**（复算版实测与真实派发 4/38 条不一致，拿它下结论就是自证）。 同理 `l2d_inspector_verify.py` 的判定区那条：2026-09-24 起断「画出的框 == 产品 `window.__L2_HITUSE()` 可用清单（逐个标签相同）」，不再是「== 登记数」——退化框被 `geomOf` 挡掉后两者本就不等（§27）。
 - **CDP 脚本每条退出路径都要回收 Chrome**（`try/finally` + 按父 PID 连子进程一起停）：泄漏的无头实例会与下一轮抢 profile，复现出 `Execution context was destroyed` 那类假失败（2026-09-24 亲测踩中，见 §27 末段）。
 - ⚠️ **跑 `l2d_ref_diff.py` / `l2d_ab.py` 比对临时重导目录时，必须显式带 `L2D_OUT_DIR=<临时目录>`。** 不给的话
