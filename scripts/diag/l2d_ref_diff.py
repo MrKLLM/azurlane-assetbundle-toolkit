@@ -56,6 +56,13 @@ CACHE = os.path.join(DIAG, "refcache")
 STATS = Counter()          # cache_hit / ok / miss404 / err / hung
 USE_CACHE = True
 
+# 参考版 motion3 里有、而我们（和 Unity 数据本身）不可能有的**Cubism 内置通道**：
+# LipSync / EyeBlink 由运行时按参数驱动，Opacity 是 Drawable 级不透明度通道，
+# 三者都不来自 AnimationClip 的 genericBindings，参考版导出器是自己合成的。
+# 实测证据（30 个模型 / 126 个"缺曲线"clip）：缺失 Id 只有 LipSync 80、Opacity 54、EyeBlink 10，
+# 没有任何其它 Id → 这是单一系统性成因，不是逐模型的解析缺陷，故不算 FAIL（计入 INFO）。
+BUILTIN_IDS = {"LipSync", "EyeBlink", "Opacity"}
+
 # 参考版 motion 子目录是 motions/（我们历史用的是 motion/）
 REF_SUBDIRS = ("motions", "motion")
 
@@ -273,7 +280,11 @@ def evaluate_model(key, clips=None, samples=121):
         res["clips"][g] = {
             "ours_file": ours_name, "paired": paired,
             "curves_ref": len(rcur), "curves_ours": len(ocur),
-            "curves_missing": sorted(set(rcur) - set(ocur))[:10],
+            # 判"缺曲线"只跟**该由绑定产生**的曲线比（扣掉 Cubism 内置通道），否则每条 clip
+            # 都会因为缺 LipSync 而永久 FAIL（实测 126/126 个缺失 clip 全是那三个 Id）
+            "curves_ref_real": len(set(rcur) - BUILTIN_IDS),
+            "curves_missing": sorted((set(rcur) - set(ocur)) - BUILTIN_IDS)[:10],
+            "curves_missing_builtin": sorted((set(rcur) - set(ocur)) & BUILTIN_IDS)[:10],
             "key_mismatch": key_mismatch(ocur, rcur),
             "types_ref": dict(type_hist(ref_j.get("Curves") or [])),
             "types_ours": dict(type_hist(ours_j.get("Curves") or [])),
@@ -315,8 +326,10 @@ def verdict(r):
         if not paired:
             soft.append(f"{g}: 配不到同时长文件（按最接近的比，不算 FAIL）")
             continue
-        if c["curves_ours"] < c["curves_ref"]:
-            hard.append(f"{g}: 曲线缺 {c['curves_ref'] - c['curves_ours']} 条")
+        if c["curves_ours"] < c.get("curves_ref_real", c["curves_ref"]):
+            hard.append(f"{g}: 曲线缺 {c.get('curves_ref_real', c['curves_ref']) - c['curves_ours']} 条")
+        if c.get("curves_missing_builtin"):
+            info.append(f"{g}: 参考版另有内置通道 {','.join(c['curves_missing_builtin'])}（不计缺失）")
         if c["dev_median"] > 0.5:
             hard.append(f"{g}: 偏差中位 {c['dev_median']} 过大")
         if c["dev_gt05_pct"] > 12.0:
