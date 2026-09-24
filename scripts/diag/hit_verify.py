@@ -1,7 +1,17 @@
 # -*- coding: utf-8 -*-
 """验证「按部位点击触发对应动作」：对若干模型，把每个 HitArea 的几何中心换算成屏幕坐标，
-   派发 pointerdown/pointerup，断言 motionManager.state.currentGroup == 该部位对应的动作组。
-用法: py -3 scripts/diag/hit_verify.py [--limit N]   # 不给 --limit 即全量
+   派发 pointerdown/pointerup，读 motionManager.state.currentGroup。
+
+   2026-09-24 起每个部位给**四类**结论（旧版只有 ok/not-ok，把工具假设当成了产品缺陷）：
+     HIT       播出的组 = 该部位
+     SHADOWED  播出的是**产品自己的 hitAt** 判出的另一个更小框 → 多个 Touch* 标记几何重叠，
+               按「重叠取面积最小者」是设计，不算失败
+     WIRING    真实派发结果与产品几何判定不一致 → 事件链路真断，**只有这类才算 bug**（退出码 1）
+     OUTSIDE   中心点不在任何可用框内（含退化框被产品侧过滤的情形，见 index.html geomOf）
+   几何判定走 window.__L2_HIT（产品页暴露的同一个 hitAt），探针不复算几何——复算版实测与真实
+   派发有 4/38 条不一致，复算不可信就不许拿它下结论。
+用法: py -3 scripts/diag/hit_verify.py [--limit N] [--only k1,k2]   # 都不给即全量
+前置: 8777 画廊服务器在跑（否则 Chrome 换成导航失败页，会假报 nAreas=0，见 WF-16 踩坑段）
 """
 import sys, os, json, time, subprocess, urllib.request
 sys.stdout.reconfigure(encoding='utf-8')
@@ -75,19 +85,30 @@ JS = r"""(async key => { try{
     let sx=0,sy=0,n=0; for(let k=0;k+1<p.length;k+=2){sx+=p[k];sy+=p[k+1];n++;}
     const cux=im.width/ppu, cuy=im.height/ppu;
     const g=m.toGlobal(new PIXI.Point((sx/n+cux/2)*ppu, (cuy/2-sy/n)*ppu));   // 点击瞬间重算：框会随呼吸/物理位移
-    return [r.left+g.x, r.top+g.y]; };
+    return {scr:[r.left+g.x, r.top+g.y], v:[sx/n, sy/n]}; };
   const res=[];
   for(const a of areas){
     mm.startMotion('idle',0,3); await t(300);           // 先归位，避免上一次残留
-    const c=centerOf(a); if(!c){ res.push({area:a.Name, played:null, ok:false, note:'no geom'}); continue; }
-    const opt={bubbles:true,cancelable:true,pointerId:1,clientX:c[0],clientY:c[1],button:0};
+    const c=centerOf(a); if(!c){ res.push({area:a.Name, played:null, cls:'NOGEOM'}); continue; }
+    /* 几何判定用**产品自己的** hitAt（window.__L2_HIT），探针不再复算一份——
+       2026-09-24 复算版与真实派发有 4/38 条不一致，复算不可信就不许拿它下结论 */
+    const expected=(window.__L2_HIT? window.__L2_HIT(c.v[0], c.v[1]) : null);
+    const opt={bubbles:true,cancelable:true,pointerId:1,clientX:c.scr[0],clientY:c.scr[1],button:0};
     wrap.dispatchEvent(new PointerEvent('pointerdown',opt));
     window.dispatchEvent(new PointerEvent('pointerup',opt));
     await t(700);
     const cur=mm.state.currentGroup;
-    res.push({area:a.Name, played:cur, ok:cur===a.Name});
+    /* 四类：HIT 命中自己 / SHADOWED 几何上本就该更小的框赢（重叠标记，非缺陷）
+       / WIRING 真实派发结果与产品几何判定不一致（事件链路真断，这才算 bug）
+       / OUTSIDE 中心点不在任何可用框内（含退化框被产品侧过滤掉的情形） */
+    let cls;
+    if(cur===a.Name) cls='HIT';
+    else if(expected===null||expected===undefined) cls='OUTSIDE';
+    else if(cur===expected) cls='SHADOWED';
+    else cls='WIRING';
+    res.push({area:a.Name, played:cur, geom:expected, cls});
   }
-  return JSON.stringify({key, nAreas:areas.length, hitOK:res.filter(x=>x.ok).length, res});
+  return JSON.stringify({key, nAreas:areas.length, hitOK:res.filter(x=>x.cls==='HIT').length, res});
 }catch(e){ return JSON.stringify({key, err:''+(e.message||e)}); }})
 """
 ok_models = 0; rows = []
@@ -102,8 +123,33 @@ for k in cands:
         time.sleep(2)
     rows.append(d)
     if d.get('hitOK') and d.get('hitOK') == d.get('nAreas'): ok_models += 1
-    print(json.dumps(d, ensure_ascii=False), flush=True)
+    cnt = {}
+    for r in d.get('res') or []:
+        cnt[r.get('cls')] = cnt.get(r.get('cls'), 0) + 1
+    d['cls_counts'] = cnt
+    bad = cnt.get('WIRING', 0) + cnt.get('OUTSIDE', 0) + cnt.get('NOGEOM', 0)
+    if bad:
+        print(json.dumps(d, ensure_ascii=False), flush=True)
+    else:
+        print(f"  {k:<22} {cnt.get('HIT', 0)}/{d.get('nAreas')} 命中"
+              + (f"  （另有 {cnt['SHADOWED']} 个部位被更小的框合法遮住）" if cnt.get('SHADOWED') else ''),
+              flush=True)
+tot = sum(r.get('nAreas', 0) for r in rows)
+allres = [x for r in rows for x in (r.get('res') or [])]
+c = {}
+for x in allres:
+    c[x.get('cls')] = c.get(x.get('cls'), 0) + 1
+wiring = c.get('WIRING', 0)
+outside = c.get('OUTSIDE', 0) + c.get('NOGEOM', 0)
 print(f"\n模型 {len(cands)} 个 | 全部部位都命中的模型 {ok_models}")
-tot = sum(r.get('nAreas', 0) for r in rows); good = sum(r.get('hitOK', 0) for r in rows)
-print(f"部位点击总计 {good}/{tot} 命中")
+print(f"部位总计 {tot}：HIT {c.get('HIT', 0)} | SHADOWED(遮住，非缺陷) {c.get('SHADOWED', 0)}"
+      f" | WIRING(事件链路断) {wiring} | OUTSIDE/NOGEOM(点不在任何可用框) {outside}")
+print("判据：WIRING 必须为 0 才算过。SHADOWED 只说明多个 Touch* 标记几何互相重叠"
+      "（产品按「重叠取面积最小者」是设计），2026-09-24 起不再当失败 —— 见 TROUBLESHOOTING §27")
+if wiring or outside:
+    print("需看的明细：")
+    for x in allres:
+        if x.get('cls') in ('WIRING', 'OUTSIDE', 'NOGEOM'):
+            print(f"   [{x['cls']}] {x.get('area')} 实播={x.get('played')} 几何判定={x.get('geom')}")
 ws.close(); proc.terminate()
+sys.exit(1 if wiring else 0)

@@ -542,6 +542,12 @@ async function renderLive2D(s, sk){
       const g={x0,y0,x1,y1,quad:null};
       if(p.length===8){ const v=[[p[0],p[1]],[p[2],p[3]],[p[4],p[5]],[p[6],p[7]]];
         g.quad={v, area:triArea(v[0],v[1],v[2])+triArea(v[1],v[3],v[2])}; }
+      /* 退化框必须在这里挡掉（2026-09-24 实测 lafeiii_3 的 touch_idle2/8/13/14/15、
+         jianwu_2 的 drag2/4/8/10 等 Touch* drawable 面积=0 或宽/高≈0）：它们**点不到**，
+         但在「重叠时取面积最小者」的规则下面积≈0 永远胜出，会抢走合法大框的点击。
+         阈值与 scripts/diag/l2d_hit_geom_forensics.py 的扫描定义保持一致。 */
+      const a=g.quad ? g.quad.area : (g.x1-g.x0)*(g.y1-g.y0);
+      if(a<1e-6 || Math.min(g.x1-g.x0, g.y1-g.y0)<1e-4) return null;
       return g; };
     const hitAt=(mx,my)=>{ let best=null, bestA=Infinity;
       for(const ha of hitAreas){ const g=geomOf(ha); if(!g) continue;
@@ -553,6 +559,10 @@ async function renderLive2D(s, sk){
           if(g.quad.area<bestA){ bestA=g.quad.area; best=ha.name; } }
         else { const a=(g.x1-g.x0)*(g.y1-g.y0); if(a<bestA){ bestA=a; best=ha.name; } } }
       return best; };
+    /* 探针专用：把**产品自己这个** hitAt 暴露出去（不是另写一份几何）。
+       hit_verify 用它把一个未命中拆成两类：几何上本就该别人赢（被遮）vs 事件链路真断（wiring）。
+       真实点击路径仍然走下面的 pointerdown→hitAt，探针不许绕过它（WF-16 规则）。 */
+    window.__L2_HIT=(x,y)=>hitAt(x,y);
     /* 兜底只给「没有判定区」的模型用；有 HitAreas 的模型点空白处不播任何动作（与游戏一致），
        否则会随机触发一个 touch_drag* 动作，用户会觉得「点哪都乱动」 */
     const fallbackG=hitAreas.length ? null : (groups.find(g=>/^(tap|touch)/i.test(g))||null);
