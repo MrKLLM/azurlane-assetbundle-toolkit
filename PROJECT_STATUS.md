@@ -44,13 +44,14 @@
 4,370 WAV / 0 失败 / ~14GB。`.b` 是 CRIWARE ACB，vgmstream 解码。分类 BGM 536 / CV 2,696 / Other 1,136 / SE 2。脚本 `scripts/export_cue_audio.py`。
 
 ### 2.5 Live2D 模型还原 ✅（2026-09-21 动作层重建；2026-09-22 补齐 9 个 bundle → 269 模型）
-269/269 还原、纹理拼接正确、HitAreas 占位（真判定区见 §6.11 待办）。输出 `Output/Live2D/{舰名}/`，~3.9GB。脚本 `reconstruct_live2d.py` / `fix_model3.py` / `extract_motions.py`。
+269/269 还原、纹理拼接正确、HitAreas 已全库补登真判定区。输出 `Output/Live2D/{舰名}/`，**4.7GB**（2026-09-24 实测，曲线补齐后从 ~3.9GB 涨上来）。脚本 `reconstruct_live2d.py` / `fix_model3.py` / `extract_motions.py`。
 | 指标 | 数值 |
 |---|---|
-| motion 文件 | 8147 条（0 空壳 / 0 未引用 / 0 悬空引用；含 09-22 换入 9 模型 +852 条） |
-| 曲线总数 | 944,136（重建前 179,072；09-22 换入 +87,266） |
-| PartOpacity 换装曲线 | 80 模型（gaoxiong_7 3548 条、shi_3 365 条等），此前整层丢弃 |
-| 审计 | shell 0 / misassign 0（`scripts/diag/l2d_motion_audit.py`） |
+| motion 文件 | **8154** 条（0 未引用 / 0 悬空引用；shell 仅剩 7 条资产层真为空，见下） |
+| 曲线总数 | **2,662,615**（2026-09-24 全量重导：944,136 → 2,662,615，×2.82，与唯一人工验收样本 `antu_2` 98→278 的 ×2.83 同比例） |
+| PartOpacity 换装曲线 | 79 模型（`gaoxiong_7` 3548 条、`kebensi_2` 2940 条、`chaijun_3` 2492 条等），此前整层丢弃 |
+| 审计 | shell **7** / misassign **0** / `clips 8154`（`scripts/diag/l2d_motion_audit.py`，2026-09-24 全库） |
+| HitAreas（model3） | min 3 / max 78 / mean 12.3，**无 0 判定区模型**（2026-09-24 `fix_model3.py` 全库补登 `Touch*`） |
 | 资产层真为空的 clip | 7（*_3 的 effect、wuqi_3 的 idle11 等），已从 model3 引用剔除 |
 > **2026-09-21 根因重建**：旧产物 5037/8154 条动作是 `"Curves": []` 空壳（`num_keys>100` 护栏误杀帧 0），
 > 其余 3117 条**曲线名全部错位**（按"curve idx==参数序号从0连续"取名，实际稀疏）→ 就是"乱飘/乱闪/没反应"。
@@ -59,8 +60,8 @@
 > ⚠️ 旧结论「B 类 12 模型属 motion 质量、资产无缺口」作废：除上述 7 条外均可解出，是解析器缺陷不是资产缺陷。
 已知限制：StreamedClip 未完全逆向；HitAreas 用 moc3 `Touch<X>` drawable 而非官方 `CubismRaycastable` 真点击区（**2026-09-22 §6.11 修后全部 269 模型均带真实 HitAreas**，仅 `z46_3` Special 框嵌 Body 属模型自带歧义）；0.226% 绑定（疑 Drawable 颜色）运行时无对应 target，跳过。
 > **网页交互层状态（2026-09-23 §6.12 + §21）**：点击命中已修「四边形包含 + V/P 坐标系换算」，idle 循环已交回运行时（前端零定时器），动作切换恢复交叉淡化，运行时自加的假呼吸层已关闭，另有判定区可视化与参数·部件检查器；改前端前**必读 WF-16**（五条硬规则 + 回归五件套）。
-> ⚠️ **§21 是动作数据的根因修复，目前只在 `antu_2` 一个模型上换入验证**（`l2d_ref_diff.py` PASS）。**其余 268 个模型仍是旧数据**，含两个已知系统性错误：贝塞尔控制点写成归一化分数（→ 部件各动各的）、只读 `m_StreamedClip` 丢掉定值曲线（→ 切动作时参数回不到静止位）。全量重导待办见 §6 第 9 条。
-> **2026-09-24 样本闸门已过、全量待放行**：5 模型重导到 `.diag/l2d_fix`（`L2D_MOTION_LINEAR=1 L2D_MOTION_EMIT_CONST=1`）→ `antu_2` 与生产数据 104/104 **逐字节一致**、审计 shell 0/misassign 0、`gaoxiong_7`/`lingbo` 权威基准 PASS（偏差中位 0.0）、`aerbien_3` 由 FAIL 转 WARN（曲线 445/640→640/640、关键帧不一致 195→0、偏差中位 2.88→0.128）。单模型 ~3.5s，全量 269 约 20 分钟，须按 WF-15/技能 `windows-long-running-batch-detach` 用脱离宿主进程跑并三分法判定完成。
+> ~~⚠️ §21 的根因修复目前只在 `antu_2` 一个模型上换入验证、其余 268 个模型仍是旧数据~~ → **2026-09-24 已全量落到 269 个模型**（覆写过程有事故，见下一条与 `TROUBLESHOOTING.md` §25）。当时判定的两个系统性错误（贝塞尔控制点写成归一化分数 → 部件各动各的；只读 `m_StreamedClip` 丢定值曲线 → 切动作时参数回不到静止位）现已在全库消除，`aerbien_3` 这类曲线数从 445/640 补齐到 640/640。
+> **✅ 2026-09-24 全量重导已落到 269 个模型（含事故记录）**：`antu_2` 样本 104/104 与已验收生产数据逐字节一致 → 全量 `clips 8154 / shell 7（=资产层真为空的 7 条）/ misassign 0 / PartOpacity 79 模型`、曲线总数 **944,136→2,662,615**。**过程有事故**：脱离启动时 `L2D_OUT_DIR` 未被子进程读到，重导**跳过了「临时目录→审计→备份换入」直接原地覆写** `Output/Live2D`（同一条 ps1 里另两个配方变量都生效，机制不可复现）；已核实 `.diag/l2d_new`（269 模型 / 曲线 944,136，与本文档记录的覆写前总数逐字相等）即覆写前状态并复制为 `Output/_OLD_bak/l2d_motion_pre_swap_20260924/` 恢复回滚，闸门补跑在正式目录上，并按「写向一律走 argv」给 `extract_motions.py` 加了 `--out`（不给即拒绝 `--all`）。根因与教训见 **`TROUBLESHOOTING.md` §25**。
 ⏳ **9 个 bundle 已于 2026-09-22 换入**：benningdun_2 / bunao_3 / feiteliekaer_4 / gangyishawa_3 / guanghui_9 / pulimaosi_3 / sebao_2 / shi_3 / wuzang_4——9 张卡的 `live2d` 字段已进 index.json，`Output/Live2D` 现 **269 个模型**。换入后逐字段 diff 证**非 live2d 字段零变化**（ship/skin 集合不变、仅 9 卡 +9 live2d 项）；**内容判据全绿：9/9 模型加载 + idle 驱动参数（加密采样各 45/57/90/58/143/50/29/75/144 条参数值变化）**。⚠️ 关键教训：运行时把每条 idle 解析成 `isLoop:false`（全 269 模型一致的既有管线特性，非本轮引入），idle 只播一次即回静；故**验证必须在播放窗口内高频采样**，若等 ~12s 后两次快照比对会因短 idle(5~8s) 已播完回到静帧而假报 `moved=0`（本轮曾据此误判 bunao_3/guanghui_9，密采证伪）。临时产物 `.diag/l2d_new9/`（467MB）已冗余可清理。
 
 ### 2.6 Spine 动态立绘 ✅（v2 提取 + 全屏 CG 导出 + viewer 修复，2026-09-19）

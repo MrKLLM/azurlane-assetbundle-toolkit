@@ -457,7 +457,22 @@ def main():
     ap.add_argument("--name", help="指定模型名称")
     ap.add_argument("--test", help="单模型，打印每条 clip 明细")
     ap.add_argument("--all", action="store_true", help="处理全部模型")
+    ap.add_argument("--out", help="输出目录。**推荐用它而不是 L2D_OUT_DIR 环境变量**："
+                                   "Start-Process 脱离进程下环境变量是否被子进程读到不可复现，"
+                                   "2026-09-24 就因此把 269 个模型直接覆写进了正式目录（见 TROUBLESHOOTING §24）")
+    ap.add_argument("--into-production", action="store_true",
+                    help="显式确认写进 Output/Live2D（--all 且不指定 --out/L2D_OUT_DIR 时必须给这个）")
     args = ap.parse_args()
+
+    if args.out:
+        globals()["OUTPUT_DIR"] = os.path.abspath(args.out)
+    elif not os.environ.get("L2D_OUT_DIR"):
+        if args.all and not args.into_production:
+            print("[ERROR] --all 未指定 --out：默认目标就是正式目录 Output/Live2D，会原地覆写 motion 且没有备份。\n"
+                  "        正规流程是先 --out .diag/<临时目录> → 审计 → apply_live2d_motions.py --yes 换入。\n"
+                  "        确实要直接写正式目录时再加 --into-production。")
+            return 2
+        globals()["OUTPUT_DIR"] = r"D:\Azur Lane Assets\Output\Live2D"
 
     if not os.path.isdir(LIVE2D_DIR):
         print(f"[ERROR] Live2D 目录不存在: {LIVE2D_DIR}")
@@ -483,17 +498,23 @@ def main():
         return 2
 
     bad_models = []
-    for m in models:
-        if not os.path.isfile(os.path.join(LIVE2D_DIR, m)):
-            continue
+    # 全量要跑 ~20 分钟且常以脱离进程（Start-Process 重定向）方式启动 → stdout 是块缓冲的。
+    # 不带 flush 与 [i/n] 进度行，日志会长时间空白，就无法区分「慢」和「死/被截断」。
+    models = [m for m in models if os.path.isfile(os.path.join(LIVE2D_DIR, m))]
+    total = len(models)
+    for i, m in enumerate(models, 1):
         ok, msg, failed = process_model(m, verbose=verbose)
-        print(("  [+]" if ok else "  [-]") + f" {m:<24} {msg}")
+        print(f"[{i}/{total}] " + ("[+]" if ok else "[-]") + f" {m:<24} {msg}", flush=True)
         if not ok or failed:
             bad_models.append((m, failed))
 
-    print("\n" + "=" * 46)
+    print("\n" + "=" * 46, flush=True)
+    # 终判行：成功与失败都打同一可 grep 字面量，判定「跑完没有」只认这一行的计数，不认退出码
+    #（有解不出的 clip 时退出码本就是 1，见 §2.5 的 7 条资产层真为空 clip）。
+    print(f"[SUMMARY] 模型 {total}/{total} 处理完 | 有解不出 clip 的模型 {len(bad_models)} | 输出 {OUTPUT_DIR}",
+          flush=True)
     if bad_models:
-        print(f"[!] {len(bad_models)} 个模型存在解不出的 clip:")
+        print("[!] 明细（前 20）:")
         for m, fl in bad_models[:20]:
             print(f"    {m}: {fl}")
         return 1

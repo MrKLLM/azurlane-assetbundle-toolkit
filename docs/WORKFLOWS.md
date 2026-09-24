@@ -545,7 +545,11 @@
 4. **Unity 版本伪装**：新包 header 可能仍伪装 `5.x.x`。若加载报错，更新脚本里的 `UnityPy.config.FALLBACK_UNITY_VERSION`（当前 `2022.3.62f3`）为游戏实际引擎版本。
 5. **定位受影响子集**（不要全量重跑）：按新增/变更包所在顶层目录（`painting` / `paintingface` / `spine` / `live2d` / `bg`…）映射到磁盘 stem 集合，写进 `.diag/affected.txt`。
 6. **元数据是否也要跟新**：若社区 azdata 快照已更新到新版本 → 重跑 `build_ship_meta.py --write`；若没更新（如 385 时社区仍 381）→ 新皮肤的名字/阵营会缺，按 §6 待办 7 的决策处理（标「待补」，不要瞎猜）。
-7. **定向重跑到临时目录**：`python scripts/compose_paintings_v2.py <stems> --out .diag/rerun`（Spine 用 `extract_spine_v2.py`，Live2D 用 `reconstruct_live2d.py`+`extract_motions.py`，全屏 CG 用 `python scripts/diag/run_cg_export.py --only a,b,c`）。
+7. **定向重跑到临时目录**：`python scripts/compose_paintings_v2.py <stems> --out .diag/rerun`（Spine 用 `extract_spine_v2.py`，Live2D 用 `reconstruct_live2d.py`+`extract_motions.py --out .diag/<临时目录>`，全屏 CG 用 `python scripts/diag/run_cg_export.py --only a,b,c`）。
+   > ⚠️ **脱离宿主进程跑的长任务里，"写到哪"必须走 argv（`--out`），不能只靠环境变量**：`Start-Process` 下
+   > 子进程能否读到 `$env:X` **不可复现**（同一脚本同一启动方式，两个变量生效、输出目录那个没生效），
+   > 2026-09-24 因此把 269 个模型的 `motion/` 跳过闸门原地覆写进了 `Output/Live2D`（见 `TROUBLESHOOTING.md` §25）。
+   > `extract_motions.py --all` 现要求 `--out`，否则拒绝（确需直写正式目录才加 `--into-production`）。
 8. **出对比图交人工确认**（硬闸门）：`python scripts/diag/make_face_cmp.py` / `make_review_sheet.py` 这类前后对照；未确认**不得**换入正式目录。
 9. **备份换入**：先 `cp` 旧件到 `Output/_OLD_bak/<主题>_<日期>/`，再**确认 `st_nlink==1`**（Paintings_v2 有 519 组硬链，直接覆写会串改孪生文件）后 `os.remove` + copy 换入。
 10. **派生产物增量重建**：删受影响 `gallery_v2/thumbs/<stem>.webp` 后跑 `make_thumbs.py`（它对已存在者 skip，天然增量；`<stem>_cg.webp` 来自 CG_v2，别误删）→ `build_gallery_index.py` → `deploy_gallery.py`。
@@ -659,6 +663,8 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
   而 ref_diff 在只含 `motion/` 的临时目录上曾经**全部 SKIP 却退出 0**。三处假绿灯的根因与判据见 `TROUBLESHOOTING.md` §24。
 
 **收尾**: 一轮 CDP 回归结束后 `py -3 scripts/diag/clean_diag_profiles.py --yes` 清 profile（见上），并确认 `.diag` 里没有本次新写的唯一副本代码（按 AGENTS.md 第 3 步移入 `scripts/diag/` 或删除）。
+- **判活用 `powershell -File scripts\diag\wait_for_detached.ps1 -Pattern <脚本名> -Log .diag\_x.log`**，不要拿 `Start-Process -PassThru` 的 PID 去 `Wait-Process`：那只是 `py.exe` 启动器，且 `Wait-Process` 抛错会被 try/catch 读成"已退出"（2026-09-24 把还在跑的 269 模型回归误判成断了）。该工具按「命令行匹配 python.exe 工作进程 + 日志行数是否还在涨 + 有无汇总行/traceback」给三分法结论。
+- **含中文的 `.ps1` 必须存成 UTF-8 带 BOM**，否则 Windows PowerShell 5.1 按 GBK 解码会把引号错位成 `字符串缺少终止符`（`wait_for_detached.ps1` 首跑就是这么死的，`py -3` 写文件时用 `encoding='utf-8-sig'`）。
 
 **涉及文件**: `gallery_src/index.html`、`scripts/deploy_gallery.py`、`scripts/diag/{l2d_coord_forensics,l2d_inspector_verify,interact_verify,hit_verify,page_sanity_check,clean_diag_profiles,l2d_ref_diff,l2d_ab}.py`、`TROUBLESHOOTING.md` §19/§20/§24
 
