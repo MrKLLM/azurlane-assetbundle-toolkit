@@ -405,13 +405,126 @@ for i in range(n):
 **拿一个局部巧合去支撑一个结构性结论**。对策已固化：校准样本必须**同时**通过
 "值匹配 + 周边结构合理（klass/monitor 是指针、bounds 合理）"两道，缺一即判未校准。
 
-### 下一步（第 5 次收口）
+### (16) 2026-09-24 `www()` 的调用方查明：**它是 Lua 脚本解密封，不是配置表解密**
+
+命令与结果（全库唯一一处交叉引用）：
+```
+py -3 tools/sharecfg_re/08_disasm_method.py --xref "UnitySourceGeneratedAssemblyMonoScriptTypes_v1.www"
+#   ->  1 处交叉引用
+#   call @0x03D9C8C5  宿主=LuaScriptMgr.Load
+```
+（`UnitySourceGeneratedAssemblyMonoScriptTypes_v1` 是 Il2CppDumper 的错归类；`www` 与
+`LuaScriptMgr.Load` RVA 相邻，同属 LuaScriptMgr 那个源文件。索引里 136652 个方法 **VA 字段零缺失、
+且 RVA==VA==Offset+0x4000 恒等**，所以"宿主方法"归属可信，不存在半覆盖导致的漏报。）
+
+**外层封装（`LuaScriptMgr.Load` RVA 0x3D9C784，逐条读出）**
+
+```
+bytes = PathUtil.ReadAllBytes( PathUtil.GetLuaBundle(filename) )   # 尾调用 0x3d9c9c3 / 0x3d9ca16
+if len(bytes) >= 14:                                   # 0x3d9c7d2: len-13,  <14 则整块直用
+    m = bytes[len-14] & ~0x80                          # 0x3d9c85a-0x3d9c867
+    plain = (m == 0) and bytes[0]==0x1B and bytes[1:4]==b"lua"   # 0x3d9c887-0x3d9c8b1
+    data  = bytes if plain else www(bytes)             # 0x3d9c8c5  ← www 唯一入口
+else: data = bytes
+luaL_loadbuffer(L, data, len, "@" + filename)          # 0x3d9c8f6（call 0x35ae110）
+失败 → LuaFileUtils.get_Instance() / throw LuaException  # 0x3d9c920 / 0x3d9c94c
+```
+
+→ **`www()` 的输出直接喂 `luaL_loadbuffer`**，合法输出只有 Lua 源码或 Lua 字节码两种。
+→ **上一轮的判据"www() 的输出必须含 UnityFS"从前提就是错的**：UnityFS 是 AssetBundle 的 magic，
+AB 永远不会被交给 `luaL_loadbuffer`。这条判据在**任何**输入上都不可能满足，用它做出的"否证"其实
+什么都没否证 —— 它唯一的信息量是把 www 的作用域指错了地方。（第 6 个假绿灯家族实例：**判据本身
+不可达**，长得却像"已经排除过了"。）
+
+**19 字节数组参与的那一步：降级成 1 个字节**
+
+`Array::New(0x13)` 建的对象在 `www()` 里**只被读一次**：
+`0x3D9CC61  movzx r9d, byte ptr [obj+0x24]` —— 数组数据起点 +0x20，即 **byte[4]**，
+唯一用途是加进种子（`lea ebp,[rcx+r13]`）；循环体内再无别的索引来自它。**它不是逐字节密钥。**
+数组本身是常量初始化（`0x3D9CB43 call RuntimeHelpers.InitializeArray`，blob 指针运行时从
+`klass+0x30` 取），所以不在 .so 的固定 VA 上；要拿原值得解析 `global-metadata.dat` 的 field-RVA。
+
+**更正一条被当成"已知事实"的东西：种子不等于 235**
+
+`0xEB=235` 只是 `ebp` 的**初值**（`0x3D9CC33`）。真实种子由三项相加：
+`0x3D9CC0C mov rbp,0xFFFFFF` → `0x3D9CC17 sub ebp,ecx`（ecx = `bytes[len-1] & ~0x80`，
+见 `0x3D9CBEE-0x3D9CBF6`）→ `0x3D9CC1E mov ecx,ebp` → `0x3D9CC5F lea ebp,[rcx+r13]`。
+
+```
+state₀ = 235 + byte[4] + (bytes[len-1] & ~0x80)     # 后两项逐文件变，硬编码的只有 235
+```
+
+**"起点 0..4095 穷举"那条否证原本有个漏洞，这次补掉了**
+
+之前只穷举了起始偏移、没穷举种子，而种子刚被证明是逐文件的 → 结论可被"你种子没试对"推翻。
+新发现（已做零假设检验）：`out[i]` 只取 `state>>8` 的 **bit 8..15**，而
+`state=(state+c)*205+207` 是仿射、**只向高位进位** → bit 8..15 永远只由 `state` 的低 16 位决定
+→ **整条密钥流只依赖种子的低 16 位，有效种子恰好 65536 个**。于是"没试对种子"这个可能性
+可以被**穷举封死**，不必再抽样。
+
+`26_www_wrapper.py` 的做法不是扫种子而是**反解**：target 首字节钉死 `state₀` 的 bit8..15，
+只剩 256 个候选，逐字节过滤 —— 与对 65536 个有效种子做全量检验完全等价。
+
+**三条对照，其中两条在真跑之前各抓到一个真 bug**
+
+- **低 16 位闭合自检**：2000 组随机 buffer × 每组 8 个"只改种子高 16 位"的变体，输出须逐字节相同 → 0 不一致。
+- **反解阳性对照**：400 次随机 (buffer, seed, off) 埋点，反解须命中原 seed。
+  **第一版这里就是红的**：过滤循环把上一步的 state 又当 seed append 回去，400/400 全失败。
+- **埋针对照**：在真 `scripts64` 里种 5 处 www 加密的 `UnityFS\0`，须 5/5 抓到。
+  **第一版 0/5** —— 抓到第二个 bug：我加密时让 state 用**明文**字节推进，而 `www()` 里 `c`
+  读的是**密文**字节（`c=b[i]` 在覆写之前）。加密方向必须用写下去的 c 推进。
+
+三条任一不过，脚本 `exit 3` 并**拒绝输出否证结论**。
+
+**实测（`--max-off 4096`，scripts64 与 scripts32 各一轮）**
+
+| 目标前缀 | 约束 | 期望假命中 | 命中 (64 / 32) |
+|---|---|---|---|
+| `UnityFS\0` | 64 bit | 1.5e-11 | **0 / 0** |
+| `\x1blua`（小写） | 32 bit | 0.062 | 1 / 0（off=815，后 36 字节全随机 → 巧合） |
+| `\x1bLuaT` | 40 bit | 2.4e-4 | 0 / 0 |
+| `local ` | 48 bit | 9.5e-7 | 0 / 0 |
+| `--[` | 24 bit | 16 | 12 / 21（**正好落在预测噪声带** → 对照自洽） |
+
+**结论（判据达不到，如实报否证）**
+
+1. **`www()` 不作用于盘面上的 `sharecfgdata/*` 容器。** 它唯一的输入是 `PathUtil` 按路径读出的
+   **单个 `.lua` 文件**，输出交给 `luaL_loadbuffer`。README 从 (6) 起挂在 www 上的那条线
+   （"19 字节内联密钥""再解一层封帧就拿到配置明文"）**方向性错误**。
+2. **但 www 分支不是死路，只是被接错了对象**：(14) 在内存里查到 **776 项 `sharecfg/<表名>.lua` 清单**
+   （含 `ship_skin_words.lua`）。若配置是以 `sharecfg/<name>.lua` 的形式被 `require` 的，那么
+   走 `LuaScriptMgr.Load` → **`www()` 正是它的解密封**，只是输入是那个 `.lua` 单元，
+   而不是磁盘上 `sharecfgdata/<name>` 这个裸容器。这一下把 (14) 和 (16) 接上了。
+3. 盘面 `scripts64` / `scripts32` 头 4 字节都是 `52 aa 2a a5`（既不是 `1b 4c 4a` 也不是 `UnityFS`），
+   `byte[len-14]&~0x80` = 35 / 7（≠0，即"若真经 Load 会走解密分支"）。之前把它当 www 的输入，
+   **没有任何依据**；本轮的穷举正好把这条无依据的假设判死。
+4. 堵点改写为：**配置表的解密不在 C# 侧**（www 排除后，(2) 的"C# 零解密"更硬了）。
+
+### 下一步（第 6 次收口）
+
+1. **确认 `sharecfg/<name>.lua` 是不是经 `LuaScriptMgr.Load` 读进来的**——这一步决定 www 是死是活。
+   需要的是 `PathUtil.GetLuaBundle/GetLuaName` 的**路径模板字符串**：
+   机器码里 `0x71E9A38 / 0x72199E0 / 0x71E9938 / 0x71E6180` 这些槽经实测是 **klass 指针**
+   （`call 0x35add98` 的类初始化守卫模式），不是字面量，**在 .so 里取不到**；
+   要拿得解析 `global-metadata.dat` 的字符串/字段默认值表。
+   - 拿到模板后：按模板拼出 `sharecfg/ship_skin_words.lua` 的实际路径，看它是**盘上独立文件**、
+     **某个 AB 里的 TextAsset**、还是 **scripts64/32 里的一个条目**。三种情况对应三条不同的路。
+2. 若 1 成立 → 直接对那个 `.lua` 单元跑 `www()`（**种子公式已完整**：235 + byte[4] + 末字节，
+   byte[4] 拿不到就先按 256×128 的小空间穷举，`26_www_wrapper.py` 的反解器可复用）。
+   **验收判据换成 Lua 形态**：输出以 `\x1bLua`/`\x1blua` 开头，或能 `--` / `local ` / 可读源码起头，
+   且能对上 (14) 那份表名清单。**不得再用 UnityFS 当判据。**
+3. 仍**不做**"扫内存猜结构"类尝试（(15) 已两次产出假信号）。
+
+#### 附：第 5 次收口时的清单（留痕；第 1、2 项已做完，结论见 (16)）
 
 1. **从"怎么用"反推**：读 `www()` 里 `Array::New(0x13)` 之后到主循环之前那段
    （约 `0x3D9CB2C`–`0x3D9CC44`），确认 19 字节数组是被逐字节索引当密钥、还是只用来算 LCG 种子。
+   → **结论：只取 byte[4] 加进种子，不是逐字节密钥。**
 2. 顺藤找**真正作用在 `Array.Copy` 目标缓冲上的那段循环**（本函数内未见，可能在
-   `www()` 调用的子程序或 Lua 侧）。
+   `www()` 调用的子程序或 Lua 侧）。→ **结论：就是 `www()` 自己那个循环**（(15) 的改判成立），
+   但函数是 `LuaScriptMgr.Load` 的解密步骤，与配置表无关。
 3. 不再做"扫内存猜结构"类尝试——已连续两次产出假信号。
+
 
 #### 附：第 4 次收口时的清单（留痕；第 1 项已做完，结论见 (10)）
 
@@ -467,6 +580,9 @@ for i in range(n):
 | `Decrypt`/`SetDecryptionKey` 属配置解密 | 都在 `CriWare_*Wrap` 里（音频） | 否证 |
 | 句柄 `&0x7fffffff` = fieldDefaultValues 条目号 | 解出等差序列 | 否证，正确解读是 **FIELD token**（`0x80xxxxxx`） |
 | adb 可捞到盘上解密缓存 | 进程 fd 表直接指向 `sharecfgdata/`；全盘 find 无缓存目录 | 否证，**唯一剩下的明文位置是进程内存** |
+| **`www()` 参与配置表解密**（(6)–(15) 整条主线的前提） | `--xref www` 全库唯一调用方 = `LuaScriptMgr.Load`，输出直喂 `luaL_loadbuffer` | **方向性错误**（详见 (16)）。但 www 未必无用——它可能作用在 (14) 的 `sharecfg/<表名>.lua` 上，见「下一步」1 |
+| "www() 的输出必须含 `UnityFS`"这条判据 | AB 不可能被交给 `luaL_loadbuffer`；穷举 65536 个有效种子 × 偏移 0..4095，`UnityFS\0` **0 命中** | **判据本身不可达**（第 6 个假绿灯：不可达的判据长得像"已排除"）。判据须换成 Lua 形态 |
+| 盘面 `scripts64`/`scripts32` 是 www 的输入 | 两文件头 4 字节均 `52 aa 2a a5`，既非 `1b 4c 4a` 也非 `UnityFS`；无任何证据指向它们经 `PathUtil` 进 `Load` | 否证（同上穷举，含 `\x1bLuaT`/`local ` 各 0 命中） |
 
 
 
@@ -529,3 +645,5 @@ for i in range(n):
 
 - 探针/工具脚本放本目录（编号前缀 `01_`、`02_`…），**不放 `.diag/`**——本项目的东西必须入库。
 - 大件中间产物（解密明文、dumper 输出）放 `.diag/sharecfg_re/`（gitignore），README 里只留结论与判据。
+- **方法账**：(16) 那条「用调用方判作用域 + 把否证做成穷举级 + 三条对照」的流程已固化进
+  `docs/WORKFLOWS.md` **WF-18**；本项目只留数据与结论，不重复抄流程。
