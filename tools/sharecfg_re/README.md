@@ -174,7 +174,48 @@ lag 自相关（15 号脚本前置实测）：`ship_skin_words`/`gametip` 在 **
   既然字节码已经在内存里是**解密后的形态**，就不必破解 `scripts64` 容器：
   **直接从内存提取 `sharecfg` 相关模块的字节码，反汇编/读常量池**，即可拿到配置解析算法与那把 key。
 
-### 下一步（按期望收益排序，2026-09-24 第 2 次收口）
+### (8) 2026-09-24 第二轮内存取证（游戏停在有台词的界面）：**拿到明文了，但不是从容器里解出来的**
+
+进程已换（pid 2968 → 3769），旧快照隔离进 `memdump/run1_pid2968/`，并给 `16_mem_hunt.py`
+补了 `--force`（原实现"文件存在且同大小就跳过"会让**重启后的进程复用上一时刻的快照**当新证据）。
+新快照 1472 区域 / 2308.4MB。
+
+**实测正获**：
+
+1. **解密后的中文配置文本确实在内存里**（带区域与偏移）：
+   `3769_...44d2e000_...45e7f000.bin`（17.32MB）内 `1913年型战列巡洋舰——马塞纳`@0x6f75c8、
+   `{namecode:134}.改`@0x975a88、`{namecode:181}.改`；`...4306c000_...44d2d000.bin`（28.75MB）内
+   `{namecode:38}级轻巡洋舰——{namecode:306}`@0x1a95c38。→ 上一轮"0 命中"是**游戏当时没加载**，
+   不是内存里没有。**结论：按需切片读的表，只要走到对应界面就会在 RAM 里留下明文。**
+2. **LuaJIT 字节码确实在内存里**：`\x1bLJ` 共 11109 次，其中 **11095 次后跟合法版本字节 01/02**
+   （随机巧合的概率约 0.8%）→ 是真字节码。
+3. **整棵 Lua 配置模块树的名字都在内存里**：`assets/luabuilds/android/normal/gamecfg/**.lua`
+   命中 39075 个不同名字（`gamecfg/buff/buff_106040.lua`、`gamecfg/story/…`、`gamecfg/dungeon/…`、
+   `gamecfg/academygraph.lua`、`gamecfg/activity/entrancedata.lua`…），
+   另有 **`ShareCfg.<表名>` 注册表 754 处**（`ShareCfg.ship_skin_words`、`ShareCfg.ship_skin_words_extra`、
+   `ShareCfg.ship_skin_template_column_time`、`ShareCfg.roll_attr`、`ShareCfg.guild_store`…），
+   以及列名/错误串 `WORD_TYPE_SKILL`、`voice_actor_CN`、`ship_skin_template not exist: 603022 603021`。
+   → **`gamecfg/**.lua` 很可能是"每张表一个 Lua 文件"的明文形态配置**，与 `sharecfgdata/` 二进制容器并存。
+   如果台词也在 `gamecfg` 里，**整条"解容器"路线可能都不需要**。
+
+**实测否证**：设备上 `scripts64`/`scripts32` 头 32 字节与本地副本**完全一致**（仍是密文，
+且两文件头部彼此相同），只是体积比本地大 ~19.7 万字节、mtime 是今天 18:38（被更新过）。
+→ "游戏把解密结果写回原路径"不成立；内存里那个 `scripts64__<md5>.temp` 只是加载期临时名，盘上已无残留。
+
+**工具缺陷（已修）**：`17_mem_lj_scan.py` 第一版把 chunk 名正则写成必须以 `@`/`=` 开头，
+实际内存里是**裸路径名** → 整轮扫成"0 个模块"。这是脚本的错，不是内存的错；已改成前缀可选。
+
+### 下一步（按期望收益排序，2026-09-24 第 3 次收口）
+
+1. **查 `gamecfg` 是不是配置的明文形态**：把 `assets/luabuilds/android/normal/gamecfg/...lua` 的字节码
+   blob 切出来反解常量池；若台词以 Lua 表常量存在，直接就能取到，**不必碰 sharecfgdata 容器**。
+2. 若 1 不成：用 `16_mem_hunt.py` 在**皮肤详情/台词界面**再抓一次，专挑 `ShareCfg.ship_skin_words`
+   附近区域按 GCstr 结构还原整表（已证实明文驻留，这条路现在是有底的）。
+3. 仍留着：读完 `www()` 主循环 + 验证封帧假设（离线）。
+
+
+
+#### 附：第 2 次收口时的清单（留痕；已被上面第 3 次收口更新）
 
 1. **从内存提取 LuaJIT 字节码**：按 `\x1bLJ` 头切出 blob，解析头部与 BC 常量池，
    找 `sharecfg` / `gamecfg` 相关模块；重点看它的字符串常量里有没有密钥与 `(startPos,size)` 的用法。

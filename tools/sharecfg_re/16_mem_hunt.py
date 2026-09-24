@@ -30,6 +30,7 @@ ADB = r"C:\Program Files\Netease\MuMuPlayer\nx_main\adb.exe"
 SERIAL = "127.0.0.1:16384"
 PKG = "com.bilibili.azurlane"
 OUT = os.path.join(ROOT, '.diag', 'sharecfg_re', 'memdump')
+FORCE = False        # 由 --force 置真：不复用任何旧快照
 LOG = os.path.join(ROOT, '.diag', 'sharecfg_re', 'memhunt.log')
 AZ = os.path.join(ROOT, 'inputs', 'azdata', 'azdata_ship_skin_template.json')
 MD_MAGIC = bytes.fromhex('af1bfab1')            # global-metadata.dat 的魔数（小端 FAB11BAF）
@@ -100,7 +101,9 @@ def dump_region(pid, r):
         return None
     name = '%d_%016x_%016x.bin' % (pid, start, end)
     p = os.path.join(OUT, name)
-    if os.path.exists(p) and os.path.getsize(p) == pages * PAGE:
+    # ⚠️ 复用旧快照 = 拿上一时刻的内存当本次证据。只有显式 --force 之外才允许跳过，
+    #    且默认在 dump 前把整个目录挪走（见 main 里的 --force / 目录改名提示）。
+    if not FORCE and os.path.exists(p) and os.path.getsize(p) == pages * PAGE:
         return p
     raw = shx('su -c "dd if=/proc/%d/mem bs=%d skip=%d count=%d 2>/dev/null"'
               % (pid, PAGE, start // PAGE, pages))
@@ -215,7 +218,10 @@ def main():
     ap.add_argument('--anon', action='store_true')
     ap.add_argument('--all', action='store_true')
     ap.add_argument('--cap', type=int, default=0, help='最多拉多少 MB（0=不限）')
+    ap.add_argument('--force', action='store_true', help='不复用旧快照（游戏进程重启后必须加）')
     a = ap.parse_args()
+    global FORCE
+    FORCE = a.force
     os.makedirs(OUT, exist_ok=True)
     if a.cmd == 'hunt':
         hunt()
