@@ -915,6 +915,11 @@ UnityFS；单字节常量 XOR/加/减；短重复密钥 XOR（周期 1–32，�
   导致整段探针 JS 语法错、每个模型都 `Uncaught`、`nAreas=null`。→ **嵌在 Python 字符串里的 JS，注释内不能出现 `*/`**。
   这类错误只会以"工具全红"的形式出现，别顺手解读成产品坏了。
 
+* **✅ 全库基线已标定（269 模型 / 3309 部位，`.diag/_hitv_base2.log`）**：
+  `HIT 2338（70.7%）| INGROUP 905 | WIRING 0 | OUTSIDE 0 | NOTCLICKABLE 66`，166 个模型全部部位都能点出自己。
+  **以后改命中/交互层，判据就是 WIRING 必须为 0**（旧口径「806/807 命中」作废：它建立在只有 3 个判定区、
+  且把重叠当失败的断言上，断言总数都不同）。INGROUP/NOTCLICKABLE 是设计使然，不当中止信号。
+
 **修正后实测（7 个原异常模型，194 部位）**：`HIT 124 / INGROUP 59 / WIRING 0 / OUTSIDE 0 / NOTCLICKABLE 11`，
 可点中率 79.9%。随机性的强证据：某点有 **14 个候选框**，连调 `__L2_HIT` 8 次出 8 条不同；
 两候选点严格交替（`touch_idle2`/`touch_idle5` 来回），说明"避开上一次刚播的"也生效。
@@ -929,3 +934,51 @@ UnityFS；单字节常量 XOR/加/减；短重复密钥 XOR（周期 1–32，�
 **工具侧踩坑（会坑到下一个会话）**：CDP 脚本被宿主 `timeout` 掐掉时，`try/finally` 缺失就不回收 Chrome → 泄漏的无头实例与下一轮抢 profile，造出 `Execution context was destroyed`（WF-16 记过的那类假失败，本次真的复现了一次）。`l2d_hit_geom_forensics.py` 已加 `kill_tree()`（按父 PID 连子进程一起停）并在每条退出路径调用；清理时 `clean_diag_profiles.py` 的「进程仍引用就不删」判据也第一次真实生效（保住了并发会话正在用的 `chrome_galprobe3`）。
 
 **涉及文件**: `gallery_src/index.html`（`geomOf` 退化框过滤、`window.__L2_HIT` 与 `window.__L2_HITUSE` 暴露）、`scripts/deploy_gallery.py`（改完必须部署，否则等于没改）、`scripts/diag/hit_verify.py`（四类断言 + 退出码）、`scripts/diag/l2d_hit_geom_forensics.py`（新增：逐框几何取证 + `--scan-all` 全库体检）、`scripts/fix_model3.py:152`（**待改**：登记前需几何校验）、`TROUBLESHOOTING.md` §18/§21/§24。
+
+---
+
+## §28. 「试遍了都解不出明文」的真根因：**验收判据本身不可达**，不是缺密钥（2026-09-24）
+
+**日期**: 2026-09-24　**状态**: ✅ 已定位并改判；`www()` 分支从"差一层封装"改记为"作用域弄错了对象"
+
+**现象**: `tools/sharecfg_re/` 连续四轮认定"`www()` 算法已完整拿到（`state=235`、`×205+207`、`out=(state>>8)^c`），
+但对配置表与盘面 `scripts64/32` 都产不出明文；起点 0..4095 穷举无 `UnityFS`、无 `00 00 00 07` →
+结论收敛为「堵点在 www 输入侧的外层封装 + 一个 19 字节数组」。**这条堵点描述是错的。**
+
+**根因（一条机器码就能定死）**: `08_disasm_method.py --xref www` → 全库**唯一**一处调用方 `LuaScriptMgr.Load`。
+读宿主：`PathUtil.ReadAllBytes(GetLuaBundle(path))` → 封装位判定 → `www()` → **`luaL_loadbuffer`**
+（`0x3d9c8f6`，call `0x35ae110`；参数 3 是 `"@"+filename` 这个 chunk 名）。
+所以 `www()` 是**游戏自身 Lua 脚本的解密封**，输出的合法形态只有 Lua 源码或 Lua 字节码。
+**而"输出须含 `UnityFS`"这条判据在任何输入上都不可能成立** —— AssetBundle 永远不会被交给 `luaL_loadbuffer`。
+拿一条不可达的判据做检验，得到的"否证"什么都没否证，只会把调查方向钉死在错误对象上。
+
+**顺带被这一条 xref 纠正的三处**:
+1. **"19 字节内联密钥"不存在。** `Array::New(0x13)` 那个对象在 `www()` 里只被读一次
+   （`0x3D9CC61 movzx r9d, byte ptr [obj+0x24]` → **byte[4]**），唯一用途是加进种子；
+   数组是 `RuntimeHelpers.InitializeArray` 的常量初始化，blob 指针运行时从 `klass+0x30` 取，
+   **不在 .so 固定 VA 上**（所以第 (15) 轮"扫内存捞这个 19 字节数组"从一开始就捞不到东西）。
+2. **种子 ≠ 硬编码 235。** `0xEB` 只是 `ebp` 的初值，真值是
+   `235 + byte[4] + (bytes[len-1] & ~0x80)`（`0x3D9CC0C`→`0x3D9CC17`→`0x3D9CC5F`）——**逐文件变**，硬编码的只有 235。
+3. **上一轮"起点 0..4095 穷举"这条否证有漏洞**：只穷举了偏移、没穷举种子，而种子刚被证明是逐文件的。
+
+**修法（把否证做成穷举级，而不是再抽一轮样）**:
+`out[i]` 只取 `state>>8` 的 **bit 8..15**，而 `state=(state+c)*205+207` 是仿射、**只向高位进位**
+→ bit 8..15 永远只由低 16 位决定 → **有效种子只有 65536 个**，可以真穷举。
+进一步不扫而是**反解**：目标前缀首字节直接钉死 `state₀` 的 bit8..15，候选降到 256 再逐字节过滤，
+与全量检验等价，且能报出**期望假命中数** = 偏移数 × 2^(16-8×前缀长)。
+实测（`26_www_wrapper.py --max-off 4096`）：`UnityFS\0` 在 scripts64/32 上 **0 命中（64 位约束，期望假命中 1.5e-11）**；
+`--[`（24 位，期望 16）命中 12/21 —— **噪声带与预测吻合**，仪器自洽。
+
+**踩坑记录**:
+- **判据可达性要先于判据执行**。定判据时先问一句："若这段代码根本不作用于这份数据，这条判据会怎样？"
+  答"照样不成立"就说明它无法区分两种假设，是废判据。本项目这是第 6 个假绿灯家族实例。
+- 阳性对照与埋针对照**都要**：`26_www_wrapper.py` 第一版「反解阳性对照 400 次全失败」
+  （过滤循环把上一步 state 又当 seed append 回去）；修好后埋针对照仍 **0/5**，
+  因为**加密方向**写错——`www()` 里 `c = b[i]` 读的是**密文**，所以 state 必须用**写下去的 c** 推进，
+  不是明文。两条 bug 相隔两步、互相掩盖，只留一条对照就会漏。
+- **结论是"这函数不管这份数据"≠ 分支作废**：内存里有 776 项 `sharecfg/<表名>.lua` 清单（见 §22 / README (14)），
+  若配置以该形态被 `require`，`www()` 恰是它的解密封 —— 只是输入不是磁盘上那个裸容器。
+  收口必须写"改接到哪去了"，否则线索随分支一起丢。
+
+**涉及文件**: `tools/sharecfg_re/08_disasm_method.py`（`--xref`）、`tools/sharecfg_re/26_www_wrapper.py`（新增）、
+`tools/sharecfg_re/README.md` (15)(16) 与「下一步（第 6 次收口）」、`docs/WORKFLOWS.md` **WF-18**、§22。
