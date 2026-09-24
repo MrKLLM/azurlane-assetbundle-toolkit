@@ -659,7 +659,8 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
   目录名 `chrome_*` / 无 chrome|msedge 进程命令行引用它 / 最后修改早于 `--min-age`（默认 30 分钟，防误删并发会话在写的）。
   它只碰 `chrome_*`，`.diag` 下其它产物一律不动——清理 `.diag` 仍要先核对 WF-15 白名单。
 - **登记/新增 HitArea 必须做几何校验**（2026-09-24 §27）：`fix_model3.py` 早期只判断 `"Touch"+名` 这段字节是否出现在 moc3 里，于是**零面积标记、彼此重合的标记**也被登记成部位框；而前端「重叠取面积最小者」会让面积≈0 的框**永远抢赢**合法大框（真人又点不中它）。前端已在 `geomOf` 里挡掉退化框（判定与可视化同源），源头校验仍待补进 `fix_model3.py`。取证工具：`py -3 scripts/diag/l2d_hit_geom_forensics.py [key ...]`（逐框：自己是否接受自己的中心点 + 谁赢）与 `--scan-all`（全库退化/同几何统计，落 `.diag/l2d_hit_geom_scan.json`）。
-- **断言要区分「几何上本就该别人赢」与「链路真断」**：`hit_verify.py` 现给四类 `HIT / SHADOWED / WIRING / OUTSIDE`，**只有 WIRING（真实派发 ≠ 产品 `hitAt` 判定）算 bug、才给非零退出码**；`SHADOWED` 是多个 `Touch*` 标记几何重叠的必然结果（产品按最具体优先是设计）。几何判定一律调产品暴露的 `window.__L2_HIT`，**探针不许自己复算一份几何**（复算版实测与真实派发 4/38 条不一致，拿它下结论就是自证）。
+- **断言要区分「几何上本就该别人赢」与「链路真断」**：`hit_verify.py` 现给四类 `HIT / SHADOWED / WIRING / OUTSIDE`，**只有 WIRING（真实派发 ≠ 产品 `hitAt` 判定）算 bug、才给非零退出码**；`SHADOWED` 是多个 `Touch*` 标记几何重叠的必然结果（产品按最具体优先是设计）。几何判定一律调产品暴露的 `window.__L2_HIT`，**探针不许自己复算一份几何**（复算版实测与真实派发 4/38 条不一致，拿它下结论就是自证）。 同理 `l2d_inspector_verify.py` 的判定区那条：2026-09-24 起断「画出的框 == 产品 `window.__L2_HITUSE()` 可用清单（逐个标签相同）」，不再是「== 登记数」——退化框被 `geomOf` 挡掉后两者本就不等（§27）。
+- **CDP 脚本每条退出路径都要回收 Chrome**（`try/finally` + 按父 PID 连子进程一起停）：泄漏的无头实例会与下一轮抢 profile，复现出 `Execution context was destroyed` 那类假失败（2026-09-24 亲测踩中，见 §27 末段）。
 - ⚠️ **跑 `l2d_ref_diff.py` / `l2d_ab.py` 比对临时重导目录时，必须显式带 `L2D_OUT_DIR=<临时目录>`。** 不给的话
   ref_diff 比的是正式目录（自证清白），`l2d_ab.py` 的"新侧"会读默认的陈旧目录得出"新旧一致"的假结论；
   而 ref_diff 在只含 `motion/` 的临时目录上曾经**全部 SKIP 却退出 0**。三处假绿灯的根因与判据见 `TROUBLESHOOTING.md` §24。

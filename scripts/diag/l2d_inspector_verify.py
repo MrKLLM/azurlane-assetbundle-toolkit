@@ -63,11 +63,19 @@ JS = r"""(async(key)=>{ try{
   const st=l2State.app.stage;
   document.getElementById('l2AreasBtn').click(); await t(600);
   const gfx=st.children.filter(c=>c instanceof PIXI.Graphics);
+  const usable=(window.__L2_HITUSE? __L2_HITUSE().slice() : (im.settings.hitAreas||[]).map(a=>a.Name));
   out.areas={btnOn:document.getElementById('l2AreasBtn').classList.contains('on'),
              graphics:gfx.length, visible:gfx.map(g=>g.visible), shapes:gfx.map(g=>g.geometry.graphicsData.length),
+             registered:(im.settings.hitAreas||[]).length, usableN:usable.length,
              labels:st.children.filter(c=>c instanceof PIXI.Text && c.visible).map(c=>c.text)};
-  out.areas.ok = out.areas.btnOn && out.areas.shapes[0]===(im.settings.hitAreas||[]).length
-                 && out.areas.labels.length===(im.settings.hitAreas||[]).length;
+  /* 2026-09-24 起登记数 ≠ 可点数：退化框（面积或宽/高≈0）被 geomOf 挡掉，既不可点也不画，
+     否则那种点不到的框会抢走合法大框的点击（§27）。所以断言改成对齐**产品自己的可用清单**，
+     并且要求画出的标签集合与它逐个相同 —— 比旧的"等于登记数"更强（旧的那条只看数量）。 */
+  const drawn=out.areas.labels.slice().sort().join('|');
+  out.areas.ok = out.areas.btnOn && out.areas.shapes[0]===usable.length
+                 && out.areas.labels.length===usable.length
+                 && drawn===usable.slice().sort().join('|');
+  if(!out.areas.ok){ out.areas.expectLabels=usable.slice().sort(); }
   // ② 参数·部件面板
   document.getElementById('l2PanelBtn').click(); await t(400);
   const pn=document.getElementById('l2panel'); const rows=pn.querySelectorAll('.prow');

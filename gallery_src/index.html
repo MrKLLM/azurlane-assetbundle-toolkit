@@ -563,6 +563,9 @@ async function renderLive2D(s, sk){
        hit_verify 用它把一个未命中拆成两类：几何上本就该别人赢（被遮）vs 事件链路真断（wiring）。
        真实点击路径仍然走下面的 pointerdown→hitAt，探针不许绕过它（WF-16 规则）。 */
     window.__L2_HIT=(x,y)=>hitAt(x,y);
+    /* 产品自己的「可用判定框」清单（=几何非退化、能参与竞选的那些）。
+       验证脚本拿它对齐"画了几个框"，而不是自己再算一遍面积——判定/可视化/探针必须同一个源。 */
+    window.__L2_HITUSE=()=>hitAreas.filter(h=>!!geomOf(h)).map(h=>h.name);
     /* 兜底只给「没有判定区」的模型用；有 HitAreas 的模型点空白处不播任何动作（与游戏一致），
        否则会随机触发一个 touch_drag* 动作，用户会觉得「点哪都乱动」 */
     const fallbackG=hitAreas.length ? null : (groups.find(g=>/^(tap|touch)/i.test(g))||null);

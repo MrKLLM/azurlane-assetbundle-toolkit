@@ -873,4 +873,8 @@ UnityFS；单字节常量 XOR/加/减；短重复密钥 XOR（周期 1–32，�
 
 **已排除的假设**：① 不是"缺面积最小规则"（已存在）；② 不是本轮重导引入（登记规则自 09-22 就在，只是当时只有 13 个模型带多个真实框，规模没暴露）；③ 不是事件链路问题（`WIRING=0`）；④ 不是探针坐标系问题（V/P 换算沿用 §20 的 `V2P`，且 `HIT` 的 32 条走的就是真实派发）。
 
-**涉及文件**: `gallery_src/index.html`（`geomOf` 退化框过滤、`window.__L2_HIT` 暴露）、`scripts/deploy_gallery.py`（改完必须部署，否则等于没改）、`scripts/diag/hit_verify.py`（四类断言 + 退出码）、`scripts/diag/l2d_hit_geom_forensics.py`（新增：逐框几何取证 + `--scan-all` 全库体检）、`scripts/fix_model3.py:152`（**待改**：登记前需几何校验）、`TROUBLESHOOTING.md` §18/§21/§24。
+**改完必须连带的第三个断言（差点漏掉）**：`l2d_inspector_verify.py` 原来断「画出的框数 == 登记的 HitAreas 数」，A 之后前提就不成立了（退化框既不画也不可点），跑出来 `areas.ok=false`。修法与 §27 的原则一致——**不让探针自己复算几何**，改由产品暴露 `window.__L2_HITUSE()`（= `hitAreas` 里 `geomOf` 非空的那批），断言对齐它，且**逐个标签集合相同**（旧断言只比数量，比集合更严）。对照实测：`lafeiii_3` 登记 25 → 可用 7（画 7，18 个退化被挡），`antu_2` **登记 57 → 可用 57**（一个都没误杀，证明阈值不是把合法斜框也过滤了）。另：`page_sanity_check` 健康、`interact_verify` 总判定 ALL PASS、`l2d_coord_forensics` head→Head / chest→Special / hip→Body 且 `identityHits` 全空。
+
+**工具侧踩坑（会坑到下一个会话）**：CDP 脚本被宿主 `timeout` 掐掉时，`try/finally` 缺失就不回收 Chrome → 泄漏的无头实例与下一轮抢 profile，造出 `Execution context was destroyed`（WF-16 记过的那类假失败，本次真的复现了一次）。`l2d_hit_geom_forensics.py` 已加 `kill_tree()`（按父 PID 连子进程一起停）并在每条退出路径调用；清理时 `clean_diag_profiles.py` 的「进程仍引用就不删」判据也第一次真实生效（保住了并发会话正在用的 `chrome_galprobe3`）。
+
+**涉及文件**: `gallery_src/index.html`（`geomOf` 退化框过滤、`window.__L2_HIT` 与 `window.__L2_HITUSE` 暴露）、`scripts/deploy_gallery.py`（改完必须部署，否则等于没改）、`scripts/diag/hit_verify.py`（四类断言 + 退出码）、`scripts/diag/l2d_hit_geom_forensics.py`（新增：逐框几何取证 + `--scan-all` 全库体检）、`scripts/fix_model3.py:152`（**待改**：登记前需几何校验）、`TROUBLESHOOTING.md` §18/§21/§24。

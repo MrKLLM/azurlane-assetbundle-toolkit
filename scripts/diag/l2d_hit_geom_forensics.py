@@ -118,6 +118,19 @@ SCAN_JS = r"""(async key => {
 """
 
 
+def kill_tree(proc):
+    """Chrome 必须真的收干净：泄漏的无头实例会和下一轮抢 profile，
+       造出 WF-16 记过的 "Execution context was destroyed" 假失败。"""
+    try:
+        subprocess.run(['powershell.exe', '-NoProfile', '-Command',
+                        f"Stop-Process -Id {proc.pid} -Force -ErrorAction SilentlyContinue;"
+                        f"Get-CimInstance Win32_Process -Filter \"ParentProcessId={proc.pid}\" |"
+                        " ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
+                       capture_output=True, timeout=30)
+    except Exception:
+        proc.terminate()
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     scan = "--scan-all" in sys.argv
@@ -143,7 +156,7 @@ def main():
         time.sleep(0.5)
     if ws is None:
         print('[ERROR] 连不上 Chrome 或页面未开——先确认 8777 服务器在跑（page_sanity_check.py）')
-        proc.terminate()
+        kill_tree(proc)
         return 2
 
     def ev(expr, t=120):
@@ -209,7 +222,11 @@ def main():
         print(f"  明细: .diag/l2d_hit_geom_scan.json")
         print("  最严重的 10 个模型（按退化框占比）:",
               sorted(deg_models, key=lambda x: -x[1] / x[2])[:10])
-        ws.close(); proc.terminate()
+        try:
+            ws.close()
+        except Exception:
+            pass
+        kill_tree(proc)
         return 0
     for k in keys:
         out = ev(f"({JS})({json.dumps(k)})")
@@ -236,8 +253,11 @@ def main():
         if disagree:
             print(f"   ⚠️ 复算与实际派发不一致 {len(disagree)} 条 → 本脚本的几何复算不可信，别据此下结论")
     print(f"\n===== 合计 =====  {tally}")
-    ws.close()
-    proc.terminate()
+    try:
+        ws.close()
+    except Exception:
+        pass
+    kill_tree(proc)
     return 0
 
 
