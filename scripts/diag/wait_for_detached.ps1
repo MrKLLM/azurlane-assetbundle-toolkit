@@ -12,10 +12,12 @@
 param(
   [Parameter(Mandatory = $true)][string]$Pattern,
   [int]$MaxSeconds = 1800,
+  [int]$StallRounds = 0,
   [string]$Log = '',
   [string]$SummaryRegex = '总计|SUMMARY|汇总|总判定'
 )
 $ErrorActionPreference = 'SilentlyContinue'
+$still = 0
 
 function Worker {
   Get-CimInstance Win32_Process | Where-Object {
@@ -33,9 +35,15 @@ $w = Worker
 while ($w -and (Get-Date) -lt $deadline) {
   Start-Sleep -Seconds 20
   $now = Lines $Log
-  $age = [int](((Get-Date) - ([datetime]$w.CreationDate)).TotalSeconds)
+  $proc = Get-Process -Id $w.ProcessId -ErrorAction SilentlyContinue
+  $age = if ($proc) { [int](((Get-Date) - $proc.StartTime).TotalSeconds) } else { -1 }
+  if ($now -eq $last) { $still++ } else { $still = 0 }
   Write-Output ("... running pid=" + $w.ProcessId + " age=" + $age + "s loglines=" + $now +
-                ($(if ($now -eq $last) { " (未增长)" } else { "" })))
+                " 未增长轮数=" + $still)
+  if ($StallRounds -gt 0 -and $still -ge $StallRounds) {
+    Write-Output "RESULT=HUNG  进程活着但日志连续 $still 轮不增长 —— 按「崩溃/截断」处理，不要等它收尾"
+    exit 3
+  }
   $last = $now
   $w = Worker
 }
