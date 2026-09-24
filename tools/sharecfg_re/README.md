@@ -148,7 +148,42 @@ lag 自相关（15 号脚本前置实测）：`ship_skin_words`/`gametip` 在 **
 前者与"UTF-8 三字节汉字"同型、后者与 4 字节记录同型 —— 但短周期 XOR 已被上面第 2 行判否，
 所以这更像**明文自身的结构周期**被某种逐字段变换保住，而不是密钥周期。
 
-### 下一步（按期望收益排序，2026-09-24 收口）
+### (7) 2026-09-24 进程内存取证（用户放行，全程只读）——**没拿到明文，但拿到了更好的路**
+
+工具 `16_mem_hunt.py`（`maps` / `selftest` / `dump` / `hunt`）。过程与实测：
+
+- **先踩到一个真 bug 并被阳性对照抓住**：`adb shell` 通道会把 `\n` 改写成 `\r\n`
+  （请求 262144 字节回 266643）。改用 `exec-out`，并把对照做成**逐字节比对**
+  （取 `global-metadata.dat` 的 `off==0` 映射区前 4KB 与本地文件比）→ **PASS**。
+  ⚠️ 任何"从设备流式读二进制"的活都必须先过这一关，别用 `shell`。
+- **量**：pid 2968，可读区域 2706 个 / 虚拟 3128MB，其中匿名区(堆/栈/JIT) 1299 个 / 1960.6MB；
+  全量拉匿名区耗时 **6m52s**（≈17MB/s），落到 `.diag/sharecfg_re/memdump/`（gitignore）。
+- **否证（重要）**：1958.5MB 匿名内存里，**azdata 的 300 个已知明文中文词 0 命中**。
+  → 内存里**没有整表驻留的解密配置**，"从 RAM 直接白拿明文"这条路不成立。
+  与 C# 侧证据自洽：`ReadData(name,startPos,size)` 是**按需切片读**，解出的值只短暂存在
+  于 Lua 字符串里，游戏当前停在登录/主界面，皮肤表根本没被整表加载。
+- **但拿到了资源地图**（内存里的路径字符串，逐条实测）：
+  `assets/luabuilds/android/normal/sharecfg/ship_skin_words.lua.bytes`、
+  `.../sharecfg/ship_skin_template.lua.bytes`、`ship_skin_template_column_time.lua`、
+  `assets/luabuilds/android/normal/gamecfg/{buff,dungeon,skill}`、
+  `assets/AssetBundles/scripts64`、`/storage/emulated/0/Android/data/.../sharecfgdata/gametip`。
+  → **证实 `www()` 的输出是一个装着 TextAsset 的 AssetBundle，Lua 按表分文件**，
+  且 `PathMgr.EncryptSuffix` 的 `.bytes` 命名规则得到印证。
+- **新的主路径（下一步做这个）**：内存里有**大量 LuaJIT 字节码**——`\x1bLJ` 在两个区域各出现
+  **5153 / 6838 次**（另有 `WorldShipRepairCommand.lua`、`W1138.lua`、`WORLD302A.lua` 等 chunk 名紧邻）。
+  既然字节码已经在内存里是**解密后的形态**，就不必破解 `scripts64` 容器：
+  **直接从内存提取 `sharecfg` 相关模块的字节码，反汇编/读常量池**，即可拿到配置解析算法与那把 key。
+
+### 下一步（按期望收益排序，2026-09-24 第 2 次收口）
+
+1. **从内存提取 LuaJIT 字节码**：按 `\x1bLJ` 头切出 blob，解析头部与 BC 常量池，
+   找 `sharecfg` / `gamecfg` 相关模块；重点看它的字符串常量里有没有密钥与 `(startPos,size)` 的用法。
+2. 若字节码提取受阻，再回到离线路线：读完 `www()` 主循环 + 验证"首 5 / 末 26 字节封帧"假设。
+3. 若 1/2 都拿到解析器，**验收仍用唯一判据**：解出的 `ship_skin_template` 与 azdata 基准逐字段一致。
+
+
+
+#### 附：第 1 次收口时列的清单（保留留痕；第 4 项今天已做完，结论见 (7)）
 
 1. **验证"外层封帧"假设**：把 `scripts64` 去掉首 5 / 末 26 字节后，末尾 4 字节是否变成合法长度、
    解出来是否 `UnityFS`。若成立 → `www` 的 19 字节 key 一拿到就能直接开 Lua。
@@ -156,8 +191,7 @@ lag 自相关（15 号脚本前置实测）：`ship_skin_words`/`gametip` 在 **
 3. **拿 19 字节 key**：要么把 v31 `fieldDefaultValues` 索引法解出来，要么——已知明文攻击：
    UnityFS 头 12 字节是固定串 `00 00 00 07 55 6e 69 74 79 46 53 00`，
    若 `www` 是纯周期 19 XOR，则 `K[0..11] = C[0..11] ^ 那 12 字节`，**不需要 metadata 就能凑出大半个 key**。
-4. **进程内存取证**（MuMu 已运行、`su` 可得 uid 0、D 盘剩 293GB）：一次同时拿到"解出的配置"和"Lua 解析器源码"。
-   这是唯一能绕过 1–3 全部不确定性的路，但要动用户正在运行的游戏进程，**需用户明确放行**。
+4. ~~进程内存取证（需用户放行）~~ → **已放行并做完（见 (7)）**：没有整表明文，但有 LuaJIT 字节码。
 
 
 
