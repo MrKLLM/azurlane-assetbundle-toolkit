@@ -67,7 +67,7 @@ def main():
             if not names:
                 continue
             nm = names[0].lstrip('=').lstrip('@')
-            st = [s.decode('ascii', 'replace') for s in STR_RE.finditer(seg[:8192])]
+            st = [m.group().decode('ascii', 'replace') for m in STR_RE.finditer(seg[:8192])]
             sus = [s for s in st if SUSPECT.search(s)]
             e = mods.setdefault(nm, {'count': 0, 'sus': collections.Counter(),
                                      'files': collections.Counter(), 'strs': set()})
