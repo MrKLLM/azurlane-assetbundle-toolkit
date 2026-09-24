@@ -100,11 +100,29 @@ JS = r"""(async key => { try{
                                wrap.dispatchEvent(new PointerEvent('pointerdown',opt));
                                window.dispatchEvent(new PointerEvent('pointerup',opt));
                                await t(700); return mm.state.currentGroup; };
-    const cur=await clickAt(c.scr);
+    /* 读结果不能用「点完等 700ms 再看一次 currentGroup」——短的 touch_idle 与 drag 类动作
+       不到 700ms 就播完回落 idle，会被读成「没响应」（同 §6.10 那类假阴性，只是换了地方）。
+       改成两路取：① 点完立刻读状态栏 pill（play() 成功时才写，同步且精确）；
+       ② 之后每 120ms 轮询 currentGroup 共 14 次，任一次等于候选即算播出。 */
+    const pillNow=()=>{ const el=document.getElementById('l2Hit'); return el?el.textContent||'':''; };
+    const before=pillNow();
+    const t0=performance.now();
+    const opt0={bubbles:true,cancelable:true,pointerId:1,clientX:c.scr[0],clientY:c.scr[1],button:0};
+    wrap.dispatchEvent(new PointerEvent('pointerdown',opt0));
+    window.dispatchEvent(new PointerEvent('pointerup',opt0));
+    let cur=null, fromPill=null;
+    const pill=await (async()=>{ await t(30); return pillNow(); })();
+    if(pill && pill!==before){ const m=/→\s*(.+)$/.exec(pill); if(m) fromPill=m[1].trim(); }
+    for(let i=0;i<14 && !cur;i++){ await t(120);
+      const g=mm.state.currentGroup; if(g && g!=='idle') cur=g; }
+    const played=cur||fromPill||mm.state.currentGroup;
+    cur=played;
+    if(!cur && fromPill) cur=fromPill;
     /* A3（2026-09-24 用户裁定）：同一位置挂多个 Touch 标记时随机挑一条 →
        断言从「必须等于自己」改成「必须落在候选集合里」，否则把设计行为当失败 */
+    const usable=window.__L2_HITUSE? window.__L2_HITUSE() : null;
     let cls;
-    if(!cand.length) cls='OUTSIDE';
+    if(!cand.length) cls=(usable && !usable.includes(a.Name)) ? 'NOTCLICKABLE' : 'OUTSIDE';
     else if(cur===a.Name) cls='HIT';
     else if(cand.includes(cur)) cls='INGROUP';
     else cls='WIRING';
@@ -180,13 +198,15 @@ c = {}
 for x in allres:
     c[x.get('cls')] = c.get(x.get('cls'), 0) + 1
 wiring = c.get('WIRING', 0)
+nclick = c.get('NOTCLICKABLE', 0)
 outside = c.get('OUTSIDE', 0) + c.get('NOGEOM', 0)
 reach = sum(1 for x in allres if x.get('reachable'))
 rand = [r.get('randChk') for r in rows if r.get('randChk')]
 rand_fail = [r for r in rand if r['distinct'] < 2 or not r.get('noRepeatOK')]
 print(f"\n模型 {len(cands)} 个 | 全部部位都命中自己的模型 {ok_models}")
 print(f"部位总计 {tot}：HIT(命中自己) {c.get('HIT', 0)} | INGROUP(随机出同组另一条) {c.get('INGROUP', 0)}"
-      f" | WIRING(实播不在候选集合内=链路断) {wiring} | OUTSIDE/NOGEOM {outside}")
+      f" | WIRING(点了没播出/播了候选外的) {wiring} | OUTSIDE/NOGEOM {outside}"
+      f" | NOTCLICKABLE(退化框，设计上不可点，不算异常) {nclick}")
 print(f"可点中率（该部位自己的中心落在自己的可用框内）: {reach}/{tot} = "
       f"{round(100.0 * reach / tot, 1) if tot else 0}%")
 if rand:
