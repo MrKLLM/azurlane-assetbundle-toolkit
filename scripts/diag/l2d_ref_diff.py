@@ -48,7 +48,10 @@ BASE = "https://static.l2d.su/azurlane/live2d"
 TIMEOUT = 25
 # urlopen(timeout=25) 只约束**单次 socket 操作**：慢滴式响应能让整轮挂住（2026-09-24 实测
 # 206/269 处 25 分钟零输出），所以每个 URL 还要一道墙钟硬上限。见 TROUBLESHOOTING §26。
-HARD_DEADLINE = 12
+# 12s 太紧：实测该站高峰单请求就要 8~12s，12s 会把"其实能成"的请求判成放弃，
+# 而那些组会被当成"参考库没有"→ 比对不完整却看起来像通过。放宽到 30s，并在 verdict 里
+# 用 INCOMPLETE 显式区分"比对过且一致"与"根本没比到"。
+HARD_DEADLINE = 30
 CACHE = os.path.join(DIAG, "refcache")
 STATS = Counter()          # cache_hit / ok / miss404 / err / hung
 USE_CACHE = True
@@ -214,9 +217,12 @@ def pick_paired(model_dir, files, ref_j):
 
 
 def evaluate_model(key, clips=None, samples=121):
+    hung0 = STATS["hung"]
     ref_m3 = fetch(f"{BASE}/{key}/{key}.model3.json")
     if not ref_m3:
-        return {"key": key, "skip": "参考库无此模型"}
+        # 「超时」与「参考库真没有」必须分开：前者重跑能补，后者是真覆盖缺口
+        return {"key": key, "skip": "取参考版 model3 超时（不是没有，重跑可补）"} \
+            if STATS["hung"] > hung0 else {"key": key, "skip": "参考库无此模型"}
     ref_groups = list((ref_m3.get("FileReferences") or {}).get("Motions") or {})
     ours_m3_path = os.path.join(OUT, key, f"{key}.model3.json")
     if not os.path.isfile(ours_m3_path):
@@ -231,25 +237,27 @@ def evaluate_model(key, clips=None, samples=121):
     res = {"key": key,
            "groups_ref": len(ref_groups), "groups_ours": len(ours_groups),
            "groups_missing": sorted(set(ref_groups) - set(ours_groups))[:20],
-           "clips": {}}
+           "clips": {}, "hung_groups": [], "ref_missing_group": [],
+           "unpaired": [], "no_file": []}
     targets = clips or [g for g in ref_groups if g in ours_groups]
     model_dir = os.path.join(OUT, key)
     for g in targets:
         files = (ours_m3["FileReferences"]["Motions"].get(g) or [])
         if not files:
-            res.setdefault("no_file", []).append(g)
+            res["no_file"].append(g)
             continue
+        hg0 = STATS["hung"]
         ref_j = None
         for sub in REF_SUBDIRS:
             ref_j = fetch(f"{BASE}/{key}/{sub}/{g}.motion3.json")
             if ref_j:
                 break
         if not ref_j:
-            res.setdefault("ref_missing_group", []).append(g)
+            res["hung_groups" if STATS["hung"] > hg0 else "ref_missing_group"].append(g)
             continue
         ours_j, ours_name, paired = pick_paired(model_dir, files, ref_j)
         if ours_j is None:
-            res.setdefault("unpaired", []).append(g)
+            res["unpaired"].append(g)
             continue
         rcur = {c["Id"]: parse_curve(c) for c in ref_j.get("Curves") or []}
         ocur = {c["Id"]: parse_curve(c) for c in ours_j.get("Curves") or []}
@@ -314,8 +322,20 @@ def verdict(r):
         if c["dev_gt05_pct"] > 12.0:
             soft.append(f"{g}: 偏差>0.5 占 {c['dev_gt05_pct']}%（超贝塞尔天花板 12%）")
     if not r["clips"]:
-        un = len(r.get("unpaired") or []) + len(r.get("no_file") or [])
-        return "WARN", f"无可比对的动作（配对失败/无文件 {un} 组）"
+        hung0 = len(r.get("hung_groups") or [])
+        rmis0 = len(r.get("ref_missing_group") or [])
+        up0 = len(r.get("unpaired") or []) + len(r.get("no_file") or [])
+        return "INCOMPLETE", (f"一组都没比到（超时 {hung0} / 参考库无 {rmis0} / 配不到或无文件 {up0}）"
+                              "——覆盖为零，既不算过也不算失败")
+    # 覆盖不足必须单独成一类：比了 3/14 组却报 PASS，就是新的假绿灯。
+    compared = len(r["clips"])
+    hung = len(r.get("hung_groups") or [])
+    rmis = len(r.get("ref_missing_group") or [])
+    up = len(r.get("unpaired") or []) + len(r.get("no_file") or [])
+    expected = compared + hung + rmis + up
+    if expected and compared < expected * 0.6:
+        return "INCOMPLETE", (f"只比到 {compared}/{expected} 组（超时 {hung} / 参考库无 {rmis} / "
+                              f"配不到 {up}）——覆盖不足，既不算通过也不算失败")
     if exact == 0:
         return "WARN", "全部 clip 都没配到同时长文件（比对结果不可判，别当通过也别当失败）"
     r["info_notes"] = info[:8]
@@ -342,7 +362,8 @@ def main():
     keys = sorted(os.listdir(OUT)) if args.all else list(args.keys or [])
     if args.only:
         keys = [k.strip() for k in args.only.split(",") if k.strip()]
-    keys = [k for k in keys if os.path.isdir(os.path.join(OUT, k))]
+    keys = [k for k in keys if os.path.isdir(os.path.join(OUT, k)) and not k.startswith("_")]
+    # 下划线开头的是工作目录不是模型（`_ab` 是 l2d_ab.py 的硬链接壳），混进来会白报一个 SKIP
     if not keys:
         print(__doc__)
         return 2
@@ -384,11 +405,12 @@ def main():
 
     n = lambda v: sum(1 for r in results if r.get("verdict") == v)
     ok, warn, fail, skip = n("PASS"), n("WARN"), n("FAIL"), n("SKIP")
-    evaluated = len(results) - skip
+    inc = n("INCOMPLETE")
+    evaluated = len(results) - skip - inc
     paired_exact = sum(1 for r in results for c in (r.get("clips") or {}).values() if c.get("paired") == "exact")
     paired_closest = sum(1 for r in results for c in (r.get("clips") or {}).values() if c.get("paired") == "closest")
     info_n = sum(len(r.get("info_notes") or []) for r in results)
-    print(f"\n===== 汇总 =====  PASS {ok} / WARN {warn} / FAIL {fail} / SKIP {skip}（共 {len(results)}）", flush=True)
+    print(f"\n===== 汇总 =====  PASS {ok} / WARN {warn} / FAIL {fail} / INCOMPLETE {inc} / SKIP {skip}（共 {len(results)}）", flush=True)
     print(f"  clip 配对: exact {paired_exact} / closest {paired_closest}"
           f" | 关键帧集合差异记为 INFO 的 clip {info_n}", flush=True)
     print(f"  网络: {dict(STATS)}  （缓存目录 {CACHE}，--no-cache 可绕过）", flush=True)
@@ -397,11 +419,11 @@ def main():
     print(f"详细结果: {path}", flush=True)
     if evaluated == 0:
         # 全跳过时 0==0 曾经返回 0 = 绿灯，而实际一条都没比对。验收工具不得静默空跑。
-        print("[FAIL] 没有任何模型真正参与比对（全部跳过）→ 判为失败，不是通过", flush=True)
+        print("[FAIL] 没有任何模型真正参与比对（全部跳过或覆盖不足）→ 判为失败，不是通过", flush=True)
         return 1
-    print(f"[i] 退出码只认 FAIL（真缺陷：漏组 / 配对成功下曲线缺失 / 偏差中位>0.5）；"
+    print(f"[i] 退出码同时认 FAIL（真缺陷）与 INCOMPLETE（覆盖不足，不得当通过）；"
           f"WARN={warn} 含天花板与配对差异，需逐条看不算硬失败", flush=True)
-    return 0 if fail == 0 else 1
+    return 0 if (fail == 0 and inc == 0) else 1
 
 
 if __name__ == "__main__":
