@@ -737,6 +737,10 @@ py -3 scripts/diag/l2d_voice_inventory.py --verbose  # 列缺失引用与孤儿�
   ⚠️ **不要拿生产 `l2d_voice.json` 当"改前"基线**——它是旧日期、旧动作组集合下生成的，
   差异里混着别的变量的变化（本轮就差点据此把 `login/mission_complete` 的缺席记成自己引入的回退）。
 - **踩坑**：`--report` 会逐个 cue 走 vgmstream，单皮肤也要几十秒 → **别在前台跑**，会被宿主超时打断。
+- **零回退闸门（已入库为工具）**：`py -3 scripts/diag/l2d_voice_diff_check.py [旧表] [新表]`
+  判据 = 丢掉的 (皮肤,组) 0 / 丢掉的皮肤 0 / 磁盘缺失音频 0 / `<2KB` 占位 0，退出码非 0 即不通过。
+  ⚠️ 它按 **相对 `Output/`** 解析映射里的路径（`Audio/L2D/<皮肤>/<cue>.ogg`），拿 `gallery_v2/` 当根会误报"全部缺失"。
+- **完成判定看条数不看退出码**：`grep -c '组=' 日志` 应等于映射表皮肤数；`grep -cE 'Traceback|Exception in thread'` 必须 0。
 
 ### WF-18: 逆向里给一个函数判"作用域"与把"否证"做成穷举级（调用方反查 + 自由度压缩 + 三条对照）
 
