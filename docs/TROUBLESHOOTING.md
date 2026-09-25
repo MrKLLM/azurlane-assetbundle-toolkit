@@ -1729,4 +1729,20 @@ ship_meta 里只有 `linghangyuan1_2` 等具体 stem ⇒ 36 个 NPC 名进了 sh
   拿 `Output/Paintings_v2/suweiaitongmeng_3.png` 一比即证伪——立绘本来就是道场倒地 + 前缩透视。
   **看图判据要说"和什么比"**，否则会像 §40 主因那样把代理指标当结论，反过来也会把正常画面当 bug。
 
+**③ 目视覆盖到哪一步（防止下一轮把"26 个看过"读成"全库验过"）**
+共逐个看图 **26 个 / 269**，抽样设计是**按 (moc3 版本 × 贴图数) 分桶全覆盖**（全库共 15 个桶）：
+
+| 批次 | 模型 | 结果 |
+|---|---|---|
+| 修复的 5 个 | benningdun_2 / feiteliekaer_4 / sebao_2 / shi_3 / wuzang_4 | 全部恢复成形 |
+| 对照组 2 个 | bunao_3 / pulimaosi_3 | 与修复前一致（文件未被写入） |
+| 枚举序最乱 5 个 | xuefeng(6 张) / z23(5) / weizhang_3 / suweiaitongmeng_3 / taiyuan_2 | 全部成形 |
+| 分桶抽样 14 个 | aidang_2 / aierdeliqi_5 / lingbo / lafei / biaoqiang / abeikelongbi_3 / adaerbote_3 / banerwei_3 / buleisite_3 / aersasi_2 / anninvwang_2 / aersasi_3 / gangyishawa_3 / guanghui_9 | 全部成形 |
+
+**未发现新增破损**。⚠️ 边界要说清：这证的是"**贴图索引绑定**这一类故障在全库已无残留"
+（另有 269/269 结构闸门 + 269/269 完整性对账兜底），**不等于** 269 个模型没有别的视觉缺陷——
+其余 243 个未被目视覆盖，非贴图绑定类问题（部件错位、参数残留、判定区）仍需按个案报上来查。
+截图目录 `.diag/l2d_shots_visual/`（已 gitignore，不进仓库）。
+
+
 
