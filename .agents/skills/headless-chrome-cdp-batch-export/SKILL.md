@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。
-version: 1.1.0
+version: 1.2.0
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -46,9 +46,23 @@ version: 1.1.0
 1. **断言要读运行时状态，别用画面代理指标**。判"动画/交互是否生效"要读引擎内部状态（如 Live2D 的 `motionManager.state.currentGroup`、Spine 的 `anim.getCurrent`）。帧哈希/`drawImage` 比对两头都骗人：无头环境 rAF 被节流 → **假阴性**；而 physics/眨眼等常驻动画让帧一直变化 → **假阳性**（曾据此误判"动画正常"）。
 2. **异步生效要等一拍再断言**。触发函数内部常含 `fetch`（如 Live2D 加载 motion JSON），调用后立刻读状态会拿到空值 → 误判失败。加 ~1.5s 等待再采样。另注意某些状态会**自动回落**（idle 播完 `currentGroup` 归 null），所以"值变了"才是被触发的证据。
 3. **冷启动要先轮询等待页面全局变量**。删过 profile 后页面加载变慢，`/json` 有 tab、甚至 `evaluate` 能跑，都不代表数据脚本已执行；直接访问 `window.<DATA>` 会 `ReferenceError`。探针开头写 `for(let i=0;i<80 && !window.GALLERY;i++) await t(300)`。
+   - ⚠️ **就绪谓词本身会造成"门在生效"的假象**：`Runtime.evaluate` 里写
+     `typeof G!=='undefined' && Array.isArray(G.ships) && G.ships.length`，返回的是**最后一个操作数的值**
+     （一个数字），Python 侧 `is True` 恒假 → 门退化成白等满超时，症状是"工具很慢"而不是"门没生效"，
+     且后续步骤可能照样成功，于是永远发现不了。→ **谓词一律显式降为布尔**：`String(<expr>)==='true'`
+     或在 JS 侧 `=== true` / `Boolean(...)`；写完先故意在页面加载前跑一次，确认它真的会等待。
 4. **两个 chrome 实例并发跑 CDP 会互相抢**，表现为 `Execution context was destroyed`。批量验证串行执行，或确保端口/profile 完全隔离且不重叠运行。
 5. **清理残留 chrome 必须按 `--user-data-dir` 精确匹配命令行再 kill**：`Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | ? { $_.CommandLine -like '*<你的profile目录>*' }`。**绝不能按进程名全杀**——会误杀用户自己的浏览器。
 6. **跨坐标空间的自动化探针，断言要落在产品语义上**。若探针要自己算目标坐标（模型单位 → 屏幕 → 再被页面反解回单位），往返误差在极端坐标处会被放大，导致"我猜它不该命中"类断言恒失败。改断言成产品契约（如"有判定区的模型任何点击都不该播出兜底动作组"）。
+7. **上面第 1 条"读运行时状态"对视觉产物只够证「没死」，不够证「对」**（2026-09-26 实测）：
+   Live2D 贴图整体错绑时，加载成功、drawable 计数正常、参数跨帧 min/max 全在动——代理指标**全部为真**，
+   而画面是几十个部件碎片叠一堆。→ 渲染类产物的批量验证必须**同时**有：
+   ① 状态断言（快、可全量、能进 CI）＋ ② 按 canvas `clip` 只截模型区的截图，**逐张看内容**
+   （慢、只能抽样，但唯一能证"对"）。只有 ① 的验收报告不要写成"全绿"。
+   看图要有**可比对象**（同皮肤静态图 > 同批未改动对照组 > 外部权威实现），否则会把
+   正常的前缩透视/夸张构图判成"姿势反常"。
+8. **探针脚本不要在启动时清空整个输出目录**——同一轮里第二次运行会把上一轮的证据删掉。
+   只删本次要重产出的那些 key；跨轮对比依赖旧产物。
 
 ## 验证
 

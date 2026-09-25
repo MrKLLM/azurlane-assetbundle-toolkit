@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
-description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.2.0
+description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
+version: 1.3.0
 ---
 
 # Live2D 网页运行时集成
@@ -280,6 +280,30 @@ app.ticker.add(restTick);   // REST_DELAY=400, REST_MS=700
 - 运行时**完全不读 `pose3.json` / model3 的 `Pose` 键**（该字符串在 pixi-live2d-display 里出现 0 次），
   但支持 motion3 的 `Target:"PartOpacity"` → 换装/部件可见性只能写进 motion3.json，出 pose3 是死路。
 
+### 6.6 `Textures` 清单是**按索引**消费的：枚举序必须显式归一 + 闸门 + 看图
+
+`model3.json` 的 `FileReferences.Textures` 数组，运行时把第 i 项绑给 moc3 的**纹理索引 i**。
+moc3 文件里**不含任何贴图名**（碧蓝 269 个 moc3 全量搜不到 `texture_*.png` 字符串），
+所以"哪张图是索引 0"这件事**只能由清单顺序决定**，错了不会报错、只会画面碎。
+
+- **典型症状**：模型加载成功、动作在播、参数在动，但画面是"几十个部件碎片叠一堆"
+  ——每个 art mesh 从别的图集里采样。背景层（往往集中在某一张图）看起来还大体成形，
+  这反而最容易骗人："渲染出东西了"被当成"渲染对了"。
+- **导出侧的坑**：从 Unity bundle 落贴图时用的是序列化对象的**枚举顺序**，
+  它 ≠ 索引顺序。碧蓝实测 **51/269 个模型两者不一致**（最狠的一个 6 张图枚举成 `[02,05,00,03,04,01]`）。
+  也就是说这一步**必须在写完后显式归一**，不能指望生产方的迭代顺序；
+  归一化是承重步骤，不是装饰。
+- **归一规则**：按名中数字排（`texture_%02d` 的编号即索引），无数字者排在带数字之后按名称序。
+  前提是先全量确认命名齐整（碧蓝：`非 texture_%02d 命名 = 0`），否则"编号即索引"这条约定不成立。
+- **闸门**（退出码即判据，只读检查、`--apply` 才写）：`l2d_texorder_check.py`。
+- **完整性对账**（另一类静默失败：解码 `except: continue` 悄悄少一张，结构仍合法）：
+  逐模型比 源 bundle 的 `Texture2D` 清单 vs 磁盘 PNG，报 `missing / extra / 命名异常`。
+- **⚠️ 验收必须包含"逐张看图"**：加载成功、`getDrawableCount()`、参数跨帧 min/max、帧哈希在变——
+  在错绑这一类故障下**全部为真**。代理指标只能证"没死"，不能证"对"。
+  看图工具要现成（否则它自然被代理指标顶替），且**判据要写明"和什么比"**：
+  本技能实测把一张"人躺在地上、腿朝镜头"的正常前缩透视误判过一次"姿势反常"，
+  拿同皮肤的静态立绘一比即证伪。可比对象优先级：同皮肤静态立绘 > 同批未改动对照组 > 权威外部实现。
+
 ## 7. 无头验证判据（配合 CDP）
 
 ### 7.0 自研管线必须找**外部权威实现**做基准，自证清白一定会漏
@@ -359,3 +383,5 @@ after **53（与 before 相等）**，且位移 >0.3 的判定区数 = **0**。
 - [ ] 参数残留复位：断言 `paramSets[idleGroup]` 非空；「clip 驱动 − idle 驱动」差集写回 moc3 默认值；复位探针走页面 `play()` 入口，after 出画数 == before 出画数
 - [ ] 全库规模（数百模型）分批起新 Chrome（~40/批），首模型预热重跑、各批日志按 key 去重取最优
 - [ ] 补占位 HitAreas：Id 逐字节确认是 moc3 drawable、Name 取该模型真实存在的组（候选小写回落）、仅替换 Id⊆{HitArea,HitArea2}、改后 sha256 清单证"仅 N 文件且仅 HitAreas 字段变"
+- [ ] `Textures` 清单按名中数字归一 + 闸门跑到退出码 0；源 bundle `Texture2D` 清单与磁盘 PNG 对账 missing/extra/命名异常全为 0
+- [ ] **逐张看图**（走页面真实入口、按 canvas 裁剪只截模型区）：新 bundle 换入后必做，且指明"和什么比"；代理指标全绿不构成完成证据
