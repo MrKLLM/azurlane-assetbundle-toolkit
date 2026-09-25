@@ -299,6 +299,7 @@ def main():
     ap.add_argument('--xref', help='谁 call/jmp 到该方法（全库扫 E8/E9 rel32）')
     ap.add_argument('--blob')
     ap.add_argument('--va')
+    ap.add_argument('--at', help='按 VA 反汇编任意地址：il2cpp 内部调用（icxx_ thunk）在 dump.cs 里没有符号')
     ap.add_argument('--count', type=int, default=600)
     ap.add_argument('--no-stop', action='store_true')
     ap.add_argument('--rebuild-index', action='store_true')
@@ -333,6 +334,18 @@ def main():
     for k, v in idx.items():
         if v['va'] and v['va'] != '0x-1':
             byname[int(v['va'], 16)] = k
+
+    if a.at:
+        va = int(a.at, 0)
+        off = elf.va2off(va)
+        if off is None:
+            print('VA 0x%X 不在任何 PT_LOAD 里' % va)
+            return
+        nm = byname.get(va) or elf.symbols.get(va)
+        print('# --at VA=0x%X  file=0x%X  %s' % (va, off, ('<%s>' % nm) if nm else ''))
+        for ln in disasm(elf, off, a.count, not a.no_stop, byname):
+            print(ln)
+        return
 
     if a.find:
         r = re.compile(a.find, re.I)

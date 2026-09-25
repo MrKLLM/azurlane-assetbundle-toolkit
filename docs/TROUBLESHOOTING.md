@@ -993,3 +993,47 @@ UnityFS；单字节常量 XOR/加/减；短重复密钥 XOR（周期 1–32，�
 **涉及文件**: `tools/sharecfg_re/08_disasm_method.py`（`--xref`）、`tools/sharecfg_re/README.md` (16) 顶部更正块、
 `tools/sharecfg_re/26_www_wrapper.py`、`tools/sharecfg_re/27_find_key_array_v2.py`（新增，快照找密钥表；
 **其指针闸待按 47 位地址修正后才可用**）、`docs/WORKFLOWS.md` **WF-18**、§22（编号冲突见该节注）。
+
+## §29. 照记 `Il2CppGlobalMetadataHeader` 节序 → 整轮否证打在**错区域**（v31 比 v24–29 多一对，2026-09-25）
+
+**日期**: 2026-09-25　**状态**: ✅ 已定位并纠正；同轮据此取到 `www()` 的 19×int32 密钥
+
+**现象**: `tools/sharecfg_re/14_extract_field_blobs.py` 的注释与 README (14) 记着一条结论——
+"按 v24–v29 的节序表解出 `fieldAndParameterDefaultValueData` = **21,388 字节**，在里面搜 `1b4c4a` **0 命中**，
+所以 `Header_32/Header_64/Footer` 这些 `static readonly byte[]` 的默认值**不在这份 metadata 里**"。
+本轮把同一段代码重跑时顺手做了区域自检，发现该结论的**搜索区间本身就是错的**。
+
+**根因**: `global-metadata.dat` 的头是 `(offset,size)` 对的**顺序表**，而这张表**随 metadata 版本增删节**。
+v31 在 `stringLiteral` 之后比旧表多一对，于是从第 1 对起整体右移一位：
+按旧表读到的"21,388 字节堆"实际是 `parameterDefaultValues`（第 12 对，21,388 B）；
+真正的 `fieldDefaultValues` = 第 **7** 对 `@9,515,896 / 224,340 B`（`224340 % 12 == 0`，18,695 条——
+**这条数正是上一轮自己实测过的**，当时被安到了错的节名上），
+`fieldAndParameterDefaultValueData` = 第 **8** 对 `@9,740,240 / **879,152 B**`。
+把 `1b4c4a` 在**整份 18MB** 里搜：6 个命中，**全部落在这 879KB 内**。
+⇒ "堆里没有头部魔数"是一条**打错靶的否证**，它把"Footer/Header 取不到"写成了既成事实，
+连带让后面几轮只在"内存盲扫 19 字节数组"上绕路（工具 16/17/24/27）。
+
+**怎么定位到的（不是靠读文档，是靠自检对不上）**: ① 把 `@8+8i` 的 48 对原始 (offset,size) 全打出来，
+看哪些对首尾相接、哪段之后开始出负数/微小值（旧表在第 15 对之后就已经崩坏，只是崩坏点前看起来"合理"）；
+② 对候选记录区做**布局自检**：12 字节步长下 `fieldIndex` 逆序数 **0**、`dataIndex` **100% 单调不减**、
+`max(dataIndex)=879,148` 距堆尾仅 4 字节——三条同时成立才认下这个布局；
+③ 再用**已知明文**（真实文件头 5 字节）验内容。
+
+**由此得到的正面结果**（详见 `PROJECT_STATUS.md` §6 第 7 条 (18) 轮与 `WORKFLOWS.md` WF-19）：
+默认值堆**按相邻 dataIndex 之差切就是 blob 真长度**，于是**不需要** token→fieldIndex 映射也能按内容取数组；
+整堆里长度恰为 76 字节的 blob 只有 2 个（一个是文本），另一个正是 `www()` Phase C 的密钥表——
+`scripts64`/`scripts32` 头 8 字节用逐指令落地的 XXTEA 解出 `UnityFS\0`（全库 91,642 个 AB 中仅这 2 个是密文头）。
+
+**教训**:
+- **凭记忆写的结构表（节序、字段偏移、指针宽度）一律先测再当判据**——本轮与 §28 是同一家族的第 8 种形态：
+  "我以为我读过那张表"。区别只在于这次错在**偏移表**而不是**机器码**。
+- **否证的强度 = 它所依据的区域/字段名的强度。** 写"X 不在 Y 里"之前，先独立证明 Y 的边界就是那段字节
+  （本轮的独立证据 = 上一轮自己实测的 `224340 % 12 == 0` 与内容命中的区间包含关系）。
+- 一条"取不到"的记录会被下游当公理：它已经在 (14)→(16) 三轮里把注意力从"读堆"引到"扫内存"上了。
+  **作废它时要连带把基于它挂起的分支一起恢复**，否则损失是路径不是结论。
+
+**涉及文件**: `tools/sharecfg_re/28_blob_heap_known_plaintext.py`（新增：节序对齐 + 布局自检 + 内容定位 + blob 切分）、
+`tools/sharecfg_re/29_www_xxtea_key_test.py`（新增：Phase C 落地 + 三重对照）、
+`tools/sharecfg_re/14_extract_field_blobs.py`（本条错结论的出处，注释待更正）、
+`tools/sharecfg_re/README.md` (14) 与「已排除的假设汇总」表里 `v31 fieldDefaultValues 可按 token rid 索引` 一行、
+`docs/WORKFLOWS.md` **WF-19**、§28（同一家族的假绿灯）。

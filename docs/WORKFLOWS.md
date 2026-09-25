@@ -769,3 +769,46 @@ py -3 scripts/diag/l2d_voice_inventory.py --verbose  # 列缺失引用与孤儿�
 **涉及文件**: `tools/sharecfg_re/08_disasm_method.py`（`--xref` / 反汇编 / 字面量解引用）、
 `tools/sharecfg_re/26_www_wrapper.py`（封装谓词 + 反解器 + 三条对照）、`tools/sharecfg_re/README.md` (15)(16)。
 相关：技能 `binary-container-vs-crypto`（零假设/阴性对照总则）、`TROUBLESHOOTING.md` §22。
+
+### WF-19: 从 il2cpp metadata 的字段默认值堆里按**内容**取 `static readonly T[]` 真值（免 token→索引映射）+ 用已知明文把内联密钥判死
+
+**日期**: 2026-09-25
+**目标**: 游戏代码里 `static readonly byte[]/int[] X = new T[N]{...}` 这类**内联数组**（头部魔数、Footer、TEA 密钥表…）在二进制里没有符号、`dump.cs` 不给长度，但它们在 `global-metadata.dat` 里有一份**唯一真值**。本 WF 给出：不解 token 索引也能按内容把它们取出来，并把"这就是那张表"钉成行为证据。
+**适用场景**: IL2CPP 逆向里"算法读全了、只差内联常量表"；或要判断某个容器封帧的头部/尾部真值。
+
+**怎么做（顺序即判据）**:
+1. **先重新对齐 metadata 头，不要用记忆里那张 v24–v29 节序表。** 把 `@8+8i` 处的 int32 两两读成 (offset,size) 打到 i=0..47，
+   再拿**两个独立事实**去钉哪一对才是目标节：① 目标节的 `size % 记录步长 == 0`；② 内容侧（如某个已知 magic 在全文件的命中位置）必须**整段落在**该节区间内。
+   v31 比 v24–29 的表多一对，直接照记会让整节错位（见 §29）。
+2. **记录布局用自检验证，不用文档**：`(fieldIndex, typeIndex, dataIndex)` 三条同时成立才算认出来 —
+   fieldIndex **逆序数须为 0**（表是排序的，因为运行时用二分）、dataIndex **100% 单调不减**、`max(dataIndex) + 最小 blob ≤ 堆大小`。
+3. **blob 长度 = 相邻 dataIndex 之差**（堆是 packed 顺序写死的）。这一步直接免掉"必须先解 token→fieldIndex"这座山：
+   数组长度不用猜、也不用 image 的 `fieldStart`。
+4. **按内容定位，不按索引定位**：用**已知明文**（真实文件头几个字节）或**结构约束**（长度恰为 76B 且能读成 19 个高位非零 int32）当筛子。
+   命中数本身就是强度：整堆 879KB 里长度恰为 76 的 blob 只有 2 个，其中一个显然是文本 → 候选只剩一个。
+5. **归属由"用起来对不对"证明，不由索引推断证明**：把目标函数（`www()` Phase C）机器码**逐指令**落成一个纯函数，
+   拿真文件跑，判据要是一个 **64 位以上的具体值**（本例：头 8 字节须等于 `UnityFS\0`）。命中即同时证明了密钥、算法、以及"这个 blob 就是那张表"。
+6. **人口级旁证**：把判据铺到全库（91,642 个 AB）上看分布——只有 2 个文件头 8 字节是密文、其余 86,561 个是明文 `UnityFS`。
+   分布本身排除了"统计巧合"和"我挑了两个特例"。
+7. **三条对照缺一不出结论**（沿用 WF-18）：① 实现自洽（`inv_walk(walk(x))==x` 随机 5000 组）；② 阳性；③ **埋针**（把 `inv_walk(目标明文)` 种进**真文件头**，扫描器须找回偏移 0）。
+
+**判据**:
+- "取到真值"的唯一形式是**用它算出了别的已知量**；"从堆里读出一段像密钥的字节"不算。
+- 报"某个 blob 就是某个字段"时，必须同时报出：候选总数、筛子强度（多少位）、以及是否有行为验证。
+- 数组**长度**只认机器码里的 `Array::New(N)`，不认 `dump.cs`（后者不输出数组长度）、也不认"相邻 blob 之差"（那只是上界）。
+- 元素宽度由**同一 klass slot** 反推：`int[2]` 与 `int[19]` 都用 slot `0x717DB78` ⇒ 19 个 int32=76B，不是 19 字节。
+
+**踩坑记录**:
+- 见 §29（节序照记 → 整轮否证打在错区域）。
+- **元素数 ≠ 字节数**：`Array::New(0x13)` 记成"19 字节密钥"直接把上一轮引到"找 19 字节数组"的内存盲扫上，白花一轮。
+- 埋针的读数坑：把 `plain[:8] + stream(x)` 拼起来打印，会看到 `UnityFS\0UnityFS\0`，其实是拼接处重复了 8 字节。
+  **先确认每段的偏移再断言内容**（本轮真踩到，差点据此宣布"8..15 也是 magic"）。
+- 反馈流写 `out[i] = (state>>8) ^ c` 必须 `& 0xFF`：机器码用的是 `dl`，天然截断；Python 里忘了就 `ValueError`。
+- 反汇编 il2cpp **内部调用**（`icxx_` thunk，`dump.cs` 里没符号）要按 VA 直接反汇编：`08_disasm_method.py --at 0x<VA>`，
+  本轮 `InitializeArray` → `jmp 0x3585406` → `call 0x352a944` → `call 0x3532d4a` → `0x35b39a0` 整条链才把"句柄→blob 地址"的算术读出来
+  （它内部就是二分 `fieldDefaultValues` + `堆基址 + dataIndex`，与第 2/3 步的自检互为印证）。
+
+**涉及文件**: `tools/sharecfg_re/28_blob_heap_known_plaintext.py`（节序对齐 + 记录自检 + 内容定位 + blob 切分）、
+`tools/sharecfg_re/29_www_xxtea_key_test.py`（Phase C 逐指令落地 + 三重对照 + 全配置扩围）、
+`tools/sharecfg_re/08_disasm_method.py`（本轮新增 `--at`）、输入 `files/il2cpp/Metadata/global-metadata.dat`。
+相关：`WF-18`（否证要做成穷举级 + 三条对照）、`TROUBLESHOOTING.md` §29、技能 `binary-container-vs-crypto`。

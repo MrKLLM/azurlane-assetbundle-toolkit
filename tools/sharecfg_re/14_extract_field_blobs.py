@@ -2,6 +2,13 @@
 # -*- coding: utf-8 -*-
 """把 LuaConfDataReader 的 Header_32[5]/Header_64[5]/Footer[26] 三个 byte[] 真值挖出来。
 
+⚠️ **2026-09-25 更正：本脚本文档串里"堆只有 21388 字节、里面没有 1b4c4a"的前提是错的**——
+   它按 v24–v29 的节序读 v31 头，整表右移一对，真正的默认值堆是 @9,740,240 / **879,152 B**。
+   作废与纠正全过程见 `docs/TROUBLESHOOTING.md` §29；正确的取法（按内容 + 相邻 dataIndex 切长度）
+   已重写在 `28_blob_heap_known_plaintext.py`，本文件仅作历史保留，别再据此判断"堆里没有"。
+   仍然有效的事实：三个数组长度 **5 / 5 / 26** 由 `.cctor` 的 `Array::New(5)/(5)/(0x1a)` 钉死
+   （`dump.cs` 不输出数组长度，这条只能从机器码拿），句柄 token 0x80000023 / 0x80000005 / 0x80000027。
+
 已知（08/09 号实测）：
   * `.cctor`（RVA 0x3C1577A）里是 `Array::New(5)/(5)/(0x1a)` + `RuntimeHelpers.InitializeArray`，
     三个 handle 全局各存一个 **FIELD 元数据 token**：0x80000023 / 0x80000005 / 0x80000027。
