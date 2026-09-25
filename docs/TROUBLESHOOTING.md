@@ -1145,3 +1145,19 @@ UnityPy 报 `No valid Unity version found`。
 **涉及文件**: `tools/sharecfg_re/31_decrypt_scripts_bundle.py`、`32_asm_key_from_metadata.py`、
 `33_asm_key_scan.py`（均新增）、`files/AssetBundles/ammo`（指纹区参照明文包）。
 相关：§30（www 三段与 A1~A5）、WF-19。
+
+**追加（同日，公开工具圈核查结果）**：
+- 找到的对口工具 = GitHub `598597535/Azurlane-LuaHelper`（"encrypt and decrypt, decompile and recompile
+  Azurlane's lua files"，含 `--decrypt` AssetBundle / `--unpack`，输出目录名 `CAB-android` 与我们
+  `data_sig` 尾部的 `B-andro` 对得上）⇒ **确认这层是 AL 已知的 AssetBundle 方案，不是我们读错**。
+  但它的密钥不落地：`AssetBundle.cs` 用 `Assembly.Load(Properties.Resources.Salt).GetType("LL.Salt")`
+  再反射调 `Make(byte[], bool)` ⇒ 钥匙在嵌入的 .NET 程序集里**运行时派生**。
+- 否证（带穷举范围，别重复劳动）：
+  ① `global-metadata.dat` 逐字节 16 字节窗口 **18,245,153 个候选 0 命中**；
+  ② `libil2cpp.so` 逐字节 **121,853,691 个候选 0 命中**（后台跑完，退出码 0）；
+  ③ 该仓库的 `Resources/Salt`（17,408 B .NET DLL）里抽 ASCII + UTF-16 交错还原后的
+     16 字节窗口 **1,880 个候选 0 命中**（2018 版工具，钥匙多半已换或为派生值）。
+  ⇒ **"16 字节连续存在于本地静态文件里"这一整类假设已排除**；剩下的现实路径只有
+  (a) 反编译/直接调用那个 .NET `LL.Salt::Make`（要跑第三方二进制，需用户点头），
+  (b) 运行时内存里找派生后的密钥，(c) **绕开**：配置表侧已证容器层不加密，
+      而台词中文串此前已在游戏内存里实测到（10.4 万条，只差归属）。
