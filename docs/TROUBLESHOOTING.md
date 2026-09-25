@@ -1543,3 +1543,29 @@ Windows 下 `text=True` 用**locale 编码**（这台机是 GBK）解码子进�
 逐字段比对 **删除 0 / 新增字段 0 / 仅 `faction` 变化 2 处**（`waerpalaisuo`、`waerpalaisuo_n` → `晶环联盟`）。
 其余三个码在当前资产集里没有对应 bundleID（联动舰没有在画廊实体），**名字先进表、不影响现有条目**。
 仍在「其他」的 14 条是布里系（码 98，无阵营），符合既有认知，不是缺陷。
+
+## §38. E2 全量语音映射重导完成：+759 个动作组映射，浏览器实播四条全通过（2026-09-25）
+
+**完成判定不看 exit code，看处理条数**：日志 `合计 270 个皮肤 | 无 ACB 17 | 有 ACB 但零交集 0 | 写入=True`，
+`grep -c '组='` = **253** 与映射表皮肤数一致，`Traceback|Exception in thread` = **0**（§37 的编码修好之后）。
+
+**逐皮肤零回退比对（对 `Output/_OLD_bak/l2d_voice_pre_25.json`）**：
+| 指标 | 改前 | 改后 |
+|---|---|---|
+| (皮肤, 动作组) | 2504 | **3263**（+759 = 253×3） |
+| 文件条目 | 5914 | 6948（+1034） |
+| 丢掉动作组的皮肤 | — | **0** |
+| 映射指向但磁盘缺失的音频 | — | **0**（6948 个全部存在，<2KB 的 0 个，合计 374.2 MB） |
+新增分布恰好三种、每皮肤各一次：`complete`×253、`mission`×253、`wedding`×253。
+
+**浏览器级实播验证**（`scripts/diag/l2d_voice_probe.py antu_2 complete,mission,wedding,touch_body`，
+先在 8777 起 `Output/gallery_v2/_gallery_server.py`）：四组全部 `paused=False`、`cur` 在走、`readyState=4`、`err=null`
+⇒ **前端一行代码没改就吃到新映射**（`index.html` 按动作组名通用查表，路径用 `new URL(P+p, location.href)` 解析）。
+其中 `touch_body → touch_1.ogg` 实播成功 = 把 §35 那条"表驱动别名"从数据层面一路验到耳朵层面。
+⚠️ 第一次探针报 `Cannot find default execution context`：**是本地服务器没在跑**，不是数据坏了——
+探针依赖 8777，起服务后 `curl` 三个 200（页面/映射表/ogg）才继续。
+
+**不需要重建索引**：`l2d_voice.json` 的读者只有 `gallery_src/index.html`（运行时 fetch）与两个 diag 探针，
+`build_gallery_index.py` 不读它 ⇒ 无派生产物要跟着重跑。
+**未跑 WF-16 五件套**：本轮**没有**修改 `gallery_src/index.html`，按 AGENTS 那条"改前端才必须先部署再跑回归"的触发条件不成立；
+需要的话我可以补跑（`interact_verify`/`hit_verify` 等）。
