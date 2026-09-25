@@ -1200,7 +1200,7 @@ public static byte[] Make(byte[] bytes, bool enc) {
 = **39,405,780 == ALEN ✓**，UnityPy 打开成功、类型含 TextAsset(49)。**"Unity 中国 ASM 加密"确认是我半解密文件造成的假象**（§31 已降级）。
 ⚠️ 附带纠正：块 3 的 revision 不该拿其它包的众数（`51f1`）硬套——这批 Lua 包真是 `62f3`；
 **"共识/多数"类参照只对同构建同批产物成立**，用它当判据前要先确认参照域。
-**待做（机械活）**：`m_Name` 为空，名字要从 bundle 的 container/source 取；下一步按 TextAsset 逐个导出再定位
+**~~待做（机械活）~~ 已完成，见下面 §32 追加**：`m_Name` 为空，名字要从 bundle 的 container/source 取；下一步按 TextAsset 逐个导出再定位
 `ship_skin_words` / `ship_skin_template`。
 
 ## §32. UnityPy 的 `TextAsset.m_Script` 是**有损** str：按 UTF-8 `errors=replace` 解码，导出会静默毁掉所有 ≥0x80 字节（2026-09-25）
