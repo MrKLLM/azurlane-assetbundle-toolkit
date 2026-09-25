@@ -727,6 +727,17 @@ py -3 scripts/diag/l2d_voice_inventory.py --verbose  # 列缺失引用与孤儿�
 
 ---
 
+### WF-17 追加（2026-09-25）：动作组→cue 的别名不再靠猜，改由游戏本体表驱动
+
+- **规则**：`scripts/extract_live2d_voice.py` 的 `ALIAS` 由 `inputs/gamecfg/character_voice.json` 生成
+  （`l2d_action → resource_key`，只收不同名的那条），文件缺失时**退回原来两条猜测并打 stderr 警告**，
+  不会静默变少。取表/发布：`tools/sharecfg_re/41 → 42`（带 4 条真值自检，自检不过不写台账）。
+- **判据**：改别名表后，必须用**只读**的 `--report <皮肤key>` 做 A/B：
+  把 `inputs/gamecfg/character_voice.json` 临时移走 = "改前"，放回 = "改后"，比 `(动作组数, 各 cue 文件名列表)`。
+  ⚠️ **不要拿生产 `l2d_voice.json` 当"改前"基线**——它是旧日期、旧动作组集合下生成的，
+  差异里混着别的变量的变化（本轮就差点据此把 `login/mission_complete` 的缺席记成自己引入的回退）。
+- **踩坑**：`--report` 会逐个 cue 走 vgmstream，单皮肤也要几十秒 → **别在前台跑**，会被宿主超时打断。
+
 ### WF-18: 逆向里给一个函数判"作用域"与把"否证"做成穷举级（调用方反查 + 自由度压缩 + 三条对照）
 
 **日期**: 2026-09-24

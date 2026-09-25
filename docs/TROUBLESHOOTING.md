@@ -1410,3 +1410,60 @@ public static byte[] Make(byte[] bytes, bool enc) {
 `tools/sharecfg_re/40_crosscheck_todos.py`（新增：五个待办的核对脚本，只读）、
 `.diag/sharecfg_re/voice_actor_cn.json`（525 条映射，未入库的派生产物）。相关：§33、WF-19/WF-20、
 [[量真实可观测状态]] 那条"假绿灯家族"再添一例（计数型结论必须有"走完"断言）。
+
+---
+
+## §35. 774 张 Lua 侧表全量落地 + 两张权威表接入管线；顺带复活了"三条路均已判否"的 namecode 表（2026-09-25）
+
+**日期**: 2026-09-25　**状态**: ✅ 只读部分完成并自检　⏳ 三处写盘动作待放行
+
+**① 774 张只在 Lua 侧的表已全量导成 JSON**（`41_export_lua_tables.py`，产物 `.diag/sharecfg_re/lua_json/`，
+772 份，**未走完=0 张**）：判定 **DATA 639 / STUB 129 / 其它 4**。
+⇒ 之后"某个东西在不在游戏里"这类问题，**先查这 639 张表**，比再逆向便宜一个数量级。
+
+**② 顺带复活一条旧否证**：`name_code` 表现在读得开，**456 行** `{'code':'樱','id':1,'name':'峰风','nation':0,'type':1}`
+= `{namecode:NN}` 占位符的码→舰名/级名对照表。
+此前记的"邻近配对、指针扫描、BCDUMP 三条路均已判否"是**在没破文法的前提下**试的三条路，
+不是"这张表拿不到"。⇒ 需要正式名时可走这张表（残余 ~52 个 story 类占位符有机会真解）。
+
+**③ 两张权威表已发布进管线输入**（`42_publish_gamecfg.py`，不入库、台账 `inputs/gamecfg/MANIFEST.json`，
+带 4 条真值自检）：
+- `voice_actor_cn.json` 525 条：`voice_actor` 码 → 中文声优；
+- `character_voice.json` 85 条：`key(台词字段) ↔ l2d_action(Live2D 动作组) ↔ resource_key(ACB cue) ↔ spine_action ↔ 中文语音名`。
+
+**④ 消费方已改两处（都在读盘阶段，未跑写盘）**：
+- `scripts/build_ship_meta.py`：新增 `entry['voice_actor_name']`（缺失时打警告不静默）。
+  只读诊断实测：库尔斯克→`衣川里佳`、泛用型布里→`下田麻美`、阿布鲁齐公爵→`平田宏美` ✓。
+- `scripts/extract_live2d_voice.py`：原来手写的 `ALIAS = {touch_body→touch_1, touch_special→touch_2}`
+  （注释自承"语义推的，需人工试听确认"）**换成从 `character_voice` 生成**。结果两条猜测**被证实**，
+  并且多认出 6 条此前根本不知道的别名：
+  `battle→warcry`、`complete→expedition`、`hp_warning→hp`、`mission→task`、`wedding→propose`、`win_mvp→mvp`；
+  `headtouch→touch_head` 是同名直配（第三条触摸键，画廊此前没有这个认知）。
+  ⚠️ 生产映射表 `Output/gallery_v2/l2d_voice.json` 现状 = 253 皮肤 / 5914 条 (皮肤,动作组)，
+  **重导才会拿到新 6 条别名** ⇒ 属"会影响已有正确结果"的批量写盘，**未跑，等放行**。
+
+**⑤ 阵营码（#7）走到这里**：`gametip` 里 1200–1226 那段就是阵营名清单（**1226 = 晶环联盟**）。
+试过两条自动对上码的路，**一条成一条否**：
+- ❌ 否：`world_port_data.port_camp` + 文案里"…所属"反推 —— 实测 `port_camp=1` 同时给出
+  皇家/白鹰/北方联合 ⇒ `port_camp` **不是** nationality 码，此路不通（阴性对照就是维基投票里码 1 干净的 732:1）。
+- ✅ 成：`fleet_tech_ship_class`（含 `nation` + 中文舰级名）与 `ship_data_statistics` 双证，把未定码收窄成
+  `101=海王星联动`（涅普顿/诺瓦露/布兰…）、`104=KizunaAI`（绊爱四种变体）、`117=尼尔`（2B/A2）、
+  `12=只有"瓦尔帕莱索"一艘`、`99=构建者 + 仲裁者·提尔瑞特·VII`。
+  **剩 12 / 99 两个码需要你按游戏内认知定名**（`晶环联盟` 最可能是 12，但这是推断，我不替你写死）。
+
+**涉及文件**: `tools/sharecfg_re/41_export_lua_tables.py`、`42_publish_gamecfg.py`（均新增）、
+`scripts/build_ship_meta.py`、`scripts/extract_live2d_voice.py`（各一处小改）。相关：§33、§34、WF-17。
+
+**待放行清单（三项，都可单独退回）**：
+1. `py -3 scripts/build_ship_meta.py --write` → 重写 `Output/ship_meta.json`（带 voice_actor_name）；
+2. `L2D_VOICE_ALL=1 py -3 scripts/extract_live2d_voice.py` → 重导语音映射（拿 6 条新别名；先 1–3 个样本对照）；
+3. 前端若要把声优名/新别名显示到画廊 → 需 `deploy_gallery.py` + WF-16 回归五件套。
+
+**§35 补：别名改表驱动的 A/B 实测（只读，`--report`，写入=False）**
+- 生产 `l2d_voice.json` 现状：253 皮肤 / **2504** 个 (皮肤,动作组) / 5914 个文件条目 / **20 种动作组**；
+  其中 `complete`、`mission`、`wedding`、`hp_warning`、`battle`、`win_mvp` **各 0 个皮肤**（旧 2 条别名根本配不到）。
+- 换成 `character_voice` 生成的 8 条别名后，抽样 16 个皮肤**全部**新出现 `complete / mission / wedding`，
+  部分另得 `hp_warning / battle`；`无 ACB 17 / 有 ACB 但零交集 0`（与旧一致 ⇒ **没有皮肤因此改动丢掉原有配音**）。
+- ⚠️ 度量口径教训：**5914 是"文件条目"数，2504 才是"(皮肤,动作组) 数"**，两者混用过一次；
+  且首次 A/B 想用生产文件当"改前基线"是错的（它是 9-23 的旧动作组集合，见 WF-17 追加的判据）。
+- 全量重导（会覆写 `Output/gallery_v2/l2d_voice.json`）**未跑**，等你放行；跑前按惯例先 1–3 个样本目视/试听。

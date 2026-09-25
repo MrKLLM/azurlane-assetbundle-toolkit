@@ -4,6 +4,7 @@
 数据源（本机权威快照，不入库，台账见 inputs/azdata/MANIFEST.json）：
   inputs/azdata/azdata_ship_skin_template.json    皮肤：painting=磁盘拼音stem, name, ship_group, voice_actor, desc
   inputs/azdata/azdata_ship_data_statistics.json  舰船：name/english_name/nationality/rarity/type/skin_id
+  inputs/gamecfg/voice_actor_cn.json             声优：voice_actor 码 -> 中文姓名（游戏本体解出，525 条）
 桥：磁盘stem --剥变体后缀--> 基painting --skin--> 基皮肤id --stats.skin_id--> 舰级字段
     （实测 stats.skin_id 命中皮肤 4118/4119；ship_group 不是 stats 外键，仅用于同舰皮肤分组）
 
@@ -54,6 +55,15 @@ try:
     from ship_name_map import SHIP_NAME_MAP
 except Exception:
     SHIP_NAME_MAP = {}
+
+# 声优码 -> 中文名：从游戏本体 sharecfg 容器解出（tools/sharecfg_re/42 发布，台账 inputs/gamecfg/MANIFEST.json）
+GAMECFG = os.path.join(ROOT, 'inputs', 'gamecfg')
+try:
+    VOICE_ACTOR = json.load(open(os.path.join(GAMECFG, 'voice_actor_cn.json'), encoding='utf-8'))
+except Exception:
+    VOICE_ACTOR = {}
+    print('!! 缺 inputs/gamecfg/voice_actor_cn.json，voice_actor_name 将全为空'
+          '（跑 py -3 tools/sharecfg_re/42_publish_gamecfg.py 重新生成）', file=sys.stderr)
 
 
 def load():
@@ -118,6 +128,7 @@ def build_meta(skin, stats, wiki, verbose=False):
         if base:
             sk = painting2skin[base]
             entry['voice_actor'] = sk.get('voice_actor', 0)
+            entry['voice_actor_name'] = VOICE_ACTOR.get(str(entry['voice_actor']), '')
             # skin_template.name 是「皮肤名」(常含 {namecode} 占位符，或是皮肤主题标题如"午夜的瑰色电梯")，
             # 不能当舰名；另存 skin_name 备用。舰名取自 statistics.name(0 占位符，实测 4119/4119 皆真名)。
             entry['skin_name'] = sk.get('name') or stem

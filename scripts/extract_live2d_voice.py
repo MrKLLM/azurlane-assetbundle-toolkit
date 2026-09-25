@@ -34,10 +34,28 @@ VGMSTREAM = r'C:\Users\KLLM\AppData\Local\vgmstream\vgmstream-cli.exe'
 FFMPEG = shutil.which('ffmpeg') or r'C:\Users\KLLM\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe'
 OPUS_BITRATE = '48k'
 
-# 动作组 → cue 名别名。除同名之外只认这两条：model3 的 HitAreas 恒为 TouchHead/TouchBody/
-# TouchSpecial，而 ACB 里对应 touch_head / touch_1 / touch_2。后两条是按「触摸=普通、特殊触摸」
-# 的语义推的，需人工试听确认，故单独列在这里而不是塞进匹配逻辑。
-ALIAS = {'touch_body': ['touch_1'], 'touch_special': ['touch_2']}
+# 动作组 → ACB cue 名别名。以前只有猜的两条（注释里自承"需人工试听确认"）；
+# 现在从游戏自己的 `character_voice` 表生成：l2d_action → resource_key，touch_body→touch_1、
+# touch_special→touch_2 得到证实，另外多出一条此前没认到的 headtouch(touch_head 同名，不走别名)。
+# 台账 inputs/gamecfg/MANIFEST.json；取不到该表时退回原来那两条猜测，不影响跑通。
+def _load_alias():
+    f = os.path.join(ROOT, 'inputs', 'gamecfg', 'character_voice.json')
+    try:
+        cv = json.load(open(f, encoding='utf-8'))
+    except Exception:
+        print('!! 缺 inputs/gamecfg/character_voice.json，动作组别名退回硬编码猜测', file=sys.stderr)
+        return {'touch_body': ['touch_1'], 'touch_special': ['touch_2']}
+    m = {}
+    for row in cv.values():
+        g, rk = row.get('l2d_action'), row.get('resource_key')
+        if g and rk and g != rk:
+            m.setdefault(g, [])
+            if rk not in m[g]:
+                m[g].append(rk)
+    return m
+
+
+ALIAS = _load_alias()
 # 变体后缀：同一触发游戏里有多条台词（main_1 / main_1_1 / main_1_2），随机取一条。
 VARIANT_SUF = ['', '_1', '_2']
 # 明确排除：_exNNNN 是活动限定台词，vocal_* 是歌曲人声，都不该在点模型时放。
