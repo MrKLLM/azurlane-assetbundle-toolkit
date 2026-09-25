@@ -194,6 +194,13 @@
 - **踩坑**：moc3 头 offset 8 起的 `Format/Size/CanvasWidth/CanvasHeight` 在本项目全部为 0，
   照公开 moc3 规范硬解 `Textures` 段会读出 95/347 这种荒谬计数——索引→名字的映射
   **取不到**，只能靠命名约定（`texture_%02d` 编号即索引）+ 全库正常产物反证。
+- **配套完整性审计**：`py -3 scripts/diag/l2d_tex_completeness.py`
+  逐模型把源 bundle 的 `Texture2D` 清单与磁盘 PNG 对账（`missing`/`extra`/非 `texture_%02d` 命名/源缺失，
+  任一非 0 退出码 1）。存在的理由是 `extract_textures()` 的 `except: continue` 会**静默少一张**。
+  2026-09-26 全量基线：**269/269 全绿，missing 0 / extra 0 / 命名异常 0**。
+  同一脚本顺带打印"源枚举序 ≠ 编号序"的模型（**51/269**）——**只提示不判红**，
+  因为归一化已由 `fix_model3.py` 承担；这个数字的作用是说明**归一化是承重步骤，不是装饰**。
+  新 bundle 换入后：先跑 `--apply` 归一 → 跑本审计对账 → 再用 `l2d_shot_models.py` 看图，三步缺一不可。
 
 ---
 

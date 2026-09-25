@@ -26,9 +26,10 @@ DEFAULT = ['benningdun_2', 'feiteliekaer_4', 'sebao_2', 'shi_3', 'wuzang_4',
 
 keys = [a for a in sys.argv[1:] if not a.startswith('--')] or DEFAULT
 os.makedirs(SHOTS, exist_ok=True)
-for f in os.listdir(SHOTS):
-    if f.endswith('.png'):
-        os.remove(os.path.join(SHOTS, f))
+for key in keys:                      # 只清本次要重拍的，保留历史证据
+    p = os.path.join(SHOTS, key + '.png')
+    if os.path.isfile(p):
+        os.remove(p)
 
 proc = subprocess.Popen([
     CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
@@ -102,6 +103,16 @@ def open_l2d(key, settle_ms):
 
 try:
     cmd('Page.enable')
+    # 全新 profile 无缓存：index.js 近 1MB + index.json 0.8MB，且服务器是单线程 http.server，
+    # 冷启动可达 2 分钟。首个 eval 抢跑会拿到 'GALLERY is not defined'（实测首模型偶发失败）。
+    for _ in range(180):
+        # 必须显式转字符串比较：`A && B && C.length` 返回的是**数字**（ships 长度），
+        # 拿它 `is True` 恒为假，就绪门会退化成白等 180 秒。
+        if ev('String(typeof GALLERY!=="undefined"&&Array.isArray(GALLERY.ships)&&GALLERY.ships.length>0)') == 'true':
+            break
+        time.sleep(1.0)
+    else:
+        print("页面 180s 内未就绪（GALLERY.ships 仍为空）", flush=True)
     for key in keys:
         try:
             r = json.loads(open_l2d(key, 9000))
