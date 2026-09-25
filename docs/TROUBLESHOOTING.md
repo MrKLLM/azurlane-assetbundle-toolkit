@@ -1202,3 +1202,32 @@ public static byte[] Make(byte[] bytes, bool enc) {
 **"共识/多数"类参照只对同构建同批产物成立**，用它当判据前要先确认参照域。
 **待做（机械活）**：`m_Name` 为空，名字要从 bundle 的 container/source 取；下一步按 TextAsset 逐个导出再定位
 `ship_skin_words` / `ship_skin_template`。
+
+## §32. UnityPy 的 `TextAsset.m_Script` 是**有损** str：按 UTF-8 `errors=replace` 解码，导出会静默毁掉所有 ≥0x80 字节（2026-09-25）
+
+**现象**：从已解开的 `scripts64` 里导 `sharecfg/ship_skin_words.lua.bytes`，`m_Script` 拿到 78,775 个字符、
+写盘 80,505 B，但内容里大量 `0x3f('?')`，且紧跟容器魔数的字节"看着就不像数据"。
+
+**根因**：`m_Script` 的类型是 **`str`**，UnityPy 读 TextAsset 时按 UTF-8 `errors=replace` 解码，
+实测这 80,505 字节里有 **32,935 个字符 > 0xFF**（即每个非法字节被打成 U+FFFD）；
+再用 `str.encode('utf8','replace')` 回写就是不可逆的破坏。**文件长度看着正常、不报错** ⇒ 典型静默失败。
+
+**正确取法（`35_export_sharecfg_lua.py` 已按此实现）**：容器项 → `PPtr.m_PathID` →
+`Object.get_raw_data()`（原始序列化字节）→ 按 **`int32 长度前缀 + 1b4c4a020a`** 定位切片。
+实测 `raw[24..28] = 80505` 正是声明长度，取回体里 `>=0x80` 字节 **34,744 个**（有损路径下是 0）。
+
+**判据（导出文本/二进制类资产时必须加）**：解出的字节流里 **`>=0x80` 的字节数为 0 就直接报错停止**——
+本项目这类载荷本应含大量高字节（参照：`gametip` 237,333 / `ship_skin_template` 58,123 / `ship_skin_words` 34,744）。
+比"文件非空/长度对"强得多，且零成本。
+
+**顺带**：`35` 号里做了个**否证式**结构检查（能否按 LuaJIT BC dump 的 `tag + ULEB` 走通）——
+紧跟 `1b4c4a02 0a` 的首字节是 `b0/fb/f0`，全部 > 0x10 ⇒ **不是标准 LuaJIT 字节码**，
+"`\x1bLJ` 是容器魔数"这条旧结论在真数据上再次通过检验（此前它只在半解密数据上被"验证"过）。
+
+**当前到手的东西**：`scripts64` 解开后容器条目 **45,739** 个，其中
+`assets/luabuilds/android/arm64/sharecfg/*.lua.bytes` **774 个**（对上内存快照里 776 项清单），
+另有 `gamecfg/` 38,178（技能/剧情 Lua）、`view/` 3,774、`mod/` 1,533、`controller/` 640、`model/` 447。
+样本已无损落盘 `.diag/sharecfg_re/lua_out/`；**全量 774 个导出属批量操作，待用户确认后 `--limit 0` 再跑**。
+
+**涉及文件**: `tools/sharecfg_re/35_export_sharecfg_lua.py`（新增，无损取法 + 高字节自检 + BC 否证检查）、
+`docs/WORKFLOWS.md` WF-19 判据段。相关：技能 `safe-pipeline-fix-targeted-rerun`（"占位/降级产物伪装成功"一类）。
