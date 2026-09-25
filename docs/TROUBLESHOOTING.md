@@ -1231,3 +1231,13 @@ public static byte[] Make(byte[] bytes, bool enc) {
 
 **涉及文件**: `tools/sharecfg_re/35_export_sharecfg_lua.py`（新增，无损取法 + 高字节自检 + BC 否证检查）、
 `docs/WORKFLOWS.md` WF-19 判据段。相关：技能 `safe-pipeline-fix-targeted-rerun`（"占位/降级产物伪装成功"一类）。
+
+**§32 追加（同日，全量导出 + 两条判否）**：
+- 全量导出已跑（用户确认）：`sharecfg/` **774 个**全部无损落盘 `.diag/sharecfg_re/lua_out/`（50MB）。
+- **GB18030 线索判否**：`ship_skin_words` 整份按 gb18030 解出 10,692 个中日韩字，**但同内容随机打乱的零假设均值 = 9,724，比值 1.10**
+  ⇒ 这就是 GB18030 对随机字节对的正常产出率，**不是文字**。别再拿"解出很多中文"当证据（CJK 区太大，任何 2 字节编码都过）。
+- 形态旁证：整份数据里 `>=4` 连续高字节的游程**只有 9 段 / 87 字节** ⇒ 不是"文字流"形态，更像数值/编码流。
+- ⚠️ **下一步最该注意的事实**：同一张表两个来源体积差 **70 倍** ——
+  Lua 侧 `sharecfg/ship_skin_words.lua.bytes` = **80,505 B**，磁盘侧 `files/AssetBundles/sharecfgdata/ship_skin_words` = **5,615,904 B**。
+  ⇒ 两者不是同一份内容（Lua 侧很可能是表结构/键，磁盘侧才是正文数据）；
+  攻文法时要**两边对照**，不要只盯着 80KB 那份。参照载荷（scripts64 尾段 6,512 B）与磁盘侧同格式。
