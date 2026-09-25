@@ -405,54 +405,94 @@ for i in range(n):
 **拿一个局部巧合去支撑一个结构性结论**。对策已固化：校准样本必须**同时**通过
 "值匹配 + 周边结构合理（klass/monitor 是指针、bounds 合理）"两道，缺一即判未校准。
 
-### (16) 2026-09-24 `www()` 的调用方查明：**它是 Lua 脚本解密封，不是配置表解密**
+### (16) 2026-09-24 `www()` 的调用方查明：**唯一调用方 = `LuaScriptMgr.Load`**
 
-命令与结果（全库唯一一处交叉引用）：
+> ## ⛔ 本节曾被写入两条**错误结论**，先更正再读（同日自查，靠 `--xref LuaScriptMgr.LoadABFromBytes`）
+>
+> **错误 1（致命）**：我写"`www()` 的输出直喂 `luaL_loadbuffer`，故'输出须含 `UnityFS`'这条判据
+> **本身不可达**"。**这是错的，那条判据是可达、可用的。**
+> 真因是我**没有逐条读完** `LuaScriptMgr.Load` 的收尾就直接断言：`0x3D9C8F6` 处其实是
+> `4c 89 fe / mov rsi, r15`（把 www 的输出搬进 arg1），`0x3D9C8F9` 是 `mov rdx, rbx`，
+> **真正的 call 在 `0x3D9C8FC` → `LuaScriptMgr.LoadABFromBytes`**（`dump.cs`:
+> `private IEnumerator LoadABFromBytes(byte[] bytes, Action<AssetBundle> callback)`），
+> 下一条 `0x3D9C909` 就是 `MonoBehaviour.StartCoroutine`。`test al,al`、`0x35ae110`、
+> `"@"+filename` 全是我编的。**www() 的输出去向 = AssetBundle**，所以
+> **`UnityFS` 恰恰是正确的验收判据**。(6) 当初画的链条（`→ LoadABFromBytes → AssetBundle`）从头到尾是对的。
+>
+> **错误 2**：我写"19 字节数组只被读 byte[4] 当种子"。`0x3D9CB2C` 之后那段我同样没读完：
+> `Array::New(0x13)` + `InitializeArray` 之后，`0x3D9CC12-0x3D9CC19` 是
+> `mov cl,[r14+rbp]; mov [rax+rdx+0x20],cl` 的**逐字节拷贝**循环，不是"取一个字节"。
+> 该数组到底怎么参与，**状态回到"未读完"**，见下方「下一步」。
+>
+> **仍然成立、且是本轮真收获的部分**：① `www()` 全库**唯一**调用方是 `LuaScriptMgr.Load`
+> （`--xref`，且已验索引 `VA` 零缺失、`RVA==VA==Offset+0x4000` 恒等）；② `Load` 的输入侧
+> = `PathUtil.GetLuaBundle()` → `PathUtil.ReadAllBytes()`（`0x3d9c9c3`/`0x3d9ca16` 两处尾调用）；
+> ③ **密钥流只依赖种子低 16 位**（闭合性 2000×9 自检 0 不一致），故"有效种子 = 65536 个"可**真穷举**，
+> 这条**不依赖**上面两处错误，是纯递推式性质；④ 由此得到的否证比 (15) 的"起点穷举"硬：
+> **65536 个有效种子 × 偏移 0..4095，`UnityFS` 0 命中**（64 位约束，期望假命中 1.5e-11）。
+>
+> **这条否证现在的正确读法**：它说的不是"判据无效"，而是**盘面上这份 39MB 的 `scripts64`/`scripts32`
+> 不是 `www()` 的输入**——与 (6) 早已独立指出的"盘上 `scripts64` 末 4 字节 = `0xB9A00799`，
+> 不是合法长度 trailer"是**同一结论的两条独立证据**。(6) 给的候选（`LuaConfDataReader` 的
+> `Header_32[5]`/`Footer[26]` 封帧，或 BSA 归档条目 ≠ loose 文件）**依然是活的，仍是主堵点**。
+>
+> **方法账（这次是反面教材）**：本项目第 **7** 个假绿灯家族实例，且形状最新——
+> **"我以为我读过那条机器码"**。前 6 个是"拿局部巧合支撑结构结论"，这一个是
+> **拿没读完的指令序列凭印象补全，还写成了'一条机器码就能定死'**。
+> 对策：**凡要据此改判整条分支的去向（输入/输出边界），必须把该调用点前后指令逐条贴出来引用，
+> 缺一条就不许写"定死"**；本轮漏的就是 `0x3D9C8CD-0x3D9C8F9` 这 13 条里的 callee 身份。
+
+**拿到的（可直接采信）**
+
+- **`www()` 的唯一调用方是 `LuaScriptMgr.Load`**：
+  `py -3 tools/sharecfg_re/08_disasm_method.py --xref "UnitySourceGeneratedAssemblyMonoScriptTypes_v1.www"`
+  → 全库 **1 处**：`call @0x03D9C8C5  宿主=LuaScriptMgr.Load`。
+  （`UnitySourceGeneratedAssemblyMonoScriptTypes_v1` 是 Il2CppDumper 的错归类；`www`、`Load`、
+  `LoadABFromBytes` RVA 全在 `0x3D9D248` 邻域，同属 `LuaScriptMgr` 那个源文件。
+  索引 136652 个方法 **`VA` 字段零缺失、`RVA==VA==Offset+0x4000` 恒等**，故"宿主方法"归属可信。）
+- **`Load` 的输入侧**（逐条读到的两处尾调用）：
+  `0x3d9c9c3 jmp PathUtil.GetLuaBundle` →（(6) 记录该函数返回字面量 `scripts32`/`scripts64`，按 `PathMgr.is32Bit()` 选）
+  → `0x3d9ca16 jmp PathUtil.ReadAllBytes`。
+- **`Load` 的输出侧**：`www()` 结果 → `0x3d9c8fc call LoadABFromBytes(byte[], Action<AssetBundle>)`
+  → `0x3d9c909 StartCoroutine`。**即 www() 的产物是一个 AssetBundle。**
+- **封装位谓词**（`0x3d9c7d2-0x3d9c8b1` 区间，`len>=14`、`m = bytes[len-14]&~0x80`、
+  `m==0 且 bytes[0]==0x1B 且 bytes[1:4]=="lua"` 则跳过 www）：这段是逐条读过的，**但既然同函数
+  别处我读漏过，此谓词在用作判据前应再独立复核一遍**。`\x1blua` 这个字面量确实从 `0x7185F00` 解出
+  （`1b 6c 75 61 00`），与 Lua 字节码签名 `\x1BLua` 只差大小写。
+
+
+
+**`LuaScriptMgr.Load` 的真实形状（RVA 0x3D9C784；只列我逐条贴得出指令的部分）**
+
 ```
-py -3 tools/sharecfg_re/08_disasm_method.py --xref "UnitySourceGeneratedAssemblyMonoScriptTypes_v1.www"
-#   ->  1 处交叉引用
-#   call @0x03D9C8C5  宿主=LuaScriptMgr.Load
-```
-（`UnitySourceGeneratedAssemblyMonoScriptTypes_v1` 是 Il2CppDumper 的错归类；`www` 与
-`LuaScriptMgr.Load` RVA 相邻，同属 LuaScriptMgr 那个源文件。索引里 136652 个方法 **VA 字段零缺失、
-且 RVA==VA==Offset+0x4000 恒等**，所以"宿主方法"归属可信，不存在半覆盖导致的漏报。）
-
-**外层封装（`LuaScriptMgr.Load` RVA 0x3D9C784，逐条读出）**
-
-```
-bytes = PathUtil.ReadAllBytes( PathUtil.GetLuaBundle(filename) )   # 尾调用 0x3d9c9c3 / 0x3d9ca16
-if len(bytes) >= 14:                                   # 0x3d9c7d2: len-13,  <14 则整块直用
-    m = bytes[len-14] & ~0x80                          # 0x3d9c85a-0x3d9c867
-    plain = (m == 0) and bytes[0]==0x1B and bytes[1:4]==b"lua"   # 0x3d9c887-0x3d9c8b1
-    data  = bytes if plain else www(bytes)             # 0x3d9c8c5  ← www 唯一入口
-else: data = bytes
-luaL_loadbuffer(L, data, len, "@" + filename)          # 0x3d9c8f6（call 0x35ae110）
-失败 → LuaFileUtils.get_Instance() / throw LuaException  # 0x3d9c920 / 0x3d9c94c
+0x3d9c9c3  jmp  PathUtil.GetLuaBundle      ; 取要读的东西的名字（(6): 字面量 scripts32/scripts64）
+0x3d9ca16  jmp  PathUtil.ReadAllBytes      ; → byte[] bytes
+0x3d9c8c5  call www(bytes)                 ; → rax = byte[]，0x3d9c8ca mov r15, rax
+0x3d9c8f6  mov  rsi, r15                   ; arg1 = www 的输出
+0x3d9c8f9  mov  rdx, rbx
+0x3d9c8fc  call LuaScriptMgr.LoadABFromBytes(byte[] bytes, Action<AssetBundle> callback)
+0x3d9c909  call MonoBehaviour.StartCoroutine
+0x3d9c920  call LuaFileUtils.get_Instance  ; 失败路径（抛 LuaException）
 ```
 
-→ **`www()` 的输出直接喂 `luaL_loadbuffer`**，合法输出只有 Lua 源码或 Lua 字节码两种。
-→ **上一轮的判据"www() 的输出必须含 UnityFS"从前提就是错的**：UnityFS 是 AssetBundle 的 magic，
-AB 永远不会被交给 `luaL_loadbuffer`。这条判据在**任何**输入上都不可能满足，用它做出的"否证"其实
-什么都没否证 —— 它唯一的信息量是把 www 的作用域指错了地方。（第 6 个假绿灯家族实例：**判据本身
-不可达**，长得却像"已经排除过了"。）
+→ **`www()` 的产物被交给 `AssetBundle.LoadFromMemory`（协程版）**。
+→ 因此 **(15)/(6) 定的判据"输出须含 `UnityFS`"是正确且可达的**，本轮一度宣布它"不可达"是错的（见本节顶部更正）。
+→ 顺带一个此前没被写清的事实：`Load` 这个函数名叫 `Load` 但**签名是 `byte[] → AssetBundle`**，
+  它**不是** Lua 的 `require` 加载器；`(14)` 那 776 项 `sharecfg/<表名>.lua` 与它的关系**尚未证实**，
+  不要再把 `www()` 叫作"Lua 文本解密封"——它的输出是个 AB 容器。
 
-**19 字节数组参与的那一步：降级成 1 个字节**
+**19 字节数组 / 种子的具体参与方式：状态回退为「未读完」**
 
-`Array::New(0x13)` 建的对象在 `www()` 里**只被读一次**：
-`0x3D9CC61  movzx r9d, byte ptr [obj+0x24]` —— 数组数据起点 +0x20，即 **byte[4]**，
-唯一用途是加进种子（`lea ebp,[rcx+r13]`）；循环体内再无别的索引来自它。**它不是逐字节密钥。**
-数组本身是常量初始化（`0x3D9CB43 call RuntimeHelpers.InitializeArray`，blob 指针运行时从
-`klass+0x30` 取），所以不在 .so 的固定 VA 上；要拿原值得解析 `global-metadata.dat` 的 field-RVA。
+本轮两次试图给结论都在同一段指令上出错（先"19 字节内联密钥"、后"只取 byte[4] 当种子"），
+原因是 `www()` 的后半段（约 `0x3D9CB48`–`0x3D9CCD5`）我并没有逐条读完：
+`Array::New(0x13)` + `InitializeArray` 之后紧接的是
+`0x3D9CC12 mov cl,[r14+rbp]` / `0x3D9CC19 mov [rax+rdx+0x20],cl` 的**逐字节拷贝**循环
+（rbp 递增、边界 `r12+rbp < len-4`），说明那个数组参与的是**整段搬运**而不是取一个字节。
 
-**更正一条被当成"已知事实"的东西：种子不等于 235**
-
-`0xEB=235` 只是 `ebp` 的**初值**（`0x3D9CC33`）。真实种子由三项相加：
-`0x3D9CC0C mov rbp,0xFFFFFF` → `0x3D9CC17 sub ebp,ecx`（ecx = `bytes[len-1] & ~0x80`，
-见 `0x3D9CBEE-0x3D9CBF6`）→ `0x3D9CC1E mov ecx,ebp` → `0x3D9CC5F lea ebp,[rcx+r13]`。
-
-```
-state₀ = 235 + byte[4] + (bytes[len-1] & ~0x80)     # 后两项逐文件变，硬编码的只有 235
-```
+- **仍然可信**：`0x3D9CC33` 的 `mov ebp, 0xEB`（= 235，(15) 与本轮两次独立引用同一地址）。
+- **不可信 / 待重读**：种子的完整表达式（是否还叠加末字节与数组内容）、19 字节数组的内容与用途、
+  以及"循环上界来自 `bytes[len-13]`"这类 trailer 语义。
+  → 见「下一步」第 1 项，**必须先做完这件事再谈任何解密**。
 
 **"起点 0..4095 穷举"那条否证原本有个漏洞，这次补掉了**
 
@@ -486,44 +526,50 @@ state₀ = 235 + byte[4] + (bytes[len-1] & ~0x80)     # 后两项逐文件变，
 | `local ` | 48 bit | 9.5e-7 | 0 / 0 |
 | `--[` | 24 bit | 16 | 12 / 21（**正好落在预测噪声带** → 对照自洽） |
 
-**结论（判据达不到，如实报否证）**
+**结论（本轮真正得到的，与本轮一度写下的相比已缩水）**
 
-1. **`www()` 不作用于盘面上的 `sharecfgdata/*` 容器。** 它唯一的输入是 `PathUtil` 按路径读出的
-   **单个 `.lua` 文件**，输出交给 `luaL_loadbuffer`。README 从 (6) 起挂在 www 上的那条线
-   （"19 字节内联密钥""再解一层封帧就拿到配置明文"）**方向性错误**。
-2. **但 www 分支不是死路，只是被接错了对象**：(14) 在内存里查到 **776 项 `sharecfg/<表名>.lua` 清单**
-   （含 `ship_skin_words.lua`）。若配置是以 `sharecfg/<name>.lua` 的形式被 `require` 的，那么
-   走 `LuaScriptMgr.Load` → **`www()` 正是它的解密封**，只是输入是那个 `.lua` 单元，
-   而不是磁盘上 `sharecfgdata/<name>` 这个裸容器。这一下把 (14) 和 (16) 接上了。
-3. 盘面 `scripts64` / `scripts32` 头 4 字节都是 `52 aa 2a a5`（既不是 `1b 4c 4a` 也不是 `UnityFS`），
-   `byte[len-14]&~0x80` = 35 / 7（≠0，即"若真经 Load 会走解密分支"）。之前把它当 www 的输入，
-   **没有任何依据**；本轮的穷举正好把这条无依据的假设判死。
-4. 堵点改写为：**配置表的解密不在 C# 侧**（www 排除后，(2) 的"C# 零解密"更硬了）。
+1. ✅ **`www()` 的作用域边界定了**：输入 = `PathUtil.ReadAllBytes(GetLuaBundle())`，
+   输出 = `AssetBundle.LoadFromMemory`。**它是一个把加密 AB 容器还原成 AssetBundle 的解密封。**
+   (6) 画的链条成立，本轮没有改判，只是把它钉得更死（全库唯一调用方）。
+2. ✅ **`www()` 的输入不是盘面上这份 `scripts64`/`scripts32`**，现在有**两条独立证据**：
+   (6) 的 trailer 不合法（末 4 字节 `0xB9A00799` 当长度荒谬），以及本轮的
+   **65536 个有效种子 × 偏移 0..4095 反解 `UnityFS` 全 0 命中**（64 位约束，期望假命中 1.5e-11）。
+   两文件头 4 字节均为 `52 aa 2a a5`（既非 `1b 4c 4a` 也非 `UnityFS`），与之一致。
+   → **"中间还有一层封装"这个堵点没有解除，仍是主堵点**；(6) 给的候选（`LuaConfDataReader`
+   的 `Header_32[5]`/`Footer[26]` 封帧，或 BSA 归档条目 ≠ loose 文件）**继续有效**。
+3. ❌ 撤回：~~"www 是 Lua 文本解密封、判据不可达、配置分支方向性错误"~~ —— 见本节顶部更正。
+   (14) 那 776 项 `sharecfg/<表名>.lua` 与 `www()` 的关系**未被本轮证实也未被否证**，
+   因为 `Load` 的产物是 AB 而不是 Lua chunk；`sharecfg/*.lua` 若要经 `require` 进 Lua VM，
+   走的应是 `LuaFileUtils`（`Load` 的失败分支里确实调了它，`0x3d9c920`），**那是另一个函数**。
 
-### 下一步（第 6 次收口）
+### 下一步（第 6 次收口 —— 顺序不可颠倒，第 1 项是本轮自己欠下的债）
 
-1. **确认 `sharecfg/<name>.lua` 是不是经 `LuaScriptMgr.Load` 读进来的**——这一步决定 www 是死是活。
-   需要的是 `PathUtil.GetLuaBundle/GetLuaName` 的**路径模板字符串**：
-   机器码里 `0x71E9A38 / 0x72199E0 / 0x71E9938 / 0x71E6180` 这些槽经实测是 **klass 指针**
-   （`call 0x35add98` 的类初始化守卫模式），不是字面量，**在 .so 里取不到**；
-   要拿得解析 `global-metadata.dat` 的字符串/字段默认值表。
-   - 拿到模板后：按模板拼出 `sharecfg/ship_skin_words.lua` 的实际路径，看它是**盘上独立文件**、
-     **某个 AB 里的 TextAsset**、还是 **scripts64/32 里的一个条目**。三种情况对应三条不同的路。
-2. 若 1 成立 → 直接对那个 `.lua` 单元跑 `www()`（**种子公式已完整**：235 + byte[4] + 末字节，
-   byte[4] 拿不到就先按 256×128 的小空间穷举，`26_www_wrapper.py` 的反解器可复用）。
-   **验收判据换成 Lua 形态**：输出以 `\x1bLua`/`\x1blua` 开头，或能 `--` / `local ` / 可读源码起头，
-   且能对上 (14) 那份表名清单。**不得再用 UnityFS 当判据。**
-3. 仍**不做**"扫内存猜结构"类尝试（(15) 已两次产出假信号）。
+1. **把 `www()` 的 `0x3D9CB48`–`0x3D9CCD5` 逐条读完**（本轮两次错判都出在这段没读完）。
+   必须回答三件事，且**每条都要能贴出指令原文**：
+   ① 19 字节数组（`Array::New(0x13)` + `InitializeArray`）到底参与什么——它后面紧接的是
+   逐字节拷贝循环，说明是**整段搬运**而非取一字节；② 主循环真正的起始/结束边界与上界来源
+   （trailer 语义：`0x3D9CB00-0x3D9CB12` 那段读末 4 字节并 `sub` 的动作）；③ 种子除了
+   `0x3D9CC33` 的 `mov ebp,0xEB` 之外还叠了什么。
+   → 只有 (15) 那三条递推式被完整复核后，第 2 项的搜索空间结论才算成立。
+2. **有了确定的种子公式，再回答"www 的输入是哪一段"**：正确做法不是继续在这 39MB 上试偏移，
+   而是**顺着 `PathMgr.is32Bit()` → `GetLuaBundle()` → `ReadAllBytes()`** 把
+   `File.Exists ? File.ReadAllBytes : BetterStreamingAssets.ReadAllBytes` 这条分支落实：
+   设备上不落散文件 → 走 **BSA 归档**，故 www 的输入是 **BSA 归档里 `scripts64` 那一条目的解压结果**。
+   要拿的是 **BSA 归档的条目表**（`BetterStreamingAssets` 是知名开源库，头/表结构有公开实现可读），
+   而不是猜自定义 trailer。
+3. 用 `26_www_wrapper.py` 的反解器（**判据 = `UnityFS`，它是对的**）在真正取到的候选缓冲上验一次；
+   命中即整条链闭合。噪声带目标（`--[` 24 位、期望 16）保留，用来持续给仪器自检。
+4. 仍**不做**"扫内存猜结构"类尝试（(15) 两次、本轮又一次）。
 
-#### 附：第 5 次收口时的清单（留痕；第 1、2 项已做完，结论见 (16)）
+#### 附：第 5 次收口时的清单（留痕；两项结论**已被本轮推翻**）
 
 1. **从"怎么用"反推**：读 `www()` 里 `Array::New(0x13)` 之后到主循环之前那段
    （约 `0x3D9CB2C`–`0x3D9CC44`），确认 19 字节数组是被逐字节索引当密钥、还是只用来算 LCG 种子。
-   → **结论：只取 byte[4] 加进种子，不是逐字节密钥。**
-2. 顺藤找**真正作用在 `Array.Copy` 目标缓冲上的那段循环**（本函数内未见，可能在
-   `www()` 调用的子程序或 Lua 侧）。→ **结论：就是 `www()` 自己那个循环**（(15) 的改判成立），
-   但函数是 `LuaScriptMgr.Load` 的解密步骤，与配置表无关。
+   → ~~结论：只取 byte[4] 加进种子~~ **作废**：那段没读完，实际紧接的是逐字节拷贝循环。回到待办第 1 项。
+2. 顺藤找**真正作用在 `Array.Copy` 目标缓冲上的那段循环**。→ 确认**就是 `www()` 内那个拷贝 + 主循环**，
+   且 `www()` 的输出进 `LoadABFromBytes` → AssetBundle。(15) 的"循环作用于输出缓冲"改判成立。
 3. 不再做"扫内存猜结构"类尝试——已连续两次产出假信号。
+
 
 
 #### 附：第 4 次收口时的清单（留痕；第 1 项已做完，结论见 (10)）
@@ -580,9 +626,8 @@ state₀ = 235 + byte[4] + (bytes[len-1] & ~0x80)     # 后两项逐文件变，
 | `Decrypt`/`SetDecryptionKey` 属配置解密 | 都在 `CriWare_*Wrap` 里（音频） | 否证 |
 | 句柄 `&0x7fffffff` = fieldDefaultValues 条目号 | 解出等差序列 | 否证，正确解读是 **FIELD token**（`0x80xxxxxx`） |
 | adb 可捞到盘上解密缓存 | 进程 fd 表直接指向 `sharecfgdata/`；全盘 find 无缓存目录 | 否证，**唯一剩下的明文位置是进程内存** |
-| **`www()` 参与配置表解密**（(6)–(15) 整条主线的前提） | `--xref www` 全库唯一调用方 = `LuaScriptMgr.Load`，输出直喂 `luaL_loadbuffer` | **方向性错误**（详见 (16)）。但 www 未必无用——它可能作用在 (14) 的 `sharecfg/<表名>.lua` 上，见「下一步」1 |
-| "www() 的输出必须含 `UnityFS`"这条判据 | AB 不可能被交给 `luaL_loadbuffer`；穷举 65536 个有效种子 × 偏移 0..4095，`UnityFS\0` **0 命中** | **判据本身不可达**（第 6 个假绿灯：不可达的判据长得像"已排除"）。判据须换成 Lua 形态 |
-| 盘面 `scripts64`/`scripts32` 是 www 的输入 | 两文件头 4 字节均 `52 aa 2a a5`，既非 `1b 4c 4a` 也非 `UnityFS`；无任何证据指向它们经 `PathUtil` 进 `Load` | 否证（同上穷举，含 `\x1bLuaT`/`local ` 各 0 命中） |
+| **盘面 `scripts64`/`scripts32` 整文件就是 `www()` 的输入** | ①(6) 末 4 字节 `0xB9A00799` 不是合法长度 trailer；②本轮 65536 个有效种子 × 偏移 0..4095 反解 `UnityFS` **0 命中**（64 位约束，期望假命中 1.5e-11）；③两文件头 4 字节均 `52 aa 2a a5` | **两条独立证据否证**。堵点仍是"输入侧那层封装"（(6) 指向 BSA 归档条目 / `Header_32[5]`+`Footer[26]`），未解除 |
+| ~~`www()` 是 Lua 文本解密封、"输出须含 UnityFS"这条判据不可达~~ | **我 09-24 本轮写下的错误结论**：把 `0x3D9C8F6` 处的 `mov rsi,r15` 当成 `call`，凭空造出 `luaL_loadbuffer`。真 callee 在 `0x3D9C8FC` = `LoadABFromBytes` → AssetBundle | **作废**。`UnityFS` 是**正确且可达**的判据；详见 (16) 顶部更正块 |
 
 
 
