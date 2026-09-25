@@ -176,6 +176,25 @@
 
 **涉及文件**: `scripts/fix_model3.py`, `scripts/extract_motions.py`, `scripts/reconstruct_live2d.py`, `TROUBLESHOOTING.md`
 
+#### WF-6 追加（2026-09-26）：贴图索引顺序从"纸面决策"变成有实现 + 有闸门
+
+上面「纹理顺序 → 必须按名称字母序排列」这条决策**写了三个月但脚本里从未实现**，
+老模型全靠 UnityPy 枚举序碰巧有序。新 bundle 换入后 5 个模型渲染成部件堆叠的碎片，
+而当时的验收判据（"idle 驱动了多少条参数"）全绿。详见 `TROUBLESHOOTING.md` §40。
+
+- **实现**：`fix_model3.py` 现按名中数字归一 `FileReferences.Textures`（幂等，只在有变化时写盘）。
+- **判据（闸门）**：`py -3 scripts/diag/l2d_texorder_check.py`
+  → 只读检查全库 `Textures` 是否升序，乱序即退出码 1 并逐条打印前后清单；
+  `--apply` 才改写。**换入新 bundle 后必须跑到退出码 0。**
+- **判据（看图，不可被代理指标顶替）**：`py -3 scripts/diag/l2d_shot_models.py <key> ...`
+  走画廊真实入口逐个打开 Live2D 皮肤，按 canvas 的 `clip` 只截模型区，落 `.diag/l2d_shots_visual/`。
+  前置：`127.0.0.1:8777` 已起（根 = `Output/`）。
+  ⚠️ 视觉产物（立绘合成 / Live2D / Spine）的验收**必须包含目视截图这一步**；
+  "加载成功""参数在动""帧哈希在变"都只是代理指标，贴图错绑这一类故障下它们全部为真。
+- **踩坑**：moc3 头 offset 8 起的 `Format/Size/CanvasWidth/CanvasHeight` 在本项目全部为 0，
+  照公开 moc3 规范硬解 `Textures` 段会读出 95/347 这种荒谬计数——索引→名字的映射
+  **取不到**，只能靠命名约定（`texture_%02d` 编号即索引）+ 全库正常产物反证。
+
 ---
 
 ### WF-7: Live2D 动作提取与安全重建（权威映射 + 换入管线）

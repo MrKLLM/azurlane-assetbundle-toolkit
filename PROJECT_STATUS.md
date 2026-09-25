@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-25 23:55（本轮续：**把上一轮的 76→3 接到画廊上** —— 索引层组名加"只把无名变有名"的加法兜底（`with_cn` 910→984），并查出第二层根因：5 个秘书舰换装被皮肤表精确命中、`cn` 拿到的是**皮肤标题**，改为实体名取自秘书舰表 + `name_via` 可审计（见 §6 第 5 条 / §39 追加）。更早：立绘名大小写假阴性修复、sharecfg_re (23) 文法破。）
+> **生成时间**: 2026-09-26 00:20（本轮：**用户报「本宁顿皮肤 Live2D 错乱」** → 定位为 `model3.json` 贴图清单按枚举序落盘、moc3 只按索引消费 → 整套贴图错绑成"部件碎片堆"；全库扫出乱序恰好 5 个、坏的也恰好这 5 个。`fix_model3.py` 补归一段 + 新增闸门 `l2d_texorder_check.py`（269/269 升序）+ 新增看图工具 `l2d_shot_models.py`；5 个逐个目视恢复、2 个对照零变化。**过程教训**：2026-09-22 那句「9/9 内容判据全绿」是代理指标假绿灯——参数在动 ≠ 画面对，当时缺的正是"看图"这一步（`TROUBLESHOOTING.md` §40 / WF-6 追加）。更早：立绘名 76→3 接到画廊、sharecfg_re (23) 文法破。）
 > 下面 ①~④ 是上一轮（2026-09-24）**Live2D 动作数据全量重导**的明细，结论仍然有效；同日的 sharecfg_re (16) 轮记在 §6 第 7 条。
 > ① **结果**：全库 `clips 8154 / shell 7（=§2.5 记录的资产层真为空的 7 条，无新增失败）/ misassign 0 / PartOpacity 79 模型`，
 >   曲线总数 **944,136 → 2,662,615（×2.82）**，与唯一经人工目视验收的样本 `antu_2`（98→278，×2.83）同比例；
@@ -60,7 +60,7 @@
 ### 2.4 音频导出 ✅
 4,370 WAV / 0 失败 / ~14GB。`.b` 是 CRIWARE ACB，vgmstream 解码。分类 BGM 536 / CV 2,696 / Other 1,136 / SE 2。脚本 `scripts/export_cue_audio.py`。
 
-### 2.5 Live2D 模型还原 ✅（2026-09-21 动作层重建；2026-09-22 补齐 9 个 bundle → 269 模型）
+### 2.5 Live2D 模型还原 ✅（2026-09-21 动作层重建；2026-09-22 补齐 9 个 bundle → 269 模型；2026-09-26 修 5 个贴图索引错绑）
 269/269 还原、纹理拼接正确、HitAreas 已全库补登真判定区。输出 `Output/Live2D/{舰名}/`，**4.7GB**（2026-09-24 实测，曲线补齐后从 ~3.9GB 涨上来）。脚本 `reconstruct_live2d.py` / `fix_model3.py` / `extract_motions.py`。
 | 指标 | 数值 |
 |---|---|
@@ -70,6 +70,7 @@
 | 审计 | shell **7** / misassign **0** / `clips 8154`（`scripts/diag/l2d_motion_audit.py`，2026-09-24 全库） |
 | HitAreas（model3） | min 3 / max 78 / mean 12.3，**无 0 判定区模型**（2026-09-24 `fix_model3.py` 全库补登 `Touch*`） |
 | 资产层真为空的 clip | 7（*_3 的 effect、wuqi_3 的 idle11 等），已从 model3 引用剔除 |
+| 贴图索引顺序闸门 | **269/269 升序**（`scripts/diag/l2d_texorder_check.py`，退出码即判据；2026-09-26 修掉 5 个乱序，见 §40） |
 > **2026-09-21 根因重建**：旧产物 5037/8154 条动作是 `"Curves": []` 空壳（`num_keys>100` 护栏误杀帧 0），
 > 其余 3117 条**曲线名全部错位**（按"curve idx==参数序号从0连续"取名，实际稀疏）→ 就是"乱飘/乱闪/没反应"。
 > 现改为 `genericBindings[i].path == crc32("Parameters/<GameObject名>")` 权威映射 + 贝塞尔 + 结构自检。
@@ -79,7 +80,12 @@
 > **网页交互层状态（2026-09-23 §6.12 + §21）**：点击命中已修「四边形包含 + V/P 坐标系换算」，idle 循环已交回运行时（前端零定时器），动作切换恢复交叉淡化，运行时自加的假呼吸层已关闭，另有判定区可视化与参数·部件检查器；改前端前**必读 WF-16**（五条硬规则 + 回归五件套）。
 > ~~⚠️ §21 的根因修复目前只在 `antu_2` 一个模型上换入验证、其余 268 个模型仍是旧数据~~ → **2026-09-24 已全量落到 269 个模型**（覆写过程有事故，见下一条与 `TROUBLESHOOTING.md` §25）。当时判定的两个系统性错误（贝塞尔控制点写成归一化分数 → 部件各动各的；只读 `m_StreamedClip` 丢定值曲线 → 切动作时参数回不到静止位）现已在全库消除，`aerbien_3` 这类曲线数从 445/640 补齐到 640/640。
 > **✅ 2026-09-24 全量重导已落到 269 个模型（含事故记录）**：`antu_2` 样本 104/104 与已验收生产数据逐字节一致 → 全量 `clips 8154 / shell 7（=资产层真为空的 7 条）/ misassign 0 / PartOpacity 79 模型`、曲线总数 **944,136→2,662,615**。**过程有事故**：脱离启动时 `L2D_OUT_DIR` 未被子进程读到，重导**跳过了「临时目录→审计→备份换入」直接原地覆写** `Output/Live2D`（同一条 ps1 里另两个配方变量都生效，机制不可复现）；已核实 `.diag/l2d_new`（269 模型 / 曲线 944,136，与本文档记录的覆写前总数逐字相等）即覆写前状态并复制为 `Output/_OLD_bak/l2d_motion_pre_swap_20260924/` 恢复回滚，闸门补跑在正式目录上，并按「写向一律走 argv」给 `extract_motions.py` 加了 `--out`（不给即拒绝 `--all`）。根因与教训见 **`TROUBLESHOOTING.md` §25**。
-⏳ **9 个 bundle 已于 2026-09-22 换入**：benningdun_2 / bunao_3 / feiteliekaer_4 / gangyishawa_3 / guanghui_9 / pulimaosi_3 / sebao_2 / shi_3 / wuzang_4——9 张卡的 `live2d` 字段已进 index.json，`Output/Live2D` 现 **269 个模型**。换入后逐字段 diff 证**非 live2d 字段零变化**（ship/skin 集合不变、仅 9 卡 +9 live2d 项）；**内容判据全绿：9/9 模型加载 + idle 驱动参数（加密采样各 45/57/90/58/143/50/29/75/144 条参数值变化）**。⚠️ 关键教训：运行时把每条 idle 解析成 `isLoop:false`（全 269 模型一致的既有管线特性，非本轮引入），idle 只播一次即回静；故**验证必须在播放窗口内高频采样**，若等 ~12s 后两次快照比对会因短 idle(5~8s) 已播完回到静帧而假报 `moved=0`（本轮曾据此误判 bunao_3/guanghui_9，密采证伪）。临时产物 `.diag/l2d_new9/`（467MB）已冗余可清理。
+⏳ **9 个 bundle 已于 2026-09-22 换入**：benningdun_2 / bunao_3 / feiteliekaer_4 / gangyishawa_3 / guanghui_9 / pulimaosi_3 / sebao_2 / shi_3 / wuzang_4——9 张卡的 `live2d` 字段已进 index.json，`Output/Live2D` 现 **269 个模型**。换入后逐字段 diff 证**非 live2d 字段零变化**（ship/skin 集合不变、仅 9 卡 +9 live2d 项）。
+> ✅ **2026-09-26 更正：上面那句「内容判据全绿：9/9 模型加载 + idle 驱动参数」是代理指标假绿灯，作废。** 当时唯一没做的检查是**看画面**，而这 9 个里有 5 个（benningdun_2 / feiteliekaer_4 / sebao_2 / shi_3 / wuzang_4）从换入第一天起就渲染成"几十个部件碎片叠一堆"，用户于 2026-09-26 才报出来。
+> **根因**：`model3.json` 的 `Textures` 按 UnityPy 对象**枚举序**落盘，而 moc3 只按**索引**消费它 → 整套贴图错位。全库扫描：乱序的恰好 5 个、坏的也恰好这 5 个，其余 264 个碰巧枚举有序。
+> **修法**：`fix_model3.py` 补上归一段（WF-6 三个月前就写了这条决策但从未实现）；闸门 `scripts/diag/l2d_texorder_check.py`（只读检查，乱序退出码 1，`--apply` 才写）现 **269/269 升序**。看图工具 `scripts/diag/l2d_shot_models.py` 新增（走画廊真实入口按 canvas clip 截图）。
+> **验证**：5 个修复后逐个目视全部成形（海滩跑车 / 棋盘格卧室 / 暗室桌面 / 后巷 / 演唱会舞台）；对照 `bunao_3`、`pulimaosi_3` 未被写入、截图与修复前一致；语义 diff 证 5 个文件除 `Textures` 顺序外零字段变化，原件备份 `.diag/m3_snap/*.bak_texorder`。详见 `TROUBLESHOOTING.md` §40。
+> ⚠️ 另记一条当时的真教训（与画面无关，仍有效）：运行时把每条 idle 解析成 `isLoop:false`（全 269 模型一致的既有管线特性），idle 只播一次即回静；故**动效验证必须在播放窗口内高频采样**，等 ~12s 后两次快照比对会因短 idle(5~8s) 已播完回到静帧而假报 `moved=0`（本轮曾据此误判 bunao_3/guanghui_9，密采证伪）。临时产物 `.diag/l2d_new9/`（467MB）已冗余可清理。
 
 ### 2.6 Spine 动态立绘 ✅（v2 提取 + 全屏 CG 导出 + viewer 修复，2026-09-19）
 `scripts/extract_spine_v2.py` 双结构兼容提取到 `Output/Spine_v2/`，232 主包。gallery 内 `spine-all.js`(3.8) 分层实时播放。**2026-09-19 三修复**：①相机视口（`SceneRenderer.resize()` 不更新 viewport → 比例怪）②`my` 变量遮蔽 TDZ（假「N 层失败」+ 取消失效）③过滤 0 秒空占位动画、默认播 `normal`、缺动画层回落 normal；另支持 JSON 骨架（beierfasite_g）。**全屏 CG 导出**：`cg_export.html` 渲染 setup pose 批量落盘 `Output/CG_v2/` **231/231 成功**（含二次像素包围盒构图修正）。

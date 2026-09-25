@@ -5,9 +5,17 @@
 """
 
 import os
+import re
 import json
 
 OUTPUT_DIR = os.environ.get("L2D_OUT_DIR") or r"D:\Azur Lane Assets\Output\Live2D"
+
+
+def _tex_key(f):
+    """贴图名里的编号即 moc3 索引；无编号者排在带编号之后按名称序。"""
+    m = re.search(r'(\d+)', os.path.basename(f))
+    return (0, int(m.group(1)), '') if m else (1, 0, f)
+
 
 fixed = 0
 for model_name in sorted(os.listdir(OUTPUT_DIR)):
@@ -64,6 +72,16 @@ for model_name in sorted(os.listdir(OUTPUT_DIR)):
     if os.path.isfile(physics_path) and 'Physics' not in refs:
         refs['Physics'] = f"{model_name}.physics3.json"
         changed = True
+
+    # 修复 Textures 顺序: moc3 只按索引引用贴图（文件里不含任何贴图名），
+    # 所以数组第 i 项必须是索引 i 那张。reconstruct_live2d.py 按 UnityPy 对象枚举序落清单，
+    # 枚举序 ≠ 索引序时模型渲染成部件堆叠的碎片。闸门: scripts/diag/l2d_texorder_check.py
+    tex = refs.get('Textures') or []
+    tex_sorted = sorted(tex, key=_tex_key)
+    if tex_sorted != tex:
+        refs['Textures'] = tex_sorted
+        changed = True
+        print(f"  {model_name}: 贴图清单按索引重排 {tex} → {tex_sorted}")
 
     # 修复 Motions: 添加 FadeInTime/FadeOutTime；并**剔除指向不存在文件的动作组**
     # （碧蓝有极少数 clip 在资产层就是空的，如 *_3 的 effect / wuqi_3 的 idle11；
