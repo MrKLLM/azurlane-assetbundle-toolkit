@@ -1,0 +1,141 @@
+examples:
+  - id: integrity-audit-three-containers
+    title:
+      zh: 动作曲线完整性审计
+      en: Motion Curve Integrity Audit
+    description:
+      zh: 核对每个 clip 是否把三容器曲线全部导出
+      en: Verify all three clip containers were enumerated for every clip
+    prompt:
+      zh: |-
+        请审计这批 Live2D 动作数据的完整性：
+
+        AssetBundle 目录：{{AssetBundle 目录}}
+        motion3.json 产物目录：{{动作产物目录}}
+        范围：{{可选，只审某模型或某 clip}}
+
+        要求：
+        1. 对每个 AnimationClip 跑三容器求和断言（streamed + dense + constant == genericBindings 数），列出所有违例；
+        2. 报出 dense 曲线非 0 但未被解析的 clip；
+        3. 统计"只读 streamed"会丢多少条绑定，给出丢曲线前后的曲线总数对比；
+        4. 结论按 ✅/⚠️ 分类，附可复现的命令。
+      en: |-
+        Please audit the integrity of this batch of Live2D motion data:
+
+        AssetBundle directory: {{AssetBundle directory}}
+        motion3.json output directory: {{motion output directory}}
+        Scope: {{optional, specific model or clip}}
+
+        Requirements:
+        1. Run the three-container sum assertion for every AnimationClip (streamed + dense + constant == genericBindings count) and list all violations;
+        2. Report clips whose dense curve count is non-zero but unparsed;
+        3. Quantify how many bindings are lost by reading only streamed, with a before/after curve total;
+        4. Give a ✅/⚠️ verdict with reproducible commands.
+
+  - id: constant-curve-emission-check
+    title:
+      zh: 定值曲线可否补入判定
+      en: Constant Curve Emission Check
+    description:
+      zh: 逐条比 moc3 默认值并列外部驱动豁免清单
+      en: Compare each constant against moc3 defaults and list driver exemptions
+    prompt:
+      zh: |-
+        帮我判定这个 Live2D 模型的 m_ConstantClip 定值曲线能不能补进 motion3.json：
+
+        模型目录：{{模型目录}}
+
+        请：
+        1. 从运行时导出全参数 (min, max, default) 表；
+        2. 逐条比对定值与默认值，给出相等条数/总条数；
+        3. 查 bundle 的 MonoBehaviour 组件清单，列出所有外部驱动参数（口型、眨眼、呼吸等）作为豁免，不许补常量；
+        4. 输出补入前后的差异与风险说明。
+      en: |-
+        Help me decide whether the m_ConstantClip constant curves of this Live2D model may be emitted into motion3.json:
+
+        Model directory: {{model directory}}
+
+        Please:
+        1. Export the full (min, max, default) parameter table from the runtime;
+        2. Compare every constant against the default and report equal_count / total_count;
+        3. Inspect the bundle's MonoBehaviour list and exempt all externally driven parameters (mouth, eye blink, breath) from constant emission;
+        4. Summarize the before/after delta and the residual risk.
+
+  - id: baseline-fidelity-diff
+    title:
+      zh: 对照权威基准验保真度
+      en: Fidelity Diff Against Authoritative Baseline
+    description:
+      zh: 用同模型的权威 motion3.json 逐曲线验收
+      en: Validate curve by curve against an authoritative motion3.json
+    prompt:
+      zh: |-
+        用同模型的权威 motion3.json 验收我导出的动作数据：
+
+        我方产物目录：{{动作产物目录}}
+        基准来源：{{参考查看器页面地址或基准文件目录}}
+        要比对的 clip：{{clip 名列表}}
+
+        按五级比对项出报告：动作组集合、曲线 Id 集合、关键帧时间/值、段类型分布、逐曲线采样偏差（求值须复刻运行时语义）。同时区分"真缺陷"和"不可复原的天花板"，采样阈值请按实测可达上限校准并写明依据。
+      en: |-
+        Validate my extracted motion data against an authoritative motion3.json for the same model:
+
+        My output directory: {{motion output directory}}
+        Baseline source: {{reference viewer page URL or baseline file directory}}
+        Clips to compare: {{clip names}}
+
+        Report the five comparison tiers: motion group sets, curve Id sets, keyframe time/value, segment-type distribution, and per-curve sampling deviation (evaluation must replicate runtime semantics). Separate real defects from the irrecoverable ceiling, and calibrate the sampling threshold against the measured reachable bound with the rationale stated.
+
+  - id: guardrail-removal-ab
+    title:
+      zh: 拆历史护栏的 A/B 验证
+      en: Guardrail Removal A/B Verification
+    description:
+      zh: 用逐字节对照组证零回退再决定换入或回退
+      en: Prove zero regression with a byte-identical control group before swapping in
+    prompt:
+      zh: |-
+        我想拆掉提取脚本里的插值降级护栏（超过阈值就降级线性），请按安全流程验证：
+
+        脚本路径：{{提取脚本路径}}
+        正式产物目录：{{动作产物目录}}
+
+        要求：
+        1. 加 env 开关且默认保持旧行为；
+        2. 临时目录分别跑对照组（默认）与实验组（开关打开），绝不写正式目录；
+        3. 先证明对照组与现产出逐字节一致（sha256 全等，报 N/N），否则判 A/B 作废；
+        4. 给出实验组逐曲线偏差分布（P50/P90/最甚），据收益正负明确换入或回退，并说明该护栏是否在掩盖另一个格式错误。
+      en: |-
+        I want to remove the interpolation downgrade guardrail (degrade to linear above a threshold) in the extraction script; verify it safely:
+
+        Script path: {{extraction script path}}
+        Production output directory: {{motion output directory}}
+
+        Requirements:
+        1. Add an env switch that keeps the old behavior by default;
+        2. Run control and experiment groups into separate temp directories, never writing to production;
+        3. First prove the control group is byte-identical to current output (sha256 match, report N/N); otherwise void the A/B;
+        4. Report the experiment group's per-curve deviation distribution (P50/P90/worst), decide swap-in or rollback by measured gain, and state whether the guardrail was masking a different format error.
+
+  - id: diagnose-parts-moving-independently
+    title:
+      zh: 定位部件各动各的根因
+      en: Diagnose Parts Moving Independently
+    description:
+      zh: 从症状出发的取证与候选根因排除
+      en: Evidence-driven triage from symptom through candidate cause elimination
+    prompt:
+      zh: |-
+        用户反馈 Live2D 模型"部件各动各的、像刚学建模的人做的，交互动作后回不到原位"：
+
+        模型目录：{{模型目录}}
+        复现动作：{{动作组名}}
+
+        请按顺序取证并逐条给数字：先查曲线完整性（三容器求和、定值曲线是否被丢、丢的参数是谁回不了位），再查字段布局锚点（参考姿态帧 vs 首键一致率），再查贝塞尔控制点单位是否写成归一化分数，最后查淡入淡出与 Loop 等运行时消费口径。结论按根因/已排除假设/天花板/未决四类分开写。
+      en: |-
+        A user reports that a Live2D model's "parts move independently, like a beginner's rigging, and never return to rest after an interaction motion":
+
+        Model directory: {{model directory}}
+        Reproducing motion group: {{motion group name}}
+
+        Gather evidence in order and give numbers for each: check curve integrity first (three-container sum, whether constant curves were dropped and which parameters can no longer reset), then the field-layout anchor (reference-pose frame vs first key agreement), then whether bezier control points were written as normalized fractions, and finally runtime consumption details such as fade in/out and Loop. Report findings separately as root cause / ruled-out hypotheses / ceiling / unresolved.
