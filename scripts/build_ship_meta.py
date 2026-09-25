@@ -68,6 +68,14 @@ except Exception:
     print('!! 缺 inputs/gamecfg/voice_actor_cn.json，voice_actor_name 将全为空'
           '（跑 py -3 tools/sharecfg_re/42_publish_gamecfg.py 重新生成）', file=sys.stderr)
 
+# 秘书舰 NPC 立绘名：指挥室换装立绘不是舰皮肤，桥走不到，只能靠这张表（tools/sharecfg_re/45 发布）
+try:
+    NPC_PAINTING = json.load(open(os.path.join(GAMECFG, 'npc_painting_name.json'), encoding='utf-8'))
+except Exception:
+    NPC_PAINTING = {}
+    print('!! 缺 inputs/gamecfg/npc_painting_name.json，36 个秘书舰 NPC 立绘将显示为拼音目录名'
+          '（跑 py -3 tools/sharecfg_re/45_publish_npc_painting.py 重新生成）', file=sys.stderr)
+
 
 def load():
     skin = json.load(open(os.path.join(AZDATA, 'azdata_ship_skin_template.json'), encoding='utf-8'))
@@ -79,10 +87,18 @@ def load():
 
 def build_indexes(skin, stats):
     painting2skin = {}
+    spell = collections.defaultdict(set)
     for v in skin.values():
         p = v.get('painting')
-        if p and p not in painting2skin:
-            painting2skin[p] = v
+        if p:
+            painting2skin.setdefault(p, v)
+            spell[str(p).lower()].add(p)
+    # 大小写不敏感索引：配置里写 `2B_2`/`aijiangDD`/`npclafeiII_4`/`suweiaitongmengNew`，
+    # 而磁盘 bundle 目录名一律小写 -> 精确比对会把这些整批判成"无源"（实测 27 个）。
+    # 只收"该小写键全表只有一种拼法"的，避免 U556/u556 这类同键多拼法被猜错。
+    painting_ci = {k: v for k, v in
+                   ((k, painting2skin[min(s, key=str)])
+                    for k, s in spell.items() if len(s) == 1)}
     skinid2skin = {v['id']: v for v in skin.values() if 'id' in v}
     # 舰级字段按 ship_group 归并：stats.skin_id -> 该皮肤所属组 -> 组级舰信息
     # （变体皮肤 gin_2 的 id 不被 stats.skin_id 直接引用，但与其基皮肤同 ship_group）
@@ -92,20 +108,67 @@ def build_indexes(skin, stats):
         if g is not None:
             by_group[g].append(sv)
     stats_by_group = {k: min(v, key=lambda x: x['id']) for k, v in by_group.items()}
-    return painting2skin, stats_by_group
+    return painting2skin, painting_ci, stats_by_group
 
 
-def resolve_base(stem, painting2skin):
-    """磁盘 stem -> (基painting, source)。source: painting 直命中 / suffix 剥后缀命中。"""
+def _walk(stem, table, fold=False):
+    """逐层剥变体后缀在 table 里找；返回 (命中层数 0/1, 键, 行) 或 None。"""
     s = stem
-    for _ in range(8):
-        if s in painting2skin:
-            return s, ('painting' if s == stem else 'suffix')
+    for depth in range(8):
+        k = s.lower() if fold else s
+        if k in table:
+            return depth, k, table[k]
         ns = DERIV.sub('', s)
         if ns == s:
             break
         s = ns
-    return None, None
+    return None
+
+
+def resolve_base(stem, painting2skin, painting_ci):
+    """磁盘 stem -> (基painting, source, 皮肤行)。
+
+    先按原逻辑**精确**匹配（大小写敏感、逐层剥后缀），命中即返回，保证既有条目一字不改；
+    只有精确匹配整轮走完都没命中，才走大小写不敏感回退（source 带 _ci 标记，可事后单独审）。
+    """
+    hit = _walk(stem, painting2skin)
+    if hit:
+        depth, key, row = hit
+        return key, ('painting' if depth == 0 else 'suffix'), row
+    hit = _walk(stem, painting_ci, fold=True)
+    if hit:
+        depth, key, row = hit
+        return (row.get('painting') or key, 'painting_ci' if depth == 0 else 'suffix_ci', row)
+    return None, None, None
+
+
+NPC_PREFIX = re.compile(r'^npc(?=[a-z])', re.I)
+
+
+def resolve_story_fallback(stem, painting_ci):
+    """立绘桥走空后的两级兜底，名字仍取自表，不猜。
+
+    -> (名字前缀, source, 皮肤行或 None, 表里的中文名或 None)；皮肤行交调用方去取舰级字段。
+      npc_table/npc_suffix：秘书舰 NPC 换装立绘（secretary_special_ship 的 head/painting）
+      npc_family：`npc<已知立绘名>` —— 剧情里当杂兵用的该舰复制体
+      family：去掉最后一个 `_段` 后等于已知立绘名 —— 同一实体的另一张资源（图纸/贴图/和谐版）
+    """
+    s = stem
+    for _ in range(8):
+        rec = NPC_PAINTING.get(s.lower())
+        if rec:
+            return '', (s == stem and 'npc_table' or 'npc_suffix'), None, rec['cn']
+        base = NPC_PREFIX.sub('', s)
+        if base != s and base.lower() in painting_ci:
+            return 'NPC', 'npc_family', painting_ci[base.lower()], None
+        parts = s.rsplit('_', 1)
+        if len(parts) == 2 and len(parts[0]) >= 4 and parts[0] in painting_ci:
+            return '', 'family', painting_ci[parts[0]], None
+        ns = DERIV.sub('', s)
+        if ns == s:
+            break
+        s = ns
+    return None, None, None, None
 
 
 def bundle_ids():
@@ -121,15 +184,15 @@ def bundle_ids():
 
 
 def build_meta(skin, stats, wiki, verbose=False):
-    painting2skin, stats_by_group = build_indexes(skin, stats)
+    painting2skin, painting_ci, stats_by_group = build_indexes(skin, stats)
     wiki_by_name = {x['name']: x for x in wiki if x.get('name')}
     meta = {}
     for stem in sorted(bundle_ids()):
-        base, source = resolve_base(stem, painting2skin)
+        base, source, sk_row = resolve_base(stem, painting2skin, painting_ci)
         entry = {'cn': stem, 'en': '', 'faction': '', 'type': '', 'rarity': '',
                  'voice_actor': 0, 'category': 'story', 'base_painting': base, 'source': source or 'unresolved'}
         if base:
-            sk = painting2skin[base]
+            sk = sk_row
             entry['voice_actor'] = sk.get('voice_actor', 0)
             entry['voice_actor_name'] = VOICE_ACTOR.get(str(entry['voice_actor']), '')
             # skin_template.name 是「皮肤名」(常含 {namecode} 占位符，或是皮肤主题标题如"午夜的瑰色电梯")，
@@ -149,17 +212,32 @@ def build_meta(skin, stats, wiki, verbose=False):
             else:
                 entry['cn'] = sk.get('name') or stem
         else:
-            # painting 未命中 -> ship_name_map 兜底（剥变体后缀找基名）-> manual 怪例表
-            s = stem
-            for _ in range(8):
-                if s in SHIP_NAME_MAP:
-                    entry['cn'] = SHIP_NAME_MAP[s]
-                    entry['source'] = 'fallback'
-                    break
-                ns = DERIV.sub('', s)
-                if ns == s:
-                    break
-                s = ns
+            # painting 未命中 -> 秘书舰 NPC 表 / 同族前缀 -> ship_name_map 兜底 -> manual 怪例表
+            pfx, src, row, npc_cn = resolve_story_fallback(stem, painting_ci)
+            if src:
+                entry['source'] = src
+                sv = stats_by_group.get((row or {}).get('ship_group'))
+                name = (sv or {}).get('name') or (row or {}).get('name') or npc_cn
+                entry['cn'] = pfx + (name or stem)
+                if sv:   # 舰级字段属于同一实体，可以带；但仍是剧情资源，不进"舰船"筛选
+                    entry['en'] = sv.get('english_name', '')
+                    entry['faction'] = NATIONALITY.get(sv.get('nationality'), '其他')
+                    entry['rarity'] = RARITY.get(sv.get('rarity'), '')
+                    entry['type'] = TYPE.get(sv.get('type'), '')
+                    entry['nationality_code'] = sv.get('nationality')
+                    entry['rarity_code'] = sv.get('rarity')
+                    entry['type_code'] = sv.get('type')
+            else:
+                s = stem
+                for _ in range(8):
+                    if s in SHIP_NAME_MAP:
+                        entry['cn'] = SHIP_NAME_MAP[s]
+                        entry['source'] = 'fallback'
+                        break
+                    ns = DERIV.sub('', s)
+                    if ns == s:
+                        break
+                    s = ns
             if entry['source'] == 'unresolved' and stem in MANUAL:
                 entry['cn'] = MANUAL[stem]
                 entry['source'] = 'manual'

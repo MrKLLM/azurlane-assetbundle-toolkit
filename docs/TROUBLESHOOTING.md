@@ -1569,3 +1569,46 @@ Windows 下 `text=True` 用**locale 编码**（这台机是 GBK）解码子进�
 `build_gallery_index.py` 不读它 ⇒ 无派生产物要跟着重跑。
 **未跑 WF-16 五件套**：本轮**没有**修改 `gallery_src/index.html`，按 AGENTS 那条"改前端才必须先部署再跑回归"的触发条件不成立；
 需要的话我可以补跑（`interact_verify`/`hit_verify` 等）。
+
+---
+
+## §39. 立绘名按大小写敏感比对：76 个目录被判"无源"，真无源只有 3 个（2026-09-25）
+
+**症状**：`Output/ship_meta.json` 里 76 个 bundleID `source=unresolved`，画廊卡片显示拼音目录名
+（`2b_2`、`aijiangdd`、`na_doa`、`linghangyuan1_2`、`npcbisimai_4_n`…）。上一轮的结论是
+"社区快照缺数据 / 这些是无源剧情资源"——**两条都不成立**。
+
+**根因（三条，按影响面排序）**：
+1. **大小写**。配置里 `ship_skin_template.painting` 写 `2B_2` / `aijiangDD` / `npclafeiII_4` /
+   `suweiaitongmengNew`，而磁盘 bundle 目录名一律小写；`build_ship_meta.py` 用 `s in painting2skin`
+   精确比对 → 整批判成无源。**一个 `lower()` 就救回 27 个**（含 2B/A2/绊爱全系/雫/香迪/Z1改/苏维埃同盟）。
+   顺带自证：这批取到的 `nationality` = 117/104/106/7/4，与上一轮人工认定的阵营码**逐条一致**。
+2. **秘书舰 NPC 根本不在皮肤表里**（36 个）。`linghangyuan*`/`lingyangzhe*`/`tansuozhe*` 是指挥室换装立绘，
+   `ship_skin_template` 无对应行 → 桥走不到。权威名在 `secretary_special_ship` 的 `head`/`painting` → `name`
+   （领航员-TB / 领洋者-娜比娅 / 探索者-艾普洛），已发布为 `inputs/gamecfg/npc_painting_name.json`。
+3. **同族资源**（10 个）：`npc<已知立绘名>`（剧情杂兵复制体）、以及"去掉最后一个 `_段`"就是已知立绘
+   （`magedebao_pt_hx`→马格德堡、`nabulesi_blueprint`→那不勒斯）。
+
+**结果**：`source` 分档 painting 2493 + suffix 1788 + painting_ci 119 + suffix_ci 46 + npc_table 36 +
+npc_family 8 + family 2，**unresolved 76 → 3**（`_ab`、`unknown`、`tansuozhe21_2`，全 272.6 MB 已解出表里 0 命中）。
+
+**已排除的假设 / 踩过的坑（三条都是本轮现场犯的）**：
+- ❌「`painting_filte_map` 命中即算有来源」。它是 **2724 个立绘键的纯键表，不带任何名字**。
+  第一版拿它当证据，虚报"65/76 有源"。**教训：判"有来源"必须要求来源能报出名字字段，不能只是"这个串出现过"。**
+- ❌「区分大小写的精确等于就够了」。第二版仍漏 5 个（`aijiangDD`/`2B`/`Z1`）——表里是**混排大小写**。
+- ⚠️「零回退」口径不能只挑自己改的那一档。第一版只比 `painting/suffix` 两档就宣布改动为 0，
+  实际大小写回退**同时接管了 136 个原先靠手抄表 `SHIP_NAME_MAP` 兜底的条目**（外加 2 个 `manual`）。
+  正确做法：把「换档」整体枚举出来（`旧档 -> 新档` 计数），再逐类找独立裁判。
+- **歧义闸**：`painting.lower()` 做键时，只收"全表该键只有一种真实拼法"的，
+  否则 `U556`/`u556` 这类同键多拼法会被悄悄猜走（全表实测仅 1 个键命中此闸）。
+
+**独立裁判（防止"配置表说了算"的自证）**：76 处改名拿去查 `Output/WikiData/ship_data.json`（862 个维基舰名，
+与配置表互相独立）——新值命中 70、旧值命中 13、**"只有旧值命中"0 条**，即没有一处是"手抄表本来更对"。
+典型纠正：`hdn101` 伊织→涅普顿（en `HDN Neptune`，手抄表整条 hdn 系列错位一档）、`lafeiii` 拉菲III→拉菲II
+（`USS Laffey II`）、`i13` I-13→伊13、`missr` R小姐→好人理查德、`haixiao` 海啸→海咲。
+
+**闸门与涉及文件**：`scripts/diag/ship_meta_authority_diff.py`（四条硬判据，退出码即结论；另附维基投票只打印不判红）
+→ `scripts/build_ship_meta.py`（四级解析优先级）→ `tools/sharecfg_re/45_publish_npc_painting.py`（发布 + 5 项自检）
+→ `inputs/gamecfg/{npc_painting_name.json,MANIFEST.json}`（台账改为**按 path 合并**写回，`42` 号脚本同步改造，
+否则两个发布脚本会互抹台账行）。**遗留**：`build_gallery_index.py` 组名查的是合成前缀 `linghangyuan1`，
+ship_meta 里只有 `linghangyuan1_2` 等具体 stem ⇒ 36 个 NPC 名进了 ship_meta 但画廊卡片仍显示拼音（见 §6 第 5 条）。

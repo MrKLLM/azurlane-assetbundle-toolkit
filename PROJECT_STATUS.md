@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-25 21:30（本轮：**sharecfg_re 第 (23) 轮——`sharecfgdata` 文法破：假 LuaJIT 帧 + 平铺 kgc 流 + 字符串掩码 `^(255-i)`，2601 行台词中文到手**，见 §6 第 7 条 / `TROUBLESHOOTING.md` §33 / `WORKFLOWS.md` WF-20）。
+> **生成时间**: 2026-09-25 23:30（本轮：**`ship_meta` 残差 76→3 —— 立绘名比对改为「精确 → 大小写不敏感 → 秘书舰 NPC 表 → 同族前缀」，并顺带用配置表纠正 76 处手抄表错名**，见 §6 第 5 条 / `TROUBLESHOOTING.md` §39。上一轮：sharecfg_re (23) 文法破，见 §6 第 7 条 / §33 / WF-20。）
 > 下面 ①~④ 是上一轮（2026-09-24）**Live2D 动作数据全量重导**的明细，结论仍然有效；同日的 sharecfg_re (16) 轮记在 §6 第 7 条。
 > ① **结果**：全库 `clips 8154 / shell 7（=§2.5 记录的资产层真为空的 7 条，无新增失败）/ misassign 0 / PartOpacity 79 模型`，
 >   曲线总数 **944,136 → 2,662,615（×2.82）**，与唯一经人工目视验收的样本 `antu_2`（98→278，×2.83）同比例；
@@ -153,7 +153,10 @@
 5. 🟡 **元数据重建（A 收尾已完成：`Output/ship_meta.json` 已产出，交接点=B）**：
    - **脚本**：`scripts/build_ship_meta.py`（默认 `--diag` 只读，`--write` 产 `Output/ship_meta.json`）。运行：`PYTHONIOENCODING=utf-8 python scripts/build_ship_meta.py --write`。产物键=画廊 bundleID（Paintings_v2/Spine_v2/Live2D/CG_v2 目录名并集，共 4492），值=`{cn,en,faction,type,rarity,voice_actor,category,base_painting,source[,数值码]}`。
    - **桥接路径（⚠️已实测校正，覆盖 §6 旧假设）**：磁盘 stem —剥变体后缀(`_n/_hx/…/罗马数字紧跟`)→ 基 `painting` → `skin[painting].ship_group` →（`stats.skin_id` 命中皮肤的组，实测 4118/4119）→ 舰级 `nationality/rarity/type/english_name`。**旧记录里“用 `ship_group` 直接反查 stats”不成立**（1270 个 ship_group 仅 268 落在 stats 键）；**变体皮肤须经 `ship_group` 归并到舰**，不能靠自身 skin.id。
-   - **成品实测**：source 分档 painting 2493 + suffix 1786 + fallback(ship_name_map) 136 + manual 2 = **4417 有中文 cn（98.3%）**；残 **75 unresolved** 全为剧情/NPC/测试（aijiang*、linghangyuan*、lingyangzhe*、npc*、error13、magician、2b/a2 联动变体）→ 归第 6 条 story。分类 **ship 4065 / story 427**。阵营分布 重樱824/白鹰729/皇家622/铁血492…，空阵营 0。
+   - **成品实测（2026-09-25 解析优先级改造后）**：bundleID 4495 条，source 分档 painting 2493 + suffix 1788 + **painting_ci 119 + suffix_ci 46**（大小写不敏感回退）+ **npc_table 36 + npc_family 8 + family 2**（秘书舰 NPC 表 / 同族前缀）= **4492 有名字（99.93%）**，仅剩 **3 个真无源**：`_ab`、`unknown`、`tansuozhe21_2`。改造前是 painting 2493 + suffix 1788 + fallback(手抄表) 136 + manual 2 + unresolved 76。分类 ship 4221 / story 274；阵营分布 重樱824/白鹰729/皇家622/铁血492…，空阵营 0。
+   - **顺带纠正 76 处手抄表错名**（`SHIP_NAME_MAP` 被配置表接管）：`hdn101` 伊织→涅普顿（整条 hdn 系列原错位一档）、`lafeiii` 拉菲III→拉菲II、`i13` I-13→伊13、`missr` R小姐→好人理查德、`haixiao` 海啸→海咲。第三方裁判：新值命中维基名表 70/76、旧值 13/76、**「只有旧值命中」0 条**。画廊侧已生效：组名修正 24 组、补阵营 38 组、组/皮肤集合零丢失（`with_cn` 899→910）。
+   - **⚠️ 尚未接上的一截**：`build_gallery_index.py` 的组名走 `ship_meta_entry(base)`，而秘书舰 NPC 的组 id 是 `linghangyuan1` 这类**合成前缀**（ship_meta 里只有 `linghangyuan1_2` 等具体 stem）→ 36 个 `领航员-TB/领洋者-娜比娅/探索者-艾普洛` 名字进了 ship_meta 但画廊卡片仍显示拼音。修法：查不到 base 时回落到该组任一成员的 ship_meta 条目。
+   - **闸门**：`py -3 scripts/diag/ship_meta_authority_diff.py`（退出码即结论）——受保护档 `painting/suffix` 4281 条 7 字段改动必须为 0、条目集合不得增减、换档只允许落在白名单新档、无源数须等于期望。见 `TROUBLESHOOTING.md` §39。
    - **数值码→中文标签表已写进脚本常量**（NATIONALITY/RARITY/TYPE，对齐游戏内筛选词表）：nationality 1白鹰 2皇家 3重樱 4铁血 5东煌 6撒丁帝国 7北方联合 8自由鸢尾 9维希教廷 11郁金王国 96飓风 97META 98其他(布里) 102~115各联动；rarity 2普通 3稀有 4精锐 5超稀有 6海上传奇 18超稀有；type 1驱逐…24风帆。游戏筛选里的「晶环联盟」本快照(9.7.381)无对应码 → 前端归「其他」。
    - **✅ 两个决策已定**：① `voice_actor` = **只存数字 id**（CV 姓名表未缓存，以后再补映射）；② 非核心码(98/111~115) = **经验名 + 兜底原样保留**，不逐个核。
    - **✅ B 已完成（2026-09-20）**：`build_gallery_index.py` 元数据主源切 `ship_meta.json`，舰名/阵营/舰种/稀有度取 ship_meta（未解析条目回落 `SHIP_NAME_MAP`+Wiki，如 `kelei`→可畏/皇家保住了），`category` 已落 index.json。**根因**：`build_ship_meta.py` 舰名原取 `ship_skin_template.name`（皮肤名，含 433 个 `{namecode}` 占位符 + 皮肤主题标题），改取 `ship_data_statistics.name`（实测 0 占位符），237 舰级占位符归零（`weizhang`→尾张、`linggu`→铃谷、`xinzexi`→新泽西、`antu`→安土，名称与阵营一致）；`META/灰烬`（`_alter` 形态）经 `normalize` 守卫拆为 56 独立卡。逐船四字段零回退。⏭️ **下一步 = C**：前端按 `category` 分「舰船/剧情角色」+ 筛选器；D Live2D 动作播放。

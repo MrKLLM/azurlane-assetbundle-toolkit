@@ -98,9 +98,17 @@ def main():
         print('自检不过，台账不写')
         return 3
     if not check:
-        open(os.path.join(DST, 'MANIFEST.json'), 'w', encoding='utf-8').write(
+        mine = {e['path'] for e in ledger['files']}
+        mp = os.path.join(DST, 'MANIFEST.json')
+        if os.path.exists(mp):  # 按 path 合并：不清掉别的发布脚本（44/45）记的条目
+            prev = json.load(open(mp, encoding='utf-8'))
+            old = [f for f in prev.get('files', []) if f.get('path') not in mine]
+            ledger['files'] = sorted(old + ledger['files'], key=lambda f: f['path'])
+            rg = ledger['provenance']['regenerate_via']
+            rg += [s for s in prev.get('provenance', {}).get('regenerate_via', []) if s not in rg]
+        open(mp, 'w', encoding='utf-8').write(
             json.dumps(ledger, ensure_ascii=False, indent=2) + '\n')
-        print('台账: inputs/gamecfg/MANIFEST.json')
+        print('台账: inputs/gamecfg/MANIFEST.json（共 %d 条）' % len(ledger['files']))
     return 0
 
 

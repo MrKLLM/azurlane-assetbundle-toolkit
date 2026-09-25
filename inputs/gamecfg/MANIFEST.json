@@ -8,21 +8,12 @@
       "tools/sharecfg_re/34_www_four_modes.py",
       "tools/sharecfg_re/35_export_sharecfg_lua.py",
       "tools/sharecfg_re/41_export_lua_tables.py",
-      "tools/sharecfg_re/42_publish_gamecfg.py"
+      "tools/sharecfg_re/42_publish_gamecfg.py",
+      "tools/sharecfg_re/45_publish_npc_painting.py"
     ],
     "landed_at": "2026-09-25"
   },
   "files": [
-    {
-      "path": "voice_actor_cn.json",
-      "bytes": 12403,
-      "sha256": "0d94a420708a405476edab16d0f3ad0722b2902533493a06f4e5380f7496b04c",
-      "rows": 525,
-      "role": "声优 code → 中文姓名（游戏本体 9.7.385，525 条）",
-      "consumers": [
-        "scripts/build_ship_meta.py"
-      ]
-    },
     {
       "path": "character_voice.json",
       "bytes": 14971,
@@ -31,6 +22,26 @@
       "role": "台词字段 key ↔ Live2D 动作组 l2d_action ↔ ACB 资源名 resource_key ↔ Spine 动作 ↔ 中文语音名（85 条）",
       "consumers": [
         "scripts/extract_live2d_voice.py"
+      ]
+    },
+    {
+      "path": "npc_painting_name.json",
+      "bytes": 4670,
+      "sha256": "e5973aeadc14be4d1b901661d163252844d67b0de0937f7eb0cd3ce31dbda513",
+      "rows": 42,
+      "role": "指挥室秘书舰 NPC 的立绘/头像资源名（小写）→ 中文显示名 + character_id，41 行 3 个实体（游戏本体 9.7.385 的 secretary_special_ship 表）",
+      "consumers": [
+        "scripts/build_ship_meta.py"
+      ]
+    },
+    {
+      "path": "voice_actor_cn.json",
+      "bytes": 12403,
+      "sha256": "0d94a420708a405476edab16d0f3ad0722b2902533493a06f4e5380f7496b04c",
+      "rows": 525,
+      "role": "声优 code → 中文姓名（游戏本体 9.7.385，525 条）",
+      "consumers": [
+        "scripts/build_ship_meta.py"
       ]
     }
   ]

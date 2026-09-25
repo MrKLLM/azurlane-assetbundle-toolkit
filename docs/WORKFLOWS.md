@@ -558,6 +558,7 @@
     - **逐字段 diff**：新旧 `index.json` 比 ship 集合/皮肤集合/每字段，期望「只有该变的变」（label 改动那次 = 1746 条 label 变化、非 label 变化 0）。
     - **未涉及文件 mtime 未变**：证明没误伤（脸洞换入那次 = 其余 4454 张 mtime 全未变）。
     - **端到端可达**：起 http.server 对全部受影响 URL（png + webp）GET 200 且长度与磁盘一致；前端渲染类改动再用无头 Chrome 断言（`scripts/diag/l2d_sweep.py` 全量 260 模型加载+动作启动；`l2d_verify.py`/`l2d_click.py` 抽样与真实点击路径）。
+    - **改的是"解析优先级"而不只是某个字段时，先把「换档」整体枚举出来再定判据**：新档往往不只影响目标子集，还会**接管**别的兜底档（大小写不敏感回退那次，76 个无源目录之外还接管了 136 个手抄表 `SHIP_NAME_MAP` + 2 个 `manual` 条目）。闸门脚本 `scripts/diag/ship_meta_authority_diff.py`：① 受保护档（本来就走配置桥的 painting/suffix）7 字段改动必须 0；② 条目集合不得增减；③ 换档只允许落在白名单新档；④ 无源数等于期望。另附**第三方裁判**（只打印不判红）：改名条目拿 `Output/WikiData/ship_data.json` 的维基名表投票，看有没有"只有旧值命中"的反例。口径见 `TROUBLESHOOTING.md` §39。
 
 #### 关键决策
 - **增量而非全量**：全量重跑 4486 张立绘会打乱已人工确认正确的结果，且无法逐张复核。
