@@ -1241,3 +1241,52 @@ public static byte[] Make(byte[] bytes, bool enc) {
   Lua 侧 `sharecfg/ship_skin_words.lua.bytes` = **80,505 B**，磁盘侧 `files/AssetBundles/sharecfgdata/ship_skin_words` = **5,615,904 B**。
   ⇒ 两者不是同一份内容（Lua 侧很可能是表结构/键，磁盘侧才是正文数据）；
   攻文法时要**两边对照**，不要只盯着 80KB 那份。参照载荷（scripts64 尾段 6,512 B）与磁盘侧同格式。
+
+---
+
+## §33. `sharecfgdata` 文法破了：假 LuaJIT 帧 + 平铺 kgc 常量流 + 字符串掩码 `^(255-i)`（2026-09-25）
+
+**日期**: 2026-09-25　**状态**: ✅ 标量字段全通（台词中文已到手）　⏳ 嵌套字段待指令装配
+
+**突破口不在本机**：二十轮统计攻击之后，决定性材料是 GitHub 上一个 0-star 仓库
+`Fernando2603/AzurLaneDataExtractor`（Python，直接离线读 `sharecfgdata/<表>`）。本轮只做了一件事：
+把它给出的格式事实**自研实现**并在我方真数据上验收（见"判据"）。
+
+**文法（全部实测吻合）**：
+- **记录帧**：记录首字节 = `ULEB(整条记录长 - 前缀自身长)`；`lock_next` 按此切窗，**逐条相加正好吃满文件**（见判据①）。
+- **假 LuaJIT BC 头**：`ULEB rec_len` → 跳 3 字节（FrameSize/`<FrameSize+Flags>`/Flags）→ `ULEB(1B) upvalues` → `ULEB knum` → `ULEB kgc` → `ULEB 指令数` → `指令数×4` 字节 → `upvalues×2` → `knum` 个 `ULEB` ⇒ 之后才是常量区。
+  实测 `ship_skin_template` 记录 1：`insn=54` → 常量区 @228，与手字节定位一致。
+- **tag**：`00`=nil　`01 00 n 00`=数组(n−1 项)　`01 n 00`=字典(n 对)　`02`=true　`03`=ULEB int（32 位回绕）　`04`=double（两个 ULEB 拼 `<II`）　**其余一律是字符串**。
+- **字符串** = `ULEB(字节长 + 5)` + 逐字节 `c ^ (255-i)`，**i 每串各自从 0 起**。⇒ `05` 就是空串；⇒ ASCII 过掩码正好落在 **0x80–0xBF**。
+  这就是二十轮来所有「高字节游程 / 平均游程 6~8 字节 / 可打印率 0.216」的来源——**既不是压缩也不是文字编码，是 ASCII 套了递减掩码**。
+
+**判据（三条各自独立）**：
+1. **帧覆盖残差 = 0**：`ship_skin_words` 5,615,904/5,615,904、`ship_skin_template` 4,066,129/4,066,129，逐条记录长度相加正好等于文件长，空记录 0。这条不含任何主观阈值，是帧模型对错的直接证据。
+2. **字段集合与外部人工 schema 对拍**：我方从数据里解出的高频字段（≥2000/2601 条）共 32 个 + `id`，与那个仓库里人写的 `ShipSkinWords` 字段表**逐项吻合**；连它注入的联动扩展键（`asmr_001..010`、`atelier_yumia_item_*`、`ryza_*`）也在我方数据里低覆盖出现——不是"我挑出来看着像"。
+3. **值级交叉验证**：`ship_skin_words.drop_descrip` 非空 2565 条，其中 **93.6% 能在完全独立的社区基准 `inputs/azdata/azdata_ship_skin_template.json` 的 `desc` 里整串命中**（差异归因于设备侧 9.7.385 vs 快照 9.7.381 的版本差）。
+产物：2601 行台词、40,897 个含中文字段值，落 `.diag/sharecfg_re/cfg_json/ship_skin_words.json`。
+
+**「70 倍体积差」判明——原提问方式有误**：两侧**根本不是同一份内容的两种编码**。
+- 用同一套掩码走 Lua 侧 `ship_skin_words.bytes`，解出的是 12 条串：`cs` `base` `all` `__namecode__` `__stream__` `confNEO` `__name` `ship_skin_words` `setmetatable` `rawget` `pg` ⇒ **Lua 侧是"读取桩"**（声明字段与 `(startPos,size)` 切片），磁盘侧才是数据本体。
+- 磁盘侧只有 **32** 个文件，Lua 侧有 **774** 张表 ⇒ 只有 32 张流式大表外置。磁盘/Lua 比值从 3.0（`weapon_name`）到 496（`activity_coloring_template`）**无恒定关系** ⇒ 一切"压缩比/编码膨胀"解释当场出局。
+
+**必须更正的旧结论（别在新会话里原样重跑）**：
+- **§31「载荷不是 LuaJIT 字节码」**：只对**磁盘侧**成立（磁盘侧是**假** BC 帧，指令区是占位/自研栈码）。**Lua 侧很可能是真 LuaJIT BC**：`598597535/Azurlane-LuaHelper` 的 `Lua.cs` 说明 `1b 4c 4a 02 0a` 是真 BC，只是**指令首字节被 256 项 S-box（Resources 的 Lock/Unlock 表）置换、版本字节被改**。我方 `35` 号的 BC 探针按**标准 tag** 走 ULEB，必然 0 命中——那条否证打在"未改动的标准 dump"上，不是打在"游戏侧不是 BC"上。
+- **§32 的 GB18030 判否**：**结论仍成立，但理由要换**——不是"随机字节的正常产出率"，而是**数据在掩码之下**，任何"直接按文字解"都必然失败。零假设对照本身做得对，只是它测的是未解掩码的字节。
+- **§30「容器层不需要解密」**：对。当时缺的答案现在有了 = 上面那条文法。
+
+**未闭环的缺口（下一步只做这件事）**：**嵌套字段的装配**。标量字段在常量流里是"键串紧邻值"，已全通；
+但 `smoke` / `bound_bone` / `couple_encourage` 这类表/数组字段，在常量流里是**打散的分片**
+（实测记录 1：`'smoke'`, `[-0.83,2.24,-0.59]`, `['smoke']`, `[30]`, `[-0.09,0.59,-0.15]`, `['smoke']`, `[70]`, `'bound_bone'`, … 对应基准里 `[[70,[["smoke",[…]]]],[30,[["smoke",[…]]]]]`），
+装配关系写在假 BC 的**指令区**（4 字节/条，实测 `4e ff 00 00 | 51 ff 01 01 | 51 ff 02 02 | 09 fe 00 04 | 4d fd 04 05 …`，第 2 字节 `ff→fe→fd→fc` 递减 = 栈回引距离）。
+两条路：**(a) 解这套栈码**（有 2863 条已知答案可当校验集，判据 = `--verify` 逐字段一致）；**(b) 走 LuaHelper 的 S-box 路线**。
+
+**许可红线**：`AzurLaneDataExtractor` **无 LICENSE 文件、pyproject 也无 license 字段** ⇒ 默认保留全部权利，
+**不得把它的源码 vendor 进本仓库**；本轮只采用其"格式事实"，reader 全部自写（`37` 号）。引用出处写进文档即可。
+
+**方法论（下一轮该先做的第 0 步）**：遇到"标准解析器读不出的私有容器"，**先花 20 分钟检索有没有公开同族实现**
+（本例关键词 `LuaConfDataReader` / `sharecfgdata` / `luabuilds` / `confNEO` 一次命中），
+再做熵/IC/差分签名这类统计攻击——本项目为此多花了约二十轮。候选并入技能 `binary-container-vs-crypto` 第 0 步。
+
+**涉及文件**: `tools/sharecfg_re/37_parse_sharecfgdata.py`（新增，自研 reader：`--trace` 头 / `--kgc` 常量流取证 / `--table` 单表出 JSON / `--verify` 与 azdata 基准逐字段比对 / `--all --yes` 全量）
+相关：§30（www 三段）、§31（ASM 结论降级）、§32（TextAsset 有损解码）、WF-19、新 WF-20。
