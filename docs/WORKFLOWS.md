@@ -794,6 +794,10 @@ py -3 scripts/diag/l2d_voice_inventory.py --verbose  # 列缺失引用与孤儿�
 
 **判据**:
 - "取到真值"的唯一形式是**用它算出了别的已知量**；"从堆里读出一段像密钥的字节"不算。
+- **优先挑"两边都能独立算出来"的量**（第 6 步之后追加的 A3 就是这么来的）：AB 文件头里自报的 `fileSize`
+  是文件内字段，`filesize - 4 - L` 是外部算出来的，两者对上 = 一次命中即几乎零假阳的 proof；
+  而**分布类统计量（可打印率、熵、字节直方图）一律不得当解密判据**——实测一段确定解真的载荷
+  可打印率只有 0.216，比"随机水平"还低（见 §30）。
 - 报"某个 blob 就是某个字段"时，必须同时报出：候选总数、筛子强度（多少位）、以及是否有行为验证。
 - 数组**长度**只认机器码里的 `Array::New(N)`，不认 `dump.cs`（后者不输出数组长度）、也不认"相邻 blob 之差"（那只是上界）。
 - 元素宽度由**同一 klass slot** 反推：`int[2]` 与 `int[19]` 都用 slot `0x717DB78` ⇒ 19 个 int32=76B，不是 19 字节。
@@ -810,5 +814,8 @@ py -3 scripts/diag/l2d_voice_inventory.py --verbose  # 列缺失引用与孤儿�
 
 **涉及文件**: `tools/sharecfg_re/28_blob_heap_known_plaintext.py`（节序对齐 + 记录自检 + 内容定位 + blob 切分）、
 `tools/sharecfg_re/29_www_xxtea_key_test.py`（Phase C 逐指令落地 + 三重对照 + 全配置扩围）、
-`tools/sharecfg_re/08_disasm_method.py`（本轮新增 `--at`）、输入 `files/il2cpp/Metadata/global-metadata.dat`。
-相关：`WF-18`（否证要做成穷举级 + 三条对照）、`TROUBLESHOOTING.md` §29、技能 `binary-container-vs-crypto`。
+`tools/sharecfg_re/30_www_endtoend_reproduce.py`（三段端到端复现 + A1~A5 自洽判据 + 产出参照明文载荷）、
+`tools/sharecfg_re/08_disasm_method.py`（本轮新增 `--at` 反汇编 icxx_ thunk、`--xrefslot` 按**数据 VA** 反查
+rip 相对引用——"同一把密钥/同一个静态槽还有谁在用"只能这么查；实测密钥槽全库仅 `www()` 一处引用）、
+输入 `files/il2cpp/Metadata/global-metadata.dat`。
+相关：`WF-18`（否证要做成穷举级 + 三条对照）、`TROUBLESHOOTING.md` §29 与 **§30**（字节序读反 + 可打印率当判据两件事故）、技能 `binary-container-vs-crypto`。

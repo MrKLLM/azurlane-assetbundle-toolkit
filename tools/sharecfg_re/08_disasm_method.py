@@ -284,6 +284,43 @@ def xref(elf, target):
     return sorted(hits)
 
 
+def xrefslot(elf, target):
+    """谁用 rip 相对方式引用了这个**数据地址**（静态字段槽 / klass 槽 / InitializeArray 句柄槽）。
+
+    `--xref` 只能找 call/jmp 目标，找不到"某个方法读取了哪个全局槽"——而那正是
+    "同一把密钥/同一个静态数组还有谁在用"的唯一查法。
+    编码约束：ModRM.mod=00 且 rm=101（rip+disp32、无 SIB）⇒ ModRM 低 3 位=5、高 2 位=0
+    → 只可能取 {05,0d,15,1d,25,2d,35,3d}（reg 域 0..7，REX.B 会加到 reg 上不影响 rm）。
+    disp32 在 ModRM 之后 4 字节，RIP 基准 = ModRM 地址 + 5。
+    ⚠️ 这是**字节模式扫描**、不是完整反汇编，会有假阳性 → 结果里连同前一字节（opcode）一起给出，
+       调用方按 opcode 过滤（8d=lea / 8b,89=a8..=mov / 3d=cmp ...）或直接 --at 回看上下文。
+    返回 [(ModRM 所在 VA, 该字节, 前一字节 opcode)]
+    """
+    import numpy as np
+    hits = []
+    mods = np.array([0x05, 0x0d, 0x15, 0x1d, 0x25, 0x2d, 0x35, 0x3d], dtype=np.uint8)
+    for va, fsz, fo, flags in elf.loads:
+        if not (flags & 1):
+            continue
+        arr = np.frombuffer(elf.data[fo:fo + fsz], dtype=np.uint8)
+        idxs = []
+        for m in mods:
+            c = np.nonzero(arr == m)[0]
+            idxs.append(c)
+        cand = np.sort(np.concatenate(idxs)) if idxs else np.array([], dtype=np.int64)
+        cand = cand[(cand >= 1) & (cand + 5 < len(arr))]
+        if not len(cand):
+            continue
+        c64 = cand.astype(np.int64)
+        w = (arr[cand + 1].astype(np.int64) | (arr[cand + 2].astype(np.int64) << 8)
+             | (arr[cand + 3].astype(np.int64) << 16) | (arr[cand + 4].astype(np.int64) << 24))
+        w = np.where(w >= (1 << 31), w - (1 << 32), w)
+        pred = va + c64 + 5 + w
+        for i in np.nonzero(pred == np.int64(target))[0]:
+            hits.append((int(va + cand[i]), int(arr[cand[i]]), int(arr[cand[i] - 1])))
+    return sorted(hits)
+
+
 def owner_of(sorted_vas, sorted_names, va):
     """按 VA 反查包含该地址的方法体。"""
     import bisect
@@ -297,6 +334,7 @@ def main():
     ap.add_argument('--list')
     ap.add_argument('--find')
     ap.add_argument('--xref', help='谁 call/jmp 到该方法（全库扫 E8/E9 rel32）')
+    ap.add_argument('--xrefslot', help='谁 rip 相对引用到这个**数据 VA**（静态字段/klass/句柄槽的使用方）')
     ap.add_argument('--blob')
     ap.add_argument('--va')
     ap.add_argument('--at', help='按 VA 反汇编任意地址：il2cpp 内部调用（icxx_ thunk）在 dump.cs 里没有符号')
@@ -381,6 +419,21 @@ def main():
         for addr, op in hits:
             print('  %s @0x%08X  宿主=%s' % ('call' if op == 0xE8 else 'jmp',
                                              addr, owner_of(vas, [sn[v] for v in vas], addr)))
+        return
+
+    if a.xrefslot:
+        tv = int(a.xrefslot, 0)
+        sn = {}
+        for k, v in idx.items():
+            if v['va'] and v['va'] != '0x-1':
+                sn.setdefault(int(v['va'], 16), k)
+        vas = sorted(sn)
+        hits = xrefslot(elf, tv)
+        print('# 数据 VA=0x%X  ->  %d 处 rip 相对引用（字节模式扫描，含假阳性；opcode 供过滤）'
+              % (tv, len(hits)))
+        for addr, m, op in hits:
+            print('  @0x%08X  modrm=%02x opcode=%02x  宿主=%s'
+                  % (addr, m, op, owner_of(vas, [sn[v] for v in vas], addr)))
         return
 
     if a.list:
