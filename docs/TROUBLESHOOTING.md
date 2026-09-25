@@ -1161,3 +1161,29 @@ UnityPy 报 `No valid Unity version found`。
   (a) 反编译/直接调用那个 .NET `LL.Salt::Make`（要跑第三方二进制，需用户点头），
   (b) 运行时内存里找派生后的密钥，(c) **绕开**：配置表侧已证容器层不加密，
       而台词中文串此前已在游戏内存里实测到（10.4 万条，只差归属）。
+
+**⚠️ 上面"追加"里的 ASM 结论已被同日第三次观察推翻（降级为"很可能不成立"，密钥搜索线正式停）**：
+第三方工具 `LL.Salt` 的反编译（只用 ILSpy 静态读，未执行该 DLL）给出决定性结构：
+
+```csharp
+public static void Init(uint[] key, uint delta) { uint_0 = key; uint_1 = delta; }   // 钥匙由调用方注入！
+public static byte[] Make(byte[] bytes, bool enc) {
+    uint num = 0;  uint n = bytes.Length - 8;
+    for (uint i = 0; i < n; i += 8) { 小端打包 array[0..1];
+        switch (num) { case 0: smethod_1(array, key); case 1: smethod_3(...); case 2: smethod_5(...);
+                       default: smethod_7(array, key, i); }        // mode 3 额外吃**块偏移 i**
+        写回 8 字节;  num = (num + 1) % 4;                          // ★ 模式按块号 4 循环
+    } }
+```
+- **`LL.Salt` 里根本没有密钥**（`Init` 注入）⇒ §31 追加①②③那三处"全窗口穷举 0 命中"不是"钥匙藏在别处"，
+  而是**根本没有这把钥匙可找**——该线正式停。
+- 游戏侧同构：`www()` 里 `0x3D9D1E8 inc r11d; and r11d,3` = 同一个 `%4`；
+  `r11d` 的三路分发 `je 0x3D9CF13`(mode0) / `cmp r11d,1 → 0x3D9D028`(mode1) / `cmp r11d,3 → 0x3D9CE87`+(sum>>11)&3(mode3)，
+  以及 `0x3D9D0B9` 要求 `keylen>13`、用 `key[13]` 的一支(mode2)。**我此前只实现了 mode 0。**
+- **这一条把 §30/§31 里全部异常一次解释干净**：块 0（mode0）解出 `UnityFS\0` ✓、
+  块 4（4%4=0，仍 mode0）解出正确的 `>i4@34 == ALEN` ✓，块 1/2/3 是 mode1/2/3 → 我按 mode0 解 = 垃圾 ✗。
+- 所以"**BundleFile is encrypted（Unity 中国 ASM）**"这条判定**很可能是半解密文件的假象**：
+  UnityPy 从错位的字节里读出 ASM 头，而 `data_sig` 尾部出现 `B-andro` 明文正是"错位数据"的特征。
+  ⇒ 教训：**"用第三方库的错误信息给格式定性"之前，必须先确认喂给它的数据是完整正确解码的**；
+  否则库会替你的 bug 编一个看起来很专业的解释（本次连 `key_sig/data_sig` 都"打印"出来了，说服力反而更强）。
+- 下一步：把 mode 1/2/3 按上述四个地址逐指令落成代码，按 `%4` 整文件解，再交 UnityPy 复验。
