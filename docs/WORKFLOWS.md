@@ -34,7 +34,8 @@
 **适用场景**: 无外部工具时的 AssetBundle 导出，或需要脚本化批量处理
 
 **步骤**:
-1. 安装依赖：`pip install UnityPy Pillow`
+1. 安装依赖：`pip install UnityPy Pillow`（要解 Unity 中国版 AssetBundle 加密还需 `pip install pycryptodome`，
+   UnityPy 的 `ArchiveStorageManager.decrypt_key` 依赖它；2026-09-25 实测）
 2. 编写 `export_assets.py`，核心逻辑：
    - `UnityPy.load(path)` 加载 Bundle
    - 遍历 `env.objects`，按 `obj.type.name` 分发导出函数

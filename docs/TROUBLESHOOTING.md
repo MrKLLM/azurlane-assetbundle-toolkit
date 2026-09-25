@@ -1095,3 +1095,53 @@ A3 是本轮最有价值的一条：**它不含任何未知量**（一边是文�
 `tools/sharecfg_re/08_disasm_method.py`（新增 `--xrefslot`：按数据 VA 找 rip 相对引用；实测密钥槽
 只被 `www()` 一处使用）、`tools/sharecfg_re/README.md` (17) 里 `LE32` 与"可打印率"两处表述待更正、
 `docs/WORKFLOWS.md` WF-19 判据段、§29（同一族的"打错区域的否证"）。
+
+## §31. `scripts64` 第 9 字节往后是哪一层：指纹区被单独改写 + 真身是 Unity 中国版 ASM 加密；UnityPy 的 `brute_force_key` 候选集太窄（2026-09-25）
+
+**日期**: 2026-09-25　**状态**: ⏳ 层已定性，16 字节 ASM 密钥未取到（扫描进行中/待换语料）
+
+**现象**: 30 号把 `www()` 三段判死之后，只补头 8 字节的副本仍打不开：
+UnityPy 报 `No valid Unity version found`。
+
+**定位过程（三个可复现的步骤，全部本地）**：
+1. `31_www_…`→ 实际是 `31_decrypt_scripts_bundle.py`：按 ECB **全量**解（向量化，并与 30 号标量实现
+   **逐块对比 8192 块 0 不一致** —— 向量化写错很容易，不对齐就不许出结论）。
+   解出的 `>i4 @34` **正好等于 ALEN**（两个文件各自命中）⇒ **偏移 32 之后解对了**。
+2. 剩下的垃圾只落在**偏移 8..31 这 24 字节**，其长度与内容正好是
+   `formatVersion(4) + "5.x.x\0"(6) + "2022.3.51f1\0"(12) + i64 高 2 字节`
+   = **"扫描器指纹区"**。用同构建明文包（实测取 `files/AssetBundles/ammo`）的这 24 字节补回去，
+   UnityPy 立刻换了一条错误：**`The BundleFile is encrypted, but no key was provided!`**
+   ⇒ **第 9 字节往后不是自研流密码，而是 Unity 中国版 ArchiveStorage 加密**
+   （特征串 `#$unity3dchina!@`，即 UnityPy 注释里 PGRStudio/PGR 那一套）。
+3. `32_asm_key_from_metadata.py` 把 `key_sig/data_sig` 从 UnityPy **自己的异常文本里解析出来**
+   （不硬编码；`ast.literal_eval`，不用 `eval`），调官方 `brute_force_key` → 依赖缺失，
+   `pip install pycryptodome` 后可跑，但**未找到密钥**。
+
+**根因（为什么官方函数白跑）**：`brute_force_key` 的默认候选是
+`re.compile(rb"(?=(\w{16}))")` —— **只试"16 个 word 字符"这一种形态**，
+对本项目这种"密钥可能是任意二进制 16 字节"的情况会系统性漏掉。
+预言机其实很便宜且极强：
+`decrypt_key(K) = AES-ECB(K).encrypt(key_sig) XOR data_sig == SIGN`
+⇒ 只需 `AES_K(key_sig) == data_sig XOR "#$unity3dchina!@"` = 一个**固定 16 字节目标**，
+候选逐个滑窗验即可（128 位判定，~10^7 候选期望假命中 10^-27）。
+`33_asm_key_scan.py` 就是把它做成**全窗口穷举**：
+`global-metadata.dat` **逐字节 18,245,153 个窗口全扫 = 0 命中**
+⇒ **密钥不在 metadata 里**（这条现在是带穷举范围的否证，不是抽样结论）。
+下一步语料：`libil2cpp.so`（121.8MB，后台扫）、必要时 APK/内存快照。
+
+**顺带钉死/纠正的**：
+- 那 24 字节被**单独改写**是有意为之（防第三方扫描器），不是"我们解错了"——证据：同一段里
+  `>i4 @34 == ALEN` 这种 32 位精确值能解出来。
+- `data_sig` 尾部含 `B-andro` 明文（本厂包命名前缀），佐证读到了正确结构。
+- 本轮新增依赖 **pycryptodome**（`docs/WORKFLOWS.md` 步骤 1 已记）。
+- 产物 `.diag/sharecfg_re/{scripts64,scripts32}.ab`（ECB 全解，各 ~39MB）**不入库、可由 31 号一键再生**。
+
+**教训**：
+- 用第三方库的"暴力/搜索"函数前，**先看它的候选集是什么**——它写死 `\w{16}` 时，
+  "跑完没找到"和"不存在"是两回事（本轮差点据此判死 metadata 这条路）。
+- **报错文本是好输入**：`key_sig`/`data_sig` 是它自己算出来的，解析出来复用即可，
+  不要手抄成常量（手抄会静默漂移）。
+
+**涉及文件**: `tools/sharecfg_re/31_decrypt_scripts_bundle.py`、`32_asm_key_from_metadata.py`、
+`33_asm_key_scan.py`（均新增）、`files/AssetBundles/ammo`（指纹区参照明文包）。
+相关：§30（www 三段与 A1~A5）、WF-19。
