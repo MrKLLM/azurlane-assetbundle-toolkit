@@ -881,3 +881,4 @@ rip 相对引用——"同一把密钥/同一个静态槽还有谁在用"只能�
 **涉及文件**: `tools/sharecfg_re/37_parse_sharecfgdata.py`（`--trace` / `--kgc` / `--entries` 条目数判据 / `--solve` / `--table` / `--verify` / `--all --yes` / `--scalar-all --yes`）、`tools/sharecfg_re/38_grammar_walk.py`（从已知锚点逐条走、崩在第几条直接打印）、
 `docs/TROUBLESHOOTING.md` §33（本案完整结论 + 需要更正的旧否证）、`inputs/azdata/`（值级交叉验证的独立基准）。
 相关：`WF-18`（否证做成穷举级）、`WF-19`（判据优先挑两边可独立算的量）、技能 `binary-container-vs-crypto`（建议把"第 0 步先查公开实现"并进去）。
+    - **展示层（画廊组名/卡片标签）的兜底必须写成"加法"**：新兜底排在既有来源之后，并限定来源档白名单，于是命题变成"只可能把无名的变成有名、既有名字一律不动"，可用逐字段 diff 机器核验（索引那次：1008 组 +74 有名、有名组 0 处被改、4491 皮肤 0 处变化）。若把新兜底排在旧来源之前，会顺带改动上百组显示名——那属于另一次需用户拍板的展示决策，不得夹在修 bug 里做掉。详见 `TROUBLESHOOTING.md` §39 追加。

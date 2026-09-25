@@ -210,7 +210,17 @@ def build_meta(skin, stats, wiki, verbose=False):
                 entry['type_code'] = sv.get('type')
                 entry['category'] = 'ship'
             else:
-                entry['cn'] = sk.get('name') or stem
+                # 皮肤行没有对应舰级行时，`name` 是**皮肤标题**（如"超级AI-TC""入浴的小恶魔"），不是实体名。
+                # 若这张立绘同时是指挥室秘书舰 NPC 的换装（在 secretary 表里），实体名取表内 name，
+                # 皮肤标题保留在 skin_name；两边都是配置里的原文，不做任何推断。
+                rec = (NPC_PAINTING.get(str(sk.get('painting') or '').lower())
+                       or NPC_PAINTING.get(stem.lower()))
+                entry['cn'] = (rec or {}).get('cn') or sk.get('name') or stem
+                if rec:
+                    # 记下命中的表键（变体皮肤 `_n` 等的基资源名），便于事后逐条回查
+                    key = (str(sk.get('painting') or '').lower()
+                           if str(sk.get('painting') or '').lower() in NPC_PAINTING else stem.lower())
+                    entry['name_via'] = 'npc_table:' + key
         else:
             # painting 未命中 -> 秘书舰 NPC 表 / 同族前缀 -> ship_name_map 兜底 -> manual 怪例表
             pfx, src, row, npc_cn = resolve_story_fallback(stem, painting_ci)

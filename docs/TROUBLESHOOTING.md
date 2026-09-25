@@ -1612,3 +1612,34 @@ npc_family 8 + family 2，**unresolved 76 → 3**（`_ab`、`unknown`、`tansuoz
 → `inputs/gamecfg/{npc_painting_name.json,MANIFEST.json}`（台账改为**按 path 合并**写回，`42` 号脚本同步改造，
 否则两个发布脚本会互抹台账行）。**遗留**：`build_gallery_index.py` 组名查的是合成前缀 `linghangyuan1`，
 ship_meta 里只有 `linghangyuan1_2` 等具体 stem ⇒ 36 个 NPC 名进了 ship_meta 但画廊卡片仍显示拼音（见 §6 第 5 条）。
+
+### §39 追加：同一批残差的第二层根因——皮肤行的 `name` 是"皮肤标题"，不是实体名（2026-09-25）
+
+接上文把 76→3 之后，`build_gallery_index.py` 仍有一截不对：组卡标题出现 `'TB'`、`'数据集：无数的我'` 这种值。
+
+**根因**：5 个秘书舰换装立绘（`linghangyuan1_1`、`linghangyuan1_5`、`linghangyuan3_2`、`lingyangzhe3_2`、`tansuozhe_2`）
+**先被皮肤表精确命中**，于是走的是 `cn = sk['name']`（皮肤标题），根本没轮到 NPC 表；
+而 `secretary_special_ship` 里同一资源名的 `name` 是实体名（领航员-TB / 领洋者-娜比娅 / 探索者-艾普洛）。
+两边都是配置原文，但语义不同层：**皮肤标题 ≠ 实体名**。
+
+**修法（规则，不写例外名单）**：`build_ship_meta.py` 里"皮肤行没有对应舰级行"这一支，
+若该立绘资源名同时出现在秘书舰 NPC 表里 → 实体名取表内 `name`，皮肤标题留在 `skin_name`，
+并写 `name_via='npc_table:<命中的表键>'`（`_n` 变体记的是基资源名，便于事后逐条回查）。
+影响 8 条（4 个实体 × 基图 + `_n`），`cn` 以外字段零变化。
+
+**索引层的新兜底必须是"加法"**：`build_gallery_index.py` 组名兜底刻意排在 `SHIP_NAME_MAP` **之后**，
+且要求来源档属于 `AUTHORITATIVE_CN` —— 于是它只可能把"当前显示拼音"的组变成有名，
+**既有名字一律不动**。实测：画廊 1008 组里 +74 组有名（`with_cn` 910→984），
+原本有名的组 0 处被改、皮肤集合 4491 条 0 处变化。这条判据形状比"改完看看对不对"强，因为它把
+"我只做加法"变成了可机器核验的命题。
+> 反面教材：若把该兜底排在手抄表**之前**，会连带改动 **112 组**已有显示名（`tbniang` TB娘→领航员-TB、
+> `missr` R小姐→好人理查德、`strength` 力量→仲裁者·司特莲库斯·VIII…）——那不是不能做，而是
+> **必须当作一次独立的、需用户拍板的展示层决策**，不能夹在修 bug 里顺手做掉。
+
+**闸门随之收紧**：`scripts/diag/ship_meta_authority_diff.py` 的"受保护档必须 0 改动"多了一条**可审计例外**——
+只放行 `name_via=npc_table:<key>` 且 `<key>` 确实存在于 `inputs/gamecfg/npc_painting_name.json`、
+且 `skin_name` 仍等于旧 `cn`（证明皮肤标题没被丢弃）的 `cn` 改动；其余一律红。
+
+**探针噪声记一条**：画廊页在 CDP 下恒有 1 条 JS 异常 `ReferenceError: THREE is not defined`
+（`Output/gallery_v2/vendor/spine/spine-all.js:11216`，vendored 库的 three.js 可选依赖），
+**与元数据无关**。写"页面无 JS 异常"这类判据时必须按 URL 把 vendor 库排除，否则每次都要重新查一遍。

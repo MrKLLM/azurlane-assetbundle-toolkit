@@ -116,6 +116,11 @@ def ship_meta_entry(base):
                 best = (score, e)
     return best[1] if best else {}
 
+# 能当组名用的来源档：走通配置桥（含大小写不敏感回退）、或从 NPC 立绘表/同族前缀查到，
+# 以及人工核验过的 manual。不含 fallback（手抄表，另有更高优先级通道）与 unresolved。
+AUTHORITATIVE_CN = {'painting', 'suffix', 'painting_ci', 'suffix_ci',
+                    'npc_table', 'npc_suffix', 'npc_family', 'family', 'manual'}
+
 # ---------- 收集 skins（key=完整stem）----------
 skins = {}   # stem -> {key,label,base,image,spine_dir,live2d}
 ships = {}   # base -> ship dict
@@ -132,6 +137,13 @@ def ship_of(base):
     resolved = bool(e.get('faction'))
     name_meta = _clean_cn(SHIP_META[base].get('cn')) if (resolved and base in SHIP_META) else ''
     cn = name_meta or SHIP_NAME_MAP.get(base) or ''
+    # 组名最后一级兜底：base 是**合成前缀**（`linghangyuan1`/`nabulesi` 这类不是任何 stem 的组键）时，
+    # 取同 base 兄弟里最权威那条的 cn。刻意排在 SHIP_NAME_MAP 之后 —— 只可能把"当前显示拼音"的组
+    # 变成有名，既有名字一律不动；且要求该兄弟的 source 属于「从表里查到」的档，
+    # 否则 cn 可能只是未被解析的拼音回显。
+    if not cn and e.get('source') in AUTHORITATIVE_CN:
+        sib = _clean_cn(e.get('cn') or '')
+        cn = '' if sib == base else sib
     cn = NAME_FIX.get(cn, cn)   # 官方译名修正（兜底路径也生效）
     meta = meta_by_cn.get(cn, {}) if cn else {}
     npc = bool(re.match(r'(npc|linghangyuan|lingyangzhe)', base))

@@ -56,11 +56,26 @@ def main():
     hard = [(k, f, old[k].get(f, ''), new[k].get(f, ''))
             for k in old if k in new and old[k].get('source') in PROTECTED
             for f in FIELDS if old[k].get(f, '') != new[k].get(f, '')]
-    print('1) 受保护档(painting/suffix) %d 条 -> 字段改动 %d 处（须为 0）'
-          % (sum(1 for v in old.values() if v.get('source') in PROTECTED), len(hard)))
-    for t in hard[:8]:
+    # 受保护档里唯一的合法例外：皮肤行没有舰级行时 cn 本来是「皮肤标题」，
+    # 被秘书舰 NPC 表纠正成实体名（`name_via=npc_table`）。逐条回查表，不许凭空放行。
+    npc_tab = json.load(open(os.path.join(ROOT, 'inputs', 'gamecfg', 'npc_painting_name.json'),
+                             encoding='utf-8')) if os.path.exists(
+        os.path.join(ROOT, 'inputs', 'gamecfg', 'npc_painting_name.json')) else {}
+
+    def justified(t):
+        k, f, a, b = t
+        via = str(new[k].get('name_via') or '')
+        key = via.split(':', 1)[1] if via.startswith('npc_table:') else ''
+        return (f == 'cn' and key in npc_tab and b == npc_tab[key]['cn']
+                and new[k].get('skin_name') == a)   # 原皮肤标题必须还留在 skin_name，不许丢
+    bad = [t for t in hard if not justified(t)]
+    okcnt = len(hard) - len(bad)
+    print('1) 受保护档(painting/suffix) %d 条 -> 字段改动 %d 处，其中"皮肤标题→NPC 实体名"%d 处（已逐条回查表），'
+          '其余 %d 处（须为 0）' % (sum(1 for v in old.values() if v.get('source') in PROTECTED),
+                                    len(hard), okcnt, len(bad)))
+    for t in bad[:8]:
         print('   ! %s %s: %r -> %r' % t)
-    if hard:
+    if bad:
         fails.append('受保护档被改动')
 
     add = [k for k in new if k not in old]
