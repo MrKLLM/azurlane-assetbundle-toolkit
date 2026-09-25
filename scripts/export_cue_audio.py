@@ -49,7 +49,7 @@ def convert_b_to_wav(input_path, output_path, temp_dir):
         # 用 vgmstream 解码
         result = subprocess.run(
             [VGMSTREAM_CLI, "-o", output_path, acb_path],
-            capture_output=True, text=True, timeout=60
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60
         )
         if result.returncode == 0 and os.path.exists(output_path):
             return True
@@ -57,7 +57,7 @@ def convert_b_to_wav(input_path, output_path, temp_dir):
             # 如果 vgmstream 失败，尝试 ffmpeg
             result2 = subprocess.run(
                 [FFMPEG, "-y", "-i", acb_path, "-acodec", "pcm_s16le", "-ar", "44100", output_path],
-                capture_output=True, text=True, timeout=60
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60
             )
             if result2.returncode == 0 and os.path.exists(output_path):
                 return True

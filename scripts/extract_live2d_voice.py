@@ -110,7 +110,7 @@ def decode_all(acb, tmp):
     os.makedirs(out, exist_ok=True)
     shutil.copy2(acb, src)
     r = subprocess.run([VGMSTREAM, '-i', '-S', '0', '-o', os.path.join(out, '?n.wav'), src],
-                       capture_output=True, text=True, timeout=600)
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
     files = glob.glob(os.path.join(out, '*.wav'))
     if not files:
         raise RuntimeError('vgmstream 未解出任何流 (rc=%s) %s' % (r.returncode, (r.stderr or '')[:200]))
@@ -121,7 +121,7 @@ def to_ogg(wav, dst):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     r = subprocess.run([FFMPEG, '-hide_banner', '-loglevel', 'error', '-y', '-i', wav,
                         '-c:a', 'libopus', '-b:a', OPUS_BITRATE, dst],
-                       capture_output=True, text=True, timeout=300)
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
     if not os.path.exists(dst) or os.path.getsize(dst) < 1024:
         raise RuntimeError('ffmpeg 转码失败 %s: %s' % (wav, (r.stderr or '')[:200]))
 

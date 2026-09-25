@@ -1505,3 +1505,41 @@ public static byte[] Make(byte[] bytes, bool enc) {
 | 117 | A2、2B | 联动-尼尔（自动再述）（A2/2B 同名） |
 
 ⚠️ 码 12/99 需按**船名**由用户裁定（用户明确说"单问编号我不确定"）；已否证的自动路：`world_port_data.port_camp`（见 §35）。
+
+---
+
+## §37. `subprocess(text=True)` 在 Windows 上按 GBK 解码子进程输出：一次全量重导在第 N 个皮肤上炸出线程异常（2026-09-25）
+
+**现象**：`extract_live2d_voice.py --all` 跑到中途，日志里冒出
+`Exception in thread Thread-255 (_readerthread): UnicodeDecodeError: 'gbk' codec can't decode byte 0xad`，
+而 `--key antu_2,yibei_3,z23` 的**三皮肤样本完全正常** ⇒ 样本闸门没盖住这个缺陷。
+
+**根因**：5 个脚本里的 `subprocess.run(..., capture_output=True, text=True)` **都没给 `encoding`**。
+Windows 下 `text=True` 用**locale 编码**（这台机是 GBK）解码子进程输出。
+`vgmstream -i` 会把 ACB 里的**日文/中文 cue 标签原样打进 stdout**，遇到非 GBK 字节 → 读线程抛异常 →
+`r.stdout` 变 `None`。**只有内容里真出现那种字节的皮肤才触发**，所以小样本永远测不到。
+
+**为什么危险**：`decode_all()` 不看 `r.stdout`（靠 glob 出来的 wav 文件），所以它**不会报错**；
+但任何**解析 `r.stdout` 的路径**会拿到 `None` 并静默当成"零条" ⇒ 典型的"跑成功了但数据少了"。
+（同项目的 `run_v2_full.py` 早就写了 `encoding="utf-8"`，说明这坑以前踩过一次但没扩散修。）
+
+**修法（已改 6 处）**：所有 `text=True` 一律补 `encoding='utf-8', errors='replace'` ——
+`scripts/extract_live2d_voice.py`(2)、`scripts/export_cue_audio.py`(2)、`scripts/extract_cpk.py`(2 命中 1 处新增)、`scripts/mumu_sync.py`(1)。
+
+**判据/规则（新增，适用于本仓库所有脚本）**：
+- **凡 `subprocess` 用 `text=True` 必须同时写 `encoding=`**；查法：`grep -rn "text=True" scripts/*.py | grep -v encoding=`。
+- **子进程输出里可能带非 ASCII 的脚本，样本必须含"内容里真带非 ASCII"那一个**；
+  只用 1–3 个"干净"样本过闸门，等于没测这类 bug。
+- 校验"跑完了"不能只看有没有 traceback：以**处理条数**为准（本轮 `grep -c "组=" 日志` 对齐皮肤总数 270）。
+
+**涉及文件**: `scripts/extract_live2d_voice.py`、`scripts/export_cue_audio.py`、`scripts/extract_cpk.py`、`scripts/mumu_sync.py`。
+相关：§36（E2 样本闸门与"假红灯：路径根判错"）、技能 `safe-pipeline-fix-targeted-rerun`。
+
+## §37 补：阵营码待办（§6 第 7 条）闭环
+用户按舰名裁定：**码 12 = 晶环联盟**（旗下只有"瓦尔帕莱索"，战列/海上传奇）、**码 99 = 塞壬**
+（构建者、仲裁者·提尔瑞特·VII）；另按舰名 + `gametip` 文案号对齐写死
+**101 = 联动-超次元游戏海王星、104 = 联动-KizunaAI、117 = 联动-尼尔：自动再述**。
+写进 `build_ship_meta.py` 的 `NATIONALITY` 后重写 `Output/ship_meta.json`：
+逐字段比对 **删除 0 / 新增字段 0 / 仅 `faction` 变化 2 处**（`waerpalaisuo`、`waerpalaisuo_n` → `晶环联盟`）。
+其余三个码在当前资产集里没有对应 bundleID（联动舰没有在画廊实体），**名字先进表、不影响现有条目**。
+仍在「其他」的 14 条是布里系（码 98，无阵营），符合既有认知，不是缺陷。

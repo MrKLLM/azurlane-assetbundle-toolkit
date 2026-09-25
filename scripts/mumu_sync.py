@@ -89,7 +89,7 @@ def _candidate_ports():
         try:
             proc = subprocess.run(
                 [MUMU_MANAGER, "info", "-v", "all"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, encoding='utf-8', errors='replace',
                 encoding="utf-8", errors="replace", timeout=30,
             )
             data = json.loads(proc.stdout)

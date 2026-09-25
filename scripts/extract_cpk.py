@@ -75,7 +75,7 @@ def try_ffmpeg_demux(input_path, output_dir, base_name):
     ]
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
         if result.returncode == 0 and os.path.exists(video_out):
             print(f"  ffmpeg 成功: {video_out}")
             return True
