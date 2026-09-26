@@ -512,7 +512,7 @@
 **踩坑记录**:
 - `<img>`/`<audio>` 在 `file://` 可直读，但 `fetch/XHR` 读 `.skel/.atlas/.json` 被 CORS 拦 → **实时播放必须起 http 服务器**；页面按 `location.protocol` 提示。
 - `.bat` 里 `start URL` 若抢在 `http.server` 监听前会连不上 → 后台起服务器 + `timeout /t 2` 延时再 `start URL`，并探测 `py`/`python`。
-- Live2D 动作播放需 Cubism Web 运行时（`live2dcubismcore.min.js`+`pixi-live2d-display`），本机无且环境出网受限 → 暂只显示模型贴图，预留 `vendor/live2d/`。
+- ~~Live2D 动作播放需 Cubism Web 运行时（`live2dcubismcore.min.js`+`pixi-live2d-display`），本机无且环境出网受限 → 暂只显示模型贴图，预留 `vendor/live2d/`。~~ **已过时**（2026-09-20 起动作播放已接通）；当年"出网受限拿不到库"这件事本身仍是真风险，所以 2026-09-26 给这 4 个库立了台账 `gallery_src/vendor/MANIFEST.json` + `scripts/fetch_gallery_vendor.py`，见本文 WF-16「运行时库台账」。
 - 个别 bundle 拼音与 `SHIP_NAME_MAP` 拼写不一致（如 daofeng/dafeng）→ 约 7% 未匹配中文名，按约定保留拼音 ID。
 
 **涉及文件**: `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `Output/gallery_v2/index.html`, `Output/gallery_v2/启动资产浏览器.bat`, `PROJECT_STATUS.md §13`
@@ -602,6 +602,8 @@
 | `Output/ship_meta.json` | `build_gallery_index`（元数据主源） | ✅ 可再生：`build_ship_meta.py --write` |
 | `Output/WikiData/ship_data.json` | `build_gallery_index` 兜底 | ✅ 可再生：`scrape_wiki_fast.py`（需外网） |
 | `Output/Paintings_v2`、`Spine_v2`、`Live2D`、`CG_v2`、`Audio`、`gallery_v2/` | 画廊 | ✅ 全量可再生，但**耗时数十小时**，故按 WF-15 增量而非全量 |
+| `Output/gallery_v2/vendor/`（4 个第三方 JS，1.3MB） | 画廊 Live2D/Spine 标签的运行时 | ✅ 可再生（2026-09-26 起）：台账 `gallery_src/vendor/MANIFEST.json`（版本+字节+sha256+来源）+ `py -3 scripts/fetch_gallery_vendor.py`。**库本体不入库**（含 Live2D 专有许可的 Redistributable Code）。⚠️ 唯 `spine/spine-all.js`(3.8.75) 无可按哈希校验的下载源（本机这份与上游官方构建不同），只能从 `tools/spine-viewer/spine-runtime/` 取——**它也在 gitignore，别清** |
+| `gallery_src/` 4 个前端正本 ↔ `Output/gallery_v2/` 同名 4 文件 | 画廊前端 | ✅ 同一份数据两个路径名（硬链，2026-09-26 起 4/4）。断链探测器：`py -3 scripts/deploy_gallery.py --check` |
 
 > `.diag/` 已写入 `.gitignore`，定位是「临时产物区」；**可复用工具一律放 `scripts/diag/`（入库）**。清理 `.diag` 前必须先跑上表白名单核对。
 > **权威外部输入一律不得放进 `.diag/`**——2026-09-24 起它们住在 `inputs/<来源>/`（数据本体不入库、只入 `MANIFEST.json` 台账），
@@ -654,10 +656,11 @@
 **改哪里**:
 | 层 | 文件 | 说明 |
 |---|---|---|
-| 前端源码（唯一权威） | `gallery_src/index.html` | **2026-09-26 起与运行目录是硬链接**（同一份 inode），改正本即刻生效；`cg_export.html` 因当时有未提交改动尚未换链 |
+| 前端源码（唯一权威） | `gallery_src/index.html` | **2026-09-26 起与运行目录是硬链接**（同一份 inode），改正本即刻生效、不需部署；4 个文件（含 `cg_export.html`）已全部换链 |
 | 部署 / 漂移检查 | `scripts/deploy_gallery.py` | 默认=用正本 copy 修复；`--check`=只比对不写盘、漂移即 `exit 1`（改完前端/提交前跑一次）；`--relink`=把运行目录副本换成硬链（要求两边逐字节相同，且正本无未提交改动才动手）。同步目标 `Output/gallery_v2/` 是运行目录（gitignore） |
 | 服务器 | `Output/gallery_v2/_gallery_server.py`（8777，已在跑则复用） | 回归脚本都打 `http://127.0.0.1:8777/gallery_v2/index.html`。⚠️ 它按**自身所在目录**算根（`ROOT=dirname(HERE)`），所以**只能双击 `Output\gallery_v2\` 里那份**；双击 `gallery_src\` 那份会把根算成仓库目录 → 404 + 「当前目录没找到 index.html」 |
 | 模型数据 | `Output/Live2D/<key>/` | 前端直读（`P="..\/"`），无副本 |
+| 运行时库台账 | `gallery_src/vendor/MANIFEST.json` + `scripts/fetch_gallery_vendor.py` | `vendor/` 4 个第三方 JS 只在 gitignore 目录里，故版本/来源/sha256 全记在台账。**换机器或清过 `Output/` 后跑一次 `fetch_gallery_vendor.py` 即补齐**；`--check` 只校验（缺件/漂移 exit 1），可并进下面的回归清单 |
 
 **四条必须记住的硬规则（每条对应一次真实事故）**:
 1. **坐标系必须换算**：`getDrawableVertexPositions()` 是 V（Cubism 原生：画布中心原点、y 向上），`toLocal()/pixelsPerUnit` 是 P（左上原点、y 向下）。换算 `Vx=Px-cux/2`、`Vy=cuy/2-Py`（`cux=im.width/ppu`）。混用 → 点胸口触发头部动作（TROUBLESHOOTING §20）。
@@ -763,7 +766,7 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
 - **启动长任务用 `py -3 scripts/diag/run_detached.py --log .diag/_x.log -- py -3 <脚本> <参数...>`**，别再用 PowerShell `Start-Process`：含空格路径在「bash → PowerShell → 子进程」三层引号下会被拆断（实测三次）。`DETACHED_PROCESS` 与 `CREATE_NO_WINDOW` 互斥，同时给会 `[WinError 87]`。
 - **含中文的 `.ps1` 必须存成 UTF-8 带 BOM**，否则 Windows PowerShell 5.1 按 GBK 解码会把引号错位成 `字符串缺少终止符`（`wait_for_detached.ps1` 首跑就是这么死的，`py -3` 写文件时用 `encoding='utf-8-sig'`）。
 
-**涉及文件**: `gallery_src/index.html`、`scripts/deploy_gallery.py`、`scripts/diag/{l2d_coord_forensics,l2d_inspector_verify,interact_verify,hit_verify,page_sanity_check,clean_diag_profiles,l2d_ref_diff,l2d_ab}.py`、`TROUBLESHOOTING.md` §19/§20/§24
+**涉及文件**: `gallery_src/index.html`、`scripts/deploy_gallery.py`（默认 copy / `--check` / `--relink`）、`gallery_src/vendor/MANIFEST.json`、`scripts/fetch_gallery_vendor.py`、`scripts/diag/{l2d_coord_forensics,l2d_inspector_verify,interact_verify,hit_verify,page_sanity_check,clean_diag_profiles,l2d_ref_diff,l2d_ab}.py`、`TROUBLESHOOTING.md` §19/§20/§24
 
 ---
 

@@ -1,5 +1,9 @@
 #!/bin/sh
-# 提交闸门：暂存区改了 scripts/** 或 gallery_src/** 但没同时暂存任何文档 → 拦下。
+# 提交闸门（两条，都不因 DOC_CHECK_SKIP 而放行第二条）：
+#   闸 1  暂存区出现 Output/ 或 files/ 下的路径 -> 直接拦（这两个目录整目录 gitignore，
+#         能进暂存区只可能是 git add -f 强加；里面是 44GB 导出产物 + 2.4 万个重导出资产 json，
+#         一旦推上 Gitee+GitHub 双远端，撤回要重写历史）。
+#   闸 2  暂存区改了 scripts/** 或 gallery_src/** 但没同时暂存任何文档 -> 拦下。
 #
 # 规则出自 AGENTS.md「阶段收尾必做清单」第 2 条（改代码必须同步文档）。
 #   正本：scripts/git-hooks/pre-commit（可版本化）
@@ -9,21 +13,46 @@
 #
 # 绕行（确属无需改文档的提交：纯重命名/格式化/试验性提交）：
 #     DOC_CHECK_SKIP=1 git commit ...
-# 绕行会打印一行警告，不静默放行。
+#   绕行只放行闸 2，且会打印一行警告，不静默放行。
 #
 # 自测用法（不动真实暂存区）：
 #     T=$(mktemp); export GIT_INDEX_FILE=$T; git read-tree HEAD
 #     touch scripts/_selftest.tmp docs/_selftest.tmp
 #     git add scripts/_selftest.tmp && ./scripts/git-hooks/pre-commit        # 期望 exit 1
 #     git add docs/_selftest.tmp   && ./scripts/git-hooks/pre-commit        # 期望 exit 0
-#     rm -f scripts/_selftest.tmp docs/_selftest.tmp $T; unset GIT_INDEX_FILE
+#     mkdir -p Output/_selftest && touch Output/_selftest/x.json
+#     git add -f Output/_selftest/x.json && ./scripts/git-hooks/pre-commit  # 期望 exit 1（闸 1）
+#     rm -rf Output/_selftest scripts/_selftest.tmp docs/_selftest.tmp $T; unset GIT_INDEX_FILE
 
+staged=$(git diff --cached --name-only --diff-filter=ACMRD)
+
+# ---------- 闸 1：禁止提交 Output/ 与 files/ ----------
+forbidden=""
+for f in $staged; do
+    case "$f" in
+        Output/*|files/*) forbidden="$forbidden
+    $f" ;;
+    esac
+done
+if [ -n "$forbidden" ]; then
+    cat >&2 <<EOF
+[pre-commit] 提交被拦下：暂存区里有整目录忽略区（Output/ 或 files/）下的文件。
+
+    $forbidden
+
+这两个目录是数十 GB 的导出产物与游戏源包，里面 2.4 万个 .json 是重导出的资产本体和换前备份，
+按项目策略一律不入库（理由见 .gitignore 里 Output/ 那行上方的注释）。它们出现在这里说明用了 git add -f。
+    要撤掉：  git rm --cached <上面列出的路径>
+    真要领入库（小个体积、且确属唯一副本）：先确认体积与版权，再 DOC 之外的场景手动处理。
+EOF
+    exit 1
+fi
+
+# ---------- 闸 2：改代码必须同步文档 ----------
 if [ -n "$DOC_CHECK_SKIP" ]; then
     echo "[pre-commit] ⚠️ 已用 DOC_CHECK_SKIP=1 绕过文档同步检查 —— 请确认本次确属无需改文档的提交。" >&2
     exit 0
 fi
-
-staged=$(git diff --cached --name-only --diff-filter=ACMRD)
 
 code_files=""
 has_code=0

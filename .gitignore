@@ -2,7 +2,7 @@
 # 碧蓝航线 AssetBundles 解包项目 — 版本控制策略
 #
 # 进远程仓库（tracked）：源码脚本 scripts/、文档 docs/ 与根 *.md、少量小数据脚本、
-#                              画廊前端源码 gallery_src/（部署到 Output/gallery_v2）。
+#                              画廊前端源码 gallery_src/（与 Output/gallery_v2 已做硬链接，见 WF-16）。
 # 绝不进远程（ignored）：游戏源包、数十 GB 导出产物、第三方工具、运行日志、
 #                        大清单、任何二进制资产、本地临时/回收目录、agent 本地状态。
 # 原则：仓库只承载「可复现的工具与知识」，资产本体由使用者自备。
@@ -10,6 +10,13 @@
 
 # 游戏源数据与生成产物（体积大 + 版权，使用者自备）
 files/
+# ⚠️ Output/ 整目录忽略挡的**不是图片**——图片早被下面那份扩展名清单挡住了。
+# 它挡的是扩展名清单完全覆盖不到的一类：Output 下实测 24,879 个 `.json`
+#   （Live2D/**/motion/*.motion3.json、.model3.json = 从游戏包重导出的资产本体；
+#     _OLD_bak/ 的 15,560 个 = WF-15 第 9 步换前备份，正式目录被覆写后只有这里有）。
+# 想改成"按内容筛"再删这行，先读 docs/WORKFLOWS.md WF-15 承重白名单 + TROUBLESHOOTING §43。
+# 失效方向也要看清：整目录规则是白名单式失效（漏配只少传一个文件）；
+# 扩展名黑名单是 fail-open（漏一类就直接双推到 Gitee+GitHub，两万次文件要重写历史才能撤）。
 Output/
 tools/*
 # 例外：sharecfgdata 逆向是本项目自研小项目，必须入库（tools/ 其余是第三方二进制，不入库）
@@ -86,3 +93,7 @@ Thumbs.db
 # 只入库 MANIFEST 台账；丢了不可复原，所以一律不得放回 .diag/。
 inputs/*/*.json
 !inputs/*/MANIFEST.json
+
+# 画廊第三方运行时库：台账入库，库本体不入库（正本在 Output/gallery_v2/vendor/，
+# 由 scripts/fetch_gallery_vendor.py 按台账 sha256 校验后补齐）。
+gallery_src/vendor/*.js

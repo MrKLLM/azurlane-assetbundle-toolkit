@@ -1,0 +1,67 @@
+{
+  "_purpose": "画廊前端运行时库台账。这 4 个第三方 JS 落在 Output/gallery_v2/vendor/（整目录 gitignore），git 里原本 0 份、无版本记录、无来源，换机器或清过 Output 就得重走当年「出网受限下载不到」那段排查（docs/WORKFLOWS.md 的 Spine/Live2D 段落）。本文件是唯一可复现记录，随仓库入库。",
+  "_provision": "py -3 scripts/fetch_gallery_vendor.py            # 缺失或哈希不符才拉，按 sha256 校验后才落盘",
+  "_check": "py -3 scripts/fetch_gallery_vendor.py --check   # 只校验不回写；漂移/缺件即非零退出（可进回归清单）",
+  "_integrity_note": "所有 sha256 于 2026-09-26 由本机在用的运行目录副本实测；标 verified=true 的 URL 已当日重新下载并按哈希逐字节对拍命中。",
+  "consumed_by": {
+    "file": "gallery_src/index.html",
+    "how": "相对页面自身目录加载 ./vendor/live2d/*、./vendor/spine/spine-all.js（⚠️ 不能用资源前缀 P='../' 拼 vendor，那会指向 Output/vendor → 404；判据见 docs/TROUBLESHOOTING.md）",
+    "load_order": [
+      "vendor/live2d/live2dcubismcore.min.js",
+      "vendor/live2d/pixi.min.js",
+      "vendor/live2d/pixi-live2d-display-cubism4.min.js"
+    ]
+  },
+  "files": [
+    {
+      "path": "Output/gallery_v2/vendor/live2d/live2dcubismcore.min.js",
+      "version": "文件头未标版本号，仅 (C) 2019 Live2D Inc.",
+      "bytes": 207155,
+      "sha256": "25ae938cb4fe282ce189b357bcc97e603d1e1f7ec78bf04150d401c23cdc792f",
+      "license": "Live2D Proprietary Software License；文件头自标 'This file corresponds to the Redistributable Code in the agreement'（EULA: https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html）",
+      "sources": [
+        { "url": "https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js", "verified": true }
+      ],
+      "note": "官方直链即此路径；根域直接访问返回 404，必须带上完整文件路径。"
+    },
+    {
+      "path": "Output/gallery_v2/vendor/live2d/pixi.min.js",
+      "version": "6.5.2（文件头 'pixi.js - v6.5.2 / Compiled Wed, 24 Aug 2022'）",
+      "bytes": 476988,
+      "sha256": "ce14152237354383ef19362e1d83cad5c62c6af70f6598c2bf54820af8e7eaf1",
+      "license": "MIT（文件头声明；registry.npmmirror.com/pixi.js/6.5.2 → license=MIT）",
+      "sources": [
+        { "url": "https://cdnjs.cloudflare.com/ajax/libs/pixi.js/6.5.2/browser/pixi.min.js", "verified": true },
+        { "url": "https://cdn.jsdelivr.net/npm/pixi.js@6.5.2/dist/pixi.min.js", "verified": false, "observed": "本机 HTTP000（被墙/超时），非哈希不符" },
+        { "url": "https://registry.npmmirror.com/pixi.js/6.5.2/files/dist/pixi.min.js", "verified": false, "observed": "HTTP404，npmmirror 该包 files 路径与此不同" }
+      ],
+      "note": "必须用 browser/ 构建（全局 PIXI），不要用 dist/pixi.js 的模块版。"
+    },
+    {
+      "path": "Output/gallery_v2/vendor/live2d/pixi-live2d-display-cubism4.min.js",
+      "version": "0.4.0（包内 VERSION=\"0.4.0\"）",
+      "bytes": 119922,
+      "sha256": "af1267e6d52759b245766c578d905bfa025b532d5c3cc727c370957c4409e21b",
+      "license": "MIT（registry.npmmirror.com/pixi-live2d-display/0.4.0 → license=MIT）",
+      "sources": [
+        { "url": "https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js", "verified": true },
+        { "url": "https://unpkg.com/pixi-live2d-display@0.4.0/dist/cubism4.min.js", "verified": true }
+      ],
+      "rename": "上游文件名 dist/cubism4.min.js → 本机改名 pixi-live2d-display-cubism4.min.js（改名不改内容，哈希一致）",
+      "note": "⚠️ 这个 0.4.0 的 cubism4 模块里 setIsLoop() 只有定义、全 bundle 无调用点，Meta.Loop 被无视——修在前端（gallery_src/index.html 出现 6 次 setIsLoop），**不要改这个库文件**，否则本台账的哈希就失效了。"
+    },
+    {
+      "path": "Output/gallery_v2/vendor/spine/spine-all.js",
+      "version": "3.8.75（文件内仅有的版本串；旧文档里写的 3.8.99 与实测不符）",
+      "bytes": 501448,
+      "sha256": "4782fb5f6f016eda12bdc4a62155cf440dea471e9be36122e8bf6e97b1529d49",
+      "license": "文件内无许可头。上游 EsotericSoftware/spine-runtimes 3.8 受 Spine Runtimes License 约束——**不要凭这条推断可自由再分发**。",
+      "sources": [
+        { "local": "tools/spine-viewer/spine-runtime/3.8_spine-all.js", "verified": true, "observed": "sha256 逐字节相同（本机两副本实测）" },
+        { "url": "https://cdn.jsdelivr.net/gh/EsotericSoftware/spine-runtimes@3.8/spine-ts/build/spine-all.js", "verified": false, "observed": "HTTP200 但 499623B ≠ 501448B，是上游另一份构建，不是本机这份" },
+        { "url": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/3.8/spine-ts/build/spine-all.js", "verified": false, "observed": "本机 HTTP000" }
+      ],
+      "gap": "**四个里唯一没有可用下载源的**：本机这份来自第三方 spine-viewer 工具自带的运行时，与上游官方构建不同名同哈希。⚠️ tools/ 整目录也在 gitignore 里，所以这份文件在本机只有 2 个副本、git 里 0 份。若 tools/spine-viewer 被清且无外网对应哈希，Spine 标签会退化。彻底封掉这个缺口只有两条路：把 501KB 提交进仓库（需先确认 Spine Runtimes License 是否允许），或换成能按哈希校验的上游 3.8 构建并回归 Spine 播放。**未拍板，见 PROJECT_STATUS.md 的「运行时库台账」条。**"
+    }
+  ]
+}
