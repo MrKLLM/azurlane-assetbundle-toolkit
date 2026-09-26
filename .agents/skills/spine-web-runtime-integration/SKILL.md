@@ -1,7 +1,7 @@
 ---
 name: spine-web-runtime-integration
-description: 在网页里集成 Spine 3.8 (spine-webgl) 运行时做动态立绘渲染与批量出图，覆盖 .skel/.json 骨架分流、atlas 多页加载、必须 setSkin（否则命名 skin 独有部件整块不显示）、setup pose 与动画第 0 帧是两种语义、相机视口与 fit 包围盒陷阱、0 秒占位动画过滤、TDZ 变量遮蔽、无头 CDP 验收判据。当需要让 .skel/.atlas 模型在浏览器里动起来、反馈"模型缺胳膊少腿/比例怪/层加载失败/导出出来是中间一小块四周全黑"、或要批量渲染 Spine 立绘成 PNG 时使用。触发词：Spine 网页播放、spine-webgl、spine-all.js、SkeletonBinary、SkeletonJson、atlas 图集页、setSkin、皮肤、SceneRenderer、比例怪、缺下半身、部件不显示、setup pose、CG 导出、层失败、动态立绘渲染、骨骼动画截图。不适用于 AssetBundle 侧的 Spine 资源还原与页纹理补齐（那是 unity-assetbundle-painting-restore），也不适用于 Live2D 网页集成（live2d-web-runtime-integration）。
-version: 1.0.0
+description: 在网页里集成 Spine 3.8 (spine-webgl) 运行时做动态立绘渲染与批量出图，覆盖 .skel/.json 骨架分流、atlas 多页加载、必须 setSkin（否则命名 skin 独有部件整块不显示）、setup pose 与动画第 0 帧是两种语义、相机视口与 fit 包围盒陷阱（含"恒不渲染的巨幕遮罩撑爆取景"与"不透明纯色黑底撑爆取景"两类，以及判据必须落在取景那一刻）、readPixels 在实时 viewer 里不可用、0 秒占位动画过滤、TDZ 变量遮蔽、无头 CDP 验收判据。当需要让 .skel/.atlas 模型在浏览器里动起来、反馈"模型缺胳膊少腿/比例怪/层加载失败/导出出来是中间一小块四周全黑"、或要批量渲染 Spine 立绘成 PNG 时使用。触发词：Spine 网页播放、spine-webgl、spine-all.js、SkeletonBinary、SkeletonJson、atlas 图集页、setSkin、皮肤、SceneRenderer、比例怪、缺下半身、部件不显示、setup pose、CG 导出、层失败、动态立绘渲染、骨骼动画截图、取景、包围盒、画面太小、只占中间一小块、四周全黑、fit。不适用于 AssetBundle 侧的 Spine 资源还原与页纹理补齐（那是 unity-assetbundle-painting-restore），也不适用于 Live2D 网页集成（live2d-web-runtime-integration）。
+version: 1.1.0
 ---
 
 # Spine 网页运行时集成与批量出图
@@ -162,6 +162,23 @@ setup 色 alpha=0（本项目实测单片达 28284×18082、最大 32967×29970 
   （把 `fit()` 挪到首帧 apply 之后实测无效）——只改时机是找错方向。
 - 正确的过滤维度是"这一刻真的会被画出来"。⚠️ 若按 alpha 过滤，**读 `slot.data.color.a`（setup 色）
   而不是 `slot.color.a`（当前色）**：后者会被动画时间线改写，用它会让取景框随动画时刻跳动。
+  落地即 `boundsOf()` 里一行 `if(slot.data.color.a<=0.001) continue;`。
+- **判据必须落在"取景那一刻"的状态上，不是"这个部件一生中出现过的状态"**：改用
+  "沿**所有**动画采样，只要曾 alpha>0 就算内容" 后，阳性对照（实测画面只占视口 1.2% 的那个皮肤）
+  报"包围盒没变化"＝等于没修，因为闪黑幕在某条特殊动画里会亮一次。
+  ⇒ 任何"筛选集合"类判据都要先拿一个已知坏样本验它会不会报警。
+- **别用 `readPixels` 在实时 viewer 里收紧包围盒**。批量导出页可以（渲的是静止姿态 + `draw()` 后
+  显式 `sleep(30)` 等 GPU），弹窗不行：动画从第一帧就在跑，且 spine 的页纹理是首次 `draw` 才上传，
+  读回来的是"局部已就绪"的渲染 → 量到一个只含背景渐变小块的框，放大成一屏模糊色块。
+- **还有第二类撑大源，`alpha` 判据救不了：不透明的纯色巨幕**（黑底/白底舞台板，实测单片 15899×11255）。
+  它真的在渲染，所以"会不会落笔"为真。两条捷径都不成立：
+  ① 按部件名（`hei`/`bai`/`heimu`/`1heidi`）会误伤真内容——整幅背景板可能就叫 `bj_1`；
+  ② 按纯黑乘数（`slot.color.rgb==0`）也不行——这类黑幕 setup 色实测 `rgb=1,1,1`，黑色来自贴图。
+  唯一可靠判据是读 atlas 页纹理、逐附件算"它落的像素里有没有非近黑颜色"（与动画时刻无关）。
+  ⚠️ 同理，**"像素 alpha 包围盒占 0.83"这种自报指标会被纯黑巨幕骗过**：图看着"填满画布"，
+  实际是一大片黑里嵌一小块舞台。**构图对不对只能看图。**
+- 量取景要报**两个数**：`长轴占满 = max(内容宽/视口宽, 内容高/视口高)`（适配留 1.1 倍边，
+  所以满分线是 0.91）与面积占比。只报面积会被宽高比失配稀释，把正常竖图误读成取景过小。
 - 状态以 `docs/TROUBLESHOOTING.md` / `PROJECT_STATUS.md` 为准（本技能只记机制与判据，不记修复进度）。
 
 ## 7. 动画列表
