@@ -38,6 +38,9 @@ const G=window.GALLERY;
 const logEl=$('#log');
 function log(msg,cls){const d=document.createElement('div');if(cls)d.className=cls;d.textContent=msg;logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+/* ?animFrame=1 → 导出"默认动画第 0 帧"而不是纯 setup pose。
+   默认关闭：231 张既有产物是 setup pose 语义，不因为 4 个皮肤就整体改定义。 */
+const ANIM_FRAME=new URLSearchParams(location.search).get('animFrame')==='1';
 
 // 收集待导出：按 Spine_v2 目录去重
 const jobs=[];{const seen=new Set();
@@ -84,8 +87,33 @@ async function loadPart(base,pn,textures){
   } else {
     data=new spine.SkeletonBinary(...loaderArgs).readSkeletonData(bytes);
   }
+  /* 与画廊 Spine 标签同一套 skin 选择逻辑（docs/TROUBLESHOOTING.md §42）：
+     spine-ts 3.8 的附件时间线经"当前 skin"解析，不设 skin 时命名 skin 独有的部件整块不画。 */
+  const skinNames=(data.skins||[]).map(k=>k.name);
+  const coverOf=(sk)=>{ const ever=new Set();
+    let an=(data.animations||[]).map(a=>a&&a.name).filter(Boolean).slice(0,6);
+    const asd=new spine.AnimationStateData(data);
+    for(const n of (an.length?an:[null])){ const t2=new spine.Skeleton(data); const st=new spine.AnimationState(asd);
+      try{ if(sk!==null) t2.setSkin(data.findSkin(sk));
+        t2.setSlotsToSetupPose(); t2.setBonesToSetupPose();
+        if(n) st.setAnimation(0,n,true);
+        for(const dt of [0.05,0.5,2.0]){ st.update(dt); st.apply(t2);
+          for(const sl of t2.slots) if(sl.getAttachment()) ever.add(sl.data.name); } }catch(e){} }
+    return ever.size; };
+  let bestSkin=null, bestCov=coverOf(null);
+  for(const k of skinNames){ const c=coverOf(k); if(c>bestCov){ bestCov=c; bestSkin=k; } }
   const skeleton=new spine.Skeleton(data);
-  skeleton.setSlotsToSetupPose(); skeleton.setBonesToSetupPose(); skeleton.updateWorldTransform();
+  if(bestSkin!==null) skeleton.setSkin(data.findSkin(bestSkin));
+  skeleton.setSlotsToSetupPose(); skeleton.setBonesToSetupPose();
+  /* ⚠️ 光设 skin 还不够：setup pose 的附件取自 slotData.attachmentName，与 skin 无关
+     （实测 aluomangshi_2 四种 skin 下都恒为 145 个附件，腿一条都不回来）；
+     部件是动画第 0 帧的 AttachmentTimeline 挂上去的（设 skin + 应用后为 201）。
+     默认仍导出纯 setup pose（保持 231 张既有语义不变）；`animFrame=1` 才应用默认动画第 0 帧。 */
+  if(ANIM_FRAME){ const an=(data.animations||[]).map(a=>a&&a.name).filter(Boolean);
+    const pick=an.indexOf('normal')>=0?'normal':an[0];
+    if(pick){ const st=new spine.AnimationState(new spine.AnimationStateData(data));
+      st.setAnimation(0,pick,true); st.update(0); st.apply(skeleton); } }
+  skeleton.updateWorldTransform();
   return {skeleton,data};
 }
 

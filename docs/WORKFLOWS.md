@@ -571,6 +571,18 @@
   （实测与 skin 无关，两种 skin 下 bbox 逐字相同；试过把 fit 挪到首帧 apply 后，无效已退回）；
   ② `suweiaitongmeng_4` / `yuanchou` / `yuanchou_hx` 三个报 `Region not found in atlas`，
   缺失区域名是 `￥ﾛﾾ￥ﾱﾂ 664` 这种 mojibake → 指向 `.skel` 与 `.atlas` 区域名编码不一致（参 §32）。
+- **⚠️ CG 导出层：光加 `setSkin` 不解决问题**（2026-09-26 实测，别照 viewer 的修法抄）。
+  `cg_export.html` 渲染的是 **setup pose**，而 setup 附件取自 `slotData.attachmentName`、**与 skin 无关**
+  （`aluomangshi_2` 四种 skin 下 setup 附件数恒为 145，腿一条不回来；设 skin + 应用动画后才 201）。
+  腿是**动画第 0 帧的 AttachmentTimeline** 挂上去的 ⇒ 导出要多一步
+  `?animFrame=1` → `setAnimation(0,'normal',true); update(0); apply(skeleton)` 再渲染。
+  已实现为**默认关闭**的开关（`gallery_src/cg_export.html` 的 `ANIM_FRAME`）：开着它会改**全部 231 张**的
+  构图语义——对照皮肤 `2b_2` 在 1400 下画布高度 821→824，即"没有皮肤问题的也会跟着挪几像素"。
+  ⇒ 要开就得整体重导 231 张，不能只重导 4 张留下混合语义。
+  不开 `animFrame` 时 `bestSkin` 仅在"命名 skin 覆盖严格大于 ∅"时生效 → 327 个 part 走**原代码路径**，
+  那 4 个 part 的 setup pose 输出也与改前相同（145 附件不变）。
+  跑法：`py -3 scripts/diag/run_cg_export.py --only aluomangshi_2 --size 1600 --extra 'animFrame=1' --redo`
+  （`--extra` 是本轮给该 runner 加的透传参数）。
 - 详见 `TROUBLESHOOTING.md` §42。
 
 ---

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """无头 Chrome + CDP 驱动 cg_export.html 导出 Spine setup-pose CG。
-用法: py -3 .diag/run_cg_export.py [--only a,b,c] [--size 2400] [--timeout 1800]
+用法: py -3 scripts/diag/run_cg_export.py [--only a,b,c] [--size 2400] [--timeout 1800] [--extra 'k=v&k2=v2']
 """
 import sys, os, json, time, subprocess, urllib.request, threading
 sys.stdout.reconfigure(encoding='utf-8')
@@ -21,6 +21,9 @@ timeout = int(arg('--timeout', '1800'))
 url = f'http://127.0.0.1:8777/gallery_v2/cg_export.html?autostart=1&size={size}'
 if only:
     url += '&only=' + only
+extra = arg('--extra', '')   # 透传给导出页的额外 query，如 --extra 'animFrame=1'
+if extra:
+    url += '&' + extra
 if '--redo' in sys.argv:
     url += '&redo=1'
 
