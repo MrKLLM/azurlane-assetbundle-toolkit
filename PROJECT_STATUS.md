@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-26 00:45（本轮：**用户报「本宁顿皮肤 Live2D 错乱」** → 定位为 `model3.json` 贴图清单按枚举序落盘、moc3 只按索引消费 → 整套贴图错绑成"部件碎片堆"；全库扫出乱序恰好 5 个、坏的也恰好这 5 个。`fix_model3.py` 补归一段 + 新增闸门 `l2d_texorder_check.py`（269/269 升序）+ 新增看图工具 `l2d_shot_models.py`；5 个逐个目视恢复、2 个对照零变化。续：又补了完整性对账 `l2d_tex_completeness.py`（**missing 0 / extra 0 / 命名异常 0**，排除 `extract_textures` 静默丢图），并发现 **51/269 的源枚举序 ≠ 编号序** → 拿乱序最狠的 `xuefeng`(6 张) / `z23`(5 张) 等 5 个看图全部正常，独立证死「编号即索引」这条原本只从 5 例归纳的约定。再补一轮**目视 26/269**，按 `(moc3 版本 × 贴图数)` 15 个分桶全覆盖，零新增破损（结论边界：只证贴图绑定这一类已清，其余 243 个未目视）。**过程教训**：2026-09-22 那句「9/9 内容判据全绿」是代理指标假绿灯——参数在动 ≠ 画面对，当时缺的正是"看图"这一步（`TROUBLESHOOTING.md` §40 及追加 / WF-6 追加）。更早：立绘名 76→3 接到画廊、sharecfg_re (23) 文法破。）
+> **生成时间**: 2026-09-26 01:50（本轮：**用户再报两例** → ① 本宁顿 Live2D「话没说完就被掐回初始态」= 语音挂在 `definitions[g][0].Sound` 上、被库按"下一条动作 dispose 上一条"托管，动作 5.17s 一到就把 9.24s 的 ogg 在 `currentTime=4.48s` 处 pause；动作时长本身忠实（`Meta.Duration`==曲线末帧==源 clip），改由页面自持 Audio 解耦（§41 / WF-17 追加）。② 阿罗芒什 Spine 缺下半身 = **viewer 与 CG 导出从未调用 `setSkin`**，而 spine-ts 3.8 的附件时间线经当前 skin 解析；新增全量扫描 `spine_skin_scan.py` 测得 **331 part 中受影响 4 个**（yunlong_2 缺 69 槽 / feiteliedadi_5 52 / 阿罗芒什 47 / 月城II_4 14），按"动画跑起来后曾挂上附件的槽位数"自动选 skin + 加皮肤下拉（§42 / WF-14 追加）。另修了回归工具自身两类假失败（固定等待不够 + 900ms 读异步 currentGroup），WF-16 五件套 2/3/4 项全绿，第 5 项全量点击在跑。更早：Live2D 贴图索引错绑 5 例修复 + 269/269 闸门 + 目视 26/269。）
 > 下面 ①~④ 是上一轮（2026-09-24）**Live2D 动作数据全量重导**的明细，结论仍然有效；同日的 sharecfg_re (16) 轮记在 §6 第 7 条。
 > ① **结果**：全库 `clips 8154 / shell 7（=§2.5 记录的资产层真为空的 7 条，无新增失败）/ misassign 0 / PartOpacity 79 模型`，
 >   曲线总数 **944,136 → 2,662,615（×2.82）**，与唯一经人工目视验收的样本 `antu_2`（98→278，×2.83）同比例；
@@ -80,6 +80,7 @@
 > ⚠️ 旧结论「B 类 12 模型属 motion 质量、资产无缺口」作废：除上述 7 条外均可解出，是解析器缺陷不是资产缺陷。
 已知限制：StreamedClip 未完全逆向；HitAreas 用 moc3 `Touch<X>` drawable 而非官方 `CubismRaycastable` 真点击区（**2026-09-22 §6.11 修后全部 269 模型均带真实 HitAreas**，仅 `z46_3` Special 框嵌 Body 属模型自带歧义）；0.226% 绑定（疑 Drawable 颜色）运行时无对应 target，跳过。
 > **网页交互层状态（2026-09-23 §6.12 + §21）**：点击命中已修「四边形包含 + V/P 坐标系换算」，idle 循环已交回运行时（前端零定时器），动作切换恢复交叉淡化，运行时自加的假呼吸层已关闭，另有判定区可视化与参数·部件检查器；改前端前**必读 WF-16**（五条硬规则 + 回归五件套）。
+> ✅ **2026-09-26 语音被掐已修**：语音原先注入 `definitions[g][0].Sound`，被库的 SoundManager 按"下一条动作 dispose 上一条"托管 → 动作一结束话就断（实测 `benningdun_2/touch_head` 在 `currentTime=4.48s` 处被 `pause`，而该 ogg 长 9.24s；该皮肤有 6 组超标）。现改由页面自持 `Audio` 元素，只有用户再次触发或切标签/换皮肤才打断，运行时回落 idle 不打断。**动作时长本身是忠实的**（`Meta.Duration` == 曲线末帧 == 源 clip），不要往数据层找原因。详见 §41 / WF-17 追加。
 > ~~⚠️ §21 的根因修复目前只在 `antu_2` 一个模型上换入验证、其余 268 个模型仍是旧数据~~ → **2026-09-24 已全量落到 269 个模型**（覆写过程有事故，见下一条与 `TROUBLESHOOTING.md` §25）。当时判定的两个系统性错误（贝塞尔控制点写成归一化分数 → 部件各动各的；只读 `m_StreamedClip` 丢定值曲线 → 切动作时参数回不到静止位）现已在全库消除，`aerbien_3` 这类曲线数从 445/640 补齐到 640/640。
 > **✅ 2026-09-24 全量重导已落到 269 个模型（含事故记录）**：`antu_2` 样本 104/104 与已验收生产数据逐字节一致 → 全量 `clips 8154 / shell 7（=资产层真为空的 7 条）/ misassign 0 / PartOpacity 79 模型`、曲线总数 **944,136→2,662,615**。**过程有事故**：脱离启动时 `L2D_OUT_DIR` 未被子进程读到，重导**跳过了「临时目录→审计→备份换入」直接原地覆写** `Output/Live2D`（同一条 ps1 里另两个配方变量都生效，机制不可复现）；已核实 `.diag/l2d_new`（269 模型 / 曲线 944,136，与本文档记录的覆写前总数逐字相等）即覆写前状态并复制为 `Output/_OLD_bak/l2d_motion_pre_swap_20260924/` 恢复回滚，闸门补跑在正式目录上，并按「写向一律走 argv」给 `extract_motions.py` 加了 `--out`（不给即拒绝 `--all`）。根因与教训见 **`TROUBLESHOOTING.md` §25**。
 ⏳ **9 个 bundle 已于 2026-09-22 换入**：benningdun_2 / bunao_3 / feiteliekaer_4 / gangyishawa_3 / guanghui_9 / pulimaosi_3 / sebao_2 / shi_3 / wuzang_4——9 张卡的 `live2d` 字段已进 index.json，`Output/Live2D` 现 **269 个模型**。换入后逐字段 diff 证**非 live2d 字段零变化**（ship/skin 集合不变、仅 9 卡 +9 live2d 项）。
@@ -92,6 +93,8 @@
 
 ### 2.6 Spine 动态立绘 ✅（v2 提取 + 全屏 CG 导出 + viewer 修复，2026-09-19）
 `scripts/extract_spine_v2.py` 双结构兼容提取到 `Output/Spine_v2/`，232 主包。gallery 内 `spine-all.js`(3.8) 分层实时播放。**2026-09-19 三修复**：①相机视口（`SceneRenderer.resize()` 不更新 viewport → 比例怪）②`my` 变量遮蔽 TDZ（假「N 层失败」+ 取消失效）③过滤 0 秒空占位动画、默认播 `normal`、缺动画层回落 normal；另支持 JSON 骨架（beierfasite_g）。**全屏 CG 导出**：`cg_export.html` 渲染 setup pose 批量落盘 `Output/CG_v2/` **231/231 成功**（含二次像素包围盒构图修正）。
+> ✅ **2026-09-26 补 `setSkin`（此前 viewer 与 CG 导出一次都没调过）**：spine-ts 3.8 的附件时间线经**当前 skin** 解析，不设 skin ⇒ 命名 skin 独有的部件整块不显示。用户报「阿罗芒什缺下半身」即此。全量扫描 `scripts/diag/spine_skin_scan.py`：**331 part 中受影响 4 个**（`yunlong_2` 缺 69 槽 / `feiteliedadi_5` 52 / `aluomangshi_2` 47 / `yuekechengii_4` 14，补回的是大腿/小腿/脚趾/躯干）。viewer 现按「动画跑起来后曾挂上附件的槽位数」自动选 skin，并加「皮肤」下拉可人工比（阿罗芒什 `1` vs `2` 覆盖数打平 201/201）。同视口对照证：设 skin 前后**画面大小不变**，只是腿回来了。详见 §42 / WF-14 追加。
+> ⚠️ **两条遗留**：① `fit()` 被 `hei1/hei2` 两片 28284×18082 单位的近透明黑色遮罩撑大 → 弹窗视图画面只占中间一小块（与 skin 无关，本轮试过把 fit 挪到首帧 apply 之后，无效已退回）；② `suweiaitongmeng_4` / `yuanchou` / `yuanchou_hx` 三个报 `Region not found in atlas` 且缺失区域名是 mojibake → `.skel` 与 `.atlas` 区域名编码不一致（参 §32），未查。
 
 ### 2.7 UI/图标导出 ⏳ 未处理
 `ui/` 4,059 文件 + 各 icon 目录数万，可复用 `export_assets.py`。优先级最低。

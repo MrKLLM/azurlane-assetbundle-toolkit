@@ -44,7 +44,12 @@ JS = r"""(async(key)=>{ try{
   if(!sk) return JSON.stringify({key, skip:'no skin'});
   openShip(ship); setSkin(sk); buildSkinList(ship);
   const l2=[...document.querySelectorAll('#mTabs .tab')].find(x=>x.dataset.k==='live2d');
-  l2.click(); await t(6500);
+  l2.click();
+  // 与 l2d_inspector_verify.py 同一个坑：固定等 6.5s 对大贴图皮肤（benningdun_2 三张共 40MB，
+  // 且服务器单线程）必然不够，表现为四个皮肤全报 reading 'internalModel' 的假失败。
+  for(let i=0;i<80 && !(l2State&&l2State.app&&l2State.app.stage.children[0]);i++) await t(500);
+  if(!(l2State&&l2State.app&&l2State.app.stage.children[0]))
+      return JSON.stringify({key:k, err:'40s 内模型未加载', note:(document.querySelector('.note')||{}).textContent||''});
   const app=l2State.app, m=app.stage.children[0], im=m.internalModel, core=im.coreModel, ppu=im.pixelsPerUnit||1, mm=im.motionManager;
   const cux2=im.width/ppu, cuy2=im.height/ppu;   // 画布单位边长：V(中心原点/y向上)↔P(左上/y向下) 换算用
   const wrap=document.getElementById('l2wrap'), rect=wrap.getBoundingClientRect();
@@ -101,7 +106,7 @@ JS = r"""(async(key)=>{ try{
     const g=m.toGlobal(new PIXI.Point((sx/n+cux2/2)*ppu, (cuy2/2-sy/n)*ppu));   // V→P→global，与 hitAt 互逆
     const e2={bubbles:true,cancelable:true,pointerId:10,clientX:rect.left+g.x,clientY:rect.top+g.y,button:0};
     wrap.dispatchEvent(new PointerEvent('pointerdown',e2)); window.dispatchEvent(new PointerEvent('pointerup',e2));
-    await t(900);
+    await t(1600);   // startMotion 是 async，900ms 会读到还没换组的 currentGroup → 假失败
     out.headClick={want:(im.settings.hitAreas[0].Name), played:st().grp, pill:(document.getElementById('l2Hit')||{}).textContent};
     out.headClick.ok = out.headClick.played===out.headClick.want;
   }

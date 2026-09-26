@@ -6,6 +6,7 @@
 
 用法:
     py -3 scripts/diag/l2d_shot_models.py benningdun_2 sebao_2
+    py -3 scripts/diag/l2d_shot_models.py --tab spine aluomangshi_2 yunlong_2
     py -3 scripts/diag/l2d_shot_models.py            # 用内置默认清单
 输出: .diag/l2d_shots_visual/<key>.png + 终端每模型一行状态
 前置: 本地服务器 127.0.0.1:8777 已起（根目录 = Output/）
@@ -24,7 +25,17 @@ BASE = 'http://127.0.0.1:8777/gallery_v2/index.html'
 DEFAULT = ['benningdun_2', 'feiteliekaer_4', 'sebao_2', 'shi_3', 'wuzang_4',
            'bunao_3', 'pulimaosi_3']
 
-keys = [a for a in sys.argv[1:] if not a.startswith('--')] or DEFAULT
+TAB = 'live2d'
+SKIN = None
+for i, a in enumerate(sys.argv):
+    if a == '--tab' and i + 1 < len(sys.argv):
+        TAB = sys.argv[i + 1]
+    if a == '--skin' and i + 1 < len(sys.argv):
+        SKIN = sys.argv[i + 1]   # Spine 皮肤下拉的目标值；'none' = 不设 skin
+keys = [a for i2, a in enumerate(sys.argv[1:])
+        if not a.startswith('--') and sys.argv[i2] not in ('--tab', '--skin')] or DEFAULT
+if TAB not in ('live2d', 'spine'):
+    sys.exit('--tab 只支持 live2d / spine')
 os.makedirs(SHOTS, exist_ok=True)
 for key in keys:                      # 只清本次要重拍的，保留历史证据
     p = os.path.join(SHOTS, key + '.png')
@@ -77,28 +88,50 @@ def ev(expr, awaitp=False):
     return res.get('value') if res.get('type') == 'string' else res.get('value')
 
 
-def open_l2d(key, settle_ms):
-    js = f"""(async () => {{ try {{
-      const t=ms=>new Promise(r=>setTimeout(r,ms));
+def open_view(key, settle_ms):
+    """走画廊真实入口打开该皮肤的 live2d / spine 标签，返回状态 + canvas 的 clip。"""
+    js = ("""(async () => { try {
+      const t=ms=>new Promise(r=>setTimeout(r,ms)), KEY=__KEY__, TAB=__TAB__;
       let ship=null, sk=null;
-      for (const s of GALLERY.ships) {{ const k=s.skins.find(x=>x.key==={json.dumps(key)});
-        if(k&&s.live2dSkins.includes({json.dumps(key)})){{ship=s;sk=k;break;}} }}
-      if(!sk) return JSON.stringify({{key:{json.dumps(key)},skip:'index 里没有这个 live2d 皮肤'}});
+      for (const s of GALLERY.ships) { const k=s.skins.find(x=>x.key===KEY);
+        if(!k) continue;
+        const has = TAB==='spine' ? !!k.spine : (s.live2dSkins||[]).includes(KEY);
+        if(has){ ship=s; sk=k; break; } }
+      if(!sk) return JSON.stringify({key:KEY, skip:'index 里该皮肤没有 ' + TAB + ' 资源'});
       openShip(ship); setSkin(sk); buildSkinList(ship);
-      tab='live2d'; renderView();
-      await t({settle_ms});
-      const app=l2State&&l2State.app;
-      if(!app) return JSON.stringify({{key:{json.dumps(key)},fail:(document.querySelector('.note')||{{}}).textContent||'no state'}});
-      const m=app.stage.children[0];
-      if(!m) return JSON.stringify({{key:{json.dumps(key)},fail:'no model',note:(document.querySelector('.note')||{{}}).textContent||''}});
-      const cv=document.querySelector('#l2wrap canvas');
-      const r=cv?cv.getBoundingClientRect():null;
-      return JSON.stringify({{key:{json.dumps(key)},ok:true,tex:(m.internalModel&&m.internalModel.textures||[]).length,
-        drawables:m.internalModel.coreModel.getDrawableCount?m.internalModel.coreModel.getDrawableCount():-1,
-        clip:r?{{x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)}}:null}});
-    }} catch(e) {{ return JSON.stringify({{key:{json.dumps(key)}, fail:'JSERR '+(e&&e.message||String(e)).slice(0,150)}}); }}
-    }})()"""
+      tab=TAB; renderView();
+      await t(__SETTLE__);
+      if (__WANTSKIN__ !== null && TAB === 'spine') {
+        const sp0 = document.getElementById('spSkin');
+        if (!sp0) return JSON.stringify({key:KEY, fail:'没有皮肤下拉（该骨架无命名 skin？）'});
+        sp0.value = __WANTSKIN__; sp0.onchange();
+        await t(1200);
+      }
+      const sel = TAB==='spine' ? '#spcwrap canvas' : '#l2wrap canvas';
+      let extra={};
+      if (TAB==='spine') {
+        const sp=document.getElementById('spSkin');
+        extra={ skinSel: sp ? {value:sp.value, opts:[...sp.options].map(o=>o.value)} : null,
+                animSel:(document.getElementById('spAnim')||{}).value||null };
+      } else {
+        const app=l2State&&l2State.app, m=app&&app.stage.children[0];
+        if(!m) return JSON.stringify({key:KEY, fail:'no model',
+                                      note:(document.querySelector('.note')||{}).textContent||''});
+        extra={ drawables: m.internalModel.coreModel.getDrawableCount
+                             ? m.internalModel.coreModel.getDrawableCount() : -1 };
+      }
+      const cv=document.querySelector(sel);
+      if(!cv) return JSON.stringify({key:KEY, fail:'no canvas', sel,
+                                     note:(document.querySelector('.note')||{}).textContent||''});
+      const r=cv.getBoundingClientRect();
+      return JSON.stringify(Object.assign({key:KEY, ok:true,
+        clip:{x:Math.round(r.x), y:Math.round(r.y), w:Math.round(r.width), h:Math.round(r.height)}}, extra));
+    } catch(e) { return JSON.stringify({key:__KEY__, fail:'JSERR '+(e&&e.message||String(e)).slice(0,150)}); }
+    })()""").replace('__KEY__', json.dumps(key)).replace('__TAB__', json.dumps(TAB)) \
+             .replace('__SETTLE__', str(settle_ms)) \
+             .replace('__WANTSKIN__', json.dumps('∅' if SKIN == 'none' else SKIN))
     return ev(js, awaitp=True)
+
 
 
 try:
@@ -115,7 +148,7 @@ try:
         print("页面 180s 内未就绪（GALLERY.ships 仍为空）", flush=True)
     for key in keys:
         try:
-            r = json.loads(open_l2d(key, 9000))
+            r = json.loads(open_view(key, 9000 if TAB == 'live2d' else 16000))
         except Exception as e:
             r = {'key': key, 'fail': 'driver ' + str(e)[:80]}
         if r.get('ok') and r.get('clip'):

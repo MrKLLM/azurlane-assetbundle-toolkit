@@ -1729,6 +1729,99 @@ ship_meta 里只有 `linghangyuan1_2` 等具体 stem ⇒ 36 个 NPC 名进了 sh
   拿 `Output/Paintings_v2/suweiaitongmeng_3.png` 一比即证伪——立绘本来就是道场倒地 + 前缩透视。
   **看图判据要说"和什么比"**，否则会像 §40 主因那样把代理指标当结论，反过来也会把正常画面当 bug。
 
+---
+
+## §41. Live2D「话没说完就被掐」：语音挂在 motion 的 `Sound` 字段上，生命周期属于动作不属于句子（2026-09-26）
+
+**症状**：用户报「本宁顿的 Live2D 没做完动作和说完话就恢复回初始状态」。
+
+**取证**（CDP 在文档创建前包住 `window.Audio` 录事件，见下方"探针"）：
+```
+t=0.0s  Audio 创建 + call:play
+t=0.7s  loadeddata（dur=9.24s）
+t=5.9s  call:pause ← currentTime=4.48s，同一刻 currentGroup 由 touch_head 翻回 idle
+```
+
+**根因**：语音是注入 `model3` 的 `definitions[g][0].Sound` 交给库的 SoundManager 播的，
+而 SoundManager 的语义是"**下一条动作 startMotion 时 dispose 上一条**"。
+idle 播完会由运行时自动回落 idle → 于是**动作结束 = 语音结束**。
+只要 `语音时长 > 动作时长`，话必然被拦腰掐断。
+碧蓝里这是常态不是例外（`benningdun_2` 实测 6 组超标：
+`touch_head` 5.17s/9.24s、`touch_body` 5.07s/10.04s、`main_3` 7.82s/12.1s、
+`mission` 9.23s/11.66s、`login` 9.48s/11.04s、`home` 10.62s/11.59s）。
+
+**⚠️ 先排除掉的那个岔路**：一开始怀疑"动作导短了"。查下来
+`Meta.Duration` == 全部曲线的最大时间戳 == 源 clip 末帧（`extract_motions.py` 的
+`duration = max(real_t)`），**动作时长是忠实的**。5.17s 就是游戏里那条 touch 动画的长度。
+→ 少这一步就会去改数据层，把正确产物改坏。
+
+**修法**：语音不走 `Sound` 字段，改由页面自己持有一个 `Audio` 元素：
+- **只有用户再次触发动作**（下拉 / 重播 / 点部位，都经 `play()`）才打断上一条；
+- 运行时回落 idle **不打断**（回落不经过 `play()`，这就是解耦点）；
+- 切标签 / 换皮肤经 `my.off()` → `stopVoice()` 打断，不留幽灵音。
+非用户手势时 `el.play()` 会被浏览器拒（部分皮肤 `idleGroup` 落在 `home`，而 `home` 带语音），
+`.catch()` 静默降级——与改动前行为一致，不是新问题。
+
+**验证**：同探针复跑，`group` 在 dt=6.6 已翻回 `idle`，而音频 `paused:false`、
+`currentTime` 一路推进到 4.52 ≈ `dur` 4.53，**完整放完**。
+
+**探针（已入库）**：`scripts/diag/l2d_voice_lifecycle.py <皮肤key> <动作组> <采样秒>`；核心手法是
+`Page.addScriptToEvaluateOnNewDocument` 里包住 `window.Audio`，记录
+`play/pause/ended/loadeddata` + 每次事件的 `currentTime`。
+⚠️ 事后在 console 里找"当前有哪些 Audio"是找不到的——库 new 完就藏进闭包，
+且自建元素不入 DOM，`document.querySelectorAll('audio')` 恒为 0，会误判成"根本没播"）。
+
+---
+
+## §42. Spine 动态立绘缺整块身体：`setSkin` 一次都没调用过（2026-09-26）
+
+**症状**：用户报「阿罗芒什的皮肤下半身不见了，立绘原件倒是显示完整的」。
+
+**根因**：spine-ts 3.8 里动画的附件时间线经
+`Skeleton.setAttachment(slotIndex, name)` → **`当前 skin.getAttachment(slotIndex, name)`** 解析。
+不设 skin 时，凡附件只存在于命名 skin 里的槽位一律解析成 `null` → 整块不显示。
+`gallery_src/index.html` 与 `cg_export.html` 里 `setSkin`/`findSkin` **零命中**
+（index.html 中的 `setSkin(sk)` 是画廊自己的"切换舰皮"函数，与 Spine skin 同名不同物，**grep 时极易看错**）。
+
+**影响面（全量扫描实测）**：`scripts/diag/spine_skin_scan.py`，331 个 part / 391.6MB，172s 跑完：
+
+| part | 不设 skin | 最佳 skin | 缺失槽位 |
+|---|---|---|---|
+| `yunlong_2` | 262 | `1` → 331 | **69** |
+| `feiteliedadi_5` | 242 | `2` → 294 | **52** |
+| `aluomangshi_2` | 154 | `1`/`2` → 201（平手） | **47** |
+| `yuekechengii_4` | 261 | `3` → 275 | **14** |
+
+其余 324 个 part `gain=0`（只有 `default` skin 或命名 skin 不新增覆盖）→ **受影响 4/328 = 1.2%**。
+阿罗芒什补回的 15 个槽正是 `datuiLA_2`(大腿) `xiaotuiLA_1`(小腿) `tuiRA_1/2`(腿)
+`jiaozhiLA_1~4`+`jiaozhiRAb_1~4`(脚趾) `shentiA_1`(躯干)。
+
+**⚠️ 这条判据差点自证成功**：第一版 `cover()` 把"纯 setup pose 的附件并集"也算进去，
+而 setup 附件走 `slotData.attachmentName`、**与 skin 无关**（阿罗芒什每个 skin 都 145），
+于是四个 skin 全相等、`gain` 恒为 0 —— 阳性对照（已知坏掉的 aluomangshi_2）当场报"没影响"才发现。
+→ **判据必须只量"动画跑起来之后实际挂上的附件"**；并且任何全量扫描都要先拿一个已知阳性样本验判据会报警。
+
+**修法（改规则，不写 4 个名字的例外表）**：`loadPart()` 内对 `∅` 与每个命名 skin
+各算一次"推进若干动画后曾挂上附件的槽位数"，取最多者作默认；
+控制条加「皮肤」下拉（含 `(不设 skin)` 项）可手动切着比。
+平手时（阿罗芒什 `1` vs `2` 都是 201）按 skin 列表顺序取第一个，交给下拉人工判。
+
+**验证**：同视口对照截图——`∅` 与 `1` 画面大小完全一致，`∅` 无腿、`1` 有腿
+→ 部件补回且**不改变构图**。`2b_2`/`a2_2`/`adaerbote_4`（`gain=0` 的对照）渲染无变化。
+
+**顺带查出的另一件事（未修，独立缺陷）**：这些骨架的 `fit()` 被
+`hei1`/`hei2` 两片 **28284×18082 单位**的近透明黑色遮罩撑大，包围盒
+`[-13750,-7851,14534,10231]` 远大于可见舞台 → 弹窗视图里整幅画面只占中间一小块。
+实测**与 skin 无关**（两种 skin 下 bbox 逐字相同），是既有问题；
+本轮试过"把 fit 挪到首帧 apply 之后"，无效，已退回（那会改掉全部 231 个皮肤的默认取景，
+收益为零）。要修得让 `boundsOf` 排除超大遮罩层或按可见 alpha 过滤。
+
+**扫描同时暴露 3 个另一类故障**（骨架压根建不起来，画廊显示"N 层失败"）：
+`suweiaitongmeng_4`、`yuanchou/yuanchouB`、`yuanchou_hx/yuanchouB` ——
+`Region not found in atlas`，且缺失的区域名是 `￥ﾛﾾ￥ﾱﾂ 664` 这种** mojibake**，
+方向指向 `.skel` 与 `.atlas` 之间的区域名编码不一致（参 §32 UnityPy 有损解码）。未查。
+
+
 **③ 目视覆盖到哪一步（防止下一轮把"26 个看过"读成"全库验过"）**
 共逐个看图 **26 个 / 269**，抽样设计是**按 (moc3 版本 × 贴图数) 分桶全覆盖**（全库共 15 个桶）：
 

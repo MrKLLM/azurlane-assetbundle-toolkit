@@ -56,7 +56,12 @@ JS = r"""(async(key)=>{ try{
   if(!sk) return JSON.stringify({key, skip:'no skin'});
   openShip(ship); setSkin(sk); buildSkinList(ship);
   const l2=[...document.querySelectorAll('#mTabs .tab')].find(x=>x.dataset.k==='live2d');
-  l2.click(); await t(6000);
+  l2.click();
+  // 固定等 6s 会让大贴图皮肤（benningdun_2 三张共 40MB，服务器还是单线程）必然读不到模型，
+  // 表现为脚本自身"偶发 ERR ... reading 'internalModel'"。改成轮询到模型出现，上限 40s。
+  for(let i=0;i<80 && !(l2State&&l2State.app&&l2State.app.stage.children[0]);i++) await t(500);
+  if(!(l2State&&l2State.app&&l2State.app.stage.children[0]))
+      return JSON.stringify({key, fail:'40s 内模型未加载', note:(document.querySelector('.note')||{}).textContent||''});
   const out={key};
   const m=l2State.app.stage.children[0], core=m.internalModel.coreModel, im=m.internalModel;
   // ① 判定区可视化

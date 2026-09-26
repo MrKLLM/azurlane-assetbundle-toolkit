@@ -408,11 +408,21 @@ async function renderLive2D(s, sk){
     const MP=(PIXI.live2d&&PIXI.live2d.MotionPriority)||{IDLE:1,NORMAL:2,FORCE:3};
     const idleGroup=['idle','main','home'].find(g=>groups.includes(g))||groups[0]||null;
     /* ---------- 动作语音 ----------
-       库原生支持 motion 定义里的 Sound 字段（Cubism4MotionManager.startMotion 里
-       getSoundFile(def) → SoundManager.add/play，并自动 dispose 上一条），所以只注入
-       definitions[g][0].Sound 即可，不必自己管 Audio 元素。resolveURL 的基准是 model3.json
-       所在目录，故下面给的是绝对 URL，避免 ../ 层级算错。 */
+       ⚠️ 不要走库的 `definitions[g][0].Sound`：那条通道由 SoundManager 托管，
+       下一条动作一 startMotion 就把上一条 dispose 掉。而 idle 播完会自动回落 idle，
+       于是**动作时长 < 语音时长**的组会在话说一半时被掐（实测 benningdun_2/touch_head：
+       动作 5.17s、语音 9.24s，音频在 currentTime=4.48s 处被 pause）。
+       改为页面自己持有一个 Audio 元素：只有**用户再次触发动作**（下拉/重播/点部位）才打断上一条，
+       运行时回落 idle 不打断；切标签/换皮肤经 my.off() 打断。 */
     const voice=Object.create(null);
+    let voiceEl=null;
+    const stopVoice=()=>{ if(voiceEl){ try{ voiceEl.pause(); }catch(e){} voiceEl=null; } };
+    const playVoice=(g)=>{ const arr=voice[g]; if(!arr||!arr.length) return;
+      stopVoice();
+      const el=new Audio(arr[(Math.random()*arr.length)|0]);
+      voiceEl=el;
+      el.addEventListener('ended',()=>{ if(voiceEl===el) voiceEl=null; });
+      el.play().catch(()=>{ if(voiceEl===el) voiceEl=null; }); };   // 非用户手势时浏览器会拒，静默降级
     /* ---------- 运行时保真三补丁（2026-09-23 无头取证，见 docs/TROUBLESHOOTING.md §21） ----------
        ① 采纳 Meta.Loop：vendored pixi-live2d-display 0.4.0 定义了 setIsLoop() 但全 bundle 无调用点，
           Meta.Loop 被无视 → idle 播完即停。此前靠前端定时器「假装循环」，实测该定时器与运行时
@@ -462,9 +472,7 @@ async function renderLive2D(s, sk){
        不 FORCE 就连点第二个部位都放不出来。回落 idle 交给运行时（见 ②），不再需要定时器。 */
     const played=new Set();
     const play=g=>{ if(!g) return false;
-      try{ /* 同组多条 = 游戏里的随机变体；无语音的组必须显式清掉，否则上一条的 Sound 会串台 */
-        const d=(mm.definitions[g]||[])[0];
-        if(d) d.Sound=(voice[g]&&voice[g][(Math.random()*voice[g].length)|0])||void 0;
+      try{ playVoice(g);
         mm.startMotion(g,0,MP.FORCE);
         if(g!==idleGroup) played.add(g); return true; }catch(e){ return false; } };
     /* ---------- 非 idle 动作的参数残留复位（docs/TROUBLESHOOTING.md §21 末段） ----------
@@ -679,7 +687,7 @@ async function renderLive2D(s, sk){
     window.addEventListener('blur',onCancel);
     window.addEventListener('pointermove',onMove);
     window.addEventListener('pointerup',onUp);
-    my.off=()=>{ ro.disconnect(); wrap.removeEventListener('wheel',onWheel);
+    my.off=()=>{ stopVoice(); ro.disconnect(); wrap.removeEventListener('wheel',onWheel);
       wrap.removeEventListener('pointerdown',onDown); wrap.removeEventListener('dblclick',onDbl);
       wrap.removeEventListener('pointercancel',onCancel);
       window.removeEventListener('pointercancel',onCancel); window.removeEventListener('blur',onCancel);
@@ -726,10 +734,32 @@ async function startSpine(s, sk){
       let data;
       if(bytes[0]===0x7B){ data=new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas)).readSkeletonData(new TextDecoder().decode(bytes)); }
       else { data=new spine.SkeletonBinary(new spine.AtlasAttachmentLoader(atlas)).readSkeletonData(bytes); }
-      const skeleton=new spine.Skeleton(data); skeleton.setSlotsToSetupPose(); skeleton.setBonesToSetupPose(); skeleton.updateWorldTransform();
+      /* ⚠️ 必须选 skin：spine-ts 3.8 里动画的附件时间线经 `Skeleton.setAttachment`
+         → `当前 skin.getAttachment(slotIndex, name)` 解析，不设 skin 时命名 skin 独有的
+         附件一律解析成 null → 整块部件不显示（2026-09-26 用户报阿罗芒什缺下半身即此）。
+         全库 331 个 part 里 4 个受影响（yunlong_2 +69 槽 / feiteliedadi_5 +52 / 阿罗芒什 +47 /
+         月城 II_4 +14）。选法：取「推进若干动画后曾挂上附件的槽位数」最多的那个 skin——
+         数据驱动，不写按角色名的例外表。代价约 100~300ms，只在打开时算一次。 */
+      const skinNames=(data.skins||[]).map(k=>k.name);
+      const coverOf=(sk)=>{ const ever=new Set();
+        const an=(data.animations||[]).map(a=>a&&a.name).filter(Boolean).slice(0,6);
+        const asd=new spine.AnimationStateData(data);
+        for(const n of (an.length?an:[null])){ const t2=new spine.Skeleton(data); const st=new spine.AnimationState(asd);
+          try{ if(sk!==null) t2.setSkin(data.findSkin(sk));
+            t2.setSlotsToSetupPose(); t2.setBonesToSetupPose();
+            if(n) st.setAnimation(0,n,true);
+            for(const dt of [0.05,0.5,2.0]){ st.update(dt); st.apply(t2);
+              for(const sl of t2.slots) if(sl.getAttachment()) ever.add(sl.data.name); } }catch(e){} }
+        return ever.size; };
+      let bestSkin=null, bestCov=coverOf(null);
+      for(const k of skinNames){ const c=coverOf(k); if(c>bestCov){ bestCov=c; bestSkin=k; } }
+
+      const skeleton=new spine.Skeleton(data);
+      if(bestSkin!==null) skeleton.setSkin(data.findSkin(bestSkin));
+      skeleton.setSlotsToSetupPose(); skeleton.setBonesToSetupPose(); skeleton.updateWorldTransform();
       const anim=new spine.AnimationState(new spine.AnimationStateData(data));
       const anims=(data.animations||[]).filter(a=>a.duration>0.01).map(a=>({name:a.name||a,dur:+a.duration.toFixed(1)}));
-      return {skeleton,anim,data,anims};
+      return {skeleton,anim,data,anims,skinNames,skin:bestSkin,cov:bestCov};
     }
 
     const layers=[]; let loadFail=0;
@@ -755,7 +785,7 @@ async function startSpine(s, sk){
     resize();
     // 动画：取各层「有时长」动画名并集（空占位 0 秒动画已过滤）
     const animUnion=[]; layers.forEach(L=>L.anims.forEach(a=>{if(animUnion.indexOf(a.name)<0)animUnion.push(a.name);}));
-    bar.innerHTML=`<label>动画</label><select id="spAnim"></select><button id="spPlay">暂停</button><button id="spFit">复位</button><button id="spFull">全屏</button><span class="pill">${layers.length} 层部件${loadFail?' · '+loadFail+' 层失败':''}</span><span class="pill">滚轮缩放 · 拖拽平移</span>`;
+    bar.innerHTML=`<label>动画</label><select id="spAnim"></select><label id="spSkinLbl" style="display:none">皮肤</label><select id="spSkin" style="display:none"></select><button id="spPlay">暂停</button><button id="spFit">复位</button><button id="spFull">全屏</button><span class="pill">${layers.length} 层部件${loadFail?' · '+loadFail+' 层失败':''}</span><span class="pill">滚轮缩放 · 拖拽平移</span>`;
     document.getElementById('spFull').onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else viewEl.requestFullscreen().catch(()=>{}); };
     document.addEventListener('fullscreenchange', resize);
     const sel=document.getElementById('spAnim');
@@ -768,6 +798,24 @@ async function startSpine(s, sk){
     if(def) setAnim(def);
     sel.value=def||'';
     sel.onchange=()=>setAnim(sel.value);
+    /* skin 下拉：默认用上面算出的覆盖最多者，允许手动切着对比
+       （'1'/'2' 是不同变体，覆盖数可能相同——阿罗芒什就是 201 vs 201 平手，需人工判） */
+    const skinUnion=[]; layers.forEach(L=>(L.skinNames||[]).forEach(k=>{if(skinUnion.indexOf(k)<0)skinUnion.push(k);}));
+    const ssk=document.getElementById('spSkin'), sskLbl=document.getElementById('spSkinLbl');
+    const setLayerSkin=(L,name)=>{ try{
+        L.skeleton.setSkin(name===null?null:L.data.findSkin(name));
+        L.skeleton.setSlotsToSetupPose(); L.skeleton.setBonesToSetupPose(); L.skin=name; }catch(e){} };
+    if(skinUnion.length){
+      const mk=(v,txt)=>{const o=document.createElement('option');o.value=v;o.textContent=txt;ssk.appendChild(o);};
+      mk('\u2205','(不设 skin)');
+      skinUnion.forEach(k=>mk(k, k+(layers.every(L=>L.skin!==k)?'':(layers.some(L=>L.skin===k)?' ✓':''))));
+      ssk.value=layers.find(L=>L.skin)?.skin ?? '\u2205';
+      sskLbl.style.display=''; ssk.style.display='';
+      ssk.onchange=()=>{ const v=ssk.value;
+        layers.forEach(L=>{ if(v==='\u2205') setLayerSkin(L,null);
+                            else if((L.skinNames||[]).indexOf(v)>=0) setLayerSkin(L,v); });
+        fit(); };
+    }
     document.getElementById('spPlay').onclick=e=>{playing=!playing;e.target.textContent=playing?'暂停':'播放';};
     document.getElementById('spFit').onclick=()=>{fit();zoom=1;};
     let drag=false,pmx=0,pmy=0;

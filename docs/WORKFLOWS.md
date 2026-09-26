@@ -547,6 +547,32 @@
 
 **涉及文件**: `gallery_src/cg_export.html`, `gallery_src/_gallery_server.py`, `scripts/diag/run_cg_export.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `PROJECT_STATUS.md §6/§10`
 
+#### WF-14 追加（2026-09-26）：Spine 必须 `setSkin`，否则命名 skin 里的部件整块不显示
+
+- **规则**：spine-ts 3.8 的附件时间线经 `Skeleton.setAttachment` → **`当前 skin.getAttachment(slotIndex,name)`**
+  解析。**不设 skin ⇒ 凡附件只在命名 skin 里的槽位一律 null**。画廊 Spine 标签与 `cg_export.html`
+  此前都从未调用 `setSkin`（grep 命中 0；注意 index.html 里的 `setSkin(sk)` 是画廊"切换舰皮"函数，**同名不同物，grep 时极易看错**）。
+- **选法（改规则不写例外表）**：对 `∅` 与每个命名 skin 各算一次
+  「推进若干动画后**曾挂上附件**的槽位数」，取最多者作默认；控制条加「皮肤」下拉（含 `(不设 skin)`）可人工比。
+  平手（阿罗芒什 `1` vs `2` 都是 201）按 skin 列表顺序取第一个。
+- **判据（全量扫描）**：`py -3 scripts/diag/spine_skin_scan.py [--only a,b] [--limit N]`
+  → 每 part 一行 JSON + 末尾 `SUMMARY {...}`。2026-09-26 基线：**331 part / 受影响 4 / gain 合计 182 槽**。
+  ⚠️ 超过 8 分钟，走 `scripts/diag/run_detached.py`。
+  逐槽细节：`scripts/diag/spine_skin_probe.py <folder> <槽名正则>`（列每个槽的 setup 附件名 / 各 skin 下挂到什么 / 所属图集页）；
+  `fit` 取景异常用 `scripts/diag/spine_bounds_probe.py <folder>` 列撑大包围盒的槽位。
+- **踩坑（判据差点自证成功）**：`cover()` 里如果把"纯 setup pose 的附件并集"也算进去，
+  而 setup 附件走 `slotData.attachmentName`、**与 skin 无关**，四个 skin 会全相等、`gain` 恒 0。
+  本轮就是**阳性对照（已知坏掉的 aluomangshi_2）报"没影响"**才发现判据写错。
+  → 判据只量"动画跑起来之后实际挂上的附件"；任何全量扫描先拿一个已知阳性样本验它确实会报警。
+- **踩坑（headless 里 spine 判据的等待）**：`--tab spine` 截图要等图集页下载完
+  （阿罗芒什 4 页共 18MB、`yunlong_2` 的 skel 单只 81MB），固定 5s/6.5s 等待会让 `#spSkin` 下拉还没建出来，
+  误报成"该皮肤没有 skin"。→ 轮询到元素出现，别用固定等待。
+- **未修的两件事**：① `fit()` 被 `hei1/hei2` 这类 28000 单位宽的近透明遮罩撑大 → 弹窗里画面只占中间一小块
+  （实测与 skin 无关，两种 skin 下 bbox 逐字相同；试过把 fit 挪到首帧 apply 后，无效已退回）；
+  ② `suweiaitongmeng_4` / `yuanchou` / `yuanchou_hx` 三个报 `Region not found in atlas`，
+  缺失区域名是 `￥ﾛﾾ￥ﾱﾂ 664` 这种 mojibake → 指向 `.skel` 与 `.atlas` 区域名编码不一致（参 §32）。
+- 详见 `TROUBLESHOOTING.md` §42。
+
 ---
 
 ### WF-15: 游戏版本更新后的增量重跑（资产同步 → 定位受影响子集 → 定向重建 → 证零回退）
@@ -644,6 +670,20 @@ py -3 scripts/diag/interact_verify.py
 # 5) 全量按部位点击（约 25 分钟，269 皮肤；基线 806/807，唯一 z46_3 框嵌框歧义）
 py -3 scripts/diag/hit_verify.py
 ```
+
+> ⚠️ **回归工具自身的两类假失败（2026-09-26 全踩了一遍，各修一处）**——工具红了不代表产品坏了，先证探针再定罪：
+> 1. **固定等待**：`l2d_inspector_verify.py` 等 6s、`interact_verify.py` 等 6.5s 就取
+>    `l2State.app.stage.children[0]`。大贴图皮肤（`benningdun_2` 三张共 40MB，且服务器单线程）
+>    根本来不及 → 报 `Cannot read properties of undefined (reading 'internalModel')`，
+>    一度表现为"四个皮肤全挂"。已改成轮询到模型出现（上限 40s），改后 4/4 一次过。
+> 2. **异步生效前读状态**：`interact_verify.py` 点部位后只等 900ms 就读 `currentGroup`，
+>    而 `startMotion` 是 async → 读到 `idle` 判成"点击没触发"（`lafeiii_3` 偶发）。
+>    已按本文档 §硬规则 3 对齐到 1600ms。
+> 另：`Execution context was destroyed` 多为**同时有两个 Chrome 在抢 CDP**（比如 detached 的
+> `hit_verify.py` 还在跑时再起一个探针）。串行跑，或确保端口/profile 完全隔离。
+>
+> 服务器（8777）掉了要重启：`py -3 scripts/diag/run_detached.py --log .diag/gallery_server.log -- py -3 Output/gallery_v2/_gallery_server.py`
+> （它不自动开浏览器，适合无人值守；双击 `启动资产浏览器.bat` 会顺带打开页面）。
 
 **改动作数据/交互层后的补充体检（都是只读，几十秒）**:
 ```bash
@@ -773,6 +813,26 @@ py -3 scripts/diag/l2d_voice_inventory.py --verbose  # 列缺失引用与孤儿�
   判据 = 丢掉的 (皮肤,组) 0 / 丢掉的皮肤 0 / 磁盘缺失音频 0 / `<2KB` 占位 0，退出码非 0 即不通过。
   ⚠️ 它按 **相对 `Output/`** 解析映射里的路径（`Audio/L2D/<皮肤>/<cue>.ogg`），拿 `gallery_v2/` 当根会误报"全部缺失"。
 - **完成判定看条数不看退出码**：`grep -c '组=' 日志` 应等于映射表皮肤数；`grep -cE 'Traceback|Exception in thread'` 必须 0。
+
+### WF-17 追加（2026-09-26）：语音的生命周期属于"句子"，不能挂在"动作"上
+
+- **规则**：**不要**把语音注入 `model3` 的 `definitions[g][0].Sound`。那条通道由库的 SoundManager 托管，
+  语义是"下一条动作 startMotion 时 dispose 上一条"，而 idle 播完会由运行时自动回落 idle
+  → 于是**动作结束 = 语音结束**。只要 `语音时长 > 动作时长` 就必然拦腰掐断。
+  碧蓝实测这是常态：`benningdun_2` 有 6 组超标（`touch_head` 动作 5.17s / 语音 9.24s 等）。
+- **正确接法**：页面自己持有一个 `Audio` 元素（`gallery_src/index.html` 的 `playVoice()/stopVoice()`）。
+  打断点只有两处，且都是**用户主动**的：① 再次 `play()`（下拉 / 重播 / 点部位）；
+  ② `my.off()`（切标签 / 换皮肤 / 销毁模型）。运行时回落 idle 不经过 `play()`，因此不打断——**这就是解耦点**。
+  非用户手势下 `el.play()` 会被浏览器拒（部分皮肤 `idleGroup` 落在带语音的 `home`），`.catch()` 静默降级。
+- **判据（必须实测音频元素，不能只听）**：`py -3 scripts/diag/l2d_voice_lifecycle.py <皮肤key> <动作组> <采样秒>`——
+  用 `Page.addScriptToEvaluateOnNewDocument` 在页面脚本执行前包住 `window.Audio`，
+  录 `play/pause/ended/loadeddata` + 每次事件的 `currentTime`；
+  判据 = **`currentGroup` 翻回 `idle` 之后音频仍 `paused:false` 且 `currentTime` 继续推进到 ≈ `duration`**。
+  ⚠️ 事后在 console 里找"当前有哪些 Audio"是找不到的：库 new 完就藏进闭包，自建元素也不入 DOM，
+  `document.querySelectorAll('audio')` 恒为 0 —— 会误判成"根本没播"（本轮就这么绕了一圈）。
+- **踩坑（先排除岔路再改代码）**：症状像"动作导短了"，但 `Meta.Duration` == 曲线最大时间 == 源 clip 末帧，
+  动作时长是忠实的。**不查这一步就会去改数据层，把正确产物改坏。**
+- 详见 `TROUBLESHOOTING.md` §41。
 
 ### WF-18: 逆向里给一个函数判"作用域"与把"否证"做成穷举级（调用方反查 + 自由度压缩 + 三条对照）
 
