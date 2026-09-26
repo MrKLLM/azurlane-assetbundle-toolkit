@@ -642,9 +642,9 @@
 **改哪里**:
 | 层 | 文件 | 说明 |
 |---|---|---|
-| 前端源码（唯一权威） | `gallery_src/index.html` | 改完必须部署 |
-| 部署 | `scripts/deploy_gallery.py` | 同步到 `Output/gallery_v2/`（运行目录，gitignore）；幂等，改完核对哈希一致 |
-| 服务器 | `Output/gallery_v2/_gallery_server.py`（8777，已在跑则复用） | 回归脚本都打 `http://127.0.0.1:8777/gallery_v2/index.html` |
+| 前端源码（唯一权威） | `gallery_src/index.html` | **2026-09-26 起与运行目录是硬链接**（同一份 inode），改正本即刻生效；`cg_export.html` 因当时有未提交改动尚未换链 |
+| 部署 / 漂移检查 | `scripts/deploy_gallery.py` | 默认=用正本 copy 修复；`--check`=只比对不写盘、漂移即 `exit 1`（改完前端/提交前跑一次）；`--relink`=把运行目录副本换成硬链（要求两边逐字节相同，且正本无未提交改动才动手）。同步目标 `Output/gallery_v2/` 是运行目录（gitignore） |
+| 服务器 | `Output/gallery_v2/_gallery_server.py`（8777，已在跑则复用） | 回归脚本都打 `http://127.0.0.1:8777/gallery_v2/index.html`。⚠️ 它按**自身所在目录**算根（`ROOT=dirname(HERE)`），所以**只能双击 `Output\gallery_v2\` 里那份**；双击 `gallery_src\` 那份会把根算成仓库目录 → 404 + 「当前目录没找到 index.html」 |
 | 模型数据 | `Output/Live2D/<key>/` | 前端直读（`P="..\/"`），无副本 |
 
 **四条必须记住的硬规则（每条对应一次真实事故）**:

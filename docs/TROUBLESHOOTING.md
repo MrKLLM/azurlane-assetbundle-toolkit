@@ -1837,5 +1837,53 @@ idle 播完会由运行时自动回落 idle → 于是**动作结束 = 语音结
 其余 243 个未被目视覆盖，非贴图绑定类问题（部件错位、参数残留、判定区）仍需按个案报上来查。
 截图目录 `.diag/l2d_shots_visual/`（已 gitignore，不进仓库）。
 
+---
+
+## §43. 画廊前端"看起来是两份重复副本、还双击打不开"，差点被当垃圾删掉（2026-09-26）
+
+**症状**：用户看 `gallery_src/` 说「和 Output 里那个画廊重复了，而且这个还点不开，用不上吧」。
+这句话若被执行，删掉的是画廊前端 65KB 逻辑的**唯一版本化正本**。
+
+**根因（三条，逐条取证，不是推测）**：
+
+1. **两边确实是两个独立副本**：`stat -c %h` 实测 `nlink=1` 各一份（不是硬链、不是引用），
+   唯一连接是 `deploy_gallery.py` 里一行 `shutil.copy2`，单向 src→dst。
+   → 所以「改了正本」和「运行目录生效」之间隔着一次手工部署，忘了就是**改了等于没改**（本项目已有先例）。
+2. **"点不开"是路径基准按自身位置算的**：`_gallery_server.py:22` `ROOT = os.path.dirname(HERE)`，注释假设自己在 `gallery_v2` 里。
+   从 `gallery_src\` 双击时 `ROOT` 变成仓库根，于是去请求 `/gallery_v2/index.html`（第 28 行）→ 不存在；
+   同时第 54 行会打 `[警告] 当前目录没找到 index.html`。**这份 bat 是待部署文本，从设计上就不该被双击。**
+3. **"重复"错觉背后是 `.gitignore` 的分工**：第 32-55 行的扩展名清单只挡二进制/媒体，**完全不含 `.json`**；
+   而 `Output/` 下有 24,879 个 json（重导出的 motion3/model3 资产本体 + `_OLD_bak` 换前备份 15,560 个）。
+   真正挡住这些的是第 13 行整目录规则——它挡的不是图片，且被它挡的东西**一个都不可复原为"远程仓库里的一份"**。
+
+**处置**：把「两份副本」变成「一份数据两个名字」——硬链接。
+
+- `deploy_gallery.py` 加三态：`--check`（只比对，漂移即 `exit 1`）/ `--relink`（换链）/ 默认（copy 修复，保留为断链后的回退手段）。
+- `--relink` 前置闸门：两边 md5 必须逐字节相同才换链；**正本相对 HEAD 有未提交改动的文件自动跳过**
+  （本次就靠这条守住了另一会话正在写的 `cg_export.html`，16:05 才落盘）。
+- 已换链 3/4：`index.html`、`_gallery_server.py`、`启动资产浏览器.bat`。`cg_export.html` 待那会话提交后补跑一次 `--relink` 即可。
+
+**判据（每条都实测过，含失败分支）**：
+
+| 要证的 | 怎么测 | 结果 |
+|---|---|---|
+| 换链真发生 | `stat -c 'nlink=%h ino=%i'` 两边 | `nlink=2`、inode 相同 |
+| 改正本即刻生效 | 往 `gallery_src/index.html` 追加探针注释，读运行目录 | 两边 md5 同步变、运行目录侧 grep 到注释；随后按原字节还原，`git diff HEAD` 干净 |
+| `--check` 会报红 | 人为把 bat 断链并改内容 | `! 启动资产浏览器.bat 漂移…`，`exit=1` |
+| `--relink` 不覆盖差异 | 同一漂移态下换链 | `! 两边内容不同，拒绝换链`，`exit=1` |
+| 修链路径通 | 默认部署刷平 → `--relink` → `--check` | 恢复 `nlink=2`，`exit=0` |
+| 画廊照常可访问 | 用**真实部署的** `_gallery_server.py` 起 8777 回环取文件 | `index.html` 200/65066B、`vendor/live2d/pixi.min.js` 200/476988B、`index.json` 200/829010B、`Cache-Control: no-cache` |
+
+**踩坑**：造漂移的测试脚本按 utf-8 读 `启动资产浏览器.bat`（**GBK**，`chcp 936`）→ `os.remove(dst)` 之后才抛 `UnicodeDecodeError`，
+把运行目录副本留成 0 字节。**碰 bat/中文控制台文件的探针一律二进制读写**，且断链类操作先备份再动手
+（本次备份在 `Output/_OLD_bak/gallery_hardlink_20260926/`，4 个文件齐全）。
+
+**副作用要说清（硬链唯一的失效场景）**：编辑器若用「写临时文件 + `os.replace`」保存，会**静默断链**
+（实测：rename 覆盖后两边 inode 立刻不同、`nlink` 回 1）。所以 `py -3 scripts/deploy_gallery.py --check`
+是长期护栏，改过前端就跑一次；它也该进 WF-16 回归的第一步。
+
+**涉及文件**：`scripts/deploy_gallery.py`、`gallery_src/`（4 个正本，git 唯一跟踪路径）、`Output/gallery_v2/`（同一份数据的第二名字 + 生成物）、`.gitignore:13`、`.gitignore:32-55`
+
+
 
 
