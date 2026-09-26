@@ -22,11 +22,18 @@ BAR_H = 46          # 底部控制条高度，不算内容
 
 
 def measure(path):
+    """两套包围盒：
+       fill    = 非背景棋盘像素（会被**不透明纯黑巨幕**顶成满分，只看它就是假绿灯）
+       fillInk = 其中"非近黑"的那部分（max(r,g,b)>40），即真正有内容的画面
+       判取景好坏要用 fillInk；fill 只用来看有没有裁到画面边缘。
+    """
     im = Image.open(path).convert('RGB')
     w, h = im.size
+    area_h = h - BAR_H
     px = im.load()
     x0, y0, x1, y1 = w, h, -1, -1
-    for y in range(0, h - BAR_H):
+    ix0, iy0, ix1, iy1 = w, h, -1, -1
+    for y in range(0, area_h):
         for x in range(0, w):
             r, g, b = px[x, y]
             if any(abs(r - br) <= 3 and abs(g - bg) <= 3 and abs(b - bb) <= 3 for br, bg, bb in BG):
@@ -35,14 +42,19 @@ def measure(path):
             if x > x1: x1 = x
             if y < y0: y0 = y
             if y > y1: y1 = y
+            if max(r, g, b) > 40:
+                if x < ix0: ix0 = x
+                if x > ix1: ix1 = x
+                if y < iy0: iy0 = y
+                if y > iy1: iy1 = y
     if x1 < 0:
         return None
-    area_h = h - BAR_H
     cw, ch = x1 - x0 + 1, y1 - y0 + 1
-    # fill = 内容在"较长那一轴上占满视口多少"。frac（面积占比）会被宽高比失配稀释，
-    # 单独看会把"正常竖图"误读成取景过小；fill≈0.91 才是"贴合 1.1 倍留边适配"的满分线。
+    ink = None if ix1 < 0 else (ix1 - ix0 + 1, iy1 - iy0 + 1)
     return {'size': (w, area_h), 'bbox': (x0, y0, x1, y1),
+            'inkBox': None if ink is None else (ix0, iy0, ix1, iy1),
             'fill': round(max(cw / w, ch / area_h), 3),
+            'fillInk': None if ink is None else round(max(ink[0] / w, ink[1] / area_h), 3),
             'frac': round(cw * ch / (w * area_h), 3),
             'touch': ''.join(c for c, v in (('L', x0 <= 1), ('R', x1 >= w - 2),
                                             ('T', y0 <= 1), ('B', y1 >= area_h - 2)) if v) or '-'}
@@ -61,9 +73,9 @@ if __name__ == '__main__':
         if m is None:
             print(f'{name:26s} 全空白')
             continue
-        rows.append((m['fill'], name))
-        print(f'{name:26s} 视口{m["size"][0]}x{m["size"][1]} 内容{m["bbox"]} '
-              f'长轴占满 {m["fill"]:.3f} 面积占比 {m["frac"]:.3f} 贴边 {m["touch"]}')
+        rows.append((m['fillInk'] or 0, name))
+        print(f'{name:24s} 视口{m["size"][0]}x{m["size"][1]} 内容框{m["bbox"]} 内容(非黑)框{m["inkBox"]} '
+              f'长轴占满 {m["fill"]:.3f} / 有效 {str(m["fillInk"]):6s} 面积 {m["frac"]:.3f} 贴边 {m["touch"]}')
     if len(rows) > 3:
         rows.sort()
-        print('\n长轴占满最小 8 个:', ', '.join(f'{n}={f}' for f, n in rows[:8]))
+        print('\n有效占满最小 8 个:', ', '.join(f'{n}={f}' for f, n in rows[:8]))
