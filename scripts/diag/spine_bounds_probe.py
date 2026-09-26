@@ -9,9 +9,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
 PORT = 9349
 FOLDER = sys.argv[1] if len(sys.argv) > 1 else 'aluomangshi_2'
+SKIN = sys.argv[2] if len(sys.argv) > 2 else '1'
+PROFILE = os.path.join(ROOT, '.diag', 'chrome_bounds_' + str(int(time.time())))   # 每次全新 profile：复用会把上一次的 chrome 当本页
 proc = subprocess.Popen([
     CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
-    '--remote-allow-origins=*', f'--user-data-dir={os.path.join(ROOT,".diag","chrome_bounds")}',
+    '--remote-allow-origins=*', f'--user-data-dir={PROFILE}',
     '--no-first-run', '--no-default-browser-check', '--enable-unsafe-swiftshader',
     '--use-angle=swiftshader', '--window-size=1280,900',
     'http://127.0.0.1:8777/gallery_v2/index.html',
@@ -20,7 +22,8 @@ ws = None
 for _ in range(120):
     try:
         for t in json.load(urllib.request.urlopen(f'http://127.0.0.1:{PORT}/json')):
-            if t.get('webSocketDebuggerUrl'):
+            # 必须按 URL 过滤 target：不过滤会连到 devtools/新标签页，eval 打到空页面上
+            if 'gallery_v2' in t.get('url', '') and t.get('webSocketDebuggerUrl'):
                 ws = websocket.create_connection(t['webSocketDebuggerUrl'], timeout=300); ws.settimeout(300)
                 break
         if ws: break
@@ -42,7 +45,7 @@ def ev(e, a=False):
     return r.get('result', {}).get('value')
 
 JS = r"""
-(async (folder) => {
+(async (folder, SKIN) => {
   const t = ms => new Promise(r => setTimeout(r, ms));
   for (let i=0;i<240;i++){ if(typeof GALLERY!=='undefined'&&Array.isArray(GALLERY.ships)&&GALLERY.ships.length) break; await t(500); }
   for (let i=0;i<60;i++){ if (typeof spine!=='undefined'&&spine.webgl) break; await t(500); }
@@ -54,6 +57,31 @@ JS = r"""
   const data=new spine.SkeletonBinary(new spine.AtlasAttachmentLoader(atlas)).readSkeletonData(bytes);
   const animNames=(data.animations||[]).map(a=>a&&a.name).filter(Boolean);
   const an = animNames.indexOf('normal')>=0 ? 'normal' : animNames[0];
+  const anim = data.animations && data.animations.length ? (function(){
+    for(const A of data.animations) if(A && A.name===an) return A; return null; })() : null;
+
+  /* 对给定槽位，沿整条动画采样 alpha：决定「透明不计入取景」是否是确定性规则 */
+  const alphaTrace = (names) => {
+    const out = {};
+    for(const n of names) out[n] = {setup:null, max:0, times:0};
+    const s0=new spine.Skeleton(data); s0.setSlotsToSetupPose(); s0.setBonesToSetupPose();
+    for(const n in out){ const sl=s0.slots.find(x=>x.data.name===n);
+      if(sl) out[n].setup = sl.color? sl.color.a : (sl.data.color? sl.data.color.a : null); }
+    const st=new spine.AnimationState(new spine.AnimationStateData(data));
+    if(an) st.setAnimation(0, an, true);
+    const dur = anim? anim.duration : 0;
+    const NSTEP=40;
+    for(let i=0;i<=NSTEP;i++){
+      const s=new spine.Skeleton(data); s.setSlotsToSetupPose(); s.setBonesToSetupPose();
+      st.update(i===0?0:dur/NSTEP); st.apply(s);
+      for(const n in out){ const sl=s.slots.find(x=>x.data.name===n); if(!sl) continue;
+        const a=sl.color? sl.color.a : (sl.data.color? sl.data.color.a : 0);
+        if(out[n].setup===null) out[n].setup=a;
+        if(a>out[n].max) out[n].max=+a.toFixed(3); if(a>0.001) out[n].times++; }
+    }
+    out.__samples = NSTEP+1; out.__dur = +dur.toFixed(2);
+    return out;
+  };
 
   const extents = (skName) => {
     const s=new spine.Skeleton(data); const st=new spine.AnimationState(new spine.AnimationStateData(data));
@@ -72,8 +100,12 @@ JS = r"""
       }catch(e){ continue; }
       let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
       for(let j=0;j<c;j+=2){ if(v[j]<minX)minX=v[j]; if(v[j]>maxX)maxX=v[j]; if(v[j+1]<minY)minY=v[j+1]; if(v[j+1]>maxY)maxY=v[j+1]; }
+      const col = sl.color || sl.data.color;
       rows.push({slot:sl.data.name, att:(a.name||''), w:Math.round(maxX-minX), h:Math.round(maxY-minY),
-                 x:Math.round(minX), y:Math.round(minY), far:Math.max(Math.abs(minX),Math.abs(maxX),Math.abs(minY),Math.abs(maxY))});
+                 x:Math.round(minX), y:Math.round(minY), far:Math.max(Math.abs(minX),Math.abs(maxX),Math.abs(minY),Math.abs(maxY)),
+                 a:col?+(col.a).toFixed(3):null, r:col?+(col.r).toFixed(2):null,
+                 bsx:+sl.bone.scaleX.toFixed(2), bsy:+sl.bone.scaleY.toFixed(2),
+                 reg:(a.width||0)+'x'+(a.height||0)});
     }
     rows.sort((p,q)=>q.far-p.far);
     return {n:rows.length,
@@ -81,12 +113,19 @@ JS = r"""
             Math.max(...rows.map(r=>r.x+r.w)), Math.max(...rows.map(r=>r.y+r.h))].map(Math.round),
       farthest: rows.slice(0,10)};
   };
-  return JSON.stringify({anim:an, none: extents(null), best: extents('1')}, null, 1);
+  const named = (data.skins||[]).map(k=>k.name).filter(n=>n && n!=='default');
+  const sk = named.indexOf(SKIN)>=0 ? SKIN : (named.length? named[0] : null);
+  const ext = extents(sk);
+  return JSON.stringify({anim:an, skin:sk, n:ext.n, bbox:ext.bbox,
+    farthest: ext.farthest, alpha: alphaTrace(ext.farthest.slice(0,6).map(r=>r.slot))}, null, 1);
 })
 """
 for _ in range(240):
-    if ev('String(typeof GALLERY!=="undefined")') == 'true':
+    if ev('String(typeof GALLERY!=="undefined"&&Array.isArray(GALLERY.ships)&&GALLERY.ships.length)') != 'false':
         break
     time.sleep(0.5)
-print(ev(f'({JS})({json.dumps(FOLDER)})', True))
-ws.close(); proc.terminate()
+print(ev(f'({JS})({json.dumps(FOLDER)}, {json.dumps(SKIN)})', True))
+ws.close()
+# 只按本次 PID 杀进程树：terminate() 不回收 chrome 子进程，残留实例会让下次同 profile 跑到旧页面上
+subprocess.call(['taskkill', '/T', '/F', '/PID', str(proc.pid)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

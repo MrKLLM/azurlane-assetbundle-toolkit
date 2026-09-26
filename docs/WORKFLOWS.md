@@ -585,6 +585,34 @@
   （`--extra` 是本轮给该 runner 加的透传参数）。
 - 详见 `TROUBLESHOOTING.md` §42。
 
+#### WF-14 追加（2026-09-26）：取景判据 = "这一刻会不会落笔"，两套工具与两条否证
+
+- **弹窗侧已修**：`gallery_src/index.html` 的 `boundsOf()` 里
+  `if(slot.data&&slot.data.color&&slot.data.color.a<=0.001)continue;`
+  —— setup alpha=0 的整屏遮罩不参与取景。判据必须用 **`slot.data.color`（setup 色）**，
+  不能用 `slot.color`（当前色，会被动画时间线改写 → 按「复位」时框会随动画时刻跳）。
+- **量取景的两个工具（都是只读，成对使用）**：
+  - `scripts/diag/spine_framing_scan.py` —— 全库算三个包围盒（`boxAll` / `boxSetup` / `boxEver`）
+    并给 `gainSetup=sqrt(areaAll/areaSetup)`；331 part 约 40s。**开跑前自带 8777 预检**
+    （服务器会静默死掉，没预检就会刷几百行"spine 运行时未就绪"的假故障）。
+  - `scripts/diag/spine_view_framing.py` —— 量**真实弹窗截图**里"非背景像素占视口"。
+    报两个数：`长轴占满`（满分线 0.91，因为适配留 1.1 倍边）与 `面积占比`
+    （会被宽高比失配稀释，单看会把正常竖图误读成取景过小）。
+  - 前置：`py -3 scripts/diag/l2d_shot_models.py --tab spine <key...>` 先出图。
+- **两条已否证的方案，别再试**：
+  1. **"沿所有动画采样曾 alpha>0 就算内容"** —— 闪黑幕只要在某条动画里亮一次就永远算内容，
+     阳性对照 `siwanshi_4` 报 `gain=1.0`（等于没修）。判据要落在**取景那一刻**。
+  2. **首帧 `readPixels` 求非透明像素包围盒**（CG 导出层的做法）—— 弹窗里动画一直在跑、
+     页纹理又是首次 `draw` 才上传，读回来的是"局部已就绪"的渲染：`mojiaduoer_5` 被量成
+     只含天空渐变小块 → 放大成一屏模糊色块。**CG 层能用是因为它渲静止姿态且 `draw()` 后显式 `sleep(30)`。**
+- **残留未修（另一类，12/234）**：**不透明纯色巨幕**（`heimu`/`1heidi`）真的在渲染，
+  "会不会落笔"对它无效。两条捷径已排除：按部件名会误伤 2B 的真背景板 `bj_1`；
+  按纯黑乘数也不行（这些黑幕 setup 色实测 `rgb=1,1,1`，黑色来自贴图）。
+  唯一可靠判据是读 atlas 页纹理逐附件算"有没有非近黑像素"，且为与弹窗一致要重导那 12 张 CG。
+  清单与数字见 §45 末。
+- ⚠️ **CG 侧的"二次构图按 alpha>8"会被纯黑巨幕骗过**：`aluomangshi_2` 的 CG 自报"覆盖 0.83"看着健康，
+  实际打开是"一大片纯黑里嵌一小块舞台"。**alpha 包围盒 ≠ 构图对不对**，这一类必须看图。
+
 ---
 
 ### WF-15: 游戏版本更新后的增量重跑（资产同步 → 定位受影响子集 → 定向重建 → 证零回退）
@@ -657,7 +685,7 @@
 | 层 | 文件 | 说明 |
 |---|---|---|
 | 前端源码（唯一权威） | `gallery_src/index.html` | **2026-09-26 起与运行目录是硬链接**（同一份 inode），改正本即刻生效、不需部署；4 个文件（含 `cg_export.html`）已全部换链 |
-| 部署 / 漂移检查 | `scripts/deploy_gallery.py` | `--check`=只比对不写盘，**要求 4 个文件全部同 inode**，断链或内容漂移都 `exit 1`（改完前端/提交前必跑）；`--relink`=补链（要求两边逐字节相同，且正本无未提交改动才动手，防打断并行会话）；默认模式=用正本 copy 刷平（断链后回退用，刷平要再 `--relink`）。⚠️ 改正本**必须原地编辑**：整文件写回 / 「临时文件+改名」的原子保存会静默断链 |
+| 部署 / 漂移检查 | `scripts/deploy_gallery.py` | `--check`=只比对不写盘，**要求 4 个文件全部同 inode**，断链或内容漂移都 `exit 1`（改完前端/提交前必跑）；`--relink`=补链（要求两边逐字节相同，且正本无未提交改动才动手，防打断并行会话）；默认模式=用正本 copy 刷平（断链后回退用，刷平要再 `--relink`）。⚠️ 改正本**必须原地编辑**：整文件写回 / 「临时文件+改名」的原子保存会静默断链。**实测（2026-09-26）：agent 的 Edit 工具就是"写临时文件+改名"，每改一次必断链**（`os.stat().st_nlink` 两边都掉回 1）⇒ 所以真实节奏是「改 → `--check` 必红 → 默认模式刷平 → 提交 → `--relink` → `--check` 绿」，不要指望改完还是绿的 |
 | 服务器 | `Output/gallery_v2/_gallery_server.py`（8777，已在跑则复用） | 回归脚本都打 `http://127.0.0.1:8777/gallery_v2/index.html`。⚠️ 它按**自身所在目录**算根（`ROOT=dirname(HERE)`），所以**只能双击 `Output\gallery_v2\` 里那份**；双击 `gallery_src\` 那份会把根算成仓库目录 → 404 + 「当前目录没找到 index.html」 |
 | 模型数据 | `Output/Live2D/<key>/` | 前端直读（`P="..\/"`），无副本 |
 | 运行时库台账 | `gallery_src/vendor/MANIFEST.json` + `scripts/fetch_gallery_vendor.py` | `vendor/` 4 个第三方 JS 只在 gitignore 目录里，故版本/来源/sha256 全记在台账。**换机器或清过 `Output/` 后跑一次 `fetch_gallery_vendor.py` 即补齐**；`--check` 只校验（缺件/漂移 exit 1），可并进下面的回归清单 |

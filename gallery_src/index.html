@@ -769,8 +769,14 @@ async function startSpine(s, sk){
     let camX=0,camY=0,zoom=1,base1=1,playing=true,last=performance.now();
     function resize(){ cv.width=wrap.clientWidth; cv.height=wrap.clientHeight; scene.resize();
       scene.camera.setViewport(cv.width, cv.height); }  // 关键：scene.resize() 不更新相机视口（比例怪的根因）
+    /* 取景只算"这一刻真的会被画出来"的部件。setup alpha=0 的巨幕遮罩（闪黑/白场，
+       实测最大 32967×29970 单位）一个像素都不落，却能把包围盒撑到可见内容的 9.6 倍
+       → 弹窗里整幅画面缩成中间一小块（四万十实测只占视口 1.2%）。
+       ⚠️ 读 slot.data.color.a（setup 色）而不是 slot.color.a（当前色）：后者会被动画时间线改写，
+       用它会让用户按「复位」时的取景框随动画时刻跳动。 */
     function boundsOf(L){ let r=[1e9,1e9,-1e9,-1e9];
       for(const slot of L.skeleton.slots){ const a=slot.getAttachment(); if(!a||!slot.bone||!slot.bone.active)continue;
+        if(slot.data&&slot.data.color&&slot.data.color.a<=0.001)continue;
         try{ let v,c;
           if(a instanceof spine.RegionAttachment){ v=spine.Utils.newFloatArray(8); c=8; a.computeWorldVertices(slot.bone,v,0,2); }
           else if(a instanceof spine.MeshAttachment&&a.worldVerticesLength){ c=a.worldVerticesLength; v=spine.Utils.newFloatArray(c); a.computeWorldVertices(slot,0,c,v,0,2); }
@@ -778,6 +784,13 @@ async function startSpine(s, sk){
           for(let j=0;j<c;j+=2){ if(v[j]<r[0])r[0]=v[j]; if(v[j]>r[2])r[2]=v[j]; if(v[j+1]<r[1])r[1]=v[j+1]; if(v[j+1]>r[3])r[3]=v[j+1]; }
         }catch(e){}
       } return r; }
+    /* 为什么取景停在"顶点框 + 排除 setup 透明"而不再按像素收紧：
+       试过在首帧 readPixels 求非透明像素包围盒（CG 导出层就是这么做的），实测**不能用**——
+       弹窗里动画从第一帧就在跑，且 spine 的页纹理是首次 draw 时才上传，
+       读回来的是"局部已就绪"的渲染：mojiaduoer_5 被量成一个只含天空渐变小块的框，
+       放大成一屏模糊色块。CG 层能做是因为它渲的是静止姿态且 draw 后显式 sleep 等 GPU。
+       残留的一类缺陷（顶点框内有大面积全透明的部件，如 mojiaduoer_5 内容只占长轴 54%）
+       因此仍在，方向是按 atlas 页纹理逐附件算"真的画出来的像素范围"，与动画时刻无关。 */
     function fit(){ let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
       for(const L of layers){ const b=boundsOf(L); if(b[0]<minX)minX=b[0]; if(b[1]<minY)minY=b[1]; if(b[2]>maxX)maxX=b[2]; if(b[3]>maxY)maxY=b[3]; }
       if(minX>maxX){ base1=1; return; }
