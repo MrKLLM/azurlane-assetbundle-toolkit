@@ -1,0 +1,154 @@
+diff --git a/gallery_src/index.html b/gallery_src/index.html
+index f2b49eb..9c69ea2 100644
+--- a/gallery_src/index.html
++++ b/gallery_src/index.html
+@@ -78,10 +78,14 @@ main{flex:1;overflow:auto;padding:14px}
+ .view{flex:1;position:relative;overflow:hidden;background:
+   repeating-conic-gradient(#12172a 0 25%, #0d1120 0 50%) 0 0/28px 28px}
+ .view .fitwrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+-.srcbar{position:absolute;left:0;right:0;bottom:0;background:rgba(10,13,24,.85);border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:8px;align-items:center;font-size:12px;z-index:5}
++.srcbar{position:absolute;left:0;right:0;bottom:0;background:rgba(10,13,24,.85);border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;z-index:5}
+ .srcbar button{font-size:12px;padding:4px 10px;background:#243049;border:1px solid #3a4a6b;color:#c9d4e6;border-radius:6px;cursor:pointer}
+ .srcbar button.on{background:#2b6cb0;border-color:#5b9bd8;color:#fff}
+ .srcbar .pill{color:#8b96ad}
++.vbox{display:flex;gap:6px;align-items:center}
++.vbox button{font-size:12px;padding:4px 10px;background:#1f2b3d;border:1px solid #3a4a6b;color:#a9c6e6;border-radius:6px;cursor:pointer}
++.vbox button.on{background:#2b6cb0;border-color:#5b9bd8;color:#fff}
++.vbox .pill{color:#8b96ad}
+ .view img.full{max-width:100%;max-height:100%;object-fit:contain;user-select:none}
+ .view:fullscreen{width:100vw;height:100vh}
+ #imgStage{overflow:hidden}
+@@ -275,7 +279,7 @@ function setSkin(sk){ curSkin=sk; paintSrc='cg'; const s=curShip;
+   renderView();
+ }
+ function renderView(){
+-  stopSpine(); stopLive2D(); const sk=curSkin;
++  stopSpine(); stopLive2D(); stopSkinVoice(); const sk=curSkin;
+   if(tab==='painting'){
+     const hasCg=!!sk.cg, hasRaw=!!sk.image;
+     if(!hasCg&&!hasRaw){ viewEl.innerHTML='<div class="note">该皮肤无独立立绘，只有动态资源</div>'; }
+@@ -289,6 +293,8 @@ function renderView(){
+         <div class="srcbar">${sw}<span style="flex:1"></span><span class="pill">滚轮缩放 · 拖拽平移 · 双击100% · 全屏</span><button id="zReset">复位</button><button id="zFull">全屏</button></div>`;
+       viewEl.querySelectorAll('.srcbar button[data-s]').forEach(b=>b.onclick=()=>{paintSrc=b.dataset.s;renderView();});
+       mountImageViewer();
++      /* 静态立绘也要能点出声（游戏里点立绘=触摸台词），故与本视图共用语音条 */
++      mountSkinVoice(viewEl.querySelector('.srcbar'), document.getElementById('imgStage'), ()=>curSkin.key);
+     }
+   }
+   else if(tab==='voice'){ renderVoice(); }
+@@ -343,12 +349,51 @@ function renderVoice(){
+   s.voices.forEach(v=>{const fn=v.split('/').pop();const cat=(fn.match(/cv-\d+(-\w+)?\.wav/)||[])[1]||'';h+=`<div class="aud"><span class="lbl">${cat?cat.replace('-',''):'默认'}</span><audio controls preload="none" src="${P+v}"></audio></div>`;});
+   h+='</div>'; viewEl.innerHTML=h;
+ }
+-/* Live2D 动作语音映射表 l2d_voice.json（由 scripts/extract_live2d_voice.py 从 cue/cv-*.b 导出）。
+-   结构 {皮肤key: {动作组: [相对 P 的音频路径...]}}，同组多条 = 游戏里的随机变体。 */
+-let _voiceP=null;
++/* ---------- 皮肤语音（skin_voice.json，由 scripts/extract_cv_voice.py 从 cue/cv-*.b 导出）----------
++   结构 {皮肤key: {cv, idx, src, l2d:{动作组:[路径]}, tap:{touch_body|touch_special|touch_head: 路径},
++                  lines:[{cat,label,f,ev}]}}。
++   音频按「船级语音包」去重存放（Audio/CV2/cv-<n>/），皮肤只写引用；同一包不再重复导出。
++   ⚠️ `_N` 后缀是**皮肤序号**不是随机变体：取词在导出侧已按皮肤序号选档，前端一律直取、不得随机抽。 */
++let _voiceP=null, SV=null;
+ function loadVoiceMap(){ return _voiceP||(_voiceP=(async()=>{
+-    try{ const r=await fetch('./l2d_voice.json'); if(!r.ok) return {};
+-      const j=await r.json(); return (j&&typeof j==='object')?j:{}; }catch(e){ return {}; } })()); }
++    try{ const r=await fetch('./skin_voice.json'); if(!r.ok) return {};
++      const j=await r.json(); return (j&&typeof j==='object')?j:{}; }catch(e){ return {}; }
++    })().then(j=>{ SV=j; return j; })); }
++const TAP_LABEL={touch_body:'普通触摸',touch_special:'特殊触摸',touch_head:'摸头'};
++/* 一个自持的 Audio 元素：不走 Live2D 库的 Sound 通道（那条会被下一条动作 dispose 掐断，见 §41） */
++let _vEl=null;
++function stopSkinVoice(){ if(_vEl){ try{_vEl.pause();}catch(e){} _vEl=null; } }
++function playVoicePath(path){ if(!path) return false;
++  stopSkinVoice();
++  const el=new Audio(path); _vEl=el;
++  el.addEventListener('ended',()=>{ if(_vEl===el) _vEl=null; });
++  el.play().catch(()=>{ if(_vEl===el) _vEl=null; });   // 非用户手势时浏览器会拒，静默降级
++  return true; }
++function skinTap(key){ const e=(SV||{})[key]; return (e&&e.tap)||null; }
++/* 表里存的是相对 Output/ 的路径，页面在 /gallery_v2/ 下，必须经 P('../') 解析后再喂给 Audio */
++function vsrc(p){ return p?new URL(P+p,location.href).href:''; }
++function playTap(key, which){ const t=skinTap(key); if(!t) return false;
++  return playVoicePath(vsrc(t[which]||t.touch_body||t.touch_special||t.touch_head||Object.keys(t).map(k=>t[k])[0])); }
++/* 标签条上的语音控件：三个视图共用。clickEl 传 null 表示不做「点画面即触摸」。 */
++function mountSkinVoice(barEl, clickEl, keyOf){
++  if(!barEl) return;
++  const box=document.createElement('span'); box.className='vbox'; barEl.appendChild(box);
++  const draw=()=>{ const t=skinTap(keyOf()); const e=(SV||{})[keyOf()]||{};
++    const ks=Object.keys(TAP_LABEL).filter(k=>t&&t[k]);
++    box.innerHTML=(ks.length?ks.map(k=>`<button data-vk="${k}">${TAP_LABEL[k]}</button>`).join('')
++                   :'<span class="pill">🔇 该皮肤无语音</span>')
++      +(e.lines?`<span class="pill">台词 ${e.lines.length} 条</span>`:'');
++    box.querySelectorAll('button[data-vk]').forEach(b=>b.onclick=()=>{
++      playTap(keyOf(),b.dataset.vk);
++      b.classList.add('on'); setTimeout(()=>b.classList.remove('on'),900); }); };
++  if(clickEl){   // 拖动/缩放手势不算「点击」：位移超 6px 就不触发语音
++    let px=0,py=0;
++    clickEl.addEventListener('pointerdown',e=>{px=e.clientX;py=e.clientY;});
++    clickEl.addEventListener('pointerup',e=>{
++      if(Math.abs(e.clientX-px)>6||Math.abs(e.clientY-py)>6) return;
++      playTap(keyOf(),'touch_body'); }); }
++  loadVoiceMap().then(draw,draw);
++}
+ /* ---------- Live2D（pixi 6.5.2 + pixi-live2d-display 0.4.0 + cubismcore 5.1.0，均为 vendor/live2d/ 本地脚本） ---------- */
+ let l2State = null;
+ function stopLive2D(){ if(l2State){ l2State.cancelled=true; if(l2State.off)try{l2State.off()}catch(e){}
+@@ -412,17 +457,10 @@ async function renderLive2D(s, sk){
+        下一条动作一 startMotion 就把上一条 dispose 掉。而 idle 播完会自动回落 idle，
+        于是**动作时长 < 语音时长**的组会在话说一半时被掐（实测 benningdun_2/touch_head：
+        动作 5.17s、语音 9.24s，音频在 currentTime=4.48s 处被 pause）。
+-       改为页面自己持有一个 Audio 元素：只有**用户再次触发动作**（下拉/重播/点部位）才打断上一条，
+-       运行时回落 idle 不打断；切标签/换皮肤经 my.off() 打断。 */
++       改为页面自己持有一个 Audio 元素（模块级 playVoicePath/stopSkinVoice）：只有**用户再次触发动作**
++       （下拉/重播/点部位）才打断上一条，运行时回落 idle 不打断；切标签/换皮肤经 my.off() 打断。 */
+     const voice=Object.create(null);
+-    let voiceEl=null;
+-    const stopVoice=()=>{ if(voiceEl){ try{ voiceEl.pause(); }catch(e){} voiceEl=null; } };
+-    const playVoice=(g)=>{ const arr=voice[g]; if(!arr||!arr.length) return;
+-      stopVoice();
+-      const el=new Audio(arr[(Math.random()*arr.length)|0]);
+-      voiceEl=el;
+-      el.addEventListener('ended',()=>{ if(voiceEl===el) voiceEl=null; });
+-      el.play().catch(()=>{ if(voiceEl===el) voiceEl=null; }); };   // 非用户手势时浏览器会拒，静默降级
++    const playVoice=(g)=>{ const arr=voice[g]; if(arr&&arr.length) playVoicePath(arr[0]); };
+     /* ---------- 运行时保真三补丁（2026-09-23 无头取证，见 docs/TROUBLESHOOTING.md §21） ----------
+        ① 采纳 Meta.Loop：vendored pixi-live2d-display 0.4.0 定义了 setIsLoop() 但全 bundle 无调用点，
+           Meta.Loop 被无视 → idle 播完即停。此前靠前端定时器「假装循环」，实测该定时器与运行时
+@@ -506,13 +544,14 @@ async function renderLive2D(s, sk){
+       sel.innerHTML=groups.map(g=>`<option value="${g}">${g}${voice[g]?'（语音）':''}</option>`).join('');
+       if(cur) sel.value=cur; };
+     fillSel();
+-    /* 表是异步来的（本地小文件），回填后只刷新下拉标签与语音计数，不阻塞模型加载主流程 */
+-    loadVoiceMap().then(m=>{ const e=m[sk.key]||{};
+-      for(const g in e) if(Array.isArray(e[g])&&e[g].length)
+-        voice[g]=e[g].map(p=>new URL(P+p,location.href).href);
++    /* 表是异步来的（本地小文件），回填后只刷新下拉标签与语音计数，不阻塞模型加载主流程。
++       计数只算「模型里真的有的组」，否则会把表里其它类别（战斗/强化…）算进来说话数虚高。 */
++    loadVoiceMap().then(m=>{ const e=m[sk.key]||{}, map=e.l2d||{};
++      for(const g in map) if(Array.isArray(map[g])&&map[g].length)
++        voice[g]=map[g].map(p=>new URL(P+p,location.href).href);
+       const vp=document.getElementById('l2Voice');
+-      const n=Object.keys(voice).length;
+-      if(vp) vp.textContent=n?('语音 '+n+' 组'):'该皮肤无语音表';
++      const n=groups.filter(g=>voice[g]).length;
++      if(vp) vp.textContent=n?('语音 '+n+' 组'):'该皮肤无语音';
+       fillSel(); });
+     sel.onchange=()=>{ play(sel.value); };
+     document.getElementById('l2Replay').onclick=()=>{ play(sel.value); };
+@@ -687,7 +726,7 @@ async function renderLive2D(s, sk){
+     window.addEventListener('blur',onCancel);
+     window.addEventListener('pointermove',onMove);
+     window.addEventListener('pointerup',onUp);
+-    my.off=()=>{ stopVoice(); ro.disconnect(); wrap.removeEventListener('wheel',onWheel);
++    my.off=()=>{ stopSkinVoice(); ro.disconnect(); wrap.removeEventListener('wheel',onWheel);
+       wrap.removeEventListener('pointerdown',onDown); wrap.removeEventListener('dblclick',onDbl);
+       wrap.removeEventListener('pointercancel',onCancel);
+       window.removeEventListener('pointercancel',onCancel); window.removeEventListener('blur',onCancel);
+@@ -875,6 +914,7 @@ async function startSpine(s, sk){
+     }
+     document.getElementById('spPlay').onclick=e=>{playing=!playing;e.target.textContent=playing?'暂停':'播放';};
+     document.getElementById('spFit').onclick=()=>{fit();zoom=1;};
++    mountSkinVoice(bar, cv, ()=>sk.key);   // Spine 动态立绘同样点画面=触摸台词
+     let drag=false,pmx=0,pmy=0;
+     cv.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.05,Math.min(60,zoom*(e.deltaY>0?.9:1.1)));},{passive:false});
+     cv.addEventListener('mousedown',e=>{drag=true;pmx=e.clientX;pmy=e.clientY;cv.style.cursor='grabbing';});

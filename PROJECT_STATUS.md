@@ -1,6 +1,8 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-26 22:05（本轮：**Spine 取景连修两类 + CG_v2 全量重导** →
+> **生成时间**: 2026-09-26 23:20（另起一轮：语音覆盖面取证 → 四层根因与"皮肤序号"语义错已定位，
+> 新管线 `scripts/extract_cv_voice.py` 已入库、前端接线以补丁挂起待放行，详见 §6 待办 ③④ 与 §47 / WF-21。
+> 上一轮：**Spine 取景连修两类 + CG_v2 全量重导** →
 > ① `boundsOf` 把"挂了附件"当成"会画出来"：整屏闪黑/闪白遮罩（最大 32967×29970 单位、setup 与整条
 > 21s 动画的 41 个采样点上 alpha 恒为 0）一个像素不落却决定取景框，全库 **13/328** 受影响、最大 9.6 倍
 > （四万十画面长轴占满 0.157→0.842）。② 同日再修**不透明纯色巨幕**（黑底板 alpha=1、真的在渲染）：
@@ -196,7 +198,14 @@
    1. **耳朵验收已过**：用户实听确认「点动作有声音」（此前一轮报"完全无声"实为**改完没部署**，见 WF-17 踩坑首条）。
    2. **全量已跑完**：`--all` 覆盖 270 个 Live2D 皮肤 → **253 个命中 ACB 并导出**、**17 个无 ACB**、**0 个"有 ACB 但动作组零交集"**；产物 **5914 个 ogg / 323 MB**，映射表 `Output/gallery_v2/l2d_voice.json` 含 **253 个皮肤**。
    脚本已入库（commit `727fe04`）：`scripts/extract_live2d_voice.py`（新增 `--all` 旗标——原先只认 `L2D_VOICE_ALL=1` 环境变量，用 `Start-Process` 脱离进程起时不继承环境变量，导致第一次"看起来起起来了"实际直接走用法分支 `exit 1`）、`scripts/diag/l2d_voice_probe.py`。
-   **仍待办**：① ~~两条别名仍是语义推断，待按耳朵裁定~~ **2026-09-25 已由游戏自己的表证实并升级为表驱动**（`extract_live2d_voice.py` 的 `ALIAS` 改读 `inputs/gamecfg/character_voice.json`）：`character_voice` 给出 `touch→resource_key=touch_1 / l2d_action=touch_body`、`touch2→touch_2 / touch_special`，另有第三条 `headtouch→touch_head / l2d_action=touch_head`（此前画廊无此认知）⇒ 且**同一张表又认出 6 条此前不知道的别名**(`battle→warcry`/`complete→expedition`/`hp_warning→hp`/`mission→task`/`wedding→propose`/`win_mvp→mvp`)，要重导语音映射才吃得到（单皮肤 `--report` A/B 已过，写盘待放行）。见 §35 与 WF-17 追加。② **口型未做**（vendored 库无音频驱动口型，需自接 WebAudio 包络写 `ParamMouthOpenY`）；③ **Spine 与静态立绘的配音仍缺**——同一批 ACB 里有 `detail`/`get`/`expedition`/`task`/`profile`/`upgrade`/`feeling1-5`/`present_like`/`title` 等触发名，数据在手未导出未接线；④ 详情页语音归并还依赖那张 719 条的社区 `CV_MAP`（安土都不在表里 → `voices=[]`），可改用 skin id 推导一并修掉。
+   **仍待办**：① ~~两条别名仍是语义推断，待按耳朵裁定~~ **2026-09-25 已由游戏自己的表证实并升级为表驱动**（`extract_live2d_voice.py` 的 `ALIAS` 改读 `inputs/gamecfg/character_voice.json`）：`character_voice` 给出 `touch→resource_key=touch_1 / l2d_action=touch_body`、`touch2→touch_2 / touch_special`，另有第三条 `headtouch→touch_head / l2d_action=touch_head`（此前画廊无此认知）⇒ 且**同一张表又认出 6 条此前不知道的别名**(`battle→warcry`/`complete→expedition`/`hp_warning→hp`/`mission→task`/`wedding→propose`/`win_mvp→mvp`)，要重导语音映射才吃得到（单皮肤 `--report` A/B 已过，写盘待放行）。见 §35 与 WF-17 追加。② **口型未做**（vendored 库无音频驱动口型，需自接 WebAudio 包络写 `ParamMouthOpenY`）；③ **Spine 与静态立绘的配音仍缺** ⚠️ 2026-09-26 已定位四层根因并备好管线（**全量导出待放行**，见下方"语音 v2 暂停点"）；④ 详情页语音归并还依赖那张 719 条的社区 `CV_MAP`（安土都不在表里 → `voices=[]`），可改用 skin id 推导一并修掉 —— 同日取证：`index.json` 里 **740/1008 组船 `voiceCount=0`**，链条 `CV_MAP(719)→中文名→拼音` 一路漏，而磁盘实有 **938 个船级语音包**（平均 ~35 条 cue/包）。
+
+   **语音 v2 暂停点（2026-09-26 深夜，用户指示"明天做"）**：
+   - **新脚本已入库**：`scripts/extract_cv_voice.py` —— 按**船级语音包去重**解码（`Audio/CV2/cv-<n>/<cue>.ogg`，皮肤只写引用，不再一份皮肤一份音频），覆盖全部皮肤而非仅 Live2D 目录；产 `Output/gallery_v2/skin_voice.json` = `{皮肤:{cv,idx,src,l2d:{动作组:[路径]},tap:{touch_body|touch_special|touch_head},lines:[{cat,label,f,ev}]}}`。
+   - **修掉的系统性语义错**：cue 名尾部 `_N` 是**皮肤序号**（= skin id 末位），旧脚本 `VARIANT_SUF=['','_1','_2']` 当成随机变体全导、前端 `Math.random()` 抽一条 ⇒ 三皮肤船 2/3 概率播到**别的皮肤**的台词，`_9`（改造皮肤）永远取不到。取证见 §47。
+   - **前端接线以补丁挂起**：`scripts/diag/voice-v2-frontend.patch`（154 行，`git apply --check` 已通过）。今晚 `gallery_src/index.html` 已回退到 HEAD 并重新补链（`deploy_gallery.py --check` 4/4 同 inode），**画廊 Live2D 语音仍是旧的 253 皮肤、静态立绘/Spine 依旧无声**。
+   - **明日接手三步**：① `git apply scripts/diag/voice-v2-frontend.patch` → ② 起全量（**实测 843 包 / 3995-4494 皮肤可定位 / 约 1.5GB / jobs=4 单包 1.9s ≈ 27 分钟**，必须用脱离宿主进程 + 进度行轮询）→ ③ 零回退闸门：旧 `l2d_voice.json` 的 (皮肤,动作组) 必须全部在新表里存在（样本已验 2 只：丢组 0、新增 7 组 `detail/feeling1-5/upgrade`），再跑 WF-16 五件套 + `deploy_gallery.py --check`。
+   - **已知缺口**：499 个皮肤无解 —— 48 个 cv 号有配置行但包没下下来（`hashes-cv.csv` 也没有，含爱宕全家 234 张，需走设备补取）+ 265 张在本地 azdata 快照里查不到 painting 行（2b/a2 等联动）；289 张只能同船回退取包号，其皮肤序号按"包内实存序号档减已被占用的"分配（`src=sibling-tier/-base`）。
    **顺带待裁定 → ✅ 2026-09-25 全部闭环**：`ALIAS` 已改读游戏自己的 `character_voice` 表（§35/§36），并**全量重导完成**：(皮肤,动作组) **2504→3263（+759 = 253×3）**、文件条目 5914→6948、**丢组 0 / 磁盘缺失 0 / <2KB 占位 0**（374.2 MB）；浏览器实播 `complete/mission/wedding/touch_body` 四组全部真出声（`paused=false`+`cur` 在走+`err=null`，§38）。新增到皮肤的语音类别：`complete`(→expedition)、`mission`(→task)、`wedding`(→propose)。
    **技能沉淀决议（勿再新建）**：自动推荐连发 4 条（`criware-acb-live2d-voice-extraction` / `criware-acb-voice-extraction` / `criware-acb-voice-bank-extraction` / `criware-voice-cue-extraction`）实为**同一份内容的四个副本**，相对 WF-17 净新增仅三点（库原生 `definitions[g][0].Sound` 注入、本库无音频驱动口型、语音表异步到达的首播竞态）。闸门过了之后**并进 `live2d-web-runtime-integration` 新开 §9「动作语音」**，与 WF-17/§23 重复的段落一律改为引用；若坚持独立技能，命名取 #3。⚠️ 该技能住在项目 `.agents/skills/`，而 `skill_manage` 只认用户技能目录 → **须直接改文件**。落笔时修掉两处事实：`-i` 不是"不给就时长翻倍"（本批语音实测无 loop 点），以及探针脚本要先入库才能被技能引用。
 
