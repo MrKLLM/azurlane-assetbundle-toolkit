@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。
-version: 1.2.0
+version: 1.3.0
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -63,6 +63,24 @@ version: 1.2.0
    正常的前缩透视/夸张构图判成"姿势反常"。
 8. **探针脚本不要在启动时清空整个输出目录**——同一轮里第二次运行会把上一轮的证据删掉。
    只删本次要重产出的那些 key；跨轮对比依赖旧产物。
+9. **`/json` 必须按 URL 过滤 target**：`--headless=new` 启动后 `/json` 里可能有多个带
+   `webSocketDebuggerUrl` 的条目（新标签页、扩展页、iframe），抓第一个会连到**错的调试目标**，
+   症状是 `Runtime.evaluate` 直接超时或拿到空结果，看起来像"页面没加载完"。
+   写 `if '<你的路径段>' in tab.get('url','') and tab.get('webSocketDebuggerUrl')`。
+10. **`subprocess.Popen(chrome)` + `proc.terminate()` 不回收浏览器进程**：被杀的是启动器，
+    真正的浏览器进程随 `--user-data-dir` 常驻。下一次用**同一个 profile** 启动 Chrome 时，
+    它会直接复用那个还活着的旧实例（并忽略你新传的 URL）——于是探针拿到的是**上一轮的页面**，
+    出现"我明明改了也部署了，截图却还是旧的"这种假矛盾，足以让人误判修复无效、甚至去改本来正确的代码。
+    ⇒ 探针要么每次用唯一 profile（`chrome_x_<timestamp>`），要么收尾按 profile 精确清进程；
+    判"修复无效"之前先确认自己没连到旧实例。
+11. **观测通道的编码问题会被当成被测对象的缺陷**：Python 在中文 Windows 上 stdout 默认 GBK，
+    把 UTF-8 内容（如带中文的资源名）打成 mojibake 后打印出来，看起来像**被测数据编码坏了**。
+    本项目据此写过一条"`.skel` 与 `.atlas` 区域名编码不一致"的错误结论，
+    hexdump 才证明两边逐字节相同、都是合法 UTF-8。
+    ⇒ 子进程输出一律 `env=dict(os.environ, PYTHONIOENCODING='utf-8')` +
+    `sys.stdout.reconfigure(encoding='utf-8')`；**下"字节层/编码层"结论前必须直接 hexdump 原始字节**，
+    不能引用任何经过终端编码的字符串。
+
 
 ## 验证
 
