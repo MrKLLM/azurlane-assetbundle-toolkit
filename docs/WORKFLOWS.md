@@ -668,6 +668,7 @@
 3. **idle 循环交给运行时，前端不许挂定时器**（2026-09-23 二次修订，旧"看守者"方案已废弃）：`Meta.Loop` 被 vendored 库忽略，但正确修法是给 CubismMotion 本体 `setIsLoop(true)` + `setIsLoopFadeIn(false)`，并把 `mm.groups.idle` 对齐成实际组名（库默认 `'Idle'`），让库自带的"播完自动回 idle"生效。旧方案用 `armIdleLoop` 定时器按 `Duration-120ms` 重开，而 `startMotion` 是 async → `!==false` 恒成立 → **被 `state.reserve` 拒绝时前端无感**，实测造成 idle 播 9.1s 后**冻结 9.2s**。改后 30s 内 `startMotion` 调用 0 次、`currentGroup=null` 采样 0 个（§21）。
 4. **验证不能自洽闭环**：合成点击若用被测映射的逆生成，永远全绿。必须用独立锚点（可见语义点反查 / 截图目视）——`l2d_coord_forensics.py` 就是干这个的。
 5. **动作数据必须有外部权威基准，别自证清白**：`motion3.json` 的贝塞尔控制点是**绝对 (时间,值)**，运行时直读不做归一化还原；写成归一化分数会让每条贝塞尔都先猛蹿到≈0 再跳目标值，而**曲线集合/时长/参数名全部校验都能通过**（§21）。唯一能抓出它的是同模型的权威导出：`scripts/diag/l2d_ref_diff.py` 拉 l2d.su 的 `motions/<group>.motion3.json` 逐曲线采样比对。
+6. **启动序列必须走 `apply()`，不能直接 `renderGrid()`**（2026-09-26，§44）：`view` 的初值是 `ships.slice()`（索引原序），排序只发生在 `apply()` 里，而 `apply()` 只绑在筛选控件的 change/input 事件上。启动直接 `renderGrid()` ⇒ 首屏未排序（VTuber 联动与 `-META` 变体排最前），用户"随便点一个筛选再回来才正常"就是这个。改法一行：结尾 `renderGrid();` → `apply();`。**通用形状**：凡"初始状态是某个函数算出的派生状态"，启动就必须调那个函数，不能既初始化一份原始数据、又指望事件来补。
 
 **回归五件套（按顺序跑）**:
 ```bash

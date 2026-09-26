@@ -851,7 +851,11 @@ async function startSpine(s, sk){
   });
 })();
 
-renderGrid();
+/* 启动必须走 apply() 而不是 renderGrid()：view 的初值是 ships.slice()（索引原序），
+   而排序只发生在 apply() 里，apply() 又只绑在筛选控件的 change/input 事件上。
+   以前这里直接 renderGrid() → 第一屏是未排序的原序（VTuber 联动与 -META 变体排最前），
+   用户报的"随便点一个筛选再回来才正常"就是这个（2026-09-26；由 126e16e 引入）。 */
+apply();
 </script>
 </body>
 </html>
