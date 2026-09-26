@@ -178,6 +178,12 @@ for k in cands:
         cnt[r.get('cls')] = cnt.get(r.get('cls'), 0) + 1
     d['cls_counts'] = cnt
     bad = cnt.get('WIRING', 0) + cnt.get('OUTSIDE', 0) + cnt.get('NOGEOM', 0)
+    if 'nAreas' not in d:
+        # skip / JS 异常都会缺 nAreas；旧写法把 bad=0 归进"全绿"分支，
+        # 于是打印成 `命中自己 0 / 共 None` 看着像通过 —— 静默失败，必须显式报出来。
+        print(json.dumps({'FAIL': k, 'reason': '没有 nAreas（skip 或 JS 异常）',
+                          'raw': d}, ensure_ascii=False), flush=True)
+        continue
     if bad or (d.get('randChk') and d['randChk']['distinct'] < 2):
         print(json.dumps(d, ensure_ascii=False), flush=True)
     else:

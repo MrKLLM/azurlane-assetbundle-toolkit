@@ -681,6 +681,12 @@ py -3 scripts/diag/hit_verify.py
 >    已按本文档 §硬规则 3 对齐到 1600ms。
 > 另：`Execution context was destroyed` 多为**同时有两个 Chrome 在抢 CDP**（比如 detached 的
 > `hit_verify.py` 还在跑时再起一个探针）。串行跑，或确保端口/profile 完全隔离。
+> 3. **`hit_verify.py` 会把 skip / JS 异常打成"通过"**（2026-09-26 修）：`bad=0` 直接进"全绿"分支，
+>    而 skip 或异常返回的对象里根本没有 `nAreas`，于是打印成 `命中自己 0 / 共 None`——
+>    那一行看着像通过，实际那个皮肤**一条都没测**。`pinghai_6` 就是这么被吞掉的。
+>    → **规则：汇总类判据必须能区分"测了且没问题"和"没测成"，缺字段一律打 FAIL。**
+>    顺带：跑 detached 全量时不要再起第二个 CDP 探针——单线程 http.server 会被抢，
+>    表现是 `await loadLive2DRuntime()` 永不返回（页面停在"正在加载 Live2D 运行时…"）。
 >
 > 服务器（8777）掉了要重启：`py -3 scripts/diag/run_detached.py --log .diag/gallery_server.log -- py -3 Output/gallery_v2/_gallery_server.py`
 > （它不自动开浏览器，适合无人值守；双击 `启动资产浏览器.bat` 会顺带打开页面）。
