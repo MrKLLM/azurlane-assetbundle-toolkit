@@ -7,10 +7,14 @@ Output/gallery_v2/ 是运行目录（gitignore，含 index.json/index.js/thumbs/
 """
 """三种模式：
   （默认）    逐文件比对，正本与运行目录副本不一致时用正本覆盖（修复用）
-  --check     只比对不写盘，发现漂移即非零退出（提交前/回归前自查）
+  --check     只比对不写盘；**要求 4 个文件都是同一份数据（硬链）**，断链或内容漂移都非零退出
+              （提交前/回归前自查）
   --relink    把运行目录副本换成指向正本的硬链接 —— 同一份磁盘数据挂两个路径名，
               此后改正本即刻生效、不再有"忘部署"这类静默失败。
               换链前要求两边内容逐字节相同；正本有未提交改动（其它会话在写）的文件自动跳过。
+
+⚠️ 改 gallery_src/ 里的正本请**原地编辑**（Edit 这类改法）。整文件写回 / 原子保存
+   （写临时文件再改名顶上去）会把硬链断掉，`--check` 会报红，补一次 `--relink` 即可。
 """
 import sys, os, shutil, hashlib, subprocess
 sys.stdout.reconfigure(encoding='utf-8')
@@ -35,7 +39,7 @@ def git_dirty(rel):
     return subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--', rel],
                           cwd=ROOT, capture_output=True).returncode != 0
 
-changed = drift = linked = skipped = 0
+changed = drift = linked = skipped = unlinked = 0
 for f in FILES:
     s, d = os.path.join(SRC, f), os.path.join(DST, f)
     if not os.path.isfile(s):
@@ -48,11 +52,19 @@ for f in FILES:
     if MODE == '--check':
         if twin:
             print(f'= {f} 同一份数据（硬链）')
-        elif same:
-            print(f'= {f} 已一致（独立副本，可 --relink）')
+            continue
+        # 没链上就是失败——哪怕两边内容还一样。断链的唯一现实成因是编辑器「写临时文件+改名」
+        # 的原子保存，它当场不丢数据，只把结构退回"两份独立副本 + 改了忘部署"这个老失效模式；
+        # 若此处按内容判定给绿灯，护栏对唯一会真实发生的失效就是瞎的。
+        unlinked += 1
+        dirty = git_dirty(os.path.join('gallery_src', f))
+        if same:
+            print(f'! {f} 已断链（内容仍一致）—— 跑 --relink 补链'
+                  + ('；但正本有未提交改动，需等写它的人先提交' if dirty else ''))
         else:
-            print(f'! {f} 漂移：运行目录副本 != 正本')
             drift += 1
+            print(f'! {f} 既断链又漂移（运行目录副本 != 正本）—— 先默认部署刷平，再 --relink'
+                  + ('；正本有未提交改动，先弄清是谁的' if dirty else ''))
         continue
 
     if MODE == '--relink':
@@ -82,8 +94,11 @@ for f in FILES:
         print(f'= {f} 已一致' + ('（硬链）' if twin else ''))
 
 if MODE == '--check':
-    print(f'检查完成，漂移 {drift} 个' + ('' if drift == 0 else ' —— 运行 deploy_gallery.py 修复'))
-    sys.exit(1 if drift else 0)
+    n = len(FILES)
+    print(f'检查完成：同 inode {n - unlinked}/{n}，内容漂移 {drift} 个'
+          + ('' if (unlinked == 0 and drift == 0)
+             else ' —— 补链跑 deploy_gallery.py --relink，漂移先用默认模式刷平'))
+    sys.exit(1 if (unlinked or drift) else 0)
 if MODE == '--relink':
     print(f'换链 {linked} 个，跳过 {skipped} 个，异常 {drift} 个，未处理（已是硬链或内容一致）若干')
     sys.exit(1 if drift else 0)

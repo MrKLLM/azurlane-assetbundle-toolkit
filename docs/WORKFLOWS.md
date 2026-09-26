@@ -657,7 +657,7 @@
 | 层 | 文件 | 说明 |
 |---|---|---|
 | 前端源码（唯一权威） | `gallery_src/index.html` | **2026-09-26 起与运行目录是硬链接**（同一份 inode），改正本即刻生效、不需部署；4 个文件（含 `cg_export.html`）已全部换链 |
-| 部署 / 漂移检查 | `scripts/deploy_gallery.py` | 默认=用正本 copy 修复；`--check`=只比对不写盘、漂移即 `exit 1`（改完前端/提交前跑一次）；`--relink`=把运行目录副本换成硬链（要求两边逐字节相同，且正本无未提交改动才动手）。同步目标 `Output/gallery_v2/` 是运行目录（gitignore） |
+| 部署 / 漂移检查 | `scripts/deploy_gallery.py` | `--check`=只比对不写盘，**要求 4 个文件全部同 inode**，断链或内容漂移都 `exit 1`（改完前端/提交前必跑）；`--relink`=补链（要求两边逐字节相同，且正本无未提交改动才动手，防打断并行会话）；默认模式=用正本 copy 刷平（断链后回退用，刷平要再 `--relink`）。⚠️ 改正本**必须原地编辑**：整文件写回 / 「临时文件+改名」的原子保存会静默断链 |
 | 服务器 | `Output/gallery_v2/_gallery_server.py`（8777，已在跑则复用） | 回归脚本都打 `http://127.0.0.1:8777/gallery_v2/index.html`。⚠️ 它按**自身所在目录**算根（`ROOT=dirname(HERE)`），所以**只能双击 `Output\gallery_v2\` 里那份**；双击 `gallery_src\` 那份会把根算成仓库目录 → 404 + 「当前目录没找到 index.html」 |
 | 模型数据 | `Output/Live2D/<key>/` | 前端直读（`P="..\/"`），无副本 |
 | 运行时库台账 | `gallery_src/vendor/MANIFEST.json` + `scripts/fetch_gallery_vendor.py` | `vendor/` 4 个第三方 JS 只在 gitignore 目录里，故版本/来源/sha256 全记在台账。**换机器或清过 `Output/` 后跑一次 `fetch_gallery_vendor.py` 即补齐**；`--check` 只校验（缺件/漂移 exit 1），可并进下面的回归清单 |

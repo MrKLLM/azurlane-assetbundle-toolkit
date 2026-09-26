@@ -1817,9 +1817,19 @@ idle 播完会由运行时自动回落 idle → 于是**动作结束 = 语音结
 收益为零）。要修得让 `boundsOf` 排除超大遮罩层或按可见 alpha 过滤。
 
 **扫描同时暴露 3 个另一类故障**（骨架压根建不起来，画廊显示"N 层失败"）：
-`suweiaitongmeng_4`、`yuanchou/yuanchouB`、`yuanchou_hx/yuanchouB` ——
-`Region not found in atlas`，且缺失的区域名是 `￥ﾛﾾ￥ﾱﾂ 664` 这种** mojibake**，
-方向指向 `.skel` 与 `.atlas` 之间的区域名编码不一致（参 §32 UnityPy 有损解码）。未查。
+`suweiaitongmeng_4`、`yuanchou/yuanchouB`、`yuanchou_hx/yuanchouB` —— `Region not found in atlas`。
+
+> ⚠️ **本条上一轮写的"区域名编码不一致（mojibake）"结论作废**（同日更正，见 §43）：
+> `yuanchouB.skel` 里那个名字的原始字节是 `0b e5 9b be e5 b1 82 20 36 36 34`
+> （`0b`=spine 的 len+1，实取 10 字节）= **UTF-8 的 `图层 664`**，与 `yuanchouB.atlas` 里的区域名
+> **逐字节相同**。两边都是合法 UTF-8，没有编码不匹配。那个 `￥ﾛﾾ￥ﾱﾂ` 是**我的扫描脚本
+> stdout 被按 GBK 解码**打出来的假象（同一条日志用 UTF-8 打印时确实抛过
+> `'gbk' codec can't encode`）。⇒ **报"编码/字节层"结论前必须直接 hexdump 原始字节，
+> 不能引用任何经过终端编码的字符串**——§40 那条"工具自身会骗人"的教训当天以另一种形式重演。
+>
+> 已查清的事实：`图层 664` 是该 atlas **文件的最后一个区域**（440–446 行，447 为结尾空行），
+> 解析后取不到。方向指向"页尾最后一个区域在 page 收尾时被丢"，
+> 需真解析器打印 `pages[*].regions[*].name` 才能定死机制。`suweiaitongmeng_4` 是否同因未验。
 
 
 **③ 目视覆盖到哪一步（防止下一轮把"26 个看过"读成"全库验过"）**
@@ -1882,8 +1892,59 @@ idle 播完会由运行时自动回落 idle → 于是**动作结束 = 语音结
 （实测：rename 覆盖后两边 inode 立刻不同、`nlink` 回 1）。所以 `py -3 scripts/deploy_gallery.py --check`
 是长期护栏，改过前端就跑一次；它也该进 WF-16 回归的第一步。
 
+> **⏱ 上线 3 小时就真断了一次，并暴露判据本身的漏洞（同日 17:00 追加）**：另一会话 16:52 整文件写回
+> `gallery_src/index.html` → 该条 `nlink` 回 1、与运行目录变回两份独立副本。当时 `--check` 只按
+> **内容**判定，于是打印一行 `已一致（独立副本，可 --relink）` 后 **`exit 0`** ——
+> **等于对唯一会真实发生的失效模式给绿灯**，用户一问"以后是不是很容易断"才被翻出来。
+> 修法：`--check` 的判据从"内容一致"改成"**4 个文件都必须同 inode**"，断链（哪怕内容仍一致）即 `exit 1`，
+> 并在消息里区分三种态：全绿 / 断链未漂移（`--relink`）/ 断链且漂移（先 copy 刷平再 `--relink`）。
+> 两条一般性教训：① **护栏要盯住"会静默变坏的那个量"，而不是"最容易测的量"**——内容比对好测，
+> 但失效是从"结构退化"开始的，只测内容就必然漏；② 断链**不丢数据、画廊照常打开**，退化的是"忘部署"
+> 这个老失效模式，所以它天然不痛不痒，只能靠非零退出的检查拦。约定同步写进 AGENTS.md 收尾清单第 1 条：
+> 改 `gallery_src/` 正本一律**原地编辑（Edit）**，不整文件写回。
+
 **涉及文件**：`scripts/deploy_gallery.py`、`gallery_src/`（4 个正本，git 唯一跟踪路径）、`Output/gallery_v2/`（同一份数据的第二名字 + 生成物）、`.gitignore:13`、`.gitignore:32-55`
 
 
 
 
+---
+
+## §43. 画廊首屏是未排序的：启动只调 `renderGrid()`，从没调过 `apply()`（2026-09-26）
+
+**症状**：用户报「现在打开网站默认界面好像不太对，都是我点一次其他按钮再回来才是初始界面，
+比如我一打开，就将 meta 阵营排在上边」。
+（这里的 "meta" 是游戏里的 **`-META` 变体舰**，不是页面元数据——第一版我理解错了，
+按"DOM 顺序/筛选高亮"猜了两次，都被自己的取证否掉：`全部` 按钮确实带 `class="on"`、
+`catFilter=''`，DOM 结构 HEADER→MAIN→mask 也正常。）
+
+**根因**（一行代码）：
+```js
+let view = ships.slice();          // 161 行：初值 = 索引原序
+function apply(){ ... view.sort(...)  renderGrid(); }   // 217/231-236：排序只在 apply 里
+['fFaction','fType',...].forEach(id=>...addEventListener('change',apply));  // 只绑事件
+...
+renderGrid();                      // 855 行：启动直接渲染，绕过 apply()
+```
+⇒ 第一屏是 `index.js` 里的原始顺序（VTuber 联动角色与 `-META` 变体排在最前），
+用户**随便点一个筛选控件**才触发 `apply()` → 排序 → "看起来正常了"。
+由 `126e16e`（按 category 分「舰船/剧情角色」）引入，不是本轮改动造成
+（本轮那六个 hunk 全在 `renderLive2D`/`startSpine` 内，落地页不走这两个函数）。
+
+**修法**：启动改为调 `apply()`（它自己会 `renderGrid()`），并加注释说明为什么不能直接 `renderGrid()`。
+
+**验证（两个独立观测，不靠"看起来对了"）**：
+- 页面内读首屏 6 张卡名：改前 `夏色祭 / 大神澪 / 好人理查德 / 探索者 / 时乃空 / 海蕾`（原序）
+  → 改后 `2B / 阿贝克隆比 / 阿布鲁齐公爵 / 阿达尔伯特亲王 / 阿蒂利奥·雷戈洛 / 阿尔贝托·迪·朱塞诺`
+  （按名称正确排序），且再手动派发一次 `fSort` change 事件，序列不变（幂等）。
+- 首屏截图目视：META 变体回到自己该在的位置。
+
+**⚠️ 探针踩坑两条（都会把"工具坏了"当成"产品坏了"）**：
+1. **CDP 连错 target**：`/json` 里第一个带 `webSocketDebuggerUrl` 的不一定是目标页。
+   必须按 `'gallery_v2' in tab.url` 过滤，否则 `Runtime.evaluate` 直接超时。
+2. **`subprocess.Popen(chrome...)` + `proc.terminate()` 不回收浏览器进程**：
+   启动器进程被杀，Chrome 浏览器进程随 `--user-data-dir` 常驻。下一次用**同一个 profile**
+   启动会直接复用那个旧实例（拿到的是**上一轮的页面**），于是出现
+   "我已经改了并部署了，截图却还是旧的"这种假矛盾。
+   ⇒ 探针要么每次用唯一 profile（`chrome_x_<timestamp>`），要么收尾按 profile 精确清进程。
+   本轮就是这么被坑了一次，清掉 13 个泄漏实例后才拿到真结果。
