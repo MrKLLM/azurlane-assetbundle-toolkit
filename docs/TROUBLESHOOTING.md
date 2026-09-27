@@ -2674,8 +2674,45 @@ yuanchou / yuanchou_2 / zhaohe_4`）。和谐版卡片显示的是未和谐的�
 SkeletonGraphic 列表 + 各自 RectTransform"，与静态立绘第 9.1 节"部件位置全由 prefab 写死"同一条路子。
 连带要重导 `CG_v2` 里受影响的 30 张。
 
-**涉及文件（待改）**: `scripts/build_gallery_index.py`、`scripts/extract_spine_v2.py`、
-`gallery_src/cg_export.html`、`Output/CG_v2/`。相关：§42、§45、§46、WF-14。
+**修法（待放行，未开工）**：把 parts 的来源从"目录 glob"换成"读 `spinepainting/<name>` prefab 的
+SkeletonGraphic 列表 + 各自 RectTransform"，与静态立绘第 9.1 节"部件位置全由 prefab 写死"同一条路子。
+连带要重导 `CG_v2` 里受影响的 30 张。
+
+---
+
+### §58.1 全库比对结果（2026-09-27 同日续，工具 `scripts/diag/spine_parts_prefab_diff.py`）
+
+把上面那条从"8 个样本"升级成"234 个目录全量"，并顺带量出**另外两类画廊从没读过的 prefab 字段**。
+
+| 指标 | 数值 | 含义 |
+|---|---|---|
+| 多画（glob 有、prefab 没挂） | **30 目录** | 就是上面那个 bug，全部是 `_hx` 变体被当成分层 |
+| 少画（prefab 挂了、glob 没有） | **0** | ⇒ glob 是**纯过包含**，修法=过滤到 prefab 列表，**不会丢内容** |
+| prefab 指到的层在导出目录里找不到 | **0** | 解析链（`skeletonDataAsset` → `<层名>_SkeletonData` → 剥后缀）全库零失败 |
+| 含非单位变换（缩放/位移）的目录 | **9** | 画廊把所有层画在同一原点 ⇒ 这些层被画成错误大小 |
+| 起始动画不是 `normal` 的目录 | **3** | 弹窗硬编码优先播 `normal` |
+| 层数分布 | 1 层 191 / 2 层 29 / 3 层 11 / 5 层 1 / 7 层 2 | 绝大多数是单层，不受影响 |
+
+**类二：层缩放/位移被忽略**（9 个目录，都是真缺陷）：
+`banerwei_2` 0.3×、`xinzexi_4B` 2.5×、`duyisibao_2B`/`guandaoB`/`moermansike_3B`/`qiershazhi_3B` 2×，
+另有 `huben_2`(-207,66)、`luyisiweier_2`(-15,-137)、`guandaoT`(10.4,-22.4) 的位移。
+⚠️ **缩放可直接用（SkeletonGraphic 生成的 mesh 受节点 localScale 支配），但位移不能照抄**——
+`anchoredPosition` 是 UI 像素，要先经 anchors/pivot/sizeDelta 换算到骨架单位，
+即静态立绘 §9.1 那套统一 UI 数学，别直接当骨架坐标用。
+
+**类三：每层该播的动画不一样**：`buleisite`/`buleisite_hx` 的 prefab 写 `idle`（画廊播 `normal`）；
+`pulimaosi` **两层各有各的**（`idle2` + `normal`）。`initialSkinName` 也一并可读
+（`yuekechengii` 的节点名是 `yukechengIIT/M/B`——游戏自己拼错了个字母，
+按 `skeletonDataAsset` 解析不受影响，按节点名匹配就会漏）。
+
+**天津风皮肤2 明确排除在本节三条之外**：prefab 权威列表 = glob 列表（5 层完全一致）、
+全单位变换、起始动画都是 `normal` ⇒ 它不是"层数错/位置错/动画错"。
+它的异常在骨架内部：`2B` 的 44 槽是 `2T` 的 390 槽的真子集、槽位重名率 17.5%
+（健康对照 `bailong`/`aimudeng_4` 为 0%）。下一步只剩"逐 part 单独渲染看哪层没落笔"。
+
+**涉及文件**: `scripts/diag/spine_parts_prefab_diff.py`（新，只读比对）、
+`scripts/build_gallery_index.py`、`scripts/extract_spine_v2.py`、`gallery_src/index.html`、
+`gallery_src/cg_export.html`、`Output/CG_v2/`（后五项**待改**）。相关：§42、§45、§46、§9.1、WF-14。
 
 ---
 
