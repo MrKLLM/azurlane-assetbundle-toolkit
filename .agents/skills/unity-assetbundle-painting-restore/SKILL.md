@@ -1,7 +1,7 @@
 ---
 name: unity-assetbundle-painting-restore
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块"类系统性坐标与画框问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、覆盖率扫描、重跑、影响面扫描。
-version: 1.9.0
+version: 1.9.1
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -147,7 +147,9 @@ prefab 中 `m_Sprite = (FileID, PathID)`：
 - **排除误判样本用收紧判据，不写手工例外名单**。若某样本目视确认是回退（改前已是完整另一表情），应回到判据层面找可观测差异把它自动筛掉，而不是在代码里列白名单。
 
 **定位脸洞子集（走 4.6 步前的只读扫描）**：给 `compose()` 加 `save=True` 参数（末尾 `if save: base.save(out)`），并加模块级 `FACE_APPLIED = {}` 与 `FACE_GATE = {}`（后者记门控**实际读到的数**：`frac_opaque` / `mad` / 脸槽像素框 / 成品裁切偏移——复核在盘产物时要靠它对齐），渲染后记 `FACE_APPLIED[bundle_name] = any("face-overlay" in str(x) for x in cinfo)`。扫描脚本 `scripts/diag/scan_faces.py` 用 **`save=False` 扫描模式**遍历「有同名 paintingface 包」的候选皮肤（`Paintings_v2 stems ∩ paintingface 包名`，~2221 个，渲染不落盘），输出洞清单 + 门控读数 TSV——真实命中远小于候选数（多数皮肤已烤脸）。再对这批洞皮肤走第 4.6 步定向重渲。
-配套三个工具：`scripts/diag/face_gate_labels_check.py`（带标签回归闸门）、
+配套工具：`scripts/diag/painting_staleness_scan.py`（全库「产物 vs 当前管线」逐字节普查，只读出清单）、
+`scripts/diag/painting_swap_in.py`（换入四道硬检查：nlink==1 / 备份 md5 全等 / 换入后与渲染一致 / 全目录快照清单外 0 个）、
+`scripts/diag/face_gate_labels_check.py`（带标签回归闸门）、
 `scripts/diag/face_gate_probe.py`（单皮肤取证，走真实渲染路径、**读生产侧 `FACE_GATE` 而不是自己复算**——
 复算极易读到"已叠脸之后"的画布，本轮就据此得出过一个假数）、
 `scripts/diag/painting_face_rerun.py`（重渲 + 与在盘逐像素比对 + 按"旧图透明/白灰块/彩色画"自动分诊）。
