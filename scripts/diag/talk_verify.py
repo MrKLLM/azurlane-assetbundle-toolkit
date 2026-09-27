@@ -65,7 +65,7 @@ PICK = r"""(async()=>{
     (s.live2dSkins||[]).forEach(k=>l2.add(k)); (s.spineSkins||[]).forEach(k=>sp.add(k));
     for(const sk of s.skins){
       out.total++;
-      const e=sv[sk.key]; if(!e){ if(!out.novoice && !sk.image) out.novoice=sk.key; continue; }
+      const e=sv[sk.key]; if(!e){ if(!out.novoice) out.novoice=sk.key; continue; }
       const w=(typeof wordsOf==='function')?wordsOf(sk.key)||{}:{};
       /* 语音标签页要挑**索引认为有语音**的船（voiceCount>0 才给标签），且这一行得有正文，
          否则换索引前后测的不是同一条路径，"行数/正文数"也无从对齐。 */
@@ -197,6 +197,58 @@ VOICEPAGE = r"""(async(key)=>{
     extra:(sk.voiceExtra||[]).length, vc:ship.voiceCount});
 })"""
 
+# 无语音皮肤：必须**显式说"没有"**，不能静默空白（用户无法区分"没做"和"本来就没有"）
+NOVOICE = r"""(async(key)=>{
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  await Promise.all([loadVoiceMap(), loadWords()]);
+  let ship=null, sk=null;
+  for(const s of GALLERY.ships){ const k=s.skins.find(x=>x.key===key); if(k){ship=s;sk=k;break;} }
+  if(!sk) return JSON.stringify({key, err:'找不到皮肤'});
+  if((typeof SV!=='undefined'&&SV[key])) return JSON.stringify({key, err:'这条样本其实有语音表，不能当无语音对照'});
+  openShip(ship); setSkin(sk); buildSkinList(ship);
+  const tabs=[...document.querySelectorAll('#mTabs .tab')];
+  const pt=tabs.find(x=>x.dataset.k==='painting'); if(pt && !pt.classList.contains('dis')) pt.click();
+  let box=null;
+  for(let i=0;i<40;i++){ box=document.querySelector('.vbox'); if(box && box.textContent.trim()) break; await t(300); }
+  const vt=tabs.find(x=>x.dataset.k==='voice');
+  let note='';
+  if(vt && !vt.classList.contains('dis')){ vt.click(); await t(1500);
+    note=(document.querySelector('.audwrap')||{}).textContent||''; }
+  return JSON.stringify({key, shipVoice:ship.voiceCount, tabEnabled: !!(vt&&!vt.classList.contains('dis')),
+    box: box?box.textContent.trim():'(没有语音条)', showsMute: box?/无语音/.test(box.textContent):false,
+    note: note.replace(/\s+/g,' ').slice(0,140)});
+})"""
+
+# 直接点立绘（不是点按钮）：这才是用户说的「点击有声音」那条主路径
+IMAGECLICK = r"""(async(key)=>{ try{
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  await Promise.all([loadVoiceMap(), loadWords()]);
+  let ship=null, sk=null;
+  for(const s of GALLERY.ships){ const k=s.skins.find(x=>x.key===key); if(k){ship=s;sk=k;break;} }
+  if(!sk) return JSON.stringify({key, err:'找不到皮肤'});
+  openShip(ship); setSkin(sk); buildSkinList(ship);
+  const pt=[...document.querySelectorAll('#mTabs .tab')].find(x=>x.dataset.k==='painting');
+  if(!pt || pt.classList.contains('dis')) return JSON.stringify({key, err:'静态立绘标签不可用'});
+  pt.click();
+  const st=document.getElementById('imgStage'); if(!st) return JSON.stringify({key, err:'立绘舞台没出现'});
+  for(let i=0;i<40 && !document.querySelectorAll('.vbox button[data-vk]').length;i++) await t(300);
+  const before=window.__AUD.length;
+  const r=st.getBoundingClientRect(), o={bubbles:true,cancelable:true,pointerId:1,button:0,
+                                        clientX:r.left+r.width/2, clientY:r.top+r.height/2};
+  st.dispatchEvent(new PointerEvent('pointerdown',o));
+  st.dispatchEvent(new PointerEvent('pointerup',o));
+  let a=null, waited=0;
+  for(let i=0;i<28;i++){ const recs=window.__AUD.slice(before); a=recs[0];
+    if(a && a.el && (a.el.currentTime>0.05 || a.el.error)) break; await t(250); waited+=250; }
+  const sub=document.getElementById('mSub');
+  const e=(typeof SV!=='undefined'&&SV[key])||{}, w=(typeof wordsOf==='function'&&wordsOf(key))||{};
+  const slot=(e.tap&&e.tap.touch_body)?'touch_body':'';
+  return JSON.stringify({key, newAudio:window.__AUD.length-before, waited_ms:waited,
+    src:a?a.src:null, playing:!!(a&&a.el&&a.el.currentTime>0.05&&!a.el.error),
+    slot, expect:slot?(w[slot]||''):'',
+    subText: sub? [...sub.querySelectorAll('span')].filter(x=>!x.classList.contains('who')).map(x=>x.textContent).join('') : null});
+}catch(err){ return JSON.stringify({key, thrown:String(err).slice(0,200)}); }})"""
+
 SETOPT = r"""(k,on)=>{ const b=document.querySelector('#gOpt button[data-k="'+k+'"]');
   if(!b) return 'NO BUTTON'; if((typeof OPT!=='undefined')&&OPT[k]!==on) b.click();
   return k+'='+(typeof OPT!=='undefined'?OPT[k]:'?')+' cls='+(b.classList.contains('on')?'on':'off'); }"""
@@ -321,6 +373,17 @@ def main():
             if not ok:
                 fails.append(f'[{tab}] {key}: ' + json.dumps(r, ensure_ascii=False)[:300])
 
+        # ---- 直接点立绘（用户说的"点击有声音"主路径，不是点按钮）----
+        k = pick.get('paint')
+        if k:
+            r = jev('(%s)(%s)' % (IMAGECLICK, json.dumps(k)), '点立绘')
+            ok = r.get('playing') and r.get('subText') == r.get('expect') and r.get('expect')
+            print(f'{"✅" if ok else "❌"} [点立绘] {k} 新Audio={r.get("newAudio")} src={r.get("src")} '
+                  f'字幕=「{(r.get("subText") or "")[:40]}」 期望=「{(r.get("expect") or "")[:40]}」')
+            shot('imageclick_%s' % k)
+            if not ok:
+                fails.append('点立绘没走出「声+字幕」: ' + json.dumps(r, ensure_ascii=False)[:300])
+
         # ---- 开关矩阵：两条独立，各自都要验到「反向证据」 ----
         k = pick.get('paint')
         if k:
@@ -371,6 +434,20 @@ def main():
             shot('voicepage_%s' % vk)
             if not ok:
                 fails.append('语音页台词列表不符: ' + json.dumps(r, ensure_ascii=False)[:300])
+
+        # ---- 无语音皮肤：显式标"没有"，不许静默空白 ----
+        nv = pick.get('novoice')
+        if not nv:
+            fails.append('没挑到无语音皮肤对照 ⇒ 空态这条判据等于没测')
+        else:
+            r = jev('(%s)(%s)' % (NOVOICE, json.dumps(nv)), '无语音对照')
+            ok = r.get('showsMute') and (not r.get('tabEnabled')
+                                         or '没有语音包' in r.get('note', '') or 'file://' in r.get('note', ''))
+            print(f'{"✅" if ok else "❌"} [无语音对照] {nv} 语音条=「{r.get("box","")[:30]}」 '
+                  f'标签可用={r.get("tabEnabled")} 语音页=「{r.get("note","")[:50]}」')
+            shot('novoice_%s' % nv)
+            if not ok:
+                fails.append('无语音皮肤没显式标注: ' + json.dumps(r, ensure_ascii=False)[:300])
 
         # ---- 持久化：设成**非常规组合**再重开，才证明确实读的是盘上那份（默认值也能骗过"全 true"的判据）----
         setopt('lines', False)
