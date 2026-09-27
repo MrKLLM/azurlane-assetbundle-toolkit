@@ -13,10 +13,11 @@
   ⑦ 探针取不到页面状态时硬失败：SW / wordsOf 拿不到就整体判 FAIL，
      绝不让"没测到"长得像"测过了"（§48 的假绿灯教训）。
 
-用法: py -3 scripts/diag/talk_verify.py [key ...]     # 不传则按判据自动挑样本
+用法: py -3 scripts/diag/talk_verify.py [--shots] [--vtab 皮肤key] [静态格样本 [Spine格样本 [Live2D格样本]]]
+      不传样本则按判据自动挑（三格各一条"有触摸语音且有正文"+ 一条"有声无词"的阴性对照）
 前置: 画廊服务器在 8777（双击 Output\\gallery_v2\\启动资产浏览器.bat）
 """
-import sys, os, json, time, base64, subprocess, urllib.request
+import sys, os, json, time, base64, argparse, subprocess, urllib.request
 
 sys.stdout.reconfigure(encoding='utf-8')
 import websocket
@@ -216,6 +217,8 @@ NOVOICE = r"""(async(key)=>{
   if(!sk) return JSON.stringify({key, err:'找不到皮肤'});
   if((typeof SV!=='undefined'&&SV[key])) return JSON.stringify({key, err:'这条样本其实有语音表，不能当无语音对照'});
   openShip(ship); setSkin(sk); buildSkinList(ship);
+  /* 皮肤级判据必须看**这个皮肤自己**：同船别的皮肤有语音不代表它有（拉菲就是这种） */
+  const skVc=sk.voiceCount||0, skExtra=(sk.voiceExtra||[]).length;
   const tabs=[...document.querySelectorAll('#mTabs .tab')];
   const pt=tabs.find(x=>x.dataset.k==='painting'); if(pt && !pt.classList.contains('dis')) pt.click();
   let box=null;
@@ -224,7 +227,8 @@ NOVOICE = r"""(async(key)=>{
   let note='';
   if(vt && !vt.classList.contains('dis')){ vt.click(); await t(1500);
     note=(document.querySelector('.audwrap')||{}).textContent||''; }
-  return JSON.stringify({key, shipVoice:ship.voiceCount, tabEnabled: !!(vt&&!vt.classList.contains('dis')),
+  return JSON.stringify({key, shipVoice:ship.voiceCount, skinVoice:skVc, skinExtra:skExtra,
+    tabEnabled: !!(vt&&!vt.classList.contains('dis')),
     box: box?box.textContent.trim():'(没有语音条)', showsMute: box?/无语音/.test(box.textContent):false,
     note: note.replace(/\s+/g,' ').slice(0,140)});
 })"""
@@ -315,6 +319,12 @@ def connect():
 
 
 def main():
+    # 手搓 sys.argv 会把 "--vtab congmang_2_hei" 的值当成位置参数（实测把 spine/live2d 样本清空了）
+    ap = argparse.ArgumentParser()
+    ap.add_argument('keys', nargs='*', help='按顺序指定 静态立绘/Spine/Live2D 三格的样本皮肤')
+    ap.add_argument('--shots', action='store_true', help='每个判据截一张图到 .diag/talk_shot_*.png')
+    ap.add_argument('--vtab', help='强制语音页样本（用来复验换索引后才可用的船）')
+    A = ap.parse_args()
     proc = subprocess.Popen([
         CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
         '--remote-allow-origins=*', f'--user-data-dir={DEBUG_DIR}',
@@ -365,7 +375,7 @@ def main():
 
         def shot(tag):
             """--shots：截下"字幕正显示着"的那一刻给人工目视验收——判据过了不代表长得对。"""
-            if '--shots' not in sys.argv:
+            if not A.shots:
                 return None
             r = cmd('Page.captureScreenshot', {'format': 'png'})
             p = os.path.join(ROOT, '.diag', 'talk_shot_%s.png' % tag)
@@ -385,10 +395,14 @@ def main():
 
         pick = jev(PICK, '挑样本')
         print('样本:', json.dumps(pick, ensure_ascii=False))
-        args = [a for a in sys.argv[1:] if not a.startswith('--')]
-        if args:
-            pick = dict(pick, paint=args[0], spine=args[0] if len(args) > 1 else None,
-                        live2d=args[-1] if len(args) > 2 else None)
+        # 显式给样本时**只覆盖给到的那一格**，其余仍按判据自动挑（早版会把没给的格清空 = 少测两格）
+        if A.keys:
+            pick = dict(pick, paint=A.keys[0])
+            if len(A.keys) > 1: pick['spine'] = A.keys[1]
+            if len(A.keys) > 2: pick['live2d'] = A.keys[2]
+        # 指定语音页样本：用来复验"曾经被旧索引口径置灰、换入后才可用"的那批船
+        if A.vtab:
+            pick = dict(pick, vtab=A.vtab)
 
         def setopt(k, on):
             print('   开关:', ev('(%s)(%s,%s)' % (SETOPT, json.dumps(k), 'true' if on else 'false')))
@@ -509,10 +523,13 @@ def main():
             fails.append('没挑到无语音皮肤对照 ⇒ 空态这条判据等于没测')
         else:
             r = jev('(%s)(%s)' % (NOVOICE, json.dumps(nv)), '无语音对照')
-            ok = r.get('showsMute') and (not r.get('tabEnabled')
-                                         or '没有语音包' in r.get('note', '') or 'file://' in r.get('note', ''))
+            note = r.get('note', '')
+            explained = ('没有语音包' in note) or ('file://' in note) \
+                or (r.get('skinExtra') and '变体包' in note)
+            ok = r.get('showsMute') and (not r.get('tabEnabled') or explained)
             print(f'{"✅" if ok else "❌"} [无语音对照] {nv} 语音条=「{r.get("box","")[:30]}」 '
-                  f'标签可用={r.get("tabEnabled")} 语音页=「{r.get("note","")[:50]}」')
+                  f'船语音数={r.get("shipVoice")} 皮肤语音数={r.get("skinVoice")} 变体包={r.get("skinExtra")} '
+                  f'标签可用={r.get("tabEnabled")} 语音页=「{note[:50]}」')
             shot('novoice_%s' % nv)
             if not ok:
                 fails.append('无语音皮肤没显式标注: ' + json.dumps(r, ensure_ascii=False)[:300])
