@@ -2693,12 +2693,21 @@ SkeletonGraphic 列表 + 各自 RectTransform"，与静态立绘第 9.1 节"部�
 | 起始动画不是 `normal` 的目录 | **3** | 弹窗硬编码优先播 `normal` |
 | 层数分布 | 1 层 191 / 2 层 29 / 3 层 11 / 5 层 1 / 7 层 2 | 绝大多数是单层，不受影响 |
 
-**类二：层缩放/位移被忽略**（9 个目录，都是真缺陷）：
-`banerwei_2` 0.3×、`xinzexi_4B` 2.5×、`duyisibao_2B`/`guandaoB`/`moermansike_3B`/`qiershazhi_3B` 2×，
-另有 `huben_2`(-207,66)、`luyisiweier_2`(-15,-137)、`guandaoT`(10.4,-22.4) 的位移。
-⚠️ **缩放可直接用（SkeletonGraphic 生成的 mesh 受节点 localScale 支配），但位移不能照抄**——
+**类二：层缩放/位移被忽略**——⚠️ **原始数字 9 是虚高的，必须再筛一层**：
+统一缩放/统一位移作用在**整个画面**上会被取景归一化（`fit()` 按内容包围盒算相机）吃掉，**看不出差别**；
+只有**同目录各层之间不一致**才真的改变画面。按这条重算：
+
+| | 数量 | 名单 |
+|---|---|---|
+| 各层缩放不一致（**真缺陷**） | **5** | `duyisibao_2` `guandao` `moermansike_3` `qiershazhi_3` `xinzexi_4`（都是 `B` 层 2.0~2.5×、`T` 层 1.0×） |
+| 各层位移不一致 | 2 | `duyisibao_2`(差 2,5) `guandao`(差 0.4,2.6)——UI 像素级，在 ~2000px 立绘上**可忽略** |
+| 单层目录但缩放≠1（无可见影响） | 1 | `banerwei_2` 0.3× |
+| 单层目录但位移≠0（无可见影响） | 2 | `huben_2`(-207,66) `luyisiweier_2`(-15,-137) |
+
+⇒ **类二真正的范围是 5 个目录，不是 9 个。**
+⚠️ 缩放可直接用（SkeletonGraphic 生成的 mesh 受节点 localScale 支配），但**位移不能照抄**——
 `anchoredPosition` 是 UI 像素，要先经 anchors/pivot/sizeDelta 换算到骨架单位，
-即静态立绘 §9.1 那套统一 UI 数学，别直接当骨架坐标用。
+即静态立绘 §9.1 那套统一 UI 数学。
 
 **类三：每层该播的动画不一样**：`buleisite`/`buleisite_hx` 的 prefab 写 `idle`（画廊播 `normal`）；
 `pulimaosi` **两层各有各的**（`idle2` + `normal`）。`initialSkinName` 也一并可读

@@ -254,11 +254,15 @@
      **✅ 全库比对已跑完**（新工具 `scripts/diag/spine_parts_prefab_diff.py`，只读，明细 **§58.1**）：
      234 个目录里 **多画 30 / 少画 0 / 层文件缺失 0** ⇒ glob 是**纯过包含**，
      修法是"过滤到 prefab 列表"，不会丢内容。另量出两类画廊从没读过的 prefab 字段：
-     **9 个目录有非单位变换**（`banerwei_2` 0.3×、`xinzexi_4B` 2.5×、`huben_2` 位移 -207,66 等，
-     缩放可直接用、位移要先过 §9.1 那套 UI 数学）、**3 个目录起始动画不是 `normal`**
+     **各层缩放不一致的只有 5 个目录**（`duyisibao_2`/`guandao`/`moermansike_3`/`qiershazhi_3`/
+     `xinzexi_4`，都是 `B` 层 2.0~2.5× 而 `T` 层 1.0×）——⚠️ 原始数字"9 个非单位变换"是虚高的，
+     统一缩放/位移会被取景归一化吃掉，**只有各层之间不一致才真的改变画面**（明细 §58.1）；
+     位移不一致的 2 个差值仅约 2px 可忽略。**3 个目录起始动画不是 `normal`**
      （`buleisite`=`idle`；`pulimaosi` 两层各播各的 `idle2`/`normal`）。
      层数分布：1 层 191 / 2 层 29 / 3 层 11 / 5 层 1 / 7 层 2。
-     修法：parts 来源换成读 prefab（含各节点 RectTransform 与 startingAnimation），连带重导受影响 CG。
+     修法：parts 来源换成读 prefab（含各节点 localScale 与 startingAnimation），连带重导受影响 CG。
+     ⏸️ **开工时机**：等并行会话把它在 `gallery_src/index.html`(+172/−38) 与
+     `build_gallery_index.py`(voiceText) 上的未提交改动落地后再动，避免同一文件撞车（2026-09-27 用户拍板）。
 
 
 ---
