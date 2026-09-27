@@ -659,13 +659,25 @@
    > 2026-09-24 因此把 269 个模型的 `motion/` 跳过闸门原地覆写进了 `Output/Live2D`（见 `TROUBLESHOOTING.md` §25）。
    > `extract_motions.py --all` 现要求 `--out`，否则拒绝（确需直写正式目录才加 `--into-production`）。
 8. **出对比图交人工确认**（硬闸门）：`python scripts/diag/make_face_cmp.py` / `make_review_sheet.py` 这类前后对照；未确认**不得**换入正式目录。
-9. **备份换入**：先 `cp` 旧件到 `Output/_OLD_bak/<主题>_<日期>/`，再**确认 `st_nlink==1`**（Paintings_v2 有 519 组硬链，直接覆写会串改孪生文件）后 `os.remove` + copy 换入。
+9. **备份换入**：`py -3 scripts/diag/painting_swap_in.py --list <清单> --from <临时目录> --bak Output/_OLD_bak/<主题>_<日期>/`
+   —— 四道硬检查（① 换入后 `st_nlink==1` ② 备份与原文件 md5 全等 ③ 换入后与临时渲染 md5 全等
+   ④ **全目录快照**：mtime/nlink 变化集合必须正好等于清单）。
+   > ⚠️ **硬链组必须显式断链**（2026-09-27 实测）：`Paintings_v2` 有历史去重留下的共享 inode，
+   > `shutil.copyfile` 是**顺 inode 写**的，会把这些孪生文件一起改掉。默认模式直接拒绝覆盖；
+   > 只有当本次重渲让共享者**彼此不再相同**时才加 `--break-hardlink`（逐名字 `os.remove` 再写，
+   > 并打印每个目标的同 inode 兄弟，清单外的兄弟留在旧 inode = 内容不变）。
+   > 实例：赤城·改 `chicheng_alter{,_n}` × 左/中/右 共 8 个文件原本两两共享 2 个 inode，
+   > 过滤关闭层后 8 份渲染**全不相同** ⇒ 必须断链，否则 8 张会塌回同一张。
 10. **派生产物增量重建**：删受影响 `gallery_v2/thumbs/<stem>.webp` 后跑 `make_thumbs.py`（它对已存在者 skip，天然增量；`<stem>_cg.webp` 来自 CG_v2，别误删）→ `build_gallery_index.py` → `deploy_gallery.py`。
 11. **证零回退**（三件套，缺一不可）：
     - **逐字段 diff**：新旧 `index.json` 比 ship 集合/皮肤集合/每字段，期望「只有该变的变」（label 改动那次 = 1746 条 label 变化、非 label 变化 0）。
     - **未涉及文件 mtime 未变**：证明没误伤（脸洞换入那次 = 其余 4454 张 mtime 全未变）。
     - **端到端可达**：起 http.server 对全部受影响 URL（png + webp）GET 200 且长度与磁盘一致；前端渲染类改动再用无头 Chrome 断言（`scripts/diag/l2d_sweep.py` 全量 260 模型加载+动作启动；`l2d_verify.py`/`l2d_click.py` 抽样与真实点击路径）。
-    - **改的是"解析优先级"而不只是某个字段时，先把「换档」整体枚举出来再定判据**：新档往往不只影响目标子集，还会**接管**别的兜底档（大小写不敏感回退那次，76 个无源目录之外还接管了 136 个手抄表 `SHIP_NAME_MAP` + 2 个 `manual` 条目）。闸门脚本 `scripts/diag/ship_meta_authority_diff.py`：① 受保护档（本来就走配置桥的 painting/suffix）7 字段改动必须 0；② 条目集合不得增减；③ 换档只允许落在白名单新档；④ 无源数等于期望。另附**第三方裁判**（只打印不判红）：改名条目拿 `Output/WikiData/ship_data.json` 的维基名表投票，看有没有"只有旧值命中"的反例。口径见 `TROUBLESHOOTING.md` §39。
+    - **改的是"解析优先级"而不只是某个字段时，先把「换档」整体枚举出来再定判据**：新档往往不只影响目标子集，还会**接管**别的兜底档（大小写不敏感回退那次，76 个无源目录之外还接管了 136 个手抄表 `SHIP_NAME_MAP` + 2 个 `manual` 条目）。闸门脚本 `scripts/diag/ship_meta_authority_diff.py`：① 受保护档（本来就走配置桥的 painting/suffix）7 字段改动必须 0，
+仅两类可**自动裁判**放行（都必须回查表，不许凭空放行、也不写名字例外）：
+`name_via=npc_table:*` 的「皮肤标题→秘书舰实体名」，以及 **方向性判据 `base_fix`**——
+该组 stats 选行从「`skin_id` ≠ 组内基皮肤」换成「`skin_id` == 基皮肤」且新行 `name` 等于成品 `cn`
+（用来吃掉配置表里的脏行，见 §56；**反向改动仍判红**）；② 条目集合不得增减；③ 换档只允许落在白名单新档；④ 无源数等于期望。另附**第三方裁判**（只打印不判红）：改名条目拿 `Output/WikiData/ship_data.json` 的维基名表投票，看有没有"只有旧值命中"的反例。口径见 `TROUBLESHOOTING.md` §39。
 
 #### 关键决策
 - **增量而非全量**：全量重跑 4486 张立绘会打乱已人工确认正确的结果，且无法逐张复核。
@@ -677,6 +689,12 @@
 - 判"动画是否在播"不能只看帧哈希：headless 下 rAF 被节流会假阴性，而 physics/眨眼会让帧变化造成**假阳性**；必须读 `motionManager.state.currentGroup` 非空（且 `startMotion` 后要等 ~1.5s 让它 fetch motion3.json）。
 - `make_thumbs.py` 遇已存在文件直接 skip → 换入新图后**不删旧 webp 就不会更新**（静默留旧图）。
 - 硬链接未检查就覆写 → 孪生文件被一起改掉。
+- **"受影响清单的条数"不等于"要换入的条数"**（2026-09-27 §55）：全库扫出 125 张有关闭层，
+  但定向重渲后只有 **48 张画面真的会变**，73 张逐字节不变——因为那批纯白遮挡条早就被
+  `is_lighting`（近纯白=加算光效层）挡着。**拿 125 去谈换入范围会虚高 2.6 倍**。
+  反过来这条也提醒：一个"看起来通用"的启发式过滤器会**掩盖**同一批数据上的另一个真缺陷——
+  带黑字 logo 的遮挡条白色占比不足 80%，正好漏过 `is_lighting`，于是正式产物上贴了两条大黄条。
+  ⇒ 受影响子集必须走一遍"重渲 + 与在盘比 md5"才算数，只读扫描只用来圈定候选。
 
 #### 收尾必做：全库「产物 vs 当前管线」逐字节普查（2026-09-27 补，§52）
 
@@ -697,7 +715,7 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 ⚠️ 分型指标**一片 0 时先怀疑量尺**：第一版四个桶都不收"低 alpha 像素的颜色差异"，把 4 张真差异报成 0.0%。
 
 #### 涉及文件
-`scripts/mumu_sync.py`, `scripts/mumu_adb.py`, `scripts/export_dependency_manifest.py`, `scripts/compose_paintings_v2.py`, `scripts/extract_spine_v2.py`, `scripts/reconstruct_live2d.py`, `scripts/extract_motions.py`, `scripts/build_ship_meta.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `scripts/deploy_gallery.py`, `scripts/diag/run_cg_export.py`, `scripts/diag/l2d_sweep.py`, `scripts/diag/l2d_verify.py`, `scripts/diag/l2d_click.py`, `scripts/diag/hit_verify.py`, `scripts/diag/make_face_cmp.py`, `scripts/diag/make_review_sheet.py`, `scripts/diag/scan_faces.py`, `scripts/diag/painting_staleness_scan.py`, `scripts/diag/painting_face_rerun.py`, `scripts/diag/painting_layer_dump.py`, `scripts/diag/dedup_*.py`, `PROJECT_STATUS.md §6/§9/§10`
+`scripts/mumu_sync.py`, `scripts/mumu_adb.py`, `scripts/export_dependency_manifest.py`, `scripts/compose_paintings_v2.py`, `scripts/extract_spine_v2.py`, `scripts/reconstruct_live2d.py`, `scripts/extract_motions.py`, `scripts/build_ship_meta.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `scripts/deploy_gallery.py`, `scripts/diag/run_cg_export.py`, `scripts/diag/l2d_sweep.py`, `scripts/diag/l2d_verify.py`, `scripts/diag/l2d_click.py`, `scripts/diag/hit_verify.py`, `scripts/diag/make_face_cmp.py`, `scripts/diag/make_review_sheet.py`, `scripts/diag/scan_faces.py`, `scripts/diag/painting_staleness_scan.py`, `scripts/diag/painting_face_rerun.py`, `scripts/diag/painting_layer_dump.py`, `scripts/diag/painting_inactive_scan.py`, `scripts/diag/painting_inactive_rerun.py`, `scripts/diag/painting_swap_in.py`, `scripts/diag/dedup_*.py`, `PROJECT_STATUS.md §6/§9/§10`
 
 ---
 

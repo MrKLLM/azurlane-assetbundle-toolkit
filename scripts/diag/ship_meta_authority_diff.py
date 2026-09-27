@@ -8,6 +8,11 @@
 
 四条硬判据（任一不满足退出码 1，退出码即结论）：
  1) 旧条目里 source ∈ {painting, suffix} 的（本来就走配置桥命中的），7 个字段必须一字不改；
+    仅两类改动可自动放行，且都必须**回查表**、不许凭空放行：
+      a) `name_via=npc_table:*` 的「皮肤标题→秘书舰实体名」（原皮肤标题仍留在 skin_name）；
+      b) **方向性判据** `base_fix`：该组的 stats 选行从「skin_id ≠ 基皮肤」换成「skin_id == 基皮肤」。
+         这条用来吃掉 `ship_data_statistics` 里的脏行（name 写甲、english_name/nationality/type 是乙、
+         且 id 更小，会钻「组内取 min(id)」的空子）。反向改动一律仍是红。
  2) 条目集合不得增减（新增/丢失都算红）；
  3) 名字来源档位只允许出现在白名单里（painting_ci/suffix_ci/npc_*/family），
     且不落在这四档的新档一律视为回退；
@@ -40,7 +45,32 @@ def load_new():
     spec.loader.exec_module(mod)
     skin, stats, wiki = mod.load()
     meta, _, _, _ = mod.build_meta(skin, stats, wiki)
-    return meta, wiki
+    return meta, wiki, mod, skin, stats
+
+
+def stats_picks(mod, skin, stats):
+    """复算「组 -> 选中的 stats 行」在新旧两条规则下各是什么，供闸门判定改动方向。
+
+    旧规则：组内取 min(stats.id)。新规则：先要求 skin_id == 该组基皮肤（id 最小的皮肤行），
+    再取最小 id。脏行能钻旧规则的空子（name 写着甲、english_name/nationality/type 是乙，
+    且 id 更小），新规则把它筛掉。"""
+    skinid2skin = {v['id']: v for v in skin.values() if 'id' in v}
+    by_group = {}
+    for sv in stats.values():
+        g = skinid2skin.get(sv.get('skin_id'), {}).get('ship_group')
+        if g is not None:
+            by_group.setdefault(g, []).append(sv)
+    base = {}
+    for v in skin.values():
+        g = v.get('ship_group')
+        if g in by_group and (g not in base or v['id'] < base[g]):
+            base[g] = v['id']
+    old = {g: min(vs, key=lambda x: x['id']) for g, vs in by_group.items()}
+    new = {}
+    for g, vs in by_group.items():
+        cand = [s for s in vs if s.get('skin_id') == base.get(g)] or vs
+        new[g] = min(cand, key=lambda x: x['id'])
+    return old, new, base
 
 
 def main():
@@ -50,8 +80,12 @@ def main():
     a = ap.parse_args()
 
     old = json.load(open(os.path.join(ROOT, 'Output', 'ship_meta.json'), encoding='utf-8'))
-    new, wiki = load_new()
+    new, wiki, mod, skin, stats = load_new()
     fails = []
+    painting2skin, _pci, _sbg = mod.build_indexes(skin, stats)
+    old_pick, new_pick, base_of = stats_picks(mod, skin, stats)
+    # 只有这几列是从 stats 行派下来的，改它们才可能是「换 stats 行」引起的
+    STATS_FIELDS = {'en', 'faction', 'type', 'rarity'}
 
     hard = [(k, f, old[k].get(f, ''), new[k].get(f, ''))
             for k in old if k in new and old[k].get('source') in PROTECTED
@@ -68,11 +102,37 @@ def main():
         key = via.split(':', 1)[1] if via.startswith('npc_table:') else ''
         return (f == 'cn' and key in npc_tab and b == npc_tab[key]['cn']
                 and new[k].get('skin_name') == a)   # 原皮肤标题必须还留在 skin_name，不许丢
-    bad = [t for t in hard if not justified(t)]
-    okcnt = len(hard) - len(bad)
-    print('1) 受保护档(painting/suffix) %d 条 -> 字段改动 %d 处，其中"皮肤标题→NPC 实体名"%d 处（已逐条回查表），'
-          '其余 %d 处（须为 0）' % (sum(1 for v in old.values() if v.get('source') in PROTECTED),
-                                    len(hard), okcnt, len(bad)))
+
+    def base_fix(t):
+        """方向性判据：这条改动必须是「从非基皮肤的 stats 行 换成 基皮肤那一行」。
+        反过来（从基皮肤行换走）一律算回退 —— 所以这不是给敦刻尔克开的后门，
+        而是一条任何组都能套、且只放行正确方向的规则。"""
+        k, f, a, b = t
+        if f not in STATS_FIELDS:
+            return False
+        sk = painting2skin.get(new[k].get('base_painting'))
+        g = (sk or {}).get('ship_group')
+        o, n = old_pick.get(g), new_pick.get(g)
+        return (o is not None and n is not None and o['id'] != n['id']
+                and o.get('skin_id') != base_of.get(g)
+                and n.get('skin_id') == base_of.get(g)
+                and str(n.get('name') or '') == str(new[k].get('cn') or ''))
+
+    npc_ok = [t for t in hard if justified(t)]
+    fix_ok = [t for t in hard if not justified(t) and base_fix(t)]
+    bad = [t for t in hard if not justified(t) and not base_fix(t)]
+    groups_fixed = {new[t[0]].get('base_painting') for t in fix_ok}
+    print('1) 受保护档(painting/suffix) %d 条 -> 字段改动 %d 处：'
+          '"皮肤标题→NPC 实体名" %d 处（逐条回查表） + "脏 stats 行→基皮肤行" %d 处 / %d 组（方向性判据）'
+          '，其余 %d 处（须为 0）'
+          % (sum(1 for v in old.values() if v.get('source') in PROTECTED),
+             len(hard), len(npc_ok), len(fix_ok), len(groups_fixed), len(bad)))
+    for g in sorted(groups_fixed):
+        sk = painting2skin.get(g)
+        o, n = old_pick.get((sk or {}).get('ship_group')), new_pick.get((sk or {}).get('ship_group'))
+        print('   · %s: 旧行 id=%s %r/%s nat=%s type=%s  ->  新行 id=%s %r/%s nat=%s type=%s'
+              % (g, o['id'], o.get('name'), o.get('english_name'), o.get('nationality'), o.get('type'),
+                 n['id'], n.get('name'), n.get('english_name'), n.get('nationality'), n.get('type')))
     for t in bad[:8]:
         print('   ! %s %s: %r -> %r' % t)
     if bad:

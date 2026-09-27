@@ -2534,3 +2534,94 @@ y 方向不夹，所以只有"纵坐标离画布中心最近"的那一两个会�
 `gallery_src/index.html`（字幕条 / 语音页 / 两个全局开关）、`tools/sharecfg_re/42_publish_gamecfg.py`
 （发布 `ship_skin_words` + 二进制写）、`Output/gallery_v2/skin_words.json`、`inputs/gamecfg/`。
 相关：§47、§49、§53、WF-21、WF-22。
+
+---
+
+## §55. 头部整片发黑 / 身上贴着 "NOT ABLE TO DISPLAY"：合成从没读过图层的激活位（2026-09-27）
+
+**症状**：用户一次报 12 张卡——水星纪念·META、敦刻尔克「除了脸，头部其他地方是黑的」；
+宁海、平海、飞龙、纽卡斯尔、让·巴尔「整个头都是黑的」。
+用户当时的猜测是"你用到了剧情立绘"——**这条是错的**，但方向对（确实是"多画了一层不该画的东西"）。
+
+**先排除"缺层"**：画廊把透明铺成棋盘格，截图里那些黑是**不透明的真像素**，
+不是层没画。所以问题在"多"不在"少"。
+
+**根因**：`parse_painting` 只认 MonoBehaviour 的 `m_Sprite` 非空，**从不读 `GameObject.m_IsActive`**。
+游戏里关着的层，我们一律画上去。
+
+取证链（三步，每步都有阴性对照）：
+1. `scripts/diag/painting_layer_dump.py ninghai` 逐层落盘 → 最后一层 `shadow`
+   （画布 260,1,436×317，不透明处 mean RGB=(68,57,63)）正压在头上；
+2. 该节点 `GameObject.m_IsActive = False`（同包 `face` 节点也是 False，但那是另一回事，见踩坑 1）；
+3. 全库只读扫描 `scripts/diag/painting_inactive_scan.py` → **4488 张里 125 张 / 150 个部件**命中，
+   用户点名的 7 艘全在里面，对照组（tianjinfeng_2 / moermansike_2 / antu / 2b）一个都没有。
+
+**三类被多画的层**：
+
+| 层名 | 部件数 | 内容（实测） | 画上去的后果 |
+|---|---|---|---|
+| `shadow` | 26 | 纯黑剪影，mean RGB=(0,0,0)，不透明率 4~7% | 头部/上半身发黑 |
+| `shop_hx` / `*_shophx` / `*_buildhx` | 60+ | **"NOT ABLE TO DISPLAY" 遮挡条** | 身上贴白条/黄条 |
+| `chicheng_alter_rw1..4` / `frame_0..3` | 24 | 同一角色的备用画法 / 4 个相框 | 赤城·改四个身子叠在一起 |
+
+**旁证（这个位是游戏的真开关，不是我们的启发式）**：`_n`（无背景版）皮肤的 `bj` 背景节点
+恒为 `m_IsActive=False` —— 与用户 2026-09-20 纠正的「`_n` 就是不显示背景」完全对上。
+
+**三条踩坑**：
+
+1. **`face` 槽必须豁免**。face 节点在 prefab 里恒为关闭，游戏运行时才激活来显示表情差分——
+   它正是 §48 叠层逻辑的输入。首版重渲工具没豁免，把 `gezi_2_hx` 的 face 层删了。
+   豁免表 `FACE_SLOT_EXEMPT` 放在 compose 模块里，**扫描脚本只读 `parse_painting` 写进部件的
+   `active` 字段、不另算一遍判据**——另算会让"预测清单"和"实际会变的图"不同源（§46 那条教训）。
+2. **「全层都是关闭态」不能一律过滤**。`qiye_4` / `kelifulan_4` 整张只有一个部件且它是关的；
+   `qiye_dark_memory` / `unknown2_memory` 的 `frame_0..3` 四层全关（游戏按剧情逐层激活）。
+   一律过滤会把整张画**清空**——典型的不报错的静默失败。规则：过滤后一层不剩 ⇒ 原样保留 +
+   记进 `INACTIVE_ALL` 交人工，绝不产出空文件。
+3. **一批 shophx 早就被 `is_lighting` 挡着 ⇒ "命中 125" ≠ "要换 125"**。纯白 ≥80% 的遮挡条
+   本来就被"加算光效层"判据跳过，所以 125 张里只有 **48 张画面真的会变，73 张逐字节不变**。
+   反过来，**带黑字 logo 的遮挡条**（`z15_2` / `shenxue_4` / `u2501_2` / `gezi_2_hx`）
+   白色占比不足 80%，正好漏过 `is_lighting` ⇒ 正式产物上现在能看到两条斜贴的大黄条。
+   教训：一个"看起来通用"的启发式过滤器（近纯白=光效）会**掩盖**同一批数据上的另一个真缺陷。
+
+**`_hx` 语义确认**（防"去掉遮挡条 = 泄了和谐内容"这条担心）：和谐处理本来就烤在 `_hx` 的底图里
+——`gezi_2` vs `gezi_2_hx` 有 **82.4%** 像素不同（`dingan_3` 0.26% / `kansasi_2` 2.6% /
+`jinshi_2` 1.3%）。那条 banner 只是运行时占位，去掉不影响和谐语义。
+
+**验证**：
+- 零回退对照 12 张（`2b antu hailunna_4 xili_alter kewei_6 aersasi_3 chicheng_4 adiliao_2
+  i168 i168_2 tianjinfeng_2 moermansike_2`）在过滤开启下逐字节 md5 全等；
+- 125 张定向重渲 → **48 变 / 73 逐字节相同 / 4 全层关闭跳过 / 0 err**；
+- 6 页「改前|改后」对照总表逐页目视，全是变好（海天、让·巴尔、伊利沙伯、平海3、z15_2 尤其明显）；
+- **落码后**再把 125 张重渲一遍，与"已验证的那批"逐字节比对 ⇒ 证落码路径 == 被批准的路径。
+
+**涉及文件**: `scripts/compose_paintings_v2.py`（`parse_painting` 记 `active` + `compose` 过滤 +
+`INACTIVE_SKIPPED`/`INACTIVE_ALL` 两个审计字典）、`scripts/diag/painting_inactive_scan.py`（新）、
+`scripts/diag/painting_inactive_rerun.py`（新）。相关：§48、§46、§14、WF-15。
+
+---
+
+## §56. 敦刻尔克被标成「皇家·驱逐」：配置表里的脏行钻了「组内取最小 id」的空子（2026-09-27）
+
+**症状**：画廊卡片 `dunkeerke` 显示 阵营=皇家、舰种=驱逐、英文名 HMS Vampire；
+而同一家的 `dunkeerke_alter`（META）显示的是正确的 维希教廷·战巡。用户只报了舰种。
+
+**根因**（两层叠在一起）：`ship_data_statistics` 里有一行 **id=900106**，
+`name` 写着「敦刻尔克」，但 `english_name=MNF Dunkerque` 位上填的是 **HMS Vampire**、
+`nationality=2`(皇家)、`type=1`(驱逐)、`skin_id=904011`。
+- `904011` 是敦刻尔克的**皮肤2**（不是基皮肤 904010），所以这行被归进了组 90401；
+- 而 `build_ship_meta.stats_by_group` 用「组内取 `min(stats.id)`」选行，900106 < 904011 ⇒ 脏行胜出。
+正确的 4 行是 904011~904014（`MNF Dunkerque` / nat 9 维希教廷 / type 4 战巡），`skin_id` 都指向基皮肤 904010。
+
+**修法（改规则，不写例外名单）**：选行时**先要求该行的 `skin_id` 正是组内基皮肤**（id 最小的皮肤行），
+再在候选里取最小 id。全库 **970 组里只有 1 组改判**，就是敦刻尔克——影响 3 张卡。
+
+**闸门配套**：`ship_meta_authority_diff.py` 原来要求"受保护档（painting/suffix）字段改动必须为 0"，
+这条会把正确的修正也拦成红。加的是**方向性判据** `base_fix` 而不是白名单：
+> 只有「从 `skin_id ≠ 基皮肤` 的行 换成 `skin_id == 基皮肤` 的行」才放行，且新行的 `name` 必须等于成品 `cn`。
+反向改动（从基皮肤行换走）仍然是红。这样任何组都能套这条规则，敦刻尔克不是特例。
+
+**顺带**：给 `build_ship_meta.py` 补了 `--out`（写向可走 argv），此前只有硬编码的 `Output/`，
+比对时只能覆写正式产物——那是 §25 那次覆写事故的同一种形状。
+
+**涉及文件**: `scripts/build_ship_meta.py`、`scripts/diag/ship_meta_authority_diff.py`、
+`Output/ship_meta.json`、`Output/gallery_v2/index.{json,js}`。相关：§39、WF-15。

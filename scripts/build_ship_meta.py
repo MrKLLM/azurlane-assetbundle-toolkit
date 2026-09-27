@@ -107,7 +107,23 @@ def build_indexes(skin, stats):
         g = skinid2skin.get(sv.get('skin_id'), {}).get('ship_group')
         if g is not None:
             by_group[g].append(sv)
-    stats_by_group = {k: min(v, key=lambda x: x['id']) for k, v in by_group.items()}
+    # 组内基皮肤 = 该组 id 最小的皮肤行（默认立绘那一行）。选 stats 行时**先要求它的
+    # skin_id 正是这个基皮肤**，再在候选里取最小 id。
+    # 只按 min(stats.id) 选会被脏行打穿：`ship_data_statistics` 里有一行 id=900106，
+    # name 写着「敦刻尔克」而 english_name 是 HMS Vampire、nationality=2 皇家、type=1 驱逐，
+    # 它的 skin_id=904011 指向敦刻尔克的**皮肤2**（不是基皮肤 904010），于是被归进同一组，
+    # 又因为 900106 < 904011 压过了正确的 4 行 ⇒ 画廊把敦刻尔克显示成「皇家·驱逐」，
+    # 而游戏自己的表是「维希教廷·战巡」。全库 970 组里只有这一组改判。
+    base_skin_of_group = {}
+    for v in skin.values():
+        g = v.get('ship_group')
+        if g in by_group and (g not in base_skin_of_group or v['id'] < base_skin_of_group[g]):
+            base_skin_of_group[g] = v['id']
+    stats_by_group = {}
+    for g, vs in by_group.items():
+        b = base_skin_of_group.get(g)
+        cand = [s for s in vs if s.get('skin_id') == b] or vs
+        stats_by_group[g] = min(cand, key=lambda x: x['id'])
     return painting2skin, painting_ci, stats_by_group
 
 
@@ -305,6 +321,8 @@ def print_diag(meta, wiki_by_name):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--write', action='store_true', help='产出 Output/ship_meta.json（默认只读诊断）')
+    ap.add_argument('--out', default=None,
+                    help='配合 --write 指定落盘目录（临时目录比对用），默认 Output/')
     args = ap.parse_args()
 
     skin, stats, wiki = load()
@@ -312,7 +330,8 @@ def main():
     print_diag(meta, wiki_by_name)
 
     if args.write:
-        path = os.path.join(OUT, 'ship_meta.json')
+        path = os.path.join(args.out or OUT, 'ship_meta.json')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         json.dump(meta, open(path, 'w', encoding='utf-8'), ensure_ascii=False, indent=0)
         print(f'\n[WRITE] 已产出 {path}  ({len(meta)} 条)')
 

@@ -9,7 +9,13 @@
 之后按清单删旧缩略图，跑 make_thumbs.py 增量重建。
 
 用法: py -3 scripts/diag/painting_swap_in.py --list <清单> --from <临时目录> --bak <备份目录>
-      [--no-thumbs]
+      [--no-thumbs] [--break-hardlink]
+
+⚠️ `--break-hardlink`：历史去重把逐字节相同的立绘链成同一 inode（见 windows-hardlink-dedup-verify）。
+   一旦本次重渲让这些共享者**彼此不再相同**（实测 2026-09-27：赤城·改 左/中/右/本体 8 个文件
+   原本两两共享 2 个 inode，过滤关闭层后 8 份渲染全不同），默认模式会拒绝覆盖 —— 因为
+   `shutil.copyfile` 是**顺着 inode 写**的，会把所有共享者一起改掉。加这个旗标后逐名字
+   `os.remove` 断开再写，并打印每个目标的同 inode 兄弟（清单外的兄弟留在旧 inode = 内容不变）。
 """
 import sys, os, shutil, hashlib, argparse, subprocess
 
@@ -35,6 +41,8 @@ def main():
     ap.add_argument('--from', dest='src', required=True)
     ap.add_argument('--bak', required=True)
     ap.add_argument('--no-thumbs', action='store_true')
+    ap.add_argument('--break-hardlink', action='store_true',
+                    help='允许把硬链目标断成独立文件（重渲后彼此不再同内容时用）')
     a = ap.parse_args()
     names = [l.strip() for l in open(os.path.join(ROOT, a.list) if not os.path.isabs(a.list) else a.list,
                                      encoding='utf-8') if l.strip()]
@@ -47,9 +55,27 @@ def main():
             for f in allf}
 
     hard = [n for n in names if os.stat(os.path.join(DIR, f'{n}.png')).st_nlink != 1]
-    if hard:
-        print(f'✗ 这些目标是硬链（nlink>1），拒绝覆盖: {hard}')
+    if hard and not a.break_hardlink:
+        print(f'✗ 这些目标是硬链（nlink>1），拒绝覆盖: {hard}\n'
+              f'  硬链是历史去重留下的（同内容共享 inode）。若本次重渲让它们**彼此不再相同**，\n'
+              f'  必须显式加 --break-hardlink：先 os.remove 断开本名字，再单独写入，\n'
+              f'  否则会顺着 inode 串改所有共享者。')
         return 2
+    if hard:
+        # 报出同 inode 的兄弟名字：清单外的兄弟会留在旧 inode 上（内容不变），这是安全的，
+        # 但必须让人看得见——否则"我只改了 4 个"和"实际有 8 个共享这份数据"是两回事。
+        inv = {}
+        for f in allf:
+            st = os.stat(os.path.join(DIR, f))
+            inv.setdefault((st.st_dev, st.st_ino), []).append(f)
+        print(f'⚠️ 断链换入 {len(hard)} 个硬链目标：')
+        for n in hard:
+            sib = [x for x in inv[(os.stat(os.path.join(DIR, f'{n}.png')).st_dev,
+                                   os.stat(os.path.join(DIR, f'{n}.png')).st_ino)]
+                   if x != f'{n}.png']
+            print(f'   {n}.png  nlink={os.stat(os.path.join(DIR, f"{n}.png")).st_nlink}  '
+                  f'同 inode 兄弟={sib}  其中清单外={[x for x in sib if x[:-4] not in names]}')
+
     missing = [n for n in names if not os.path.isfile(os.path.join(src, f'{n}.png'))]
     if missing:
         print(f'✗ 临时目录里缺这些: {missing}')
@@ -68,10 +94,16 @@ def main():
             if md5(b) != md5(d):
                 bad.append((n, '备份 md5 不符'))
                 continue
+        if os.stat(d).st_nlink != 1:
+            os.remove(d)              # 断开这一个名字，别顺 inode 串改共享者
         shutil.copyfile(s, d)
         if md5(d) != md5(s):
             bad.append((n, '换入后 md5 不符'))
-    print(f'① nlink 全为 1 ✓   ② 备份 {len(names) - len(bad)} 份 md5 全等   ③ 换入后与临时渲染 md5 全等: '
+        elif os.stat(d).st_nlink != 1:
+            bad.append((n, f'换入后 nlink 仍为 {os.stat(d).st_nlink}'))
+    still_hard = [n for n in names if os.stat(os.path.join(DIR, f'{n}.png')).st_nlink != 1]
+    print(f'① 换入后 nlink 全为 1: {not still_hard} {still_hard[:5]}   '
+          f'② 备份 {len(names) - len(bad)} 份 md5 全等   ③ 换入后与临时渲染 md5 全等: '
           f'{not bad}')
     if bad:
         print('✗ 校验失败:', bad)

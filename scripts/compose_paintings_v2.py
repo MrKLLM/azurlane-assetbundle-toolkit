@@ -41,6 +41,11 @@ _obj_cache = {}      # (bundle, path_id) -> UnityPy object
 _img_cache = {}      # (bundle, path_id) -> PIL RGBA (flip=False)
 FACE_APPLIED = {}    # bundle_name -> 是否触发了 paintingface 脸洞叠层（扫描用）
 FACE_GATE = {}       # bundle_name -> 门控实际读到的数（复扫/分诊用，见 diag/scan_faces.py）
+# 关闭层过滤的实际动作（审计用）：跳过了哪些层名 / 哪些皮肤「全层都是关闭态」
+INACTIVE_SKIPPED = {}
+INACTIVE_ALL = set()
+# face 槽在 prefab 里恒为关闭，游戏运行时才激活来显示表情差分 ⇒ 不过滤它
+FACE_SLOT_EXEMPT = {"face"}
 # 门控阈值：脸谱落笔处下方
 #   不透明占比低于 FACE_OPAQUE_MIN -> 透明洞（脸没烤进底图）
 #   底图与脸谱逐像素平均色差高于 FACE_MAD_MAX -> 那块画的不是这张脸（平涂灰块/缺头）
@@ -263,6 +268,8 @@ def parse_painting(bundle_name):
     go_names = {}
     children_map = {}
     father_map = {}
+    rect_go = {}       # RectTransform pid -> GameObject pid（判激活位要用）
+    go_active = {}     # GameObject pid -> m_IsActive
     for o in env.objects:
         if o.type.name == "RectTransform":
             r = o.read()
@@ -270,7 +277,13 @@ def parse_painting(bundle_name):
             go = getattr(r, "m_GameObject", None)
             go_pid = getattr(go, "m_PathID", 0) if go is not None else 0
             g = self_objs.get(go_pid)
-            go_names[o.path_id] = g.read().m_Name if g else ""
+            if g is not None:
+                gd = g.read()
+                go_names[o.path_id] = gd.m_Name
+                rect_go[o.path_id] = go_pid
+                go_active[go_pid] = bool(gd.m_IsActive)
+            else:
+                go_names[o.path_id] = ""
             f = getattr(r, "m_Father", None)
             father_map[o.path_id] = getattr(f, "m_PathID", 0) if f is not None else 0
             children_map[o.path_id] = [getattr(c, "m_PathID", 0)
@@ -342,7 +355,26 @@ def parse_painting(bundle_name):
             "mesh_pid": mesh_pid,
             "mesh_bundle": mesh_bundle,
             "frame": frame,
+            "active": True,
         })
+
+    # 游戏侧的层开关：GameObject.m_IsActive=False 的节点根本不渲染（Unity 语义下父节点关了
+    # 整棵子树都不画）。此前不读这个位 ⇒ 把 `shadow`（纯黑剪影）/`shop_hx`（"NOT ABLE TO
+    # DISPLAY" 遮挡条）/`chicheng_alter_rw1..4`（备用画法）这类**关着的层**画在角色身上，
+    # 表现为头部整片发黑、身上贴白条。旁证：`_n`（无背景版）皮肤的 `bj` 背景节点恒为 False，
+    # 与「_n 就是不显示背景」的语义对上 ⇒ 这个位是游戏的真开关，不是我们的启发式。
+    def eff_active(rect_pid, go_pid):
+        seen, cur = set(), rect_pid
+        while cur and cur not in seen:
+            seen.add(cur)
+            g = rect_go.get(cur)
+            if g is not None and not go_active.get(g, True):
+                return False
+            cur = father_map.get(cur) or 0
+        return go_active.get(go_pid, True)   # rect_pid 兜底成 go_pid 的部件走这一支
+
+    for n in nodes:
+        n["active"] = eff_active(n["rect_pid"], n["go_pid"])
     return rects, go_names, father_map, children_map, nodes, deps
 
 
@@ -530,6 +562,20 @@ def compose(bundle_name, out_dir, faces=None, save=True):
     if not parts:
         print(f"  ✗ {bundle_name}: 没有可绘制部件")
         return False
+    # 只画游戏里真开着的层。全层都是关闭态时**一律不动**：过滤会把整张画清空，
+    # 而「游戏运行时激活哪一层」没有权威依据，宁可维持现状并记进清单交人工裁定。
+    kept = [p for p in parts
+            if p.get("active", True) or p["name"] in FACE_SLOT_EXEMPT]
+    dropped = [p["name"] or str(p["rect_pid"]) for p in parts
+               if not (p.get("active", True) or p["name"] in FACE_SLOT_EXEMPT)]
+    if kept:
+        if dropped:
+            INACTIVE_SKIPPED[bundle_name] = dropped
+        parts = kept
+    else:
+        INACTIVE_ALL.add(bundle_name)
+        INACTIVE_SKIPPED.pop(bundle_name, None)
+        print(f"  ! {bundle_name}: {len(parts)} 层全为关闭态，未过滤（交人工裁定）")
     boxes, mirrors, roots = layout_all(rects, father_map, children_map)
     order = draw_order(rects, father_map, children_map)
     rank = {p: i for i, p in enumerate(order)}
