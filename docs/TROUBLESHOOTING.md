@@ -2628,6 +2628,57 @@ y 方向不夹，所以只有"纵坐标离画布中心最近"的那一两个会�
 
 ---
 
+## §58. Spine 的 parts 列表是按目录 glob 猜的：15 个和谐版 CG 与本体逐像素完全相同（2026-09-27，**未修**）
+
+**发现路径**：用户报「天津风皮肤2 动态有问题（躯干/狐尾不显示）」。查这条时顺带查出下面这个更大、
+且可量化的缺陷。
+
+**根因**：`build_gallery_index.py:187` 用
+`parts = sorted(glob('Output/Spine_v2/<folder>/*.skel'))` 决定"这个 Spine 立绘由哪几层合成"。
+但**同一个目录里除了分层，还躺着 `_hx`（和谐版）等变体的 skel**——它们不是层，是**另一张画**。
+于是 viewer 与 `cg_export.html`（共用同一份 parts）把本体与和谐版**叠在一起画**。
+
+**权威答案在 prefab 里**：`AssetBundles/spinepainting/<name>` 是个 UI 容器，
+每个 `SkeletonGraphic` 组件对应一个真实图层节点（实测 14 个 RectTransform + 5 个 SkeletonGraphic
++ 6 个 Canvas 这类构成）。逐皮肤比对：
+
+| glob 出来的 parts | prefab 里真正挂着的 SkeletonGraphic |
+|---|---|
+| `aersasi` → `[aersasi, aersasi_hx]` | `aersasi` → `[aersasi]`；`aersasi_hx` → `[aersasi_hx]` |
+| `huajia_2` → `[2B, 2M, 2T, 2T_hx]` | `huajia_2` → `[2B, 2M, 2T]`；`huajia_2_hx` → `[2B, 2M, **2T_hx**]` |
+| `buleisite` → `[B, T, T_hx]` | `buleisite` → `[B, T]`；`buleisite_hx` → `[B, T]` |
+
+⇒ **`_hx` 是"替换某一层"，不是"多加一层"**。glob 把两种语义都画了。
+
+**可量化的后果（零人工判断的硬指标）**：全库 234 个 Spine 目录里 **30 个**的 parts 含
+「变体后缀且基名也在列表里」；`Output/CG_v2/` 里 **15 对**本体/`_hx` 的导出图
+**逐像素完全相同**（`aersasi / bawu_2 / buleisite / dahuangfengii_2 / digaiteluyin_2 /
+feiteliedadi / huajia_2 / kuangsan_2 / weizhang_2 / wuzang / xili_g / yanusi_4 /
+yuanchou / yuanchou_2 / zhaohe_4`）。和谐版卡片显示的是未和谐的合成图。
+
+**判据（怎么区分"真分层"与"误叠变体"）**：健康的多 part 皮肤，各 part 的**槽位名互不相交**——
+对照组 `bailong` / `aimudeng_4` 重名率 0%、`lafeier` 3.4%；而被误叠的
+`yuanchou` 48.4%、`weizhang_2` 45.2%、`huajia_2` 44.6%、`wuzang` 30.4%。
+`wuzang` 的 8 个"层"里有一个是 `wuzang3_hx`。
+
+**天津风皮肤2 本身另案**：它的 prefab 确实列了 5 个 SkeletonGraphic
+（`tianjinfeng_2 / 2B / 2B2 / 2M / 2T`），且**全部单位变换**（anchoredPosition 0,0 / scale 1 /
+四元数无旋转）⇒ 游戏是把 5 层画在同一原点。所以它**不属于**上面这个 bug。
+但它 5 个 part 的槽位名重名率 17.5%，且 `2B` 的 44 个槽是 `2T` 的 390 个槽的**真子集**，
+`data.width×height` 分别是 `0×0 / 0×0 / 5063×5501 / 927×720 / 7087×3449`
+（对照 `bailong` 是 `2940×2179 / 2691×1458 / 1837×1647`）⇒ 结构本身异常，尚未定性。
+**两条已否证**：不是换肤（5 个 part 都只有 `default` skin，`gain=0`）、不是缺贴图
+（atlas 页与 png 一一对应、viewer 报 5 层零失败）。
+
+**修法（待放行，未开工）**：把 parts 的来源从"目录 glob"换成"读 `spinepainting/<name>` prefab 的
+SkeletonGraphic 列表 + 各自 RectTransform"，与静态立绘第 9.1 节"部件位置全由 prefab 写死"同一条路子。
+连带要重导 `CG_v2` 里受影响的 30 张。
+
+**涉及文件（待改）**: `scripts/build_gallery_index.py`、`scripts/extract_spine_v2.py`、
+`gallery_src/cg_export.html`、`Output/CG_v2/`。相关：§42、§45、§46、WF-14。
+
+---
+
 ## §57. 「354 张无解语音」按可救性拆开：两条路否证、一条是产品口径缺口（2026-09-27）
 
 **日期**: 2026-09-27　**状态**: ✅ 分解与裁定完成；补口子的实现口径待用户拍板
