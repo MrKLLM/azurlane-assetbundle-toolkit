@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
-description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.3.0
+description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
+version: 1.4.0
 ---
 
 # Live2D 网页运行时集成
@@ -393,3 +393,16 @@ after **53（与 before 相等）**，且位移 >0.3 的判定区数 = **0**。
 - [ ] 补占位 HitAreas：Id 逐字节确认是 moc3 drawable、Name 取该模型真实存在的组（候选小写回落）、仅替换 Id⊆{HitArea,HitArea2}、改后 sha256 清单证"仅 N 文件且仅 HitAreas 字段变"
 - [ ] `Textures` 清单按名中数字归一 + 闸门跑到退出码 0；源 bundle `Texture2D` 清单与磁盘 PNG 对账 missing/extra/命名异常全为 0
 - [ ] **逐张看图**（走页面真实入口、按 canvas 裁剪只截模型区）：新 bundle 换入后必做，且指明"和什么比"；代理指标全绿不构成完成证据
+- [ ] 接了语音/台词层 → 过 §9 的七条（自持 Audio、等表再开播、按皮肤序号直取、正文与音频同源、字幕在全屏目标内、audio 可见高度、CDP 反向证据 + 阴性对照）
+
+## 9. 动作语音与台词层（2026-09-27 补；此前这条只写在决议里，技能一直停在 §8）
+
+模型动起来之后下一层是"点它会说话、说的有字幕"。七条，每条都对应一次真实返工：
+
+1. **不要用运行时库的 Sound 通道**（`definitions[g][0].Sound`）。那条由 SoundManager 托管，**下一条动作一 `startMotion` 就把上一条 dispose 掉**；而 idle 播完会自动回落 idle ⇒ 凡是"动作时长 < 语音时长"的组都会话说一半被掐（实测 `touch_head` 动作 5.17s、语音 9.24s，在 `currentTime=4.48s` 处被 `pause`）。改成**页面自持一个 Audio 元素**：只有用户再次触发、切标签、换皮肤才打断，运行时回落 idle 不打断。⚠️ 动作时长本身是忠实的（`Meta.Duration` == 曲线末帧 == 源 clip），别去数据层找原因。
+2. **首播竞态**：语音表是异步 `fetch` 的，模型就绪那一瞬播的动作拿不到 Sound ⇒ 表现成"第一个动作没声音，之后才有"。开播前 `await` 表到位。**加了台词层之后要把正文表一起等**，否则同样的位置换成"有声没字幕"。
+3. **取词按皮肤序号，不许随机抽**：cue 名尾部的 `_N` 是**皮肤序号**（= 皮肤行 id 末位），不是"同一条台词的随机变体"。导出侧按本皮肤序号选档，前端一律直取。当成变体随机抽的后果：三皮肤船有 2/3 概率播到**别的皮肤**的台词，且 `_9`（改造皮肤）永远取不到。
+4. **正文与音频必须同源**：不要新写一套匹配逻辑。导出侧已算好的 `cv`(语音包号) 与 `idx`(皮肤序号) 满足 `皮肤行id = cv*10 + idx`，而这正是台词表的主键 ⇒ 两者取自**同一行**，错配在结构上不可能。类别名之间的对应（cue 类别 / Live2D 动作组 / 触摸槽 / 台词正文字段）全查 `character_voice` 的 `key ↔ resource_key ↔ l2d_action`，**先断言一个运行时名不对多个字段**（有歧义就拒绝，别猜）。
+5. **字幕条必须挂在"会被 `requestFullscreen()` 的那个元素"里面**。各视图通常把自己的全屏按钮做成 `容器.requestFullscreen()`，全屏时**只有那棵子树**被渲染出去；字幕若挂在容器外面（例如挂在上一层 flex 容器上）就是"全屏没台词"。又因为各视图会 `el.innerHTML=...` 整块重写，这个节点要**按需取用/重建**，不能常驻在骨架里。
+6. **`<audio controls>` 在列向 flex 容器里会被压成 0 高**：`flex:1` 展开是 `flex-basis:0%`，容器高度由内容决定时没有剩余空间可长 ⇒ 播放器看不见（点都点不到），但行还在。写 `flex:none` + 固定高，判据量 `getBoundingClientRect().height`。
+7. **验收（CDP 无头）七条判据**：① 走真实 UI 路径（点语音按钮 / 点画面 / 点部位），不直接调 `startMotion` 或页面内部函数；② 在页面脚本执行前包住 `window.Audio`，断言新实例的 `src` **属于本皮肤档位**且 `currentTime` 在涨——**轮询到真的走秒**，固定等 1.5s 会把正常文件读成 `cur=0` 报假失败；③ 字幕**逐字**等于表里该槽位正文，且"谁在说"那行是中文类别名（内部键 `complete`/`touch_body` 等于把实现细节露给用户）；④ 开关类改动必须拿到**反向证据**：关 A ⇒ 只剩 B、关 B ⇒ 只剩 A，只验"开着时能用"不算；⑤ 挑一条"**有音频但游戏本来没写词**"的槽位做阴性对照（必须出声且**不弹空字幕框**，这同时挡住"字幕残留上一条"）；⑥ 探针不许依赖上一轮状态——无头 Chrome 被 kill 时不保证把 `localStorage` 落盘，下一轮开局开关可能是关的，**每轮先设基线**；⑦ 取不到页面状态要**硬失败**（顶层 `let` 不挂 `window`，用裸名取；返回非 JSON 直接 raise），绝不让"没测到"长得像"测过了"。

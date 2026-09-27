@@ -4,6 +4,8 @@
 #         能进暂存区只可能是 git add -f 强加；里面是 44GB 导出产物 + 2.4 万个重导出资产 json，
 #         一旦推上 Gitee+GitHub 双远端，撤回要重写历史）。
 #   闸 2  暂存区改了 scripts/** 或 gallery_src/** 但没同时暂存任何文档 -> 拦下。
+#         （文档 = PROJECT_STATUS.md / docs/** / AGENTS.md / .agents/skills/**；后两类是 2026-09-27
+#          加技能闸门时才暴露的漏项：改 hook 只带 AGENTS.md 会被自己的闸 2 拦死。）
 #
 # 规则出自 AGENTS.md「阶段收尾必做清单」第 2 条（改代码必须同步文档）。
 #   正本：scripts/git-hooks/pre-commit（可版本化）
@@ -63,7 +65,7 @@ for f in $staged; do
             has_code=1
             code_files="$code_files
     $f" ;;
-        PROJECT_STATUS.md|docs/*)
+        PROJECT_STATUS.md|docs/*|AGENTS.md|.agents/skills/*)
             has_doc=1 ;;
     esac
 done

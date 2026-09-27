@@ -1,0 +1,57 @@
+#!/bin/sh
+# 提交闸门 3：改代码的提交必须交代「技能沉淀判定」（AGENTS.md DoD 第 3 步）。
+#
+# 为什么单独一个 hook：pre-commit 看不到 commit message（消息文件此时还不存在），
+# 消息格式类规则只能挂在 commit-msg 上。
+#
+# 规则：本次提交的暂存区含 scripts/** 或 gallery_src/** 时，message 里必须有一行含「技能:」——
+#   改了哪个技能（带 version 变化），或「技能: 无新增（原因）」。空白不算答过。
+# 绕行：SKILL_CHECK_SKIP=1 git commit ...（打印一行警告，不静默放行）
+#
+# 生效副本：.git/hooks/commit-msg（git 不跟踪该目录，换机器 / 重新 clone 后必须重装）：
+#   cp scripts/git-hooks/commit-msg .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
+# 改逻辑只改正本，改完重新 copy。
+#
+# 自测（不动真实提交）：
+#   printf '测试\n' > .diag/msg.txt
+#   git add scripts/deploy_gallery.py && git commit -F .diag/msg.txt --dry-run   # 看不到 hook，改用：
+#   .git/hooks/commit-msg .diag/msg.txt ; echo $?                                 # 期望 1
+#   printf '测试\n\n技能: 无新增（纯格式化）\n' > .diag/msg.txt && .git/hooks/commit-msg .diag/msg.txt; echo $?  # 期望 0
+
+[ -n "$SKILL_CHECK_SKIP" ] && {
+    echo "[commit-msg] ⚠️ 已用 SKILL_CHECK_SKIP=1 绕过技能沉淀检查 —— 请确认本阶段收尾时补上判定。" >&2
+    exit 0
+}
+
+msgfile="$1"
+staged=$(git diff --cached --name-only --diff-filter=ACMRD)
+has_code=0
+code_files=""
+for f in $staged; do
+    case "$f" in
+        scripts/*|gallery_src/*)
+            has_code=1
+            code_files="$code_files
+    $f" ;;
+    esac
+done
+[ "$has_code" = "0" ] && exit 0
+
+if grep -q "技能:" "$msgfile"; then
+    exit 0
+fi
+
+cat >&2 <<EOF
+[commit-msg] 提交被拦下：改了代码，但没交代「技能沉淀判定」。
+
+本次暂存的代码文件:$code_files
+
+按 AGENTS.md「阶段收尾必做清单」第 3 步，commit message 里加一行（二选一）：
+    技能: live2d-web-runtime-integration v1.3.0→v1.4.0（新增 §9 动作语音与台词层）
+    技能: 无新增（<一句话原因>，如：本轮只是数据换源，做法未超出已有 WF-22）
+判定标准：本轮产生了"换个任务还用得上的做法 / 判据 / 踩坑"吗？有就改对应技能（先去重，
+别新建近似副本），没有就把原因写出来——空白才是真正被禁止的状态。
+
+确属中途提交、判定留到阶段收尾时：  SKILL_CHECK_SKIP=1 git commit ...
+EOF
+exit 1

@@ -67,7 +67,7 @@ PROJECT_STATUS.md 各部分进度使用以下格式：
 
 ## 阶段收尾必做清单（DoD —— 没走完不得声称"完成"）
 
-一个任务阶段（修 bug / 加管线 / 改前端 / 做完一轮取证）结束时，**按顺序**走完以下 5 步，缺一不可：
+一个任务阶段（修 bug / 加管线 / 改前端 / 做完一轮取证）结束时，**按顺序**走完以下 6 步，缺一不可：
 
 1. **验证跑完，且跑在真实路径上**。按改动面选：
    - 改 `gallery_src/` 里的前端正本（Live2D / 交互层 / CG 导出页）→ 与运行目录 `Output/gallery_v2/` **已做硬链接，改完即生效**（不用再 copy）。⚠️ **但"改完即生效"不是可以省步骤的理由**：2026-09-27 实测，**连 Edit 这类原地编辑也会断链**（工具内部走"写临时文件 + 改名"的原子保存，绕不开），断链就把结构退回"两份独立副本 + 改了忘部署"这个老失效模式。⇒ **唯一的护栏是收尾必跑 `py -3 scripts/deploy_gallery.py --check`**（要求 4 个文件都同 inode，断链或漂移都非零退出），**不要指望"我用了原地编辑"就没事**。
@@ -81,20 +81,31 @@ PROJECT_STATUS.md 各部分进度使用以下格式：
    - 新的可复用流程 → `docs/WORKFLOWS.md` 新增 `WF-n`，必须含**判据**、**踩坑记录**、**涉及文件**三段。
    - 新的「问题 → 根因 → 修法」→ `docs/TROUBLESHOOTING.md` 新增 `§n`。
    - **否证结论同样必须入库**：本轮试过并排除掉的假设（编码方向、密钥形态、格式猜测……）写进对应条目的「已排除的假设」，否则下个会话会原样重跑一遍浪费的时间。
-3. **临时探针处置**：本次在 `.diag/` 下新写的 `.py`，要么移进 `scripts/diag/` 入库，要么删掉——`.diag/` 不留任何唯一副本代码。
-4. **提交**：`git add` 本次相关文件后 commit（中文 message）。提交前自查 `git status`，确认没把 `.diag/` 产物、`Output/` 运行目录、以及任何疑似密钥/凭据的文件加进去。
-5. **输出确认行**（终端可见，供用户核对没跳步）：
-   `收尾完成 — 文档: <改了哪几个文件> | 验证: <跑了哪些> | 探针: <入库/删除>`
+3. **技能沉淀判定**（与第 2 步并列的硬要求，不接受"以后再提"）：文档记的是**这个项目发生过什么**，技能记的是**下次遇到同类任务怎么做**——两者不能互相替代。本步必须显式回答一句："本轮产生了换个任务还用得上的做法 / 判据 / 踩坑吗？"
+   - 有 → 改进 `.agents/skills/` 里**对应的那一个**技能，并把 `version:` 末位 +1。**先去重再落笔**：同一条管线只允许一个技能，宁可给已有技能加小节，也不许新建近似副本（历史上一次自动推荐连发 4 份同内容副本，净新增只有 3 条）。
+   - 结论**未验证 / 未定**的假设**不落技能**（只沉淀"不依赖成败的方法"；具体结论留在 `docs/` 与状态文档）。
+   - 没有 → 本轮无动作，但第 6 步确认行里必须写 `技能: 无新增（<原因>）`，**空白不允许**。
+   - ⚠️ 技能正本住在项目 `.agents/skills/`，而 `skill_manage` 只认用户技能目录 → **项目级技能只能直接改文件**。
+   - 真实漏沉淀：2026-09-27 一轮把"动作语音并进 `live2d-web-runtime-integration` §9"写成了决议，因为当时没有这一步，直到下一轮才发现该技能仍停在 §8。
+4. **临时探针处置**：本次在 `.diag/` 下新写的 `.py`，要么移进 `scripts/diag/` 入库，要么删掉——`.diag/` 不留任何唯一副本代码。
+5. **提交**：`git add` 本次相关文件后 commit（中文 message）。提交前自查 `git status`，确认没把 `.diag/` 产物、`Output/` 运行目录、以及任何疑似密钥/凭据的文件加进去。
+6. **输出确认行**（终端可见，供用户核对没跳步）：
+   `收尾完成 — 文档: <改了哪几个文件> | 验证: <跑了哪些> | 技能: <改了哪个技能+version / 无新增(原因)> | 探针: <入库/删除>`
 
-### 提交闸门（pre-commit hook）
+### 提交闸门（pre-commit + commit-msg 两个 hook）
 
 上面第 2 条由 hook 强制：**暂存区改了 `scripts/**` 或 `gallery_src/**`，但没同时暂存任何文档**（`PROJECT_STATUS.md` / `docs/**`）→ 拦下提交。
 
-- 脚本正本（可版本化）：`scripts/git-hooks/pre-commit`
-- 生效副本：`.git/hooks/pre-commit`（git 不跟踪该目录，**换机器或重新 clone 后必须重装一次**）：
-  `cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`
+上面第 3 条由 **另一个 hook（`commit-msg`）** 强制：改了 `scripts/**` / `gallery_src/**` 的提交，message 里必须有一行 `技能:`（改了哪个技能 + version，或 `技能: 无新增（原因）`）→ 否则拦下。
+- 为什么不在 pre-commit 里做：pre-commit 运行时 commit message 文件还不存在，**消息格式类规则只能挂 `commit-msg`**。
+- ⚠️ 多会话共用同一工作树时，这条会同样作用于别的会话（它们第一次撞上要能看懂错误文本里给的两种写法）。
+
+- 脚本正本（可版本化）：`scripts/git-hooks/pre-commit`、`scripts/git-hooks/commit-msg`
+- 生效副本：`.git/hooks/pre-commit`、`.git/hooks/commit-msg`（git 不跟踪该目录，**换机器或重新 clone 后必须重装一次**）：
+  `cp scripts/git-hooks/* .git/hooks/ && chmod +x .git/hooks/pre-commit .git/hooks/commit-msg`
 - 确属无需改文档的提交（纯重命名、格式化、试验性提交）时绕行：`DOC_CHECK_SKIP=1 git commit ...`（hook 会打印一行警告，不静默放行）。
-- 改 hook 逻辑只改 `scripts/git-hooks/pre-commit`，改完记得重新 copy。
+- 技能判定留到阶段收尾时补的（同一路管线拆成多个提交）：`SKILL_CHECK_SKIP=1 git commit ...`（同样只打印警告，两个绕行互不覆盖：`DOC_CHECK_SKIP` 只放行文档闸，`SKILL_CHECK_SKIP` 只放行技能闸）。
+- 改 hook 逻辑只改 `scripts/git-hooks/` 下的正本，改完记得重新 copy。
 
 ## 执行模式约定
 
