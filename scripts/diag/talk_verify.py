@@ -60,13 +60,21 @@ READY = r"""(async()=>{
 PICK = r"""(async()=>{
   await Promise.all([loadVoiceMap(), loadWords()]);
   const sv=(typeof SV!=='undefined'&&SV)||{};
-  const out={paint:null,spine:null,live2d:null,notext:null,novoice:null,vtab:null,total:0};
+  const out={paint:null,spine:null,live2d:null,notext:null,novoice:null,vtab:null,textonly:null,total:0};
   const l2=new Set(), sp=new Set();
   for(const s of GALLERY.ships){
     (s.live2dSkins||[]).forEach(k=>l2.add(k)); (s.spineSkins||[]).forEach(k=>sp.add(k));
     for(const sk of s.skins){
       out.total++;
-      const e=sv[sk.key]; if(!e){ if(!out.novoice) out.novoice=sk.key; continue; }
+      const w0=(typeof wordsOf==='function')?(wordsOf(sk.key)||null):null;
+      const e=sv[sk.key];
+      if(!e){
+        /* 「没语音表」要拆成两类，否则新加的仅台词那一档会把无源对照悄悄换掉（§57）：
+           有正文=能读不能播；没正文=真无源，语音页必须显式说"没有"。 */
+        const tk=w0?Object.keys(w0).length:0;
+        if(tk && !out.textonly) out.textonly=sk.key;
+        if(!tk && !out.novoice) out.novoice=sk.key;
+        continue; }
       const w=(typeof wordsOf==='function')?wordsOf(sk.key)||{}:{};
       /* 语音标签页要挑**索引认为有语音**的船（voiceCount>0 才给标签），且这一行得有正文，
          否则换索引前后测的不是同一条路径，"行数/正文数"也无从对齐。 */
@@ -199,11 +207,13 @@ VOICEPAGE = r"""(async(key)=>{
   /* 语音页的本职是"能播"：audio 不存在、或高宽为 0（被 flex 压扁）都算失败，
      光比"行数/正文数"会放过"只剩一行字、播放器没了"这类回退。 */
   const playable = audios.length && audios.every(a=>a && a.src && a.h>=20);
+  /* 实体占位符必须已在生成侧展开：页面上出现 `{namecode:98}` 就是没解完（§58） */
+  const residue = /\{namecode:\d+\}/.test(document.querySelector('.audwrap').textContent);
   const h4=(document.querySelector('.audwrap h4')||{}).textContent||'';
   return JSON.stringify({key, expectRows:nLines+(sk.voiceExtra||[]).length, gotRows:rows.length,
     expectTexts:nText, gotTexts:texts.filter(x=>x).length, head:h4,
     firstText:texts.find(x=>x)||'', firstAudio:audios[0], audioHeights:audios.map(a=>a&&a.h).slice(0,6),
-    playable: !!playable,
+    playable: !!playable, residue: !!residue,
     rowsAligned: texts.slice(0,nLines).every((tx,i)=> tx===(w[(e.lines[i]||{}).cat]||'')),
     extra:(sk.voiceExtra||[]).length, vc:ship.voiceCount});
 })"""
@@ -295,7 +305,48 @@ FS_READ = r"""(()=>{ const sub=document.getElementById('mSub');
     subShown: !!(sub && sub.classList.contains('on')),
     text: sub?sub.textContent.slice(0,40):''}); })()"""
 
-SETOPT = r"""(k,on)=>{ const b=document.querySelector('#gOpt button[data-k="'+k+'"]');
+# 「有表行、主包未下发」那一档（§57 / §6 第 16 条）：台词要能看到，但**不许长出播放器**
+TEXTONLY = r"""(async(key)=>{
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  await Promise.all([loadVoiceMap(), loadWords()]);
+  let ship=null, sk=null;
+  for(const s of GALLERY.ships){ const k=s.skins.find(x=>x.key===key); if(k){ship=s;sk=k;break;} }
+  if(!sk) return JSON.stringify({key, err:'找不到皮肤'});
+  if((typeof SV!=='undefined'&&SV[key])) return JSON.stringify({key, err:'这条样本有语音表，不是"仅台词"档'});
+  const w=wordsOf(key)||{}, tk=Object.keys(w);
+  if(!tk.length) return JSON.stringify({key, err:'正文档里也没有这一档，不该当仅台词样本'});
+  openShip(ship); setSkin(sk); buildSkinList(ship);
+  const vt=[...document.querySelectorAll('#mTabs .tab')].find(x=>x.dataset.k==='voice');
+  if(!vt) return JSON.stringify({key, err:'没有语音标签'});
+  const enabled=!vt.classList.contains('dis');
+  if(!enabled) return JSON.stringify({key, enabled:false, err:'语音标签仍被置灰（tab 判据没放宽到 voiceText）',
+                                      shipVoice:ship.voiceCount, shipText:ship.voiceText});
+  vt.click();
+  let rows=[];
+  for(let i=0;i<40;i++){ rows=[...document.querySelectorAll('.audwrap .aud')];
+    if(rows.length>=tk.length) break; await t(300); }
+  const labs=rows.map(r=>(r.querySelector('.lbl')||{}).textContent||'');
+  const texts=rows.map(r=>{const x=r.querySelector('.tw'); return x?x.textContent:'';});
+  const nAudio=document.querySelectorAll('.audwrap audio').length;
+  const nExtra=(sk.voiceExtra||[]).length;
+  const h4=(document.querySelector('.audwrap h4')||{}).textContent||'';
+  /* 反向证据 1：**台词行一个 audio 都不许有**（造个点了不响的假控件比不给更糟）。
+     整页 audio 数只等于"变体包整包"那一节的条数——那是真的能播的文件，不是伪造的。
+     反向证据 2：类别名必须是表里的中文（不是 battle/touch2/main1 这种内部键） */
+  const rawKey=labs.filter(x=>tk.indexOf(x)>=0);
+  const textRows=rows.filter(r=>!r.querySelector('audio'));
+  return JSON.stringify({key, enabled, shipVoice:ship.voiceCount, shipText:ship.voiceText||0,
+    skinText:sk.voiceText||0, expect:tk.length, gotRows:rows.length, extra:nExtra,
+    expectRows:tk.length+nExtra, textsOk:texts.filter(x=>x).length,
+    aligned:textRows.slice(0,tk.length).map(r=>(r.querySelector('.tw')||{}).textContent||'')
+                   .every((tx,i)=>tx===(w[tk[i]]||'')),
+    audio:nAudio, textRowsWithoutPlayer:textRows.length,
+    residue: /\{namecode:\d+\}/.test(document.querySelector('.audwrap').textContent),
+    rawKey:rawKey, head:h4, label0:labs[0]||'', text0:(texts[0]||'').slice(0,24)});
+})"""
+
+SETOPT = r"""(k,on)=>{
+ const b=document.querySelector('#gOpt button[data-k="'+k+'"]');
   if(!b) return 'NO BUTTON'; if((typeof OPT!=='undefined')&&OPT[k]!==on) b.click();
   return k+'='+(typeof OPT!=='undefined'?OPT[k]:'?')+' cls='+(b.classList.contains('on')?'on':'off'); }"""
 
@@ -324,6 +375,7 @@ def main():
     ap.add_argument('keys', nargs='*', help='按顺序指定 静态立绘/Spine/Live2D 三格的样本皮肤')
     ap.add_argument('--shots', action='store_true', help='每个判据截一张图到 .diag/talk_shot_*.png')
     ap.add_argument('--vtab', help='强制语音页样本（用来复验换索引后才可用的船）')
+    ap.add_argument('--textonly', help='强制"有表行、主包未下发"样本（仅台词那一档）')
     A = ap.parse_args()
     proc = subprocess.Popen([
         CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
@@ -508,14 +560,44 @@ def main():
         else:
             r = jev('(%s)(%s)' % (VOICEPAGE, json.dumps(vk)), '语音页')
             ok = (r.get('gotRows') == r.get('expectRows') and r.get('gotTexts') == r.get('expectTexts')
-                  and r.get('rowsAligned') and r.get('playable'))
+                  and r.get('rowsAligned') and r.get('playable') and not r.get('residue'))
             print(f'{"✅" if ok else "❌"} [语音页] {vk} 行数 {r.get("gotRows")}/{r.get("expectRows")} '
                   f'正文 {r.get("gotTexts")}/{r.get("expectTexts")} 逐行对齐={r.get("rowsAligned")} '
                   f'每行可播={r.get("playable")} audio高={r.get("audioHeights")} '
+                  f'占位符残留={bool(r.get("residue"))} '
                   f'首条=「{(r.get("firstText") or "")[:30]}」 变体包={r.get("extra")}')
             shot('voicepage_%s' % vk)
             if not ok:
                 fails.append('语音页台词列表不符: ' + json.dumps(r, ensure_ascii=False)[:300])
+
+        # ---- 「有表行、主包未下发」那一档：台词要能看到，且**不许长出播放器** ----
+        tk = A.textonly or pick.get('textonly')
+        if not tk:
+            fails.append('没挑到「无音频但有正文」的仅台词样本 ⇒ 这一档等于没测（§6 第 16 条）')
+        else:
+            r = jev('(%s)(%s)' % (TEXTONLY, json.dumps(tk)), '仅台词页')
+            ok = (r.get('enabled') and r.get('gotRows') == r.get('expectRows')
+                  and r.get('textsOk') == r.get('expect') and r.get('aligned')
+                  and r.get('audio') == r.get('extra')              # 播放器只来自"变体包整包"那一节
+                  and r.get('textRowsWithoutPlayer') == r.get('expect')
+                  and not r.get('rawKey') and not r.get('residue'))
+            print(f'{"✅" if ok else "❌"} [仅台词页] {tk} 标签可用={r.get("enabled")} '
+                  f'行 {r.get("gotRows")}/{r.get("expectRows")}(台词 {r.get("expect")}+变体包 {r.get("extra")}) '
+                  f'有正文={r.get("textsOk")} 对齐={r.get("aligned")} '
+                  f'audio={r.get("audio")} 无播放器台词行={r.get("textRowsWithoutPlayer")} '
+                  f'内部键={r.get("rawKey") or "无"} 标签={r.get("label0")} 首条=「{(r.get("text0") or "")}」')
+            shot('textonly_%s' % tk)
+            if not ok:
+                fails.append('仅台词档不符: ' + json.dumps(r, ensure_ascii=False)[:300])
+            setopt('lines', False)
+            r2 = jev('(%s)(%s)' % (TEXTONLY, json.dumps(tk)), '仅台词页·关显示台词')
+            ok2 = (r2.get('gotRows') == r2.get('expectRows') and r2.get('textsOk') == 0
+                   and r2.get('audio') == r2.get('extra'))
+            print(f'{"✅" if ok2 else "❌"} [开关独立性·仅台词] 关显示台词 → 行 {r2.get("gotRows")} 条仍在、'
+                  f'正文 {r2.get("textsOk")} 条（应为 0）audio={r2.get("audio")}')
+            if not ok2:
+                fails.append('关显示台词后台词没隐藏: ' + json.dumps(r2, ensure_ascii=False)[:300])
+            setopt('lines', True)
 
         # ---- 无语音皮肤：显式标"没有"，不许静默空白 ----
         nv = pick.get('novoice')
@@ -559,7 +641,7 @@ def main():
         for f in fails:
             print('  - %s' % f)
         return 1
-    print('\n[PASS] 三格实播 + 开关矩阵 + 阴性对照 + 语音页列表 + 持久化 全部通过')
+    print('\n[PASS] 三格实播 + 开关矩阵 + 阴性对照 + 语音页列表 + 仅台词档 + 持久化 全部通过')
     return 0
 
 

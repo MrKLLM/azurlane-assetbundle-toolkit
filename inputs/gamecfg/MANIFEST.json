@@ -10,7 +10,8 @@
       "tools/sharecfg_re/41_export_lua_tables.py",
       "tools/sharecfg_re/37_parse_sharecfgdata.py --scalar-all",
       "tools/sharecfg_re/42_publish_gamecfg.py",
-      "tools/sharecfg_re/45_publish_npc_painting.py"
+      "tools/sharecfg_re/45_publish_npc_painting.py",
+      "tools/sharecfg_re/46_publish_name_code.py"
     ],
     "landed_at": "2026-09-27"
   },
@@ -25,6 +26,18 @@
         "scripts/extract_live2d_voice.py"
       ],
       "source": ".diag/sharecfg_re/lua_json/character_voice.json"
+    },
+    {
+      "path": "name_code.json",
+      "bytes": 26951,
+      "sha256": "aae0123b3dec92fcbf9b4dbf163c523304921e63f72f73210608764b224150d3",
+      "rows": 456,
+      "role": "台词正文里 `{namecode:NN}` 占位符的权威展开表：id → 中文实体名 + 单字代号（456 行，游戏本体 9.7.385 的 name_code 表）",
+      "consumers": [
+        "scripts/build_skin_words.py"
+      ],
+      "source": ".diag/sharecfg_re/lua_json/name_code.json",
+      "alignment_proof": "tools/sharecfg_re/43_check_namecode_alignment.py（带零假设）"
     },
     {
       "path": "npc_painting_name.json",

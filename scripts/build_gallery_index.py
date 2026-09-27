@@ -20,6 +20,14 @@ _sv_path = os.path.join(OUT, 'gallery_v2', 'skin_voice.json')
 if os.path.exists(_sv_path):
     SKIN_VOICE = json.load(open(_sv_path, encoding='utf-8'))
 
+# 台词正文（scripts/build_skin_words.py）：给「有表行但主包没下发」的皮肤补 voiceText，
+# 少这一步就是 44 张明明有台词却在语音页整页空白（§57 / §6 第 16 条）。缺文件不许静默当 0。
+_sw_path = os.environ.get('GALLERY_WORDS_PATH') or os.path.join(OUT, 'gallery_v2', 'skin_words.json')
+if not os.path.exists(_sw_path) and not os.environ.get('GALLERY_ALLOW_NO_WORDS'):
+    raise SystemExit('缺 %s —— 先跑 py -3 scripts/build_skin_words.py 再建索引；'
+                     '确实不需要台词字段时用 GALLERY_ALLOW_NO_WORDS=1 显式放行' % _sw_path)
+SKIN_WORDS = json.load(open(_sw_path, encoding='utf-8')) if os.path.exists(_sw_path) else {'m': {}, 'w': {}}
+
 # ---------- 元数据 ----------
 meta_by_cn = {}
 for s in json.load(open(os.path.join(OUT, 'WikiData', 'ship_data.json'), encoding='utf-8')):
@@ -262,6 +270,26 @@ for stem, sk in skins.items():
         sk['voiceExtra'] = hits
         VOICE_EXTRA += 1
 
+# ---------- 「只有台词、没有音频」的那批皮肤 ----------
+# 判据与 build_skin_words.py 的第二趟同源：语音表里没这条皮肤、词表 m 里有 ⇒ 台词能显示、不能播。
+# voiceCount 语义不变（仍= 可播音频条数），只加一个新字段，前端据此放行语音标签。
+_W_M = SKIN_WORDS.get('m') or {}
+_W_W = SKIN_WORDS.get('w') or {}
+VOICE_TEXT_ONLY = 0
+for stem, sk in skins.items():
+    if sk.get('voiceCount'):
+        continue
+    sid = _W_M.get(stem)
+    n = len(_W_W.get(sid) or {}) if sid else 0
+    if n:
+        sk['voiceText'] = n
+        VOICE_TEXT_ONLY += 1
+
+
+def ship_voice_text(sh):
+    """船级「台词条数（无可播音频的那些皮肤）」——语音标签能不能放行要看这个 + voiceCount。"""
+    return sum(sk.get('voiceText') or 0 for sk in sh['skins'] if not sk.get('voiceCount'))
+
 
 def ship_voice_count(sh):
     """船级「语音 N 条」= 该船全部皮肤去重后的音频文件数（同一包同一条台词只算一次）。"""
@@ -304,6 +332,9 @@ def skin_sort(s):
 for sh in ships.values():
     sh['skins'].sort(key=skin_sort)
     sh['voiceCount'] = ship_voice_count(sh)
+    vt = ship_voice_text(sh)
+    if vt:
+        sh['voiceText'] = vt          # 只在有值时写，避免给 964 组船凭空加一个 0
 
 ship_list = sorted(ships.values(),
                    key=lambda s: (s['npc'], not s['hasCn'], s['faction'], s['type'], s['name']))
@@ -315,6 +346,7 @@ cnt = {
     'live2d': sum(1 for v in skins.values() if v['live2d']),
     'with_voice': sum(1 for s in ship_list if s['voiceCount']),
     'voice_skins': sum(1 for v in skins.values() if v.get('voiceCount')),
+    'voice_text_skins': VOICE_TEXT_ONLY,        # 只有台词、没有可播音频的皮肤（§6 第 16 条）
     'npc': sum(1 for s in ship_list if s['npc']),
     'with_faction': sum(1 for s in ship_list if s['faction']),
     'ship': sum(1 for s in ship_list if s['category'] == 'ship'),

@@ -1,10 +1,12 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-27 20:20
-> 本轮：**354 张「🔇 无语音」按可救性拆细并裁定关闭**（§57）——196 缺主包（两侧都无源，等下发）/ 36 只有变体包（正文齐全却没进前端 ⇒ 新待办）/ 55 剥后缀才命中（**确认不能做**）/ 54 表里查无此名（NPC 皮肤）/ 13 该船无 CV；工具 `scripts/diag/voice_gap_audit.py`。
-> 上一轮：静态立绘「只画游戏里开着的层」根因修掉、换入 48 张（**§55**）；敦刻尔克被标成「皇家·驱逐」→ 改成「先要求 `skin_id` == 组内基皮肤」，970 组只有 1 组改判（**§56**）。再上一轮：台词字幕 + 两个全局开关 + 索引新口径已换入（**§54** / WF-22 / §6 第 13 条）。
+> **生成时间**: 2026-09-27 21:22
+> 本轮（并行会话，A+C）：**44 张「有表行、主包未下发」的皮肤补上「仅台词」档** + **修掉一个已上线一天的内容缺陷**——台词里的 `{namecode:NN}` 从没展开，**862 个能播的皮肤字幕里就在显示 `{namecode:98}`**；`name_code`(456 行) 已发布进 `inputs/gamecfg/` 并入台账，生成侧展开 6672 处、产物零残留，页面加 `residue` 断言（**§60**）。C 项：54 张「查无此名」= 领航员/领洋者/探索者等 NPC 皮肤，NPC 族在皮肤表里的 62 行**全部** 0 包 0 词 ⇒ 🔇 是对的，不改代码。索引零回退闸门：皮肤标量 31000 项 / 船标量 9072 项逐字未变；`talk_verify` 14 条判据全绿。
+> 同日并行轮（画廊取景/视角记忆）：**画廊前端「打开皮肤缩得有点小」两层根因修掉 + 视角记忆**（**§59** / WF-16 追加）——弹窗上限 1100×880 → `min(1900px,96vw)×min(1400px,96vh)`（2560×1600 上占屏 43%×55% → 74%×87%）、Live2D 改按 drawable 顶点框∩画布的内容框取景、Spine 留白 1.1→1.05、静态立绘解除「永不放大」上限（双击仍 1:1）；**A/B 实测内容绝对像素 10/10 变大 x1.69~x3.89、零回退样本**（工具 `scripts/diag/gallery_framing_ab.py`）；三视图相机按 `皮肤|标签页` 持久化（只存尺度无关量）+ 顶部新全局开关「记住视角」+ 弹层快捷键 `←→/1-4/F/R`；顺带修掉「进一次全屏就抹掉用户缩放」这条老失效。
+> 上一轮：**354 张「🔇 无语音」按可救性拆细并裁定关闭**（§57）——196 缺主包（两侧都无源，等下发）/ 36 只有变体包（正文齐全却没进前端 ⇒ 新待办）/ 55 剥后缀才命中（**确认不能做**）/ 54 表里查无此名（NPC 皮肤）/ 13 该船无 CV；工具 `scripts/diag/voice_gap_audit.py`。
+> 再上一轮：静态立绘「只画游戏里开着的层」根因修掉、换入 48 张（**§55**）；敦刻尔克被标成「皇家·驱逐」→ 改成「先要求 `skin_id` == 组内基皮肤」，970 组只有 1 组改判（**§56**）。更早：台词字幕 + 两个全局开关 + 索引新口径已换入（**§54** / WF-22 / §6 第 13 条）。
 > 历轮会话流水（2026-09-20 ~ 09-27）已**逐字**外迁 `docs/archive/2026-09-26_PROJECT_STATUS_外迁归档.md`（A1~A13 段）；
-> 结论性知识在 `docs/TROUBLESHOOTING.md` §25~§57 与 `docs/WORKFLOWS.md` WF-14~WF-22。本文只留当前状态。
+> 结论性知识在 `docs/TROUBLESHOOTING.md` §25~§60 与 `docs/WORKFLOWS.md` WF-14~WF-22。本文只留当前状态。
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
 >
 > **【其它待办】**~~§6.11 HitAreas 生成规则漏了 `touch_*` 组名~~ **已于 2026-09-22 修复落地**（13 模型真实判定区、全库 806/807）｜**官方交互层**：用 `CubismRaycastable` 真点击区替换现在猜的 `Touch*` drawable HitAreas、以及 `CubismExpressionController` 表情还原（注意运行时不读 pose3.json/exp 需验证）｜§6 待办 7「晶环联盟阵营码」三选一（A 逆向 sharecfgdata 加密 / B 走 381 旁路 / C 搁置）｜**剧情 CG 混进 `Paintings_v2/`** 的识别与分离（用户指出"脸黑的基本都是剧情 CG"，与缺脸是两类问题，见 §6.8）｜**结构隐患**：~~`azdata_*.json` 权威元数据源仍住在可被清理的 `.diag/`~~（**2026-09-24 已迁 `inputs/azdata/` + sha256 台账 `MANIFEST.json` + 校验 `scripts/diag/check_inputs.py`；数据本体仍不入库**，理由：9.2MB 游戏配置属资产、zlib 后 0.67MB 虽小但仓库原则是「只承载可复现的工具与知识」）——剩余一项：18 个核心脚本硬编码 `D:\Azur Lane Assets` 绝对路径（建议改 `__file__` 推导）｜**语音产物口径已定：无需单独备份**（可确定性再生，体检 `scripts/diag/l2d_voice_inventory.py`），不可复原的只有 `inputs/azdata`｜低优先：声优中文姓名回填、UI/图标批量导出、`organize.py`。
@@ -234,12 +236,21 @@
      （`frame_0..3` 四层全关，游戏按剧情逐层激活）。过滤会把它们**清空**，所以规则是"一层不剩就原样保留"
      并记进 `C.INACTIVE_ALL`。要修得先知道游戏在哪一刻激活哪一层，**没有权威依据不许猜**。
      取证：`py -3 scripts/diag/painting_inactive_scan.py`（只读全库扫）+ `painting_inactive_rerun.py`（定向重渲+对照表）。
-16. ⏳ **36 张「有变体包音频 + 正文齐全」的皮肤在画廊里整页无台词**（2026-09-27 §57 查出，**实现口径待拍板**）：
-     `aidang`/`lafei` 这类主包 `cv-N.b` 两侧都无、只有 `-battle/-gift` 的皮肤，音频已用 `voiceExtra` 挂上，
-     但 `build_skin_words.py` 的 `m` 只遍历 `skin_voice.json` ⇒ 它们拿不到正文键，
-     而语音页 tab 的判据是 `s.voiceCount>0` ⇒ **整页不显示**。
-     修法是加法、不动那条 75 分钟管线：`build_skin_words.py` 再补一遍「盘上有表行但没语音」的键 +
-     前端加一节「仅台词（无音频）」；另有 7 张（缺包但表里有词）顺带一起覆盖。
+16. ✅ **「有表行、主包未下发」的 44 张皮肤补上「仅台词」档（2026-09-27 用户拍板 A 后落地）**
+     原缺口：`aidang`/`lafei`/`jiahe` 这类主包 `cv-N.b` 两侧都无、只有 `-battle/-gift` 的皮肤，
+     音频已用 `voiceExtra` 挂上，但 `build_skin_words.m` 只遍历 `skin_voice.json` ⇒ 拿不到正文键，
+     而语音页 tab 判据是 `s.voiceCount>0` ⇒ **整页不显示**。
+     - ✅ 落地（全加法，**没动**那条 75 分钟语音管线）：词表第二趟 **44 张 / 565 条正文**（爱宕 11、拉菲 17、
+       加贺 11、声望/加贺·战列/七宝琳/UI 角色 5）；索引 `voiceText`（皮肤级+船级，只在无音频皮肤上写）；
+       前端 tab 判据 `voiceCount>0 || voiceText>0` + 语音页「仅台词」一节 + `talkCount` 兜底。
+       台词行**不带播放器**（探针反向证据：`audio == 变体包条数`、`无播放器台词行 == 台词数`）。
+     - ✅ **顺带修掉一个已上线一天的内容缺陷**：台词正文里的 `{namecode:NN}` 从没展开，
+       **862 个能播的皮肤字幕里就在显示 `{namecode:98}`**。发布 `name_code`（456 行，带零假设证成对齐）
+       进 `inputs/gamecfg/` 并入台账，生成侧展开 6672 处，产物零残留 + 页面 `residue` 断言。见 **§60**。
+     - ⏭️ **顺带待办（探针侧）**：`hit_verify`/`talk_verify` 等 CDP 探针的 `PORT` 与 `--user-data-dir` 是写死的，
+       两个会话同时跑会附着同一个浏览器 ⇒ 本轮 WF-16 第 5 件读出 `WIRING=38`（每条 `played` 恰好滞后一个部位）
+       这种**假红灯**。修法：端口/profile 走 env。⚠️ 那是并发会话正在用的工具，**别在它跑的时候改**。见 §60 末段。
+     - 复核：`py -3 scripts/diag/voice_gap_audit.py`（只读）+ `py -3 scripts/diag/talk_verify.py --shots --textonly aidang`。
 17. ⚠️ **Spine 的 parts 列表是按目录 glob 猜的 ⇒ 15 个和谐版 CG 与本体逐像素完全相同**
      （2026-09-27 查第 14 条时顺带查出，**未修、待放行**，取证见 **§58**）：
      `build_gallery_index.py:187` 用 `glob('Output/Spine_v2/<folder>/*.skel')` 决定"由哪几层合成"，
@@ -342,6 +353,7 @@ motion 大面积失效源于我们自己的解析器（帧 0 护栏 + 曲线名�
 - **形态**：本地网页（源 28GB / Paintings 15GB，上线不现实），参照 l2d.su，中文名展示 静态立绘 + Spine + Live2D + 语音。
 - **数据**：`build_gallery_index.py`（合并四类 + `ship_name_map` 拼音→中文 812 条 → `index.json/js`；Spine 皮肤附 `cg` 字段指向 `CG_v2/`）+ `make_thumbs.py`（Paintings_v2 + CG_v2 → 380px WebP，CG 缩略图 `<stem>_cg.webp`）。结果 954 船 / 4489 皮肤 / spine 231 / CG 231 / live2d 256 / 语音 268。
 - **前端** `index.html`：网格懒加载 + 搜索/阵营/舰种/稀有度筛选 + **类别分段（全部/舰船/剧情角色，主网格按 `category` 分区渲染各带小标题计数）**；详情四标签。「静态立绘」对 Spine 皮肤默认展示全屏 CG（可切换回 painting 原件），支持**滚轮缩放(光标锚点)/拖拽平移/双击100%/全屏浏览/复位**；Spine 标签 `vendor/spine/spine-all.js`(3.8) 分层 WebGL 播放（相机视口/动画过滤已修，**支持全屏**）。服务器统一响应 `Cache-Control: no-cache`，改版后浏览器不再吃旧缓存。
+- **前端取景与视角记忆 ✅（2026-09-27，§59 / WF-16 追加）**：修掉「打开皮肤缩得有点小」的两层根因——弹窗上限 1100×880 → `min(1900px,96vw)×min(1400px,96vh)`（2560×1600 上从占屏 43%×55% 到 74%×87%），Live2D 改按 **drawable 顶点框 ∩ 画布**的内容框取景（原来按 Cubism 正方形画布 fit，角色只占 6~8 成）、Spine 留白 1.1→1.05、静态立绘解除「永不放大」上限（双击仍是 1:1 像素）。**A/B 实测内容绝对像素 10/10 变大（x1.69~x3.89），零回退样本**，工具 `scripts/diag/gallery_framing_ab.py`。新增**视角记忆**：三个视图各自的缩放/平移按 `皮肤|标签页` 存 localStorage（只存尺度无关量 ⇒ 换窗口尺寸与进出全屏不错位；LRU 300 条），顶部第三个全局开关「记住视角」可关。顺带修一条老失效：**进一次全屏再退出会把调好的缩放抹掉**（`ResizeObserver` 直挂 `fit()`）→ 改 `refit(preserve)`。另加弹层内快捷键 `←/→` 换皮肤、`1-4` 切标签、`F` 全屏、`R` 复位。交互层零回退：`interact_verify` ALL PASS、`l2d_inspector_verify` 全绿、`hit_verify` 四类判定。
 - **源码治理**：画廊前端源码在**仓库内 `gallery_src/`**（唯一权威版本），`Output/gallery_v2/` 是运行目录（gitignore）。**2026-09-26 起两边改成硬链接**（同一份磁盘数据两个路径名），**4/4 已全部换链**（`index.html` / `cg_export.html` / `_gallery_server.py` / `启动资产浏览器.bat`）：改正本即刻生效、不需再部署。`deploy_gallery.py` 三态——默认 copy 修复（断链后的回退手段）/ `--check` **要求 4 个文件全部同 inode，断链或漂移都 `exit 1`** / `--relink` 换链（要求两边逐字节相同，且正本有未提交改动者自动跳过，防打断并行会话）。⚠️ 断链的唯一现实成因是整文件写回式「写临时文件+改名」的原子保存：**16:52 真断过一次，而当时只比内容的 `--check` 给了 `exit 0`（判据漏洞，已改为结构性并写进 AGENTS.md 收尾清单第 1 条——改 `gallery_src/` 正本一律原地编辑）**。当前 `index.html` 因那条未提交改动处于"已断链、内容仍一致"态，待其提交后 `--relink` 补。见 §43 与 WF-16。CG 导出页 `cg_export.html` 同样入 `gallery_src/`；服务器 `_gallery_server.py` 提供 `POST /save_cg` 落盘接口，`--export` 参数直开导出页。⚠️ 服务器按自身所在目录算根，**只能双击 `Output\gallery_v2\` 里那份 bat**。
 - **运行**：`启动资产浏览器.bat`（→ `_gallery_server.py`：8777 端口 + `allow_reuse_address` + 端口占用即复用 + 结尾 `pause`，杜绝闪退）。file:// 下立绘/语音可看，Spine `fetch` 被 CORS 拦需走 .bat。
 - **运行时库台账**（2026-09-26）：`vendor/` 4 个第三方 JS 只在 gitignore 目录里，版本/来源/sha256 记进 **`gallery_src/vendor/MANIFEST.json`**（3 个的 URL 当日重新下载按哈希逐字节对拍命中），换机器跑 `py -3 scripts/fetch_gallery_vendor.py` 补齐（**哈希+字节数双对上才落盘**，`--check` 只校验）。⚠️ **唯一残留缺口**：`vendor/spine/spine-all.js`（实测 3.8.75，非旧文档写的 3.8.99）没有可按哈希校验的下载源——本机这份与上游官方 3.8 构建不同（499623B ≠ 501448B），只能从 `tools/spine-viewer/spine-runtime/` 取，而 `tools/` 也在 gitignore。要彻底封掉需二选一：把 501KB 提交进仓库（先确认 Spine Runtimes License 允许），或改用可哈希校验的上游构建并回归 Spine 播放。**未拍板**。

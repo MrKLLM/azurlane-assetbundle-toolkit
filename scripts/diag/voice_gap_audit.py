@@ -54,9 +54,41 @@ def strip_to_row(ml, rows):
         s = s[:m.start()]
 
 
+def drill(out, keys):
+    """对「皮肤表里查无此名」这一类再查一层：到底是不参与配音的 NPC 皮肤，还是我们漏接线。
+
+    判据只用游戏自己的表：① 有没有出现在秘书舰 NPC 图名表里；② 两份皮肤表里有没有**任何**同族行；
+    ③ 语音包号是从行里推的——没行就没包号、也没台词行（台词表按行 id 索引）⇒ 本机零线索。
+    ⚠️ 这只证"本机数据里没有"，不证"游戏里也没有"；后者要么按耳朵要么看游戏内界面。
+    """
+    npc = json.load(open(os.path.join(ROOT, 'inputs', 'gamecfg', 'npc_painting_name.json'), encoding='utf-8'))
+    sc = json.load(open(os.path.join(ROOT, '.diag', 'sharecfg_re', 'cfg_json_scalar',
+                                     'ship_skin_template.json'), encoding='utf-8'))
+    sc_p = {str(r.get('painting') or '').strip().lower() for r in sc.values() if isinstance(r, dict)}
+    unk = [r for r in out if r['cls'] == 'no-row-unknown']
+    by_fam = collections.defaultdict(list)
+    for r in unk:
+        by_fam[E.ship_stem(r['skin'].lower())].append(r['skin'])
+    print('\n查无此名的 %d 张，按同族归并成 %d 族：'
+          % (len(unk), len(by_fam)))
+    n_npc = n_family_row = 0
+    for fam in sorted(by_fam):
+        ks = sorted(by_fam[fam])
+        innpc = [k for k in ks if k in npc or E.VAR.sub('', k) in npc]
+        kin = [k for k in ks if k in sc_p]
+        famrow = [p for p in sc_p if p == fam or p.startswith(fam + '_') or p.startswith(fam)]
+        n_npc += len(innpc)
+        n_family_row += len(kin)
+        print('  %-18s %2d 张  NPC图名表 %2d  表里有此名 %2d  同族在表里 %s  例 %s'
+              % (fam, len(ks), len(innpc), len(kin), len(famrow), ks[0]))
+    print('  合计：命中 NPC 图名表 %d 张 / 表里直接有此名 %d 张 ⇒ '
+          '这两份都不等于"游戏里没配音"，只等于"本机推不出包号，也就没有台词行"' % (n_npc, n_family_row))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--json', default=os.path.join(ROOT, '.diag', 'voice_gap_audit.json'))
+    ap.add_argument('--drill', action='store_true', help='只对「查无此名」类再查一层 NPC 归属')
     args = ap.parse_args()
 
     rows = E.load_skin_rows()
@@ -171,6 +203,9 @@ def main():
                    'total_miss': len(out), 'by_class': dict(by), 'detail': out},
                   f, ensure_ascii=False, indent=1)
     print('\n明细 → %s' % os.path.relpath(args.json, ROOT))
+    if args.drill:
+        drill(out, keys)
+    return 0
 
 
 if __name__ == '__main__':

@@ -633,7 +633,7 @@
 |---|---|---|
 | `scripts/`、`scripts/diag/`、`gallery_src/`、`docs/`、根 `*.md` | —— | ✅ 已入 Git，随时可取 |
 | `inputs/azdata/azdata_ship_{skin_template,data_statistics,data_template}.json` + `azdata_version.json` | **`scripts/build_ship_meta.py` / `extract_live2d_voice.py` 的唯一权威输入**（舰名/阵营/舰种/稀有度/CV id 全从这里来），也是 `tools/sharecfg_re` 的已知明文基准 | ⚠️ 半可再生：社区快照会滞后（385 时最新仍 381），且 `sharecfgdata/*` 是**自定义加密**、本机无解 → **务必当源文件保护**。2026-09-24 从 `.diag/` 迁到此处；`sha256` 台账 = `inputs/azdata/MANIFEST.json`，跑前 `py -3 scripts/diag/check_inputs.py` 校验。旧 `.diag/azdata_tree.json` 经核实内容是 14 字节 `Invalid input.`（上游报错残留，非数据），已删不再列入白名单 |
-| `inputs/gamecfg/ship_skin_words.json`（4.9MB / 2569 行） | **台词中文正文的唯一副本**，`scripts/build_skin_words.py` 的唯一输入 | ⚠️ 半可再生：要能跑通 `sharecfgdata` 容器文法（§33/§36，`37_parse_sharecfgdata.py --scalar-all`）。2026-09-27 从 `.diag/sharecfg_re/cfg_json/` 迁到此处（原先只住在那儿，清盘即永久丢失）；`sha256` 台账 = `inputs/gamecfg/MANIFEST.json` |
+| `inputs/gamecfg/name_code.json`（456 行） | 台词正文里 `{namecode:NN}` 的**唯一展开表**，`build_skin_words.py` 的第二个输入 | ⚠️ 半可再生：`41_export_lua_tables.py` 从设备侧 sharecfgdata 重导 lua 表 → `46_publish_name_code.py`；对齐关系由 `43_check_namecode_alignment.py`（带零假设）证成。2026-09-27 从 `.diag/sharecfg_re/lua_json/` 迁到此处，`sha256` 台账同 `MANIFEST.json` | | **台词中文正文的唯一副本**，`scripts/build_skin_words.py` 的唯一输入 | ⚠️ 半可再生：要能跑通 `sharecfgdata` 容器文法（§33/§36，`37_parse_sharecfgdata.py --scalar-all`）。2026-09-27 从 `.diag/sharecfg_re/cfg_json/` 迁到此处（原先只住在那儿，清盘即永久丢失）；`sha256` 台账 = `inputs/gamecfg/MANIFEST.json` |
 | `Output/dependency_manifest.json`（~15MB / 86k+ 条） | `compose_paintings_v2`、`extract_spine_v2`（PPtr→包 依赖表） | ✅ 可再生：`export_dependency_manifest.py` |
 | `Output/ship_meta.json` | `build_gallery_index`（元数据主源） | ✅ 可再生：`build_ship_meta.py --write` |
 | `Output/WikiData/ship_data.json` | `build_gallery_index` 兜底 | ✅ 可再生：`scrape_wiki_fast.py`（需外网） |
@@ -854,6 +854,23 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
 - **含中文的 `.ps1` 必须存成 UTF-8 带 BOM**，否则 Windows PowerShell 5.1 按 GBK 解码会把引号错位成 `字符串缺少终止符`（`wait_for_detached.ps1` 首跑就是这么死的，`py -3` 写文件时用 `encoding='utf-8-sig'`）。
 
 **涉及文件**: `gallery_src/index.html`、`scripts/deploy_gallery.py`（默认 copy / `--check` / `--relink`）、`gallery_src/vendor/MANIFEST.json`、`scripts/fetch_gallery_vendor.py`、`scripts/diag/{l2d_coord_forensics,l2d_inspector_verify,interact_verify,hit_verify,page_sanity_check,clean_diag_profiles,l2d_ref_diff,l2d_ab}.py`、`TROUBLESHOOTING.md` §19/§20/§24
+
+**WF-16 追加（2026-09-27）：默认取景与视角记忆——「看起来变小了」这类视觉改动怎么做对照组**
+
+用户反馈两条：① 打开皮肤「缩得有点小」；② 重开不回上次的位置/缩放。落地面是 `gallery_src/index.html` 的三个视图（静态立绘 / Live2D / Spine）。**这类改动没有功能断言可跑**（不报错 ≠ 尺寸对），所以整套做法围绕「把观感变成能红的数」。
+
+- **先把"小"拆成两层再动手**：外层容器尺寸（弹窗 `min(1100px,96vw)×min(880px,96vh)` 在 2560×1600 上只占屏 43%×55%）与内层取景（Live2D 按 Cubism **画布**适配、Spine 按包围盒 +1.1 留白）。两层混在一起谈会各修一半、两边都不够。**量法**：无头截图 → 在绘图区矩形内找"落笔像素"包围盒 → 报绝对像素，而不是报比例（见下条）。
+- ⚠️ **判据必须用「内容绝对像素面积」，不能用「占视口比例」**：视口形状本身会被这次改动改掉（宽窗里 Live2D 从**宽受限**变成**高受限**），于是比例会**假报回退**——实测同一批样本按面积比给出 5/10 "比旧版小"，按绝对像素则是 10/10 变大（x1.69~x3.89）。这是"代理指标骗人"的第 N 个实例：**用户看到的是多少像素，不是多少比例**。
+- ⚠️ **改 `min(px, vw/vh)` 这类常量时，"数值更大=更宽松"是错的**：把 `96vh` 写成 `94vh` 想让上限更松，结果在 `innerHeight < ~917` 的窗口里 `94vh` 反而**小于**原来的 880px 硬上限，弹窗变矮、高度受限的 Live2D/Spine 直接回退。⇒ 视口百分比与像素上限的**交叉点两侧都要各测一次**（本轮用 `--win 1600,1000` 与 `--win 2560,1600` 两档，前者当场抓出这条自伤）。
+- **A/B 对照页用 `git show HEAD:gallery_src/index.html > Output/gallery_v2/index_old.html`**：同一台服务器、同一份数据、同一次运行里跑新旧两页 ⇒ 排掉了模型加载时序与机器状态这两个混淆源；跑完删掉临时页（它在 gitignore 的 `Output/` 里，不会污染仓库）。工具 `py -3 -u scripts/diag/gallery_framing_ab.py --pages both --n 5 --win 2560,1600`。
+- ⚠️ **无头量"落笔"前必须把 `.view` 的棋盘格底色刷成纯黑**：`#12172a` 的 max 通道 = 42，任何合理阈值都挡不住它，实测 `wf/hf` 恒为 0.999（整屏都算内容）。同时**基准框要按视图取**（Live2D 用 `#l2wrap` 它本身已让开底部控制条；Spine 的 canvas 得再减掉底部 48px，否则条上的浅色字会被算成内容、把高度顶满）。
+- **断言必须能红**（两条空断言各加一条前置守卫）：① 记忆类断言先确认"操作确实改变了取景"（`|moved−fresh| > 0.03`），否则 `back==moved==fresh` 是永真式；② resize 类断言先确认 `Emulation.setDeviceMetricsOverride` 真的生效（基准宽 1233→874→1233），否则"偏移 0.000"只是没测到东西。
+- **Live2D 按内容取景的实现约束**：不能用渲染包围盒（`mdl.width`，会被巨型离屏 quad 撑到几百万像素，§20 那条老坑），也不能直接并集 drawable 顶点框（停放件会把框甩出画布）。落地形态 = **各 drawable 顶点框 ∩ 画布 的并集**，另加两条护栏（单边 >画布 4 倍丢弃；与画布完全不相交丢弃；有效 drawable <3 个则整体退回画布 fit）。方向上这是**单调放大**（内容框 ⊆ 画布 ⇒ 只会比原来大），所以"零回退"是可证明的而不是抽样的。
+- **视角记忆只存尺度无关量**，否则换窗口尺寸/进出全屏就错位：图片存 `s` + 偏移÷视口宽高；Live2D 存 `z` + 偏移÷`baseK`（= 模型本地像素）；Spine 的 `camX/camY` 是世界坐标、`zoom` 无量纲，原样存。皮肤有 1000+ 个 ⇒ LRU 截断 300 条防顶穿 localStorage 配额；写盘走 350ms 合并 + 切视图/关弹层时强制 flush（否则最后一次滚轮丢失）。
+- **顺带修掉一条老失效**：Live2D 的 `ResizeObserver` 原来直接挂 `fit()`，而 `fit()` 会把 `z/ox/oy` 清零 ⇒ **进一次全屏再退出，用户调好的缩放就没了**。改成 `refit(preserve)`：只按新视口重算基准缩放、偏移随 `baseK` 同比换算。
+- 交互层零回退靠现成三件套：`interact_verify`（裸滚轮不劫持 / Ctrl+滚轮才缩放 / 点部位触发）ALL PASS、`l2d_inspector_verify`（判定区 + 参数·部件面板 + 过滤）全绿、`hit_verify` 四类判定。**注意 `py -u … | tail -25` 会让 `tail` 把中间输出全吞掉**（`tail` 只在 EOF 才吐），要轮询进度就别在管道里接 `tail`。
+
+**涉及文件（追加）**: `gallery_src/index.html`（`.modal` 尺寸 / `contentBox()` / `refit()` / `vmemCommitter()` / 弹层快捷键）、`scripts/diag/gallery_framing_ab.py`（A/B 取景与视角记忆回归）、`TROUBLESHOOTING.md` §59
 
 ---
 
@@ -1176,11 +1193,15 @@ files/AssetBundles/sharecfgdata/ship_skin_words
   → .diag/sharecfg_re/cfg_json/ship_skin_words.json
   → tools/sharecfg_re/42_publish_gamecfg.py                   （清洗成标量表 + sha256 台账）
   → inputs/gamecfg/ship_skin_words.json                       ← 正文唯一副本，**不许再放回 .diag/**
-  → scripts/build_skin_words.py                               （按 cv*10+idx join 语音表）
+  → tools/sharecfg_re/46_publish_name_code.py                 （{namecode:NN} 的展开表 + 台账，§60）
+  → inputs/gamecfg/name_code.json
+  → scripts/build_skin_words.py                               （两趟：① 按 cv*10+idx join 语音表 ② 有表行无音频的皮肤按字段出词；就地展开占位符）
   → Output/gallery_v2/skin_words.json  {m:皮肤→行id, w:行id→{运行时名:正文}, L:运行时名→中文类别名}
-  → scripts/build_gallery_index.py                            （voiceCount 换权威源）
-  → gallery_src/index.html                                    （字幕条 + 语音页 + 两个开关）
+  → scripts/build_gallery_index.py                            （voiceCount 换权威源 + voiceText）
+  → gallery_src/index.html                                    （字幕条 + 语音页 + 仅台词档 + 两个开关）
 ```
+⚠️ **建索引前必须先有 `skin_words.json`**：`build_gallery_index.py` 缺这份会直接 `SystemExit`
+（要跳过用 `GALLERY_ALLOW_NO_WORDS=1` 显式放行）——静默当 0 就是 §60 那种"结构合法但内容缺"。
 
 **三条可复用的做法**：
 1. **钥匙要用"上游已经算好的字段"，不要新造匹配**。`skin_voice.json` 里每条皮肤带 `cv`(语音包号) 与
@@ -1198,6 +1219,9 @@ files/AssetBundles/sharecfgdata/ship_skin_words
 - 开关矩阵要拿到**反向证据**：关显示台词 ⇒ 仍出声且字幕为空；关点击出声 ⇒ 新 Audio 数=0 且仍上字幕；
 - **阴性对照**：挑"有音频但游戏本来没写词"的槽位（部分船的摸头），必须出声且**不弹空字幕**；
 - 语音页逐行比对行数 / 正文数 / **每行 `<audio>` 的可见高度**（只数行会放过"播放器被压成 0 高"）；
+- **内容形状断言**：页面上不许出现 `{namecode:NN}`（`residue`）——结构判据全绿也可能把运行时占位符端给用户（§60）；
+- 「有表行、主包未下发」那一档：语音标签必须放行、台词行必须逐字对齐，且
+  **audio 元素数 == 变体包条数**（台词行一律不带播放器；造个点了不响的假控件比不给更糟，§60）；
 - 无语音皮肤必须显式 🔇，不许静默空白；
 - 持久化用**非常规组合**（on/off）验证，全 on 时"读默认值"也能过。
 
