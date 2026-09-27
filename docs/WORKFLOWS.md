@@ -677,8 +677,26 @@
 - `make_thumbs.py` 遇已存在文件直接 skip → 换入新图后**不删旧 webp 就不会更新**（静默留旧图）。
 - 硬链接未检查就覆写 → 孪生文件被一起改掉。
 
+#### 收尾必做：全库「产物 vs 当前管线」逐字节普查（2026-09-27 补，§52）
+
+**为什么**：本 WF 的"定位受影响子集"是**预测量**——预测漏了就永久静默。
+实证：09-18 换入 85 张、09-19 换入 55 张，两次各自的受影响扫描**分别漏了 2 张和 7 张**，
+直到 09-27 用全库逐字节比对才发现（9 张在盘产物仍停留在旧提交的行为上）。
+
+**怎么做**（只读，不动正式产物）：
+```bash
+py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927        # 4488 张 ≈ 94 分钟，逐条落盘
+py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中断后续跑
+```
+判据：`差异清单` 应为空；非空则逐张定性——**先量再盯图**：
+按「差异像素里 `max(α_旧,α_新) ≥ 40` 才算可见」+ 可见处最大色差分档，
+色差 ≤6/255 的是重采样舍入级（肉眼不可能看见），色差上百的才需要人工过目。
+**因果判定**：把历代脚本从 git 取出分别重渲，看在盘文件能被哪个提交逐字节复现，
+即可指认"它漏掉了哪一次修复"（`git show <c>:scripts/compose_paintings_v2.py > .diag/oc_<c>.py`）。
+⚠️ 分型指标**一片 0 时先怀疑量尺**：第一版四个桶都不收"低 alpha 像素的颜色差异"，把 4 张真差异报成 0.0%。
+
 #### 涉及文件
-`scripts/mumu_sync.py`, `scripts/mumu_adb.py`, `scripts/export_dependency_manifest.py`, `scripts/compose_paintings_v2.py`, `scripts/extract_spine_v2.py`, `scripts/reconstruct_live2d.py`, `scripts/extract_motions.py`, `scripts/build_ship_meta.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `scripts/deploy_gallery.py`, `scripts/diag/run_cg_export.py`, `scripts/diag/l2d_sweep.py`, `scripts/diag/l2d_verify.py`, `scripts/diag/l2d_click.py`, `scripts/diag/hit_verify.py`, `scripts/diag/make_face_cmp.py`, `scripts/diag/make_review_sheet.py`, `scripts/diag/scan_faces.py`, `scripts/diag/dedup_*.py`, `PROJECT_STATUS.md §6/§9/§10`
+`scripts/mumu_sync.py`, `scripts/mumu_adb.py`, `scripts/export_dependency_manifest.py`, `scripts/compose_paintings_v2.py`, `scripts/extract_spine_v2.py`, `scripts/reconstruct_live2d.py`, `scripts/extract_motions.py`, `scripts/build_ship_meta.py`, `scripts/build_gallery_index.py`, `scripts/make_thumbs.py`, `scripts/deploy_gallery.py`, `scripts/diag/run_cg_export.py`, `scripts/diag/l2d_sweep.py`, `scripts/diag/l2d_verify.py`, `scripts/diag/l2d_click.py`, `scripts/diag/hit_verify.py`, `scripts/diag/make_face_cmp.py`, `scripts/diag/make_review_sheet.py`, `scripts/diag/scan_faces.py`, `scripts/diag/painting_staleness_scan.py`, `scripts/diag/painting_face_rerun.py`, `scripts/diag/painting_layer_dump.py`, `scripts/diag/dedup_*.py`, `PROJECT_STATUS.md §6/§9/§10`
 
 ---
 
@@ -1096,6 +1114,16 @@ rip 相对引用——"同一把密钥/同一个静态槽还有谁在用"只能�
   安全暂停配方：`git diff -- <前端正本> > scripts/diag/<名>.patch` →（`git apply --check` 验可回放）→ `git checkout -- <正本>`
   → `deploy_gallery.py`（刷平运行目录）→ `--relink`（补硬链）→ `--check` 要求 4/4 同 inode。
 - 终端打印的中文乱码不是数据坏：判"字段坏了"之前先打 codepoint（`[hex(ord(c))]`）或看原始字节的 UTF-8 序列。
+- **报"某批数据查不到"之前，先怀疑查表姿势而不是数据缺失**：`azdata` 皮肤表里 `painting` 有 `2B`/`A2`/`HDN101`
+  这种大写，而磁盘目录名一律小写 ⇒ 按原样建键 + 按原样查 = 145 张明明有语音包的皮肤被判"无解"。
+  表键与候选**都小写归一**。发现"无解"数量异常时按可观测口径拆开算一遍（包在不在盘上 / `voice_actor` 是不是 0 /
+  表里到底有没有这一行），别笼统写成"快照滞后"——本次"265 张因快照滞后无解"整条是误判，见 §53。
+- **后缀剥离要分两类，身份后缀绝不盲剥**：`_n/_hx/_rw/_bj/_jz/_alter/_hei` 是同一皮肤的画法变体（剥了不影响归属），
+  而 `_memory`（回忆剧情）/`_rank`（排行榜立绘）/`_heihua`（黑化）/`_ex`/`_wjz`/`_g`/`_meta` 可能是
+  **另一个发声实体或另一张独立皮肤**。剥错的后果是把别人的台词派给它——按 §47 的定性属"不报错的语义错"，
+  比"没声音"更糟。宁可留空待裁定。
+- 只改定位逻辑、不改音频时，用 `--skip-done` 复用磁盘上已解过的 `cv-<n>/<cue>.ogg`（文件名即 cue 名），
+  把"重建映射"从 75 分钟降到几分钟；**用完仍必须过"磁盘缺失 / <2KB 占位 = 0"闸门**，否则半截包会被当成完整包。
 - 验证 Live2D 那一格要用**换数据文件之后**的表：Live2D 侧唯一风险是动作组键对不上（`l2d_action` 恰好等于组名，
   旧表靠这个成立），不重跑一次就是没验。
 

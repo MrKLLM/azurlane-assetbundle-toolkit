@@ -100,7 +100,11 @@ def split_cue(n):
 
 
 def load_skin_rows():
-    """painting（磁盘皮肤名）→ [(cv, idx)]，cv = skin id // 10（语音包号），idx = skin id % 10。"""
+    """painting（磁盘皮肤名）→ [(cv, idx)]，cv = skin id // 10（语音包号），idx = skin id % 10。
+
+    ⚠️ 表键**一律小写归一**：皮肤表里 `2B`/`A2`/`HDN101` 这类是大写，而磁盘目录名是小写，
+    原样查表会让 145 张明明有包的皮肤掉进「无解」（2026-09-27 普查 499 无解时查出）。
+    磁盘侧候选也要 `.lower()`（见 resolve）。"""
     d = json.load(open(os.path.join(AZDATA, 'azdata_ship_skin_template.json'), encoding='utf-8'))
     by = collections.defaultdict(list)
     for k, r in d.items():
@@ -110,7 +114,7 @@ def load_skin_rows():
         if not p:
             continue
         sid = int(r.get('id') or k)
-        by[p].append((sid // 10, sid % 10))
+        by[p.lower()].append((sid // 10, sid % 10))
     return {p: sorted(set(v)) for p, v in by.items()}
 
 
@@ -147,18 +151,23 @@ def ship_stem(k):
 
 
 def resolve(keys, rows, banks):
-    """皮肤 → {cv, idx or None, src}。idx=None 表示等解码出包内序号档后再定（同船回退）。"""
+    """皮肤 → {cv, idx or None, src}。idx=None 表示等解码出包内序号档后再定（同船回退）。
+
+    候选一律小写（表已按小写归一，见 load_skin_rows）。**不做身份后缀剥离**：
+    `_memory/_rank/_heihua/_ex/_wjz` 这类可能是另一个发声实体，剥错就是把别人的台词派给它。"""
     res, miss = {}, []
-    stems = {p: ship_stem(p) for p in rows}
+    rows_l = {p.lower(): v for p, v in rows.items()}
+    stems = {p: ship_stem(p) for p in rows_l}
     for k in keys:
-        for cand, src in ((k, 'row'), (VAR.sub('', k), 'strip')):
-            hit = [t for t in rows.get(cand, []) if t[0] in banks]
+        kl = k.lower()
+        for cand, src in ((kl, 'row'), (VAR.sub('', kl), 'strip')):
+            hit = [t for t in rows_l.get(cand, []) if t[0] in banks]
             if hit:
                 res[k] = {'cv': hit[0][0], 'idx': hit[0][1], 'src': src}
                 break
         else:
-            st = ship_stem(k)
-            alt = sorted({t for p in rows if stems[p] == st for t in rows[p] if t[0] in banks})
+            st = ship_stem(kl)
+            alt = sorted({t for p in rows_l if stems[p] == st for t in rows_l[p] if t[0] in banks})
             if alt:
                 res[k] = {'cv': alt[0][0], 'idx': None, 'src': 'sibling'}
             else:
@@ -254,16 +263,24 @@ def build_entry(cv, idx, src, names, rel):
              'tap': tap, 'lines': lines}, unknown)
 
 
-def process_bank(cv, acb, out_audio):
+def process_bank(cv, acb, out_audio, skip_done=False):
+    dst_dir = os.path.join(out_audio, 'cv-%d' % cv)
+    if skip_done and os.path.isdir(dst_dir):
+        have = sorted(os.path.splitext(f)[0] for f in os.listdir(dst_dir)
+                      if f.endswith('.ogg') and os.path.getsize(os.path.join(dst_dir, f)) >= 1024)
+        if have:
+            # 增量：整包已解过就复用文件名即 cue 名这一对应关系，不再跑 vgmstream+ffmpeg。
+            # 换入前仍要过 l2d_voice_diff_check 的「磁盘缺失/占位 = 0」闸门，防止半截包被当成完整。
+            return cv, have
     with tempfile.TemporaryDirectory(dir=DIAG) as tmp:
         names = decode_bank(acb, tmp)
         keep = [n for n in names if not SONG.match(n)]
         for n in keep:
-            to_ogg(names[n], os.path.join(out_audio, 'cv-%d' % cv, n + '.ogg'))
+            to_ogg(names[n], os.path.join(dst_dir, n + '.ogg'))
         return cv, sorted(keep)
 
 
-def run(skin_keys, mode, out_audio, map_path, jobs):
+def run(skin_keys, mode, out_audio, map_path, jobs, skip_done=False):
     rows = load_skin_rows()
     banks = banks_on_disk()
     if not banks:
@@ -287,9 +304,15 @@ def run(skin_keys, mode, out_audio, map_path, jobs):
                 cue_sets[cv] = sorted(decode_bank(banks[cv], tmp))
     else:
         os.makedirs(out_audio, exist_ok=True)
+        reused = 0
+        if skip_done:
+            reused = sum(1 for cv in need
+                         if os.path.isdir(os.path.join(out_audio, 'cv-%d' % cv)))
+            print('增量：复用已解包 %d / %d，只新解 %d 个'
+                  % (reused, len(need), len(need) - reused), flush=True)
         done = fail = 0
         with ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
-            futs = [ex.submit(process_bank, cv, banks[cv], out_audio) for cv in need]
+            futs = [ex.submit(process_bank, cv, banks[cv], out_audio, skip_done) for cv in need]
             for f in futs:
                 try:
                     cv, names = f.result()
@@ -357,6 +380,8 @@ if __name__ == '__main__':
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--out-dir', default='')
     ap.add_argument('--map', default='')
+    ap.add_argument('--skip-done', action='store_true',
+                    help='磁盘上已解过的包不再解码，只复用现有 ogg 重建映射（增量重跑）')
     a = ap.parse_args()
     keys = gallery_keys()
     sel = [x for x in (a.probe or a.sample or a.only).split(',') if x]
@@ -371,6 +396,7 @@ if __name__ == '__main__':
             keys = [k for k in keys if k in sel]
         if a.limit:
             keys = keys[:a.limit]
-        sys.exit(run(keys, 'all', a.out_dir or DEF_AUDIO, a.map or DEF_MAP, a.jobs))
+        sys.exit(run(keys, 'all', a.out_dir or DEF_AUDIO, a.map or DEF_MAP, a.jobs,
+                   skip_done=a.skip_done))
     print(__doc__)
     sys.exit(1)

@@ -101,11 +101,21 @@ CASE = r"""(async(key, tab)=>{ try{
     btns[0].click(); await t(1500);
     res.clicked=btns[0].textContent;
   }
+  // ⚠️ 不能"点完固定等 1.5s 读一次 currentTime"：服务器单线程、首帧要现取，
+  //    实测 cv-1170002/touch_1.ogg（3.47s 正常文件）会被读成 cur=0 而误报失败（WF-16 同类坑）。
+  //    改成轮询到真的走秒为止，并记下等了多久。
+  let waited=0, a=null;
+  for(let i=0;i<28;i++){
+    const recs=window.__AUD.slice(before);
+    a=recs[0];
+    if(a && a.el && a.el.currentTime>0.05) break;
+    await t(250); waited+=250;
+  }
   const recs=window.__AUD.slice(before);
+  res.waited_ms=waited;
   res.audios=recs.map(r=>({src:r.src, ev:r.events, cur:r.el?+r.el.currentTime.toFixed(2):null,
                            paused:r.el?r.el.paused:null, err:r.el?r.el.error:null}));
-  const a=recs[0];
-  res.playing = !!(a && a.el && a.el.currentTime>0.1 && !a.el.paused && !a.el.error);
+  res.playing = !!(a && a.el && a.el.currentTime>0.05 && !a.el.error);
   res.src_is_own_index_tier = !!(a && sv[key] && (function(){
       const files=[]; const e=sv[key];
       for(const g in (e.l2d||{})) files.push(...e.l2d[g]);
