@@ -716,7 +716,7 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 | 模型数据 | `Output/Live2D/<key>/` | 前端直读（`P="..\/"`），无副本 |
 | 运行时库台账 | `gallery_src/vendor/MANIFEST.json` + `scripts/fetch_gallery_vendor.py` | `vendor/` 4 个第三方 JS 只在 gitignore 目录里，故版本/来源/sha256 全记在台账。**换机器或清过 `Output/` 后跑一次 `fetch_gallery_vendor.py` 即补齐**；`--check` 只校验（缺件/漂移 exit 1），可并进下面的回归清单 |
 
-**四条必须记住的硬规则（每条对应一次真实事故）**:
+**六条必须记住的硬规则（每条对应一次真实事故）**:
 1. **坐标系必须换算**：`getDrawableVertexPositions()` 是 V（Cubism 原生：画布中心原点、y 向上），`toLocal()/pixelsPerUnit` 是 P（左上原点、y 向下）。换算 `Vx=Px-cux/2`、`Vy=cuy/2-Py`（`cux=im.width/ppu`）。混用 → 点胸口触发头部动作（TROUBLESHOOTING §20）。
 2. **命中必须先做包含判定**再就近取框，框外返回 null（否则点空白/任意处都触发最近部位，动作被反复打断，用户感受=「做得快/赶」，§19）。
 3. **idle 循环交给运行时，前端不许挂定时器**（2026-09-23 二次修订，旧"看守者"方案已废弃）：`Meta.Loop` 被 vendored 库忽略，但正确修法是给 CubismMotion 本体 `setIsLoop(true)` + `setIsLoopFadeIn(false)`，并把 `mm.groups.idle` 对齐成实际组名（库默认 `'Idle'`），让库自带的"播完自动回 idle"生效。旧方案用 `armIdleLoop` 定时器按 `Duration-120ms` 重开，而 `startMotion` 是 async → `!==false` 恒成立 → **被 `state.reserve` 拒绝时前端无感**，实测造成 idle 播 9.1s 后**冻结 9.2s**。改后 30s 内 `startMotion` 调用 0 次、`currentGroup=null` 采样 0 个（§21）。
