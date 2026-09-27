@@ -223,6 +223,8 @@ app.ticker.add(restTick);   // REST_DELAY=400, REST_MS=700
   经验：老模型组名是 `Head/Body/Special`，新换入模型是 `touch_head/touch_body/touch_special`——两代都要覆盖，只认其一就是"点哪儿都不动"的来源。
 - **改后必须证"仅该字段变"**：跑前对全部 `model3.json` 快照 `(path, mtime, sha256)` 清单，跑 `fix_model3` 后 diff → 断言"**仅 N 个文件变、且每个文件仅 `HitAreas` 字段变**"（顶层键集合不变、`changed_fields == ['HitAreas']`）。任何其它字段被顺带改动 = 回退，立即排查。
 - **收尾**：`hit_verify --only <这批 key>` 逐个证 **3/3 命中**（点击各 drawable 框中心 → `state.currentGroup == HitAreas[].Name`）；再全库复跑确认命中数增量 == 新启用的判定区数（本项目 13 模型 × 3 = +39，768→807、767→806，同一 `z46_3` 嵌套框歧义为既有非回退项）。
+- **⚠️ 静止态落在画布外的 `Touch*` 不等于脏数据，不许按几何位置批量过滤或删除**。这类标记常挂在**会动的道具**上（按钮/绳索/手持物），静止态被停在画布外几千像素处，播对应动作时才随部件进画面才可点。判别式只有一个：**逐动作组播一遍（走页面自己的 `play()`，别直接 `startMotion`），每组重新量"落回画布内"的标记数**——静止态 4/26、播某些组时 7~10 个即证明是动画驱动。
+- **换装/开关类交互的落地形态是"各 clip 用定值曲线锁住开关参数"**（如 `TouchSiwa`/`Paramaixin` 这类 Parameter，`touch_idle31` 里 `Paramaixin=1.6` 就是爱心眼）。所以按钮的 `HitAreas[].Name` 本来就是那条动作组名，**不需要另造切换机制**；反过来，一个 `Touch<X>` 若没有同名动作组，多半是"开关参数 + 停放标记"，而不是可点部位。
 
 ## 5. 构图与 fit 的两个陷阱
 
