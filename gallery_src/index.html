@@ -169,7 +169,6 @@ audio{height:30px;width:100%;flex:none;color-scheme:dark}
     <div class="content">
       <div class="tabs" id="mTabs"></div>
       <div class="view" id="mView"></div>
-      <div class="talksub" id="mSub"></div>
     </div>
   </div>
 </div>
@@ -454,9 +453,16 @@ function speak(key, name, path){ if(OPT.voice && path) playVoicePath(path); show
 function playTap(key, which){ const t=skinTap(key); if(!t) return false;
   const s=tapSlot(t, which); if(!s) return false;
   speak(key, s, vsrc(t[s])); return true; }
-/* ---------- 底部字幕条 ---------- */
-function showSub(name, text){ const el=document.getElementById('mSub'); if(!el) return;
-  if(!OPT.lines || !text){ hideSub(); return; }
+/* ---------- 台词字幕条 ----------
+   ⚠️ 必须挂在 `#mView` **里面**：三格的「全屏」按钮 requestFullscreen() 的是 viewEl，
+   全屏时只有那棵子树会被渲染出去 —— 挂在 .content 上（早版如此）等于全屏就没字幕（用户 2026-09-27 报）。
+   各视图会 `viewEl.innerHTML=...` 整块重写，所以这个节点按需取用/重建，不常驻。 */
+function subEl(){ let el=document.getElementById('mSub');
+  if(el && viewEl.contains(el)) return el;
+  el=document.createElement('div'); el.className='talksub'; el.id='mSub';
+  viewEl.appendChild(el); return el; }
+function showSub(name, text){ if(!viewEl) return; const el=subEl();
+  if(!OPT.lines || !text){ el.classList.remove('on'); el.innerHTML=''; return; }
   const who=document.createElement('span'); who.className='who';
   /* 「谁在说」这行用表里的中文类别名（SW.L，由 character_voice 的 voice_name 落过来），
      动作组名（complete / touch_body）是英文的，直接显示等于把内部键露给用户。 */

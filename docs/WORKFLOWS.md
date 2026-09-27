@@ -633,6 +633,7 @@
 |---|---|---|
 | `scripts/`、`scripts/diag/`、`gallery_src/`、`docs/`、根 `*.md` | —— | ✅ 已入 Git，随时可取 |
 | `inputs/azdata/azdata_ship_{skin_template,data_statistics,data_template}.json` + `azdata_version.json` | **`scripts/build_ship_meta.py` / `extract_live2d_voice.py` 的唯一权威输入**（舰名/阵营/舰种/稀有度/CV id 全从这里来），也是 `tools/sharecfg_re` 的已知明文基准 | ⚠️ 半可再生：社区快照会滞后（385 时最新仍 381），且 `sharecfgdata/*` 是**自定义加密**、本机无解 → **务必当源文件保护**。2026-09-24 从 `.diag/` 迁到此处；`sha256` 台账 = `inputs/azdata/MANIFEST.json`，跑前 `py -3 scripts/diag/check_inputs.py` 校验。旧 `.diag/azdata_tree.json` 经核实内容是 14 字节 `Invalid input.`（上游报错残留，非数据），已删不再列入白名单 |
+| `inputs/gamecfg/ship_skin_words.json`（4.9MB / 2569 行） | **台词中文正文的唯一副本**，`scripts/build_skin_words.py` 的唯一输入 | ⚠️ 半可再生：要能跑通 `sharecfgdata` 容器文法（§33/§36，`37_parse_sharecfgdata.py --scalar-all`）。2026-09-27 从 `.diag/sharecfg_re/cfg_json/` 迁到此处（原先只住在那儿，清盘即永久丢失）；`sha256` 台账 = `inputs/gamecfg/MANIFEST.json` |
 | `Output/dependency_manifest.json`（~15MB / 86k+ 条） | `compose_paintings_v2`、`extract_spine_v2`（PPtr→包 依赖表） | ✅ 可再生：`export_dependency_manifest.py` |
 | `Output/ship_meta.json` | `build_gallery_index`（元数据主源） | ✅ 可再生：`build_ship_meta.py --write` |
 | `Output/WikiData/ship_data.json` | `build_gallery_index` 兜底 | ✅ 可再生：`scrape_wiki_fast.py`（需外网） |
@@ -723,7 +724,7 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 5. **动作数据必须有外部权威基准，别自证清白**：`motion3.json` 的贝塞尔控制点是**绝对 (时间,值)**，运行时直读不做归一化还原；写成归一化分数会让每条贝塞尔都先猛蹿到≈0 再跳目标值，而**曲线集合/时长/参数名全部校验都能通过**（§21）。唯一能抓出它的是同模型的权威导出：`scripts/diag/l2d_ref_diff.py` 拉 l2d.su 的 `motions/<group>.motion3.json` 逐曲线采样比对。
 6. **启动序列必须走 `apply()`，不能直接 `renderGrid()`**（2026-09-26，§44）：`view` 的初值是 `ships.slice()`（索引原序），排序只发生在 `apply()` 里，而 `apply()` 只绑在筛选控件的 change/input 事件上。启动直接 `renderGrid()` ⇒ 首屏未排序（VTuber 联动与 `-META` 变体排最前），用户"随便点一个筛选再回来才正常"就是这个。改法一行：结尾 `renderGrid();` → `apply();`。**通用形状**：凡"初始状态是某个函数算出的派生状态"，启动就必须调那个函数，不能既初始化一份原始数据、又指望事件来补。
 
-**回归五件套（按顺序跑）**:
+**回归六件套（按顺序跑；2026-09-27 起第 6 件是台词/开关验收）**:
 ```bash
 # 0) 部署
 py -3 scripts/deploy_gallery.py
@@ -738,6 +739,8 @@ py -3 scripts/diag/l2d_inspector_verify.py lafeiii_3
 py -3 scripts/diag/interact_verify.py
 # 5) 全量按部位点击（约 25 分钟，269 皮肤；基线 806/807，唯一 z46_3 框嵌框歧义）
 py -3 scripts/diag/hit_verify.py
+# 6) 台词/字幕与两个全局开关（2026-09-27 加：改过语音条、字幕、语音页或 skin_words/skin_voice 之后必跑）
+py -3 scripts/diag/talk_verify.py --shots
 ```
 
 > ⚠️ **回归工具自身的两类假失败（2026-09-26 全踩了一遍，各修一处）**——工具红了不代表产品坏了，先证探针再定罪：
@@ -1133,4 +1136,52 @@ rip 相对引用——"同一把密钥/同一个静态槽还有谁在用"只能�
 `scripts/diag/voice_v2_verify.py`（三格实播验收：真实 UI 路径 + CDP 包 `window.Audio`）；
 `scripts/diag/l2d_voice_diff_check.py`（零回退闸门，兼容 v1/v2 两种表形 + 按皮肤序号裁定"丢组"）；
 `inputs/gamecfg/character_voice.json`、`inputs/azdata/azdata_ship_skin_template.json`、`files/hashes-cv.csv`（判断"包没下载"而非"解析不出"的对照）。
-相关：`WF-17`（Live2D 动作语音旧管线，被本 WF 的取词规则取代）、`WF-15`/`WF-16`（换入闸门与回归五件套）、`WF-19`（判据优先挑两边可独立算的量）、技能 `live2d-web-runtime-integration` / `spine-web-runtime-integration`。
+相关：`WF-17`（Live2D 动作语音旧管线，被本 WF 的取词规则取代）、`WF-15`/`WF-16`（换入闸门与回归六件套）、`WF-19`（判据优先挑两边可独立算的量）、技能 `live2d-web-runtime-integration` / `spine-web-runtime-integration`。
+
+---
+
+### WF-22: 把「台词正文」接进画廊——皮肤行 id 当钥匙、别名查表不猜、验收量"逐字 + 可播 + 反向证据"
+
+**目标**: 语音只有声音、没有中文台词时，把 `ship_skin_words` 的正文接到画廊三格与语音页上，
+并让「点击出声 / 显示台词」成为两个互相独立的全局开关。
+**适用场景**: 新增一类"文本 ↔ 已导出音频"的配对；或要给画廊加全局交互开关。
+
+**数据链（每一步都可单独重跑，谁也不挡谁）**：
+```
+files/AssetBundles/sharecfgdata/ship_skin_words
+  → tools/sharecfg_re/37_parse_sharecfgdata.py --scalar-all   （容器文法，§33/§36）
+  → .diag/sharecfg_re/cfg_json/ship_skin_words.json
+  → tools/sharecfg_re/42_publish_gamecfg.py                   （清洗成标量表 + sha256 台账）
+  → inputs/gamecfg/ship_skin_words.json                       ← 正文唯一副本，**不许再放回 .diag/**
+  → scripts/build_skin_words.py                               （按 cv*10+idx join 语音表）
+  → Output/gallery_v2/skin_words.json  {m:皮肤→行id, w:行id→{运行时名:正文}, L:运行时名→中文类别名}
+  → scripts/build_gallery_index.py                            （voiceCount 换权威源）
+  → gallery_src/index.html                                    （字幕条 + 语音页 + 两个开关）
+```
+
+**三条可复用的做法**：
+1. **钥匙要用"上游已经算好的字段"，不要新造匹配**。`skin_voice.json` 里每条皮肤带 `cv`(语音包号) 与
+   `idx`(皮肤序号)，`cv*10+idx` 正好是台词表主键 ⇒ 音频与正文取自**同一行**，同皮肤同档位是结构性保证，
+   不需要第二套对齐逻辑（也就不存在两套逻辑各自漂移的风险）。
+2. **类别名之间的映射一律查游戏自己的表**：`character_voice` 的 `key`(正文字段) ↔ `resource_key`(cue 类别)
+   ↔ `l2d_action`(动作组/触摸槽) 三条链覆盖 93 个运行时名，且**先断言"一个运行时名不对多个字段"**
+   （实测 0 冲突）。表没覆盖的才回退同名直取。
+3. **产物拆两份、别改已验收的那份**：`skin_voice.json` 是 75 分钟全量导出的已验收产物（零回退闸门以它为基准），
+   正文单独落 `skin_words.json`，前端两次 fetch、各自可重生。
+
+**判据（`py -3 scripts/diag/talk_verify.py --shots`，退出码即结论）**：
+- 三格各点一次 + **直接点立绘**（用户说的"点击有声音"是这条，不是点按钮）；
+- 字幕**逐字**等于表里该槽位正文，且"谁在说"那行必须是**中文类别名**（不是 `complete`/`touch_body` 这种内部键）；
+- 开关矩阵要拿到**反向证据**：关显示台词 ⇒ 仍出声且字幕为空；关点击出声 ⇒ 新 Audio 数=0 且仍上字幕；
+- **阴性对照**：挑"有音频但游戏本来没写词"的槽位（部分船的摸头），必须出声且**不弹空字幕**；
+- 语音页逐行比对行数 / 正文数 / **每行 `<audio>` 的可见高度**（只数行会放过"播放器被压成 0 高"）；
+- 无语音皮肤必须显式 🔇，不许静默空白；
+- 持久化用**非常规组合**（on/off）验证，全 on 时"读默认值"也能过。
+
+**踩坑记录**：见 §54（闸门把白名单字段剔出比较 = 假绿灯；`flex:1` 压扁 audio；
+探针依赖上一轮 localStorage；阴性对照没点到那个槽位；CRLF 让台账校验长期报假红灯）。
+
+**涉及文件**：`scripts/build_skin_words.py`、`scripts/diag/gallery_index_diff_check.py`（索引零回退闸门）、
+`scripts/diag/talk_verify.py`、`scripts/build_gallery_index.py`、`gallery_src/index.html`、
+`tools/sharecfg_re/42_publish_gamecfg.py`、`inputs/gamecfg/{ship_skin_words,character_voice}.json`。
+相关：`WF-21`（语音 v2 导出）、`WF-16`（回归六件套，第 6 件就是本 WF 的 `talk_verify`）、`WF-15`（换入闸门）、§47/§49/§53/§54。

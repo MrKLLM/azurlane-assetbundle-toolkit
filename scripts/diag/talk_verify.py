@@ -154,6 +154,16 @@ CLICK = r"""(async(key, tab, opts)=>{ try{
                   who: (sub.querySelector('.who')||{}).textContent||'',
                   text: [...sub.querySelectorAll('span')].filter(x=>!x.classList.contains('who')).map(x=>x.textContent).join('')}
                 : null;
+  res.inFSTarget = !!(sub && document.getElementById('mView').contains(sub));
+  /* 全屏：三格「全屏」按钮 requestFullscreen() 的是 #mView，字幕必须在那棵子树里才看得见。
+     结构判据（inFSTarget）是硬指标；真进一次全屏只是补一条直读证据，进不去（无手势授权）不算失败。 */
+  try{ const v=document.getElementById('mView');
+    await v.requestFullscreen();
+    const r=sub?sub.getBoundingClientRect():null;
+    res.fs={entered:document.fullscreenElement===v, subH:r?Math.round(r.height):0,
+            subW:r?Math.round(r.width):0, subInFs: !!(sub && document.fullscreenElement
+                                                     && document.fullscreenElement.contains(sub))};
+    await document.exitFullscreen(); }catch(e){ res.fs={err:String(e.message||e).slice(0,70)}; }
   /* 期望字幕 = 「该槽位的正文」；关显示台词时期望空；游戏没写词的槽位期望也是空（阴性对照） */
   const wantSub = wantText ? (res.expect||'') : '';
   res.subMatch = !!(res.sub && res.sub.text === wantSub);
@@ -248,6 +258,38 @@ IMAGECLICK = r"""(async(key)=>{ try{
     slot, expect:slot?(w[slot]||''):'',
     subText: sub? [...sub.querySelectorAll('span')].filter(x=>!x.classList.contains('who')).map(x=>x.textContent).join('') : null});
 }catch(err){ return JSON.stringify({key, thrown:String(err).slice(0,200)}); }})"""
+
+# 真进一次全屏：requestFullscreen 需要**用户手势**，直接 evaluate 调会被 "Permissions check failed" 拒，
+# 所以这里只准备数据（点出一条台词 + 报出「全屏」按钮的屏幕坐标），点击交给 CDP Input.dispatchMouseEvent。
+FS_PREP = r"""(async(key)=>{ try{
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  await Promise.all([loadVoiceMap(), loadWords()]);
+  let ship=null, sk=null;
+  for(const s of GALLERY.ships){ const k2=s.skins.find(x=>x.key===key); if(k2){ship=s;sk=k2;break;} }
+  if(!sk) return JSON.stringify({key, err:'找不到皮肤'});
+  openShip(ship); setSkin(sk); buildSkinList(ship);
+  const pt=[...document.querySelectorAll('#mTabs .tab')].find(x=>x.dataset.k==='painting');
+  if(!pt || pt.classList.contains('dis')) return JSON.stringify({key, err:'静态立绘标签不可用'});
+  pt.click();
+  let b=null;
+  for(let i=0;i<40;i++){ const bs=[...document.querySelectorAll('.vbox button[data-vk]')];
+    b=document.getElementById('zFull'); if(bs.length && b) break; await t(300); }
+  const tap=[...document.querySelectorAll('.vbox button[data-vk]')][0];
+  if(!tap) return JSON.stringify({key, err:'没有可点的语音按钮'});
+  tap.click(); await t(600);
+  const sub=document.getElementById('mSub'), r=b.getBoundingClientRect();
+  return JSON.stringify({key, x:Math.round(r.left+r.width/2), y:Math.round(r.top+r.height/2),
+    btn:b.textContent, subText: sub?sub.textContent.slice(0,40):null,
+    subH: sub?Math.round(sub.getBoundingClientRect().height):0});
+}catch(err){ return JSON.stringify({key, thrown:String(err).slice(0,160)}); }})"""
+
+FS_READ = r"""(()=>{ const sub=document.getElementById('mSub');
+  const r=sub?sub.getBoundingClientRect():null;
+  return JSON.stringify({fs: document.fullscreenElement?document.fullscreenElement.id:null,
+    subInFs: !!(sub && document.fullscreenElement && document.fullscreenElement.contains(sub)),
+    subH: r?Math.round(r.height):0, subW: r?Math.round(r.width):0,
+    subShown: !!(sub && sub.classList.contains('on')),
+    text: sub?sub.textContent.slice(0,40):''}); })()"""
 
 SETOPT = r"""(k,on)=>{ const b=document.querySelector('#gOpt button[data-k="'+k+'"]');
   if(!b) return 'NO BUTTON'; if((typeof OPT!=='undefined')&&OPT[k]!==on) b.click();
@@ -362,13 +404,13 @@ def main():
                 fails.append('%s 没挑到样本（挑样本的判据没匹配到皮肤）' % tab)
                 continue
             r = jev('(%s)(%s,%s,%s)' % (CLICK, json.dumps(key), json.dumps(tab), 'null'), '%s 实播' % tab)
-            ok = r.get('playing') and r.get('subMatch') and r.get('whoOk')
+            ok = r.get('playing') and r.get('subMatch') and r.get('whoOk') and r.get('inFSTarget')
             print(f'{"✅" if ok else "❌"} [{tab}] {key} 出声={r.get("playing")} '
-                  f'字幕逐字一致={r.get("subMatch")} 中文类别名={r.get("whoOk")} 槽位={r.get("slot")} '
-                  f'新Audio={r.get("newAudio")} opt={r.get("opt")} '
+                  f'字幕逐字一致={r.get("subMatch")} 中文类别名={r.get("whoOk")} 在全屏目标内={r.get("inFSTarget")} '
+                  f'槽位={r.get("slot")} 新Audio={r.get("newAudio")} opt={r.get("opt")} '
                   f'audio={json.dumps(r.get("audio"), ensure_ascii=False)}')
             print(f'      字幕=「{(r.get("sub") or {}).get("text","")[:60]}」 期望=「{(r.get("expect") or "")[:60]}」 '
-                  f'谁=「{(r.get("sub") or {}).get("who","")}」 条={r.get("pill","")[:40]}')
+                  f'谁=「{(r.get("sub") or {}).get("who","")}」 全屏实测={json.dumps(r.get("fs"), ensure_ascii=False)}')
             shot('%s_%s' % (tab, key))
             if not ok:
                 fails.append(f'[{tab}] {key}: ' + json.dumps(r, ensure_ascii=False)[:300])
@@ -384,8 +426,34 @@ def main():
             if not ok:
                 fails.append('点立绘没走出「声+字幕」: ' + json.dumps(r, ensure_ascii=False)[:300])
 
+        # ---- 真进一次全屏：CDP 可信点击「全屏」按钮，再量字幕（结构判据的直读版）----
+        if k:
+            p = jev('(%s)(%s)' % (FS_PREP, json.dumps(k)), '全屏准备')
+            if p.get('err') or p.get('thrown'):
+                fails.append('全屏用例准备失败: ' + json.dumps(p, ensure_ascii=False)[:200])
+            else:
+                for ty in ('mousePressed', 'mouseReleased'):
+                    cmd('Input.dispatchMouseEvent', {'type': ty, 'x': p['x'], 'y': p['y'],
+                                                     'button': 'left', 'clickCount': 1,
+                                                     'buttons': 1 if ty == 'mousePressed' else 0})
+                time.sleep(1.5)
+                r = jev(FS_READ, '全屏内字幕')
+                if r.get('fs') != 'mView':
+                    fails.append('没进成全屏（fs=%r），这条判据没被执行过，不算通过 —— 准备=%s'
+                                 % (r.get('fs'), json.dumps(p, ensure_ascii=False)[:160]))
+                else:
+                    ok = (r.get('subInFs') and r.get('subShown')
+                          and r.get('subH', 0) > 10 and r.get('subW', 0) > 40)
+                    print(f'{"✅" if ok else "❌"} [全屏实测] 点「{p.get("btn")}」→ fullscreenElement={r.get("fs")} '
+                          f'字幕在树内={r.get("subInFs")} 显示={r.get("subShown")} '
+                          f'尺寸={r.get("subW")}x{r.get("subH")} 文本=「{r.get("text","")}」')
+                    shot('fullscreen')
+                    if not ok:
+                        fails.append('全屏里字幕不可见: ' + json.dumps(r, ensure_ascii=False)[:240])
+                ev('document.exitFullscreen && document.exitFullscreen(); 1')
+                time.sleep(0.6)
+
         # ---- 开关矩阵：两条独立，各自都要验到「反向证据」 ----
-        k = pick.get('paint')
         if k:
             setopt('lines', False)
             r = jev('(%s)(%s,%s,%s)' % (CLICK, json.dumps(k), '"painting"', '{"nolines":true}'), '关显示台词')

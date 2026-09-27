@@ -1465,7 +1465,7 @@ public static byte[] Make(byte[] bytes, bool enc) {
 **待放行清单（三项，都可单独退回）**：
 1. `py -3 scripts/build_ship_meta.py --write` → 重写 `Output/ship_meta.json`（带 voice_actor_name）；
 2. `L2D_VOICE_ALL=1 py -3 scripts/extract_live2d_voice.py` → 重导语音映射（拿 6 条新别名；先 1–3 个样本对照）；
-3. 前端若要把声优名/新别名显示到画廊 → 需 `deploy_gallery.py` + WF-16 回归五件套。
+3. 前端若要把声优名/新别名显示到画廊 → 需 `deploy_gallery.py` + WF-16 回归六件套。
 
 **§35 补：别名改表驱动的 A/B 实测（只读，`--report`，写入=False）**
 - 生产 `l2d_voice.json` 现状：253 皮肤 / **2504** 个 (皮肤,动作组) / 5914 个文件条目 / **20 种动作组**；
@@ -1575,7 +1575,7 @@ Windows 下 `text=True` 用**locale 编码**（这台机是 GBK）解码子进�
 
 **不需要重建索引**：`l2d_voice.json` 的读者只有 `gallery_src/index.html`（运行时 fetch）与两个 diag 探针，
 `build_gallery_index.py` 不读它 ⇒ 无派生产物要跟着重跑。
-**未跑 WF-16 五件套**：本轮**没有**修改 `gallery_src/index.html`，按 AGENTS 那条"改前端才必须先部署再跑回归"的触发条件不成立；
+**未跑 WF-16 六件套**：本轮**没有**修改 `gallery_src/index.html`，按 AGENTS 那条"改前端才必须先部署再跑回归"的触发条件不成立；
 需要的话我可以补跑（`interact_verify`/`hit_verify` 等）。
 
 ---
@@ -2481,3 +2481,56 @@ y 方向不夹，所以只有"纵坐标离画布中心最近"的那一两个会�
 先量产品再定罪：文件没问题 ⇒ 是**固定等待**型假失败（WF-16 已记过一次），改成轮询到真的走秒。
 **涉及文件**: `scripts/extract_cv_voice.py`（小写归一 + `--skip-done`）、`scripts/diag/voice_v2_verify.py`（轮询）、
 `.diag/_cv_miss_after.json`（修后 354 无解清单）。相关：§47、§49、WF-21。
+
+---
+
+## §54. 「点立绘还是没台词弹出来」= 三层原因叠在一起，其中两层各自都有假绿灯（2026-09-27）
+
+**日期**: 2026-09-27　**状态**: ✅ 三层全部落地并实播验收（索引换入待用户放行）
+
+**症状**：语音 v2（§47/§49/§53）已经"点得出声"，用户仍报"没有台词弹出来"。
+
+**三层原因，逐层都要有对照，否则每层都能给自己造一个绿灯**：
+
+1. **正文从来没进过前端**（主因）。`skin_voice.json` 的 `lines[].label` 是**类别名**
+   （"普通触摸""查看详情"），不是角色说的话；台词中文正文在 `ship_skin_words`（2601 行 / 2569 行有词）。
+   ⇒ 全库任何皮肤都不会弹正文，这不是偶发。
+   **钥匙**：`皮肤行 id = cv*10 + idx`（`cv`/`idx` 是语音 v2 已经算好的两字段）正是这张表的主键 ⇒
+   **音频与正文取自同一行**，天然同皮肤同档位，不需要再匹配一次。
+   **类别名 → 正文字段**查 `character_voice` 的 `key ↔ resource_key ↔ l2d_action`（16 条别名，表驱动不猜）；
+   `main1..7` 表里常缺，游戏把三条合并在 `main` 字段用 `|` 分隔 ⇒ 按序号拆。
+2. **索引口径陈旧**。`index.json` 的 `voiceCount`/`voices` 还是 v1 那条
+   「社区 CV_MAP(719 条) → 中文名 → 拼音」链算的 ⇒ 1008 组船里 **740 组显示"语音 0"、语音标签直接置灰**，
+   而其中 **590 组在 `skin_voice.json` 里真有 20~27 条**。角标 🔊N 与"含语音"筛选同源同错。
+3. **353 张真无源**（224 两侧无包 + 84 后缀待裁定 + 16 无 CV + 30 其它，见 §49/§53）⇒ 只能显式标 🔇。
+
+**四条踩坑（两条是判据自身的假绿灯）**：
+- **闸门把"允许变化的字段"从比较里整个剔掉 ⇒ 它最关心的那条判据永远不会触发**。
+  首版 `gallery_index_diff_check.py` 用 `scalars(d, skip=allow|...)`，`voiceCount` 进了 skip，
+  于是"归零"分支不可达，输出 PASS。通用形状：**白名单 = 期望变化，不是不比较**。
+- **"归零"有两种，别用船名例外名单区分**。旧口径 `voiceCount` 归零既可能是丢了本船语音（回退），
+  也可能是旧语音本来就属于别的船（修正）。判据用游戏自己的表：
+  旧文件里的包号 `cv-<N>` 若在该船任何皮肤的游戏表行（`painting → id//10`）里**一个都不出现** ⇒ 修正。
+  实测：`柯蕾` 旧 3 条来自 `cv-20705`（= 可畏），归零是修正；
+  `拉菲` 的 `cv-10117-gift` 包号能对上 ⇒ 归零是回退，于是给它保留了 `voiceExtra`（见下）。
+- **换行符让台账校验长期报假红灯**。`42/45_publish_*.py` 用文本模式写盘，Windows 下 `\n`→`\r\n`，
+  而台账里的 `bytes`/`sha256` 是 LF 版本算的 ⇒ 只要产物带换行，`check_inputs.py` 必报 DRIFT
+  （`npc_painting_name.json` 4923B vs 台账 4670B 就是这么来的，不是数据漂移）。改成二进制写。
+- **`flex:1` 在列向 flex 容器里把 `<audio>` 压成 0 高**（实测 24 行全 `h=0`）：
+  `flex:1` = `flex-basis:0%`，容器高度又由内容决定 ⇒ 没有剩余空间可长。改 `flex:none` + 固定高。
+  **这条是"行数/正文数都对得上"的判据放过去的** ⇒ 语音页的本职是"能播"，判据必须量 `audio` 的
+  存在**与可见高度**，不能只数行。
+
+**验收（`scripts/diag/talk_verify.py`，全部走真实 UI 路径）**：三格各点一次 + 直接点立绘 +
+开关矩阵两条反向证据 + 阴性对照 + 语音页逐行比对 + 持久化，全 ✅。
+- **阴性对照必须点到那个槽位**：首版一律点第一个按钮，于是"摸头无正文"这条实际点的是普通触摸，
+  报了个假失败。挑样本时把 `slot` 一起带下去。
+- **探针不许依赖上一轮的 localStorage**：无头 Chrome 被 kill 时不保证落盘，
+  下一轮开局 `OPT={voice:false,lines:false}` ⇒ 三格全"没出声"。每轮先把开关按回基线。
+- **持久化要设成非常规组合再重开**（voice=on/lines=off）：全 true 时"读默认值"也能过。
+
+**涉及文件**: `scripts/build_skin_words.py`（新）、`scripts/diag/gallery_index_diff_check.py`（新）、
+`scripts/diag/talk_verify.py`（新）、`scripts/build_gallery_index.py`（语音口径换源 + `voiceExtra`）、
+`gallery_src/index.html`（字幕条 / 语音页 / 两个全局开关）、`tools/sharecfg_re/42_publish_gamecfg.py`
+（发布 `ship_skin_words` + 二进制写）、`Output/gallery_v2/skin_words.json`、`inputs/gamecfg/`。
+相关：§47、§49、§53、WF-21、WF-22。
