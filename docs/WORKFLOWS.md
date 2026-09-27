@@ -1061,6 +1061,18 @@ rip 相对引用——"同一把密钥/同一个静态槽还有谁在用"只能�
    JS 里 `dispatchEvent`/`.click()` 无用户激活，`play()` 会被策略拒 —— 那类失败长得和数据缺陷一模一样。
 8. **零回退闸门**：换权威源后，旧表每一条 `(皮肤,动作组)` 必须仍在新表里（丢组必须为 0），
    并抽样打印"旧=多条混抽 / 新=本皮肤一条"的逐组对照，让改动方向肉眼可见。
+   - 新旧表形不同也要能用同一个闸门：`l2d_voice_diff_check.py` 已兼容 v2 的
+     `{皮肤:{cv,idx,src,l2d,tap,lines}}`（比对取 `l2d` 子表，音频清单把 `tap`+`lines` 一起算存在性/占位）。
+   - **"丢组"要按规则裁定，不要按名字放行**：cue 尾部 `_N` 是皮肤序号 ⇒ 旧表里存在
+     "本皮肤拿到别的皮肤序号台词"的条目，新表删掉它是**修正**。判据 = 旧文件名尾部 `_N` 存在且 ≠ 本皮肤 `idx`
+     （2026-09-27 这样查掉 4 条，全是 `touch_head`，逐条回看包内文件确认序号各归其主）。
+9. **出声验收必须走真实 UI 路径 + 包住 `window.Audio`**：`scripts/diag/voice_v2_verify.py`
+   （CDP `Page.addScriptToEvaluateOnNewDocument` 在页面脚本执行前包 Audio，录 src/play/pause/ended/error）。
+   断言三件：新实例的 `paused=false` 且 `currentTime>0.1`、`error=null`、**src 尾部文件名属于本皮肤序号档**。
+   ⚠️ 探针取页面状态的两个假绿灯坑（本轮真踩）：`let SV` **不挂 window**（`window.SV` 恒 undefined），
+   且表是 `mountSkinVoice` 里异步拉的 ⇒ 不 `await loadVoiceMap()` 就"谁都无语音"，
+   于是三个视图一个都没测到、只有"无语音"那条空洞通过，**输出却一片 ✅**。
+   通用形状：探针取不到被测状态时必须硬失败，不能让"没测到"长得像"测过了"。
 
 **踩坑**
 
@@ -1068,8 +1080,11 @@ rip 相对引用——"同一把密钥/同一个静态槽还有谁在用"只能�
   而所有结构校验、文件计数、播放器都全绿。详见 §47。
 - 48/66 两个数不是笔误：报"缺多少包"必须同时给两个口径——**包号级**（皮肤表要引用而磁盘没有的包）与
   **皮肤级**（连同船兄弟皮肤也推不出包号、因此真的拿不到语音的皮肤数）。只报前者会低估，只报后者会以为"解析 bug"。
-- 想证明"包是**没下载**而不是解析不出"：拿 `files/hashes-cv.csv` 与磁盘做 1:1 比对（清单里有的全在盘上 ⇒ 缺失项根本不在清单里 = 没取过），
-  再去设备侧 `scripts/mumu_sync.py diff` 只读确认存在，然后 `--apply --limit 20` 小样本、最后补全量重跑导出。
+- 想证明"包是**没下载**而不是解析不出"：拿 `files/hashes-cv.csv` 与磁盘做 1:1 比对（清单里有的全在盘上 ⇒ 缺失项根本不在清单里 = 没取过）。
+  **但"再去设备侧补取"这条已否证，别再排进计划**：2026-09-27 只读核对，设备 `cue` 4958 vs 本地 4726，
+  设备独有 232 个只属于 `cv-970113` 一个号，与那 66 个缺号**交集为 0**（59 个连前缀文件都没有）。
+  复核命令：`py -3 scripts/mumu_sync.py diff`（只读），逐号比对用
+  `adb -s <host> shell "ls <REMOTE>/AssetBundles/cue | grep '^cv-<n>'"`。详见 §49。
 - 换数据文件 = 半程部署风险。前端只读新表时，若新表只覆盖了样本，出声面会**倒退**（253→2）。
   安全暂停配方：`git diff -- <前端正本> > scripts/diag/<名>.patch` →（`git apply --check` 验可回放）→ `git checkout -- <正本>`
   → `deploy_gallery.py`（刷平运行目录）→ `--relink`（补硬链）→ `--check` 要求 4/4 同 inode。
@@ -1079,6 +1094,8 @@ rip 相对引用——"同一把密钥/同一个静态槽还有谁在用"只能�
 
 **涉及文件**：`scripts/extract_cv_voice.py`（`--probe` 只解码选词 / `--sample` 临时目录落盘 / `--all [--jobs N]`），
 产物 `Output/Audio/CV2/cv-<n>/<cue>.ogg` + `Output/gallery_v2/skin_voice.json`；
-`scripts/diag/voice-v2-frontend.patch`（三格接线的挂起补丁）；
+`scripts/diag/voice-v2-frontend.patch`（三格接线的挂起补丁，**2026-09-27 已 `git apply` 落地**）；
+`scripts/diag/voice_v2_verify.py`（三格实播验收：真实 UI 路径 + CDP 包 `window.Audio`）；
+`scripts/diag/l2d_voice_diff_check.py`（零回退闸门，兼容 v1/v2 两种表形 + 按皮肤序号裁定"丢组"）；
 `inputs/gamecfg/character_voice.json`、`inputs/azdata/azdata_ship_skin_template.json`、`files/hashes-cv.csv`（判断"包没下载"而非"解析不出"的对照）。
 相关：`WF-17`（Live2D 动作语音旧管线，被本 WF 的取词规则取代）、`WF-15`/`WF-16`（换入闸门与回归五件套）、`WF-19`（判据优先挑两边可独立算的量）、技能 `live2d-web-runtime-integration` / `spine-web-runtime-integration`。

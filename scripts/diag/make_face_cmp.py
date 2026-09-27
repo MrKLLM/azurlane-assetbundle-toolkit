@@ -1,18 +1,25 @@
 # -*- coding: utf-8 -*-
-"""为 35 个脸洞皮肤生成「改前 | 改后」对比图 + 差异区放大图 + 总览拼图。
-输出 .diag/facefix_cmp/<name>.png 与 .diag/facefix_cmp/_overview.png
+"""为一批脸洞皮肤生成「改前 | 改后」对比图 + 差异区放大图 + 总览拼图。
+输出 <cmp>/<name>.png 与 <cmp>/_overview.png
+用法：py -3 scripts/diag/make_face_cmp.py [--list .diag/face_holes_20260927.txt]
+        [--new .diag/facefix_rerun] [--cmp .diag/facefix_cmp]
 """
-import os, sys, json
+import os, sys, json, argparse
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ap = argparse.ArgumentParser()
+ap.add_argument('--list', default='.diag/face_holes.txt')
+ap.add_argument('--new', default='.diag/facefix_rerun')
+ap.add_argument('--cmp', default='.diag/facefix_cmp')
+a = ap.parse_args()
 OLD = os.path.join(ROOT, 'Output', 'Paintings_v2')
-NEW = os.path.join(ROOT, '.diag', 'facefix_rerun')
-CMP = os.path.join(ROOT, '.diag', 'facefix_cmp')
+NEW = os.path.join(ROOT, a.new)
+CMP = os.path.join(ROOT, a.cmp)
 os.makedirs(CMP, exist_ok=True)
-names = [l.strip() for l in open(os.path.join(ROOT, '.diag', 'face_holes.txt'), encoding='utf-8') if l.strip()]
+names = [l.strip() for l in open(os.path.join(ROOT, a.list), encoding='utf-8') if l.strip()]
 
 try:
     F = ImageFont.truetype('C:/Windows/Fonts/msyh.ttc', 22)

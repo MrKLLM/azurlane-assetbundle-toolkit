@@ -40,8 +40,13 @@ _env_cache = {}      # bundle_name -> env / False
 _obj_cache = {}      # (bundle, path_id) -> UnityPy object
 _img_cache = {}      # (bundle, path_id) -> PIL RGBA (flip=False)
 FACE_APPLIED = {}    # bundle_name -> 是否触发了 paintingface 脸洞叠层（扫描用）
-# 门控阈值：脸谱落笔处下方「不透明且有彩色」的实画占比超过它即判「脸已烤好」，不叠
-FACE_ART_MAX = float(os.environ.get("FACE_ART_MAX", "0.5"))
+FACE_GATE = {}       # bundle_name -> 门控实际读到的数（复扫/分诊用，见 diag/scan_faces.py）
+# 门控阈值：脸谱落笔处下方
+#   不透明占比低于 FACE_OPAQUE_MIN -> 透明洞（脸没烤进底图）
+#   底图与脸谱逐像素平均色差高于 FACE_MAD_MAX -> 那块画的不是这张脸（平涂灰块/缺头）
+# 二者任一成立即判洞、叠脸。见 §14 与 §48。
+FACE_OPAQUE_MIN = float(os.environ.get("FACE_OPAQUE_MIN", "0.5"))
+FACE_MAD_MAX = float(os.environ.get("FACE_MAD_MAX", "30"))
 
 
 def manifest():
@@ -590,8 +595,9 @@ def compose(bundle_name, out_dir, faces=None, save=True):
                 py = int(round(ch - (wy0 + wh)))
                 canvas.paste(img, (px, py), img)
                 cinfo.append(f"{part['name'] or pid}")
-        # ---- 叠 paintingface 默认脸（门控：只看脸谱自身落笔处，其下若已是「不透明+有彩色」的实画则说明脸已烤好，不叠）----
-        # 判据不能用整框不透明率：face rect 常含大片透明背景，已烤脸的皮肤（如 leiniya_wjz）整框率会跌破 0.5 而误叠。
+        # ---- 叠 paintingface 默认脸（只在脸谱自身落笔处量底图：透明洞看不透明占比，
+        #      「这里画的是不是这张脸」看与脸谱的逐像素色差 MAD。sat≥30 那版判据会把淡色真脸
+        #      整片误判成洞——48 张带标签样本上 MAD 两侧差 5 倍，见 §14 与 §48）----
         if face_pid is not None and face_pid in boxes:
             rx, ry, rw, rh = boxes[face_pid]
             fpx = int(round(rx)); fpy = int(round(ch - (ry + rh)))
@@ -615,19 +621,40 @@ def compose(bundle_name, out_dir, faces=None, save=True):
                     sub = np.asarray(canvas.crop((fpx, fpy, fpx + fww, fpy + fwh))).astype(int)
                     rgb = sub[..., :3]
                     sat = rgb.max(axis=2) - rgb.min(axis=2)
-                    frac_realart = float(((sub[..., 3] >= 250) & (sat >= 30) & foot).sum()) / n_foot
-                    if frac_realart < FACE_ART_MAX:
+                    opq = (sub[..., 3] >= 250) & foot
+                    frac_opaque = float(opq.sum()) / n_foot
+                    frac_realart = float((opq & (sat >= 30)).sum()) / n_foot
+                    # 底图在脸槽处画的是不是这张脸：直接和脸谱逐像素比色差。
+                    # 可比像素 <64 说明底图这里几乎没落笔 -> 属透明洞，交给 frac_opaque 分支。
+                    mad = float(np.abs(sp[..., :3] - rgb)[opq].mean()) if int(opq.sum()) >= 64 else None
+                    hole = frac_opaque < FACE_OPAQUE_MIN or mad is None or mad > FACE_MAD_MAX
+                    if face_override is None:
+                        FACE_GATE[bundle_name] = {
+                            "n_foot": n_foot,
+                            "frac_opaque": frac_opaque,
+                            "frac_realart": frac_realart,   # 已退役的 sat 判据，仅留作与 §14 对照
+                            "mad": mad,
+                            "hole": hole,
+                            # 脸槽在画布上的像素框，供「量在盘产物」的复核工具对齐用
+                            "face_px": (fpx, fpy, fww, fwh),
+                        }
+                    if hole:
                         canvas.paste(fimg, (fpx, fpy), fimg)
                         cinfo.append(f"face-overlay:{FACE_DEFAULT if face_override is None else face_override}")
                     else:
-                        cinfo.append(f"face-skip(realart={frac_realart:.2f})")
+                        cinfo.append(f"face-skip(mad={mad:.1f})")
         return canvas, cinfo
 
     os.makedirs(out_dir, exist_ok=True)
     canvas, cinfo = render()
     face_applied = any(str(x).startswith("face-overlay") for x in cinfo)
     FACE_APPLIED[bundle_name] = face_applied
-    base = canvas.crop(canvas.getbbox() or (0, 0, cw, ch))
+    bb = canvas.getbbox() or (0, 0, cw, ch)
+    base = canvas.crop(bb)
+    if bundle_name in FACE_GATE:
+        # 成品 = 画布按 getbbox 裁过，落盘坐标 = 画布坐标 - 此偏移
+        FACE_GATE[bundle_name]["crop_off"] = (bb[0], bb[1])
+        FACE_GATE[bundle_name]["canvas"] = (cw, ch)
     out = os.path.join(out_dir, f"{bundle_name}.png")
     if save:
         base.save(out)
