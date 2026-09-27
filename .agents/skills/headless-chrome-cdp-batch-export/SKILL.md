@@ -74,6 +74,17 @@ version: 1.3.0
     出现"我明明改了也部署了，截图却还是旧的"这种假矛盾，足以让人误判修复无效、甚至去改本来正确的代码。
     ⇒ 探针要么每次用唯一 profile（`chrome_x_<timestamp>`），要么收尾按 profile 精确清进程；
     判"修复无效"之前先确认自己没连到旧实例。
+    **同一坑的两种更狠的形态（2026-09-27 各踩一次，把用户机器压到只剩 1.1GB 空闲）**：
+    ① `proc.terminate()` 只杀启动器、**不杀进程树** —— crashpad / gpu(SwiftShader) / network /
+       若干 renderer 会整棵留着继续吃 CPU 与内存（一次验收漏两棵树 = 16 个 chrome 进程）。
+       正确收尾是整树杀：`subprocess.call(['taskkill','/T','/F','/PID',str(proc.pid)])`。
+    ② 清理语句写在脚本**最后一行** ⇒ 中途抛异常（典型 `RuntimeError: Execution context was destroyed`）
+       就压根执行不到，比"忘了写 terminate"更隐蔽，因为正常路径看着是对的。
+       正确姿势：注册 `atexit`（本项目已抽成 `scripts/diag/chrome_tree.py:install(proc)`），
+       新增探针一律走它，别再各自在末尾写 `terminate()`。
+    ③ 自查残留时 `Get-CimInstance Win32_Process | ? { $_.CommandLine -match "chrome_x_1"` 这类写法
+       会**匹配到执行查询的 powershell/bash 自己**（查询串就在它的 CommandLine 里），
+       误报"还有 N 个残留"、甚至差点去 kill 自己的 shell —— 先按 `$_.Name -eq "chrome.exe"` 过滤再匹配。
 11. **观测通道的编码问题会被当成被测对象的缺陷**：Python 在中文 Windows 上 stdout 默认 GBK，
     把 UTF-8 内容（如带中文的资源名）打成 mojibake 后打印出来，看起来像**被测数据编码坏了**。
     本项目据此写过一条"`.skel` 与 `.atlas` 区域名编码不一致"的错误结论，
