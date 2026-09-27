@@ -2393,7 +2393,9 @@ y 方向不夹，所以只有"纵坐标离画布中心最近"的那一两个会�
    （`--relink` 会跳过"正本有未提交改动"的文件，所以必须先提交再补链。）
 3. **`Execution context was destroyed` 这次不是两个 Chrome 抢 CDP**（§50 记的那一类），
    而是**探针在页面还在导航时就 evaluate**。同一张 tab 的上下文在导航结束后会重建，
-   `document.readyState==='complete'` + 最多 6 次重试即可（已加进 `l2d_coord_forensics.py` / `interact_verify.py`）。
+   `document.readyState==='complete'` + 最多 6 次重试即可（已加进 `l2d_coord_forensics.py` / `interact_verify.py`，
+   同日复测判定区时 `l2d_inspector_verify.py` 又被打红一次——**三个脚本都装了才算修完**，
+   拿不到稳定上下文一律显式 `exit 2` 并报"探针故障，非产品故障"）。
    另：`page_sanity_check.py` 此前完全不清理 Chrome（连 `proc` 都没接住），本轮漏了 8 个进程，已补 `chrome_tree.install`。
 
 **残留待办（本轮明确不修，另起一轮）**: 有一批标记**静止态就在画面内、不透明度 1、却压根没登记**，

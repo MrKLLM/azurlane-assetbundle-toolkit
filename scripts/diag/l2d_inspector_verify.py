@@ -113,7 +113,19 @@ JS = r"""(async(key)=>{ try{
   f.value=''; f.oninput();
   return JSON.stringify(out,null,1);
 }catch(e){ return 'ERR '+(e.message||e); }})"""
-out = ev(JS + f"({json.dumps(KEY)})")
+out = None
+for _try in range(6):
+    try:
+        if ev("document.readyState") != 'complete':
+            time.sleep(2); continue
+        out = ev(JS + f"({json.dumps(KEY)})"); break
+    except RuntimeError as e:
+        # 页面仍在导航时 CDP 执行上下文会被销毁 —— 探针自身的假失败（与"两个 Chrome 抢 CDP"
+        # 是两类成因，串行也照犯）。上下文在导航结束后重建，重连同一张 tab 即可。
+        print(f"  [retry {_try+1}] {str(e)[:70]}", flush=True); time.sleep(4)
+if out is None:
+    print('[ERROR] 6 次仍拿不到稳定执行上下文（探针故障，非产品故障）')
+    ws.close(); chrome_tree.kill_tree(proc.pid); sys.exit(2)
 with open(os.path.join(ROOT, '.diag', '_probe_feats.json'), 'w', encoding='utf-8') as f:
     f.write(out if isinstance(out, str) else json.dumps(out))
 r = cmd('Page.captureScreenshot', {'format': 'png'})
