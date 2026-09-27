@@ -635,23 +635,39 @@ async function renderLive2D(s, sk){
     const areaG=new PIXI.Graphics(); areaG.visible=false; app.stage.addChild(areaG);
     const areaTs=hitAreas.map(()=>{ const tx=new PIXI.Text('',{fontSize:11,fill:0xffffff,stroke:0x0a0d18,strokeThickness:3});
       tx.visible=false; app.stage.addChild(tx); return tx; });
+    /* V(顶点原生) → P → stage 像素：P=(Vx+cux/2, cuy/2-Vy)，stage = mdl.pos + P*ppu*scale。
+       apply() 只设 mdl.scale/x/y（无旋转无锚点），手工映射即可（等价 toGlobal(P*ppu) 且更可控）。
+       scale/x/y 每次重读：判定区随呼吸与动作实时位移。 */
+    const toStage=(vx,vy)=>{ const s=mdl.scale.x;
+      return [mdl.x+(vx+cux/2)*ppu*s, mdl.y+(cuy/2-vy)*ppu*s]; };
+    /* 顶点是**三角带序** (v0,v1,v2,v3)=(TR,TL,BR,BL)，按原序连环会画成自交的蝴蝶结；
+       与命中判定同语义 = 三角形 (v0,v1,v2)+(v1,v3,v2)，其无自交环序是 [0,1,3,2]。 */
+    const ptsOf=(g)=>g.quad?[0,1,3,2].map(k=>toStage(g.quad.v[k][0],g.quad.v[k][1]))
+                           :[toStage(g.x0,g.y1),toStage(g.x1,g.y1),toStage(g.x1,g.y0),toStage(g.x0,g.y0)];
+    const rectOf=(pts)=>({x0:Math.min(...pts.map(p=>p[0])), x1:Math.max(...pts.map(p=>p[0])),
+                          y0:Math.min(...pts.map(p=>p[1])), y1:Math.max(...pts.map(p=>p[1]))});
+    const inView=(r)=>r.x1>0 && r.x0<wrap.clientWidth && r.y1>0 && r.y0<wrap.clientHeight;
     const drawAreas=()=>{ areaG.clear();
-      hitAreas.forEach((ha,i)=>{ const g=geomOf(ha); if(!g){ areaTs[i].visible=false; return; }
-        /* V(顶点原生) → P → stage 像素：P=(Vx+cux/2, cuy/2-Vy)，stage = mdl.pos + P*ppu*scale。
-           apply() 只设 mdl.scale/x/y（无旋转无锚点），手工映射即可（等价 toGlobal(P*ppu) 且更可控）。 */
-        const s=mdl.scale.x;
-        const toStage=(vx,vy)=>[mdl.x+(vx+cux/2)*ppu*s, mdl.y+(cuy/2-vy)*ppu*s];
-        /* 顶点是**三角带序** (v0,v1,v2,v3)=(TR,TL,BR,BL)，按原序连环会画成自交的蝴蝶结；
-           与命中判定同语义 = 三角形 (v0,v1,v2)+(v1,v3,v2)，其无自交环序是 [0,1,3,2]。 */
-        const pts=g.quad?[0,1,3,2].map(k=>toStage(g.quad.v[k][0],g.quad.v[k][1]))
-                        :[toStage(g.x0,g.y1),toStage(g.x1,g.y1),toStage(g.x1,g.y0),toStage(g.x0,g.y0)];
-        const flat=[]; pts.forEach(p=>flat.push(p[0],p[1]));
+      hitAreas.forEach((ha,i)=>{ const g=geomOf(ha), tx=areaTs[i];
+        if(!g){ tx.visible=false; return; }
+        const pts=ptsOf(g), flat=[]; pts.forEach(p=>flat.push(p[0],p[1]));
         const col=AREA_COL[(ha.name||'').toLowerCase().replace(/^touch_/,'')]||0xba68c8;
         areaG.lineStyle(1.5,col,0.9).beginFill(col,0.07).drawPolygon(flat).endFill();
-        const gx0=Math.min(...pts.map(p=>p[0])), gy0=Math.min(...pts.map(p=>p[1]));
-        const gy1=Math.max(...pts.map(p=>p[1]));
-        const tx=areaTs[i]; tx.text=ha.name; tx.style.fill=col; tx.visible=true;
-        tx.position.set(Math.max(2,Math.min(gx0,wrap.clientWidth-72)), gy0-15>=2?gy0-15:gy1+3); }); };
+        /* 标签只在**框与视口相交**时才画（贴边可见的框仍保留 clamp）。
+           换装按钮（TouchIdle 与 TouchDrag 系列）挂在会动的道具上：静止态被停在画布外几千像素处，
+           播对应动作时才随部件进画面（2026-09-27 实测奇尔沙治皮肤2 全部 42 个动作组）。
+           旧代码无条件把 x 夹进 [2, clientWidth-72]，于是出画框的名字被拽到屏幕右边缘，
+           看起来就是「角落里有个点不到的判定区」（用户报的现象；同高的两个框还会叠成一行）。 */
+        const r=rectOf(pts);
+        if(!inView(r)){ tx.visible=false; return; }
+        tx.text=ha.name; tx.style.fill=col; tx.visible=true;
+        tx.position.set(Math.max(2,Math.min(r.x0,wrap.clientWidth-72)),
+                        r.y0-15>=2 ? r.y0-15 : r.y1+3); }); };
+    /* 「此刻画得出标签」的清单——与 drawAreas 走同一组判据，探针不许自己复算（§27 同源规则）。
+       注意它与 __L2_HITUSE 的分工：USE=可点清单（退化框已被 geomOf 挡掉），
+       SHOW=USE 里此刻与视口相交的那批，多边形按 USE 画、标签按 SHOW 画。 */
+    window.__L2_HITSHOW=()=>hitAreas.filter(h=>{ const g=geomOf(h);
+      return !!g && inView(rectOf(ptsOf(g))); }).map(h=>h.name);
     let areaViz=false;
     document.getElementById('l2AreasBtn').onclick=()=>{ areaViz=!areaViz;
       document.getElementById('l2AreasBtn').classList.toggle('on',areaViz);

@@ -15,17 +15,19 @@
 import sys, os, json, time, subprocess, urllib.request
 sys.stdout.reconfigure(encoding='utf-8')
 import websocket
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import chrome_tree
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
 PORT = 9371
 PROFILE = os.path.join(ROOT, '.diag', 'chrome_coordfix')
 os.makedirs(PROFILE, exist_ok=True)
-proc = subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
+proc = chrome_tree.install(subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
   '--remote-allow-origins=*', f'--user-data-dir={PROFILE}', '--no-first-run',
   '--no-default-browser-check', '--disable-background-timer-throttling', '--enable-unsafe-swiftshader',
   '--use-angle=swiftshader', '--window-size=1280,900',
-  'http://127.0.0.1:8777/gallery_v2/index.html'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+  'http://127.0.0.1:8777/gallery_v2/index.html'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 w = None
 for _ in range(90):
     try:
@@ -83,11 +85,22 @@ JS = r"""(async(key)=>{ try{
   }
   return JSON.stringify(out,null,1);
 }catch(e){ return 'ERR '+(e.message||e); }})"""
-out = ev(JS + f"({json.dumps(KEY)})")
+out = None
+for _try in range(6):
+    try:
+        if ev("document.readyState") != 'complete':
+            time.sleep(2); continue
+        out = ev(JS + f"({json.dumps(KEY)})"); break
+    except RuntimeError as e:
+        # 页面仍在导航时 CDP 执行上下文会被销毁 —— 探针自身的假失败（WF-16 已记过同类），
+        # 上下文在导航结束后会重建，等一拍重连同一张 tab 即可，别据此判定产品坏了。
+        print(f"  [retry {_try+1}] {str(e)[:80]}", flush=True); time.sleep(4)
+if out is None:
+    print('[ERROR] 6 次仍拿不到稳定执行上下文'); ws.close(); chrome_tree.kill_tree(proc.pid); sys.exit(2)
 path = os.path.join(ROOT, '.diag', '_probe_affine.json')
 with open(path, 'w', encoding='utf-8') as f:
     f.write(out if isinstance(out, str) else json.dumps(out))
 print(out)
 print(f'\n已写出 {path}')
 print('判据：head→Head / chest→Special / hip→Body（flipHits 列）；identityHits 应全空。')
-ws.close(); proc.terminate()
+ws.close(); chrome_tree.kill_tree(proc.pid)

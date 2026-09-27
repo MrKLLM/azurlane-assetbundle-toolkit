@@ -123,12 +123,20 @@ def open_view(key, settle_ms):
       const cv=document.querySelector(sel);
       if(!cv) return JSON.stringify({key:KEY, fail:'no canvas', sel,
                                      note:(document.querySelector('.note')||{}).textContent||''});
+      /* L2D_AREAS=1 → 打开「判定区」开关后再截，用于目视验收可视化（点按钮，不直接调内部函数） */
+      if (__AREAS__ && TAB !== 'spine') {
+        const b = document.getElementById('l2AreasBtn');
+        if (!b) return JSON.stringify({key:KEY, fail:'没有判定区按钮'});
+        if (!b.classList.contains('on')) b.click();
+        await t(700);
+      }
       const r=cv.getBoundingClientRect();
       return JSON.stringify(Object.assign({key:KEY, ok:true,
         clip:{x:Math.round(r.x), y:Math.round(r.y), w:Math.round(r.width), h:Math.round(r.height)}}, extra));
     } catch(e) { return JSON.stringify({key:__KEY__, fail:'JSERR '+(e&&e.message||String(e)).slice(0,150)}); }
     })()""").replace('__KEY__', json.dumps(key)).replace('__TAB__', json.dumps(TAB)) \
              .replace('__SETTLE__', str(settle_ms)) \
+             .replace('__AREAS__', 'true' if os.environ.get('L2D_AREAS') else 'false') \
              .replace('__WANTSKIN__', json.dumps('∅' if SKIN == 'none' else SKIN))
     return ev(js, awaitp=True)
 

@@ -611,8 +611,13 @@ moc3 里的 `Touch*` 标记远不止 Head/Body/Special——安土有 **76 个**
 **根因**：Cubism 只对"本 clip 有曲线的"参数施权，**缺曲线的参数停在上一个动作留下的值上**。
 `touch_idle1`（4.65s、252 条曲线、Loop=false）驱动的参数里有 **15 条是 `idle`（278 条绑定集）从不驱动的**，
 其中含整体位移 → clip 末帧值永久残留 → 57 个判定区全部被甩出画布（核心三个一起到 `(-36.37,-52.81)`）。
-静止态实测本就 53/57 在画布外（编辑器遗留的停放标记，只有核心 3 个 + `touch_idle1` 真可点），
+静止态实测本就 53/57 在画布外（只有核心 3 个 + `touch_idle1` 真可点），
 所以"进 1 层之后点哪儿都没反应"。游戏侧靠 `change_in`/`home` 状态机复位，Web 运行时没有状态机 → 同一份数据在游戏里不暴露。
+> ⚠️ **2026-09-27 更正（本条原句）**：这里把出画原因写成「**编辑器遗留的停放标记**」是错的。
+> 逐动作组实测（`l2d_hit_offcanvas.py --sweep`）证明：那些 `TouchIdle*/TouchDrag*` 是**换装/互动按钮的停放位**，
+> 播对应动作时随部件一起进画面才可点（奇尔沙治皮肤2 静止态 4/26 在画布内，播 `idle1/main_*/mail` 时到 7~10 个）。
+> 数据没问题，别去 `fix_model3.py` 里删它们；当时的"点不到"是参数残留把**核心三个**也甩出了画，与本句无关。
+> 全条取证与修法见 **§51**。
 **定位手段**：对 motion3.json 求 `{Curves[Target=="Parameter"].Id}` 的差集（该 clip 集 − idle 集），不靠猜。
 ⚠️ `Id` 有两种形态（纯字符串 / `{string:…}`），判据要兜两种。
 
@@ -2321,3 +2326,83 @@ MAD 比的是同一槽、同一张脸谱、已按 rect resize 且已按 mirrors 
 并跑，又把浏览器验收压在扫描上 ⇒ 扫描 ETA 从 43 分钟被拖到 79 分钟，还挤到了用户正在跑的游戏/ALA。
 本机只有 15.4GB 内存且常开着游戏与模拟器：**重活串行跑，别把并行当免费**。
 **涉及文件**: `scripts/diag/chrome_tree.py`（新）及上述四个验收脚本。相关：WF-16、§48、§49。
+
+---
+
+## §51. 判定区可视化里"贴在屏幕角落、根本点不到"的标签：是标签 clamp，不是数据坏了（2026-09-27）
+
+**日期**: 2026-09-27　**状态**: ✅（前端只改标签可见性；数据与命中链路一律未动）
+
+**现象（用户直接反馈）**: 奇尔沙治皮肤2 开「判定区」后，屏幕右上角黑幕里贴着 `touch_idle5`、`touch_idle7` 两个标签，
+那里既没有框也点不到；"其他皮肤也是，有一些判定区都已经跑到皮肤外的黑幕里了"。
+
+**直接根因**（`gallery_src/index.html` 的 `drawAreas`）：标签坐标把 x **无条件夹进视口**：
+
+```js
+tx.position.set(Math.max(2, Math.min(gx0, wrap.clientWidth-72)), gy0-15>=2?gy0-15:gy1+3)
+```
+
+框本身在 stage 横坐标 3800~4600 像素处（多边形画到画布外，看不见），但标签被这条 clamp 拽到右边缘；
+y 方向不夹，所以只有"纵坐标离画布中心最近"的那一两个会落进屏幕 → 就成了角落里的幽灵标签。
+且 `TouchIdle4/5` 同高、`6/7` 同高，x 又夹到同一处，**看着 2 个其实是 4 个框叠成一行**。
+探针实测：所有幽灵标签的 x 恰为 `clientWidth-72`（868 视口下 = 796）。
+
+### ⚠️ 先记一条我上一轮的错误结论（否则会重犯）
+
+我第一轮判定："这些出画框是 `fix_model3.py` 不做几何校验登记进来的**编辑器遗留停放标记**，
+建议在 `geomOf` 里按『框与画布矩形不相交 → return null』过滤掉（一处生效三处同源）"。
+**被用户的领域记忆否证**——他记得"有一个垂电线下来，然后可以改皮肤的配置：丝袜、猫耳兔耳猫尾巴兔尾巴、爱心眼"。
+于是做了反证实验：
+
+**反证实验**（`scripts/diag/l2d_hit_offcanvas.py --sweep`，走页面自己的 `play()`，逐组播完全部动作组，
+每组播放中重新量 26 个 `Touch*` 标记有几个落回画布内）：
+
+| 模型 | 静止态在画布内 | 播某些动作组时 |
+|---|---|---|
+| `qiershazhi_2`（画布 28×28 单位） | **4 / 26** | `idle1/idle3/idle5/idle6` 带入 `TouchDrag6/9/10`+`TouchIdle9~13`；`main_1~5/mail/mission/wedding` 再带 `TouchIdle1`；`touch_idle2` 时达 **10 个** |
+| `yuanchou_3` | 9 / 31 | `touch_drag2/3/4` 带入 `TouchIdle3/6/7/8`+`TouchDrag2`+`TouchIdle38`，同时 Head/Body/Special 出画 |
+
+⇒ **"出画"是换装按钮的停放位，动画一开它随部件进画面**，不是数据坏了。按"不相交就过滤"改 `geomOf`
+会把可视化变成随动作闪烁的框集，且没有任何命中收益（出画的框本来就包不住可见的点击点）。方案作废。
+
+**换装开关在数据里长什么样**（`yuanchou_3` 实测）：moc3 里有 **Parameter** `TouchSiwa`(丝袜)、
+`TouchPijian/2/3`(皮鞭)、`TouchFa`(发)、`Touch_zi`(字)，以及 `Paramaixin`(爱心)、`ParamMAOBI`、`Paramtushe*`；
+各 clip 用**定值曲线**锁住它们（例：`touch_idle31` → `Paramaixin=1.6 / ParamMAOBI=-1` 即爱心眼；
+`touch_drag6` → `TouchPijian2=1`）。所以**"换装 = 播某条把开关参数锁成 1 的动作"**，
+而 `HitAreas[].Name` 本身就是那条组名 → 与 §27 的 A3 随机命中天然兼容，不需要新机制。
+（注意 `TouchSiwa` 这类只作为 Parameter 存在，`core.getDrawableIds()` 里没有同名 drawable。）
+
+**修法**（只此一处）：`drawAreas` 里把 `toStage/ptsOf/rectOf/inView` 抽成共用小函数，
+**多边形仍按 `__L2_HITUSE()` 全画，标签只在框与视口相交时画**（贴边可见的框保留原 clamp，那是它需要的）。
+另暴露 `window.__L2_HITSHOW()` = 「此刻画得出标签」的清单，与 `drawAreas` 同一组判据 ——
+`l2d_inspector_verify.py` 的标签基准由 USE 换成 SHOW（多边形那条仍对齐 USE），仍是"探针不复算几何"。
+
+**判据**: 场景图里可见标签数 == `__L2_HITSHOW()` 数 == 与视口相交的框数；
+且**全部框都在画面内的模型标签数一字不变**（对照组，防误杀）。
+实测：`qiershazhi_2` 16→3、`wuzang_4` 78→4、`antu_2` 57→4、`chuyue_2` 8→**8**、`lafeiii_3` 10→**10**；
+`hit_verify` 抽样 6 模型 201 个部位 **WIRING 0 / OUTSIDE 0**（HIT 104 + INGROUP 91 + NOTCLICKABLE 6，随机性抽查 3/3 合格）。
+目视：`.diag/l2d_shots_visual/{qiershazhi_2,chuyue_2}.png`（前者角落标签消失、只剩身上 3 个；后者 8 个标签含
+腿上的 `touch_drag1`、撑地的 `touch_drag3` 全部保留）。
+
+**踩坑（三条）**:
+1. **JS 块注释里不能写 `TouchIdle*/TouchDrag*`** —— 那个 `*/` 会**提前闭合注释**，把后半句当代码解析。
+   本条初稿就踩了，改成"TouchIdle 与 TouchDrag 系列"。
+2. **Edit 类原地编辑同样会断硬链**（实测）。AGENTS.md 原话是"不要整文件写回 / 原子保存"，
+   但本轮用 Edit 改 `gallery_src/index.html` 之后 `--check` 就报了"既断链又漂移"。
+   ⇒ 收尾**一律以 `deploy_gallery.py --check` 为准**，红了按提示"默认模式刷平 → 提交 → `--relink`"。
+   （`--relink` 会跳过"正本有未提交改动"的文件，所以必须先提交再补链。）
+3. **`Execution context was destroyed` 这次不是两个 Chrome 抢 CDP**（§50 记的那一类），
+   而是**探针在页面还在导航时就 evaluate**。同一张 tab 的上下文在导航结束后会重建，
+   `document.readyState==='complete'` + 最多 6 次重试即可（已加进 `l2d_coord_forensics.py` / `interact_verify.py`）。
+   另：`page_sanity_check.py` 此前完全不清理 Chrome（连 `proc` 都没接住），本轮漏了 8 个进程，已补 `chrome_tree.install`。
+
+**残留待办（本轮明确不修，另起一轮）**: 有一批标记**静止态就在画面内、不透明度 1、却压根没登记**，
+因为 `fix_model3.py` 硬性要求存在同名动作组：`yuanchou_3` 的 `TouchDrag20~23`、
+`qiershazhi_2` 的 `TouchDrag7`（6.4×6.2 的大框压在角色身上）、`suweiaitongmeng_2` 的 5 个 `TouchDrag*`。
+这些组（`touch_drag20` 等）确实不存在，游戏侧究竟把它们绑到哪条动作没有权威依据，不能猜着登记。
+
+**涉及文件**: `gallery_src/index.html`（`drawAreas` + `__L2_HITSHOW`）、`scripts/diag/l2d_inspector_verify.py`（标签基准）、
+`scripts/diag/l2d_hit_offcanvas.py`（**新，入库**：① 幽灵标签/出画对账 ② `--sweep` 逐动作组量在画布数）、
+`scripts/diag/l2d_shot_models.py`（加 `L2D_AREAS=1` 开判定区后再截）、`scripts/diag/l2d_coord_forensics.py`、
+`scripts/diag/interact_verify.py`（②③ 两条重试）、`scripts/diag/page_sanity_check.py`（补 chrome_tree）。
+更正 §21 与技能 `live2d-web-runtime-integration` §3.8 里"编辑器遗留的停放标记"那句。相关：§21、§27、WF-16。

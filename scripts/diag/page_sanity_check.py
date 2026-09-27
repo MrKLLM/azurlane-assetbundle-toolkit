@@ -2,7 +2,9 @@
 # 判别式：DOM 渲染了没 vs 页面全局可见不可见
 import sys, os, json, time, subprocess, urllib.request
 sys.stdout.reconfigure(encoding='utf-8')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import websocket
+import chrome_tree
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
@@ -11,10 +13,10 @@ P = os.path.join(ROOT, '.diag', 'chrome_galprobe3')
 os.makedirs(P, exist_ok=True)
 URL = 'http://127.0.0.1:8777/gallery_v2/index.html'
 
-subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
+chrome_tree.install(subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
   '--remote-allow-origins=*', f'--user-data-dir={P}', '--no-first-run', '--no-default-browser-check',
   '--disable-background-timer-throttling', '--enable-unsafe-swiftshader', '--use-angle=swiftshader',
-  '--window-size=1280,900', URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+  '--window-size=1280,900', URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
 w = None
 for i in range(80):

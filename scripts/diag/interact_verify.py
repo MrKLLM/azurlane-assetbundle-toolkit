@@ -118,7 +118,18 @@ JS = r"""(async(key)=>{ try{
 os.makedirs(os.path.join(ROOT, '.diag', 'size_shots'), exist_ok=True)
 allok = True
 for k in ['anninvwang_2', 'aersasi_2', 'aersasi_3', 'lafeiii_3']:
-    out = ev(JS + f"({json.dumps(k)})")
+    out = None
+    for _try in range(6):
+        try:
+            if ev("document.readyState") != 'complete':
+                time.sleep(2); continue
+            out = ev(JS + f"({json.dumps(k)})"); break
+        except RuntimeError as e:
+            # 页面导航中 CDP 执行上下文会被销毁（探针自身的假失败，WF-16 同类）；
+            # 上下文在导航结束后重建，重连同一张 tab 即可，别据此判定产品坏了。
+            print(f"  [{k}] retry {_try+1}: {str(e)[:70]}", flush=True); time.sleep(4)
+    if out is None:
+        allok = False; print('=====', k); print('  ✗ 6 次仍拿不到稳定执行上下文（探针故障，非产品故障）'); continue
     print('=====', k)
     print(out)
     try:
