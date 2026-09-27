@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-27 21:22
+> **生成时间**: 2026-09-27 22:55
 > 本轮（并行会话，A+C）：**44 张「有表行、主包未下发」的皮肤补上「仅台词」档** + **修掉一个已上线一天的内容缺陷**——台词里的 `{namecode:NN}` 从没展开，**862 个能播的皮肤字幕里就在显示 `{namecode:98}`**；`name_code`(456 行) 已发布进 `inputs/gamecfg/` 并入台账，生成侧展开 6672 处、产物零残留，页面加 `residue` 断言（**§60**）。C 项：54 张「查无此名」= 领航员/领洋者/探索者等 NPC 皮肤，NPC 族在皮肤表里的 62 行**全部** 0 包 0 词 ⇒ 🔇 是对的，不改代码。索引零回退闸门：皮肤标量 31000 项 / 船标量 9072 项逐字未变；`talk_verify` 14 条判据全绿。
 > 同日并行轮（画廊取景/视角记忆）：**画廊前端「打开皮肤缩得有点小」两层根因修掉 + 视角记忆**（**§59** / WF-16 追加）——弹窗上限 1100×880 → `min(1900px,96vw)×min(1400px,96vh)`（2560×1600 上占屏 43%×55% → 74%×87%）、Live2D 改按 drawable 顶点框∩画布的内容框取景、Spine 留白 1.1→1.05、静态立绘解除「永不放大」上限（双击仍 1:1）；**A/B 实测内容绝对像素 10/10 变大 x1.69~x3.89、零回退样本**（工具 `scripts/diag/gallery_framing_ab.py`）；三视图相机按 `皮肤|标签页` 持久化（只存尺度无关量）+ 顶部新全局开关「记住视角」+ 弹层快捷键 `←→/1-4/F/R`；顺带修掉「进一次全屏就抹掉用户缩放」这条老失效。
 > 上一轮：**354 张「🔇 无语音」按可救性拆细并裁定关闭**（§57）——196 缺主包（两侧都无源，等下发）/ 36 只有变体包（正文齐全却没进前端 ⇒ 新待办）/ 55 剥后缀才命中（**确认不能做**）/ 54 表里查无此名（NPC 皮肤）/ 13 该船无 CV；工具 `scripts/diag/voice_gap_audit.py`。
@@ -274,6 +274,36 @@
      修法：parts 来源换成读 prefab（含各节点 localScale 与 startingAnimation），连带重导受影响 CG。
      ⏸️ **开工时机**：等并行会话把它在 `gallery_src/index.html`(+172/−38) 与
      `build_gallery_index.py`(voiceText) 上的未提交改动落地后再动，避免同一文件撞车（2026-09-27 用户拍板）。
+18. ⏳ **画廊「按钮 / 交互反馈」层重做**（2026-09-27 立项，**用户指定次日开工**）：
+     - **先记一条否证，别重走**：同日做过一整版**视觉语言重做**（暖墨底 + 单一铜金强调、字阶、卡片三行化、
+       头部一行、查看器底换掉棋盘格），样板页 `index_b.html` 已给用户看过并**被否**（"B版不如之前"）
+       ⇒ **整体换色这条路已试且被拒**；方向改为**只动按钮与交互反馈，配色基调与布局不动**。
+       样板代码与成对截图留 `.diag/uishots/`（`before_*` vs `b3_*`、`sbs_grid.png` / `sbs_modal.png`）。
+     - **本轮 grep 出来的五条真缺陷**（都是量过的，不是感觉）：
+       ① **同一个"选中"语义有 5 种颜色**：`.seg button.on`=`--acc2` 蓝、`.srcbar/.vbox button.on`=
+          硬编码 `#2b6cb0`（连 token 都没走）、`.opt button.on`=`--ok` 绿、`.spine-bar button.on`=`--acc` 红、
+          `.skin.on`=红边框、`.tab.on`=红下划线。
+       ② **Live2D / Spine 两条控制条其实是浏览器原生按钮**：CSS 里 `.spine-bar select,.spine-bar button`
+          **只设了 `font-size`/`padding`，没有 `background`/`border`**，而 `#l2bar` 的 class 就是 `spine-bar`
+          （`index.html:608`）⇒ 那排「重播/复位/全屏/判定区/参数·部件」是 UA 浅灰底，
+          与静态立绘那条 `.srcbar` 的深色 chips 是两套视觉。
+       ③ **零按压反馈**：全文 `:active` 命中 **0 次**。
+       ④ **零键盘焦点可见性**：`:focus-visible` **0 次**，且 `input,select{outline:none}` 连默认焦点环一起杀了
+          ⇒ 本轮新加的 `←/→ / 1-4 / F / R` 与 Tab 导航都没有视觉反馈；hover 只有 `.card/.close/.skin` 三处，
+          三条控制条上约 20 个按钮**全无 hover**。
+       ⑤ **toggle 与动作混在一排且外观不可区分**：`判定区`/`参数·部件`/三个全局开关是状态开关，
+          `重播`/`复位`/`全屏` 是瞬时动作，外观一模一样。
+     - **建议做法（待验证，不是结论）**：先做"一个语义一种表现"（选中一色 / 可点一 hover / 按压一 `:active`
+       / 键盘焦点一 `focus-visible` 环），再给 `.spine-bar button` 补齐与其它条一致的基样式，
+       最后用**形状或图标**而不是颜色去区分 toggle 与动作。
+     - **判据与工具已就位**：`py -3 scripts/diag/gallery_ui_shots.py`（同机成对截图，默认 2560×1600 对齐实机；
+       ⚠️ 它按 `--pages a,b` 跑，对照页用 `git show HEAD:gallery_src/index.html > Output/gallery_v2/index_x.html` 现造现删）；
+       `py -3 scripts/diag/hit_verify.py --page <对照页>`（本轮新增该参数，用于判 WIRING 是不是本轮引入）；
+       交互零回退仍跑 `interact_verify` / `l2d_inspector_verify` / `hit_verify` 三件套。
+     - ⚠️ **两条本轮踩到、明天直接避开的坑**：① 判据别用「占视口比例」——视口形状被改动改掉时会假报回退，
+       用**绝对像素**（详见 WF-16 追加段）；② **别把长任务写成 `py -3 x.py 2>&1 | tail -25`**：
+       `tail` 会吞掉中间明细，且 `$?` 取的是 `tail` 的退出码不是 python 的——本轮就是这么把
+       一个 `WIRING=2`（实为探针抖动）读成了 `EXIT=0` 假绿灯。
 
 
 ---
@@ -353,7 +383,8 @@ motion 大面积失效源于我们自己的解析器（帧 0 护栏 + 曲线名�
 - **形态**：本地网页（源 28GB / Paintings 15GB，上线不现实），参照 l2d.su，中文名展示 静态立绘 + Spine + Live2D + 语音。
 - **数据**：`build_gallery_index.py`（合并四类 + `ship_name_map` 拼音→中文 812 条 → `index.json/js`；Spine 皮肤附 `cg` 字段指向 `CG_v2/`）+ `make_thumbs.py`（Paintings_v2 + CG_v2 → 380px WebP，CG 缩略图 `<stem>_cg.webp`）。结果 954 船 / 4489 皮肤 / spine 231 / CG 231 / live2d 256 / 语音 268。
 - **前端** `index.html`：网格懒加载 + 搜索/阵营/舰种/稀有度筛选 + **类别分段（全部/舰船/剧情角色，主网格按 `category` 分区渲染各带小标题计数）**；详情四标签。「静态立绘」对 Spine 皮肤默认展示全屏 CG（可切换回 painting 原件），支持**滚轮缩放(光标锚点)/拖拽平移/双击100%/全屏浏览/复位**；Spine 标签 `vendor/spine/spine-all.js`(3.8) 分层 WebGL 播放（相机视口/动画过滤已修，**支持全屏**）。服务器统一响应 `Cache-Control: no-cache`，改版后浏览器不再吃旧缓存。
-- **前端取景与视角记忆 ✅（2026-09-27，§59 / WF-16 追加）**：修掉「打开皮肤缩得有点小」的两层根因——弹窗上限 1100×880 → `min(1900px,96vw)×min(1400px,96vh)`（2560×1600 上从占屏 43%×55% 到 74%×87%），Live2D 改按 **drawable 顶点框 ∩ 画布**的内容框取景（原来按 Cubism 正方形画布 fit，角色只占 6~8 成）、Spine 留白 1.1→1.05、静态立绘解除「永不放大」上限（双击仍是 1:1 像素）。**A/B 实测内容绝对像素 10/10 变大（x1.69~x3.89），零回退样本**，工具 `scripts/diag/gallery_framing_ab.py`。新增**视角记忆**：三个视图各自的缩放/平移按 `皮肤|标签页` 存 localStorage（只存尺度无关量 ⇒ 换窗口尺寸与进出全屏不错位；LRU 300 条），顶部第三个全局开关「记住视角」可关。顺带修一条老失效：**进一次全屏再退出会把调好的缩放抹掉**（`ResizeObserver` 直挂 `fit()`）→ 改 `refit(preserve)`。另加弹层内快捷键 `←/→` 换皮肤、`1-4` 切标签、`F` 全屏、`R` 复位。交互层零回退：`interact_verify` ALL PASS、`l2d_inspector_verify` 全绿、`hit_verify` 四类判定。
+- **前端取景与视角记忆 ✅（2026-09-27，§59 / WF-16 追加）**：修掉「打开皮肤缩得有点小」的两层根因——弹窗上限 1100×880 → `min(1900px,96vw)×min(1400px,96vh)`（2560×1600 上从占屏 43%×55% 到 74%×87%），Live2D 改按 **drawable 顶点框 ∩ 画布**的内容框取景（原来按 Cubism 正方形画布 fit，角色只占 6~8 成）、Spine 留白 1.1→1.05、静态立绘解除「永不放大」上限（双击仍是 1:1 像素）。**A/B 实测内容绝对像素 10/10 变大（x1.69~x3.89），零回退样本**，工具 `scripts/diag/gallery_framing_ab.py`。新增**视角记忆**：三个视图各自的缩放/平移按 `皮肤|标签页` 存 localStorage（只存尺度无关量 ⇒ 换窗口尺寸与进出全屏不错位；LRU 300 条），顶部第三个全局开关「记住视角」可关。顺带修一条老失效：**进一次全屏再退出会把调好的缩放抹掉**（`ResizeObserver` 直挂 `fit()`）→ 改 `refit(preserve)`。另加弹层内快捷键 `←/→` 换皮肤、`1-4` 切标签、`F` 全屏、`R` 复位。交互层零回退：`interact_verify` ALL PASS、`l2d_inspector_verify` 全绿、`hit_verify` **全量 269 模型 / 3309 部位 WIRING=0**（HIT 2330 / INGROUP 913 / NOTCLICKABLE 66 / 可点中率 97.1%，与 §27 那次全库基线 HIT 2338 / INGROUP 905 / WIRING 0 逐项对齐）。
+- **视觉语言重做 ❌ 已试并被否（2026-09-27）**：换配色基调（暖墨 + 单一铜金、稀有度降饱和）、字阶、卡片三行化、头部一行、查看器底换掉棋盘格——样板做完给用户对比看，**用户判"不如之前"**，正本一行未改。⇒ 别再走"整体换色"这条路；下一步方向是**只打磨按钮与交互反馈**，见 **§6 第 18 条**（含 grep 出来的五条真缺陷：一个"选中"语义有 5 种颜色、`.spine-bar button` 其实是浏览器原生按钮、`:active` 0 次、`:focus-visible` 0 次、toggle 与动作外观不可区分）。
 - **源码治理**：画廊前端源码在**仓库内 `gallery_src/`**（唯一权威版本），`Output/gallery_v2/` 是运行目录（gitignore）。**2026-09-26 起两边改成硬链接**（同一份磁盘数据两个路径名），**4/4 已全部换链**（`index.html` / `cg_export.html` / `_gallery_server.py` / `启动资产浏览器.bat`）：改正本即刻生效、不需再部署。`deploy_gallery.py` 三态——默认 copy 修复（断链后的回退手段）/ `--check` **要求 4 个文件全部同 inode，断链或漂移都 `exit 1`** / `--relink` 换链（要求两边逐字节相同，且正本有未提交改动者自动跳过，防打断并行会话）。⚠️ 断链的唯一现实成因是整文件写回式「写临时文件+改名」的原子保存：**16:52 真断过一次，而当时只比内容的 `--check` 给了 `exit 0`（判据漏洞，已改为结构性并写进 AGENTS.md 收尾清单第 1 条——改 `gallery_src/` 正本一律原地编辑）**。当前 `index.html` 因那条未提交改动处于"已断链、内容仍一致"态，待其提交后 `--relink` 补。见 §43 与 WF-16。CG 导出页 `cg_export.html` 同样入 `gallery_src/`；服务器 `_gallery_server.py` 提供 `POST /save_cg` 落盘接口，`--export` 参数直开导出页。⚠️ 服务器按自身所在目录算根，**只能双击 `Output\gallery_v2\` 里那份 bat**。
 - **运行**：`启动资产浏览器.bat`（→ `_gallery_server.py`：8777 端口 + `allow_reuse_address` + 端口占用即复用 + 结尾 `pause`，杜绝闪退）。file:// 下立绘/语音可看，Spine `fetch` 被 CORS 拦需走 .bat。
 - **运行时库台账**（2026-09-26）：`vendor/` 4 个第三方 JS 只在 gitignore 目录里，版本/来源/sha256 记进 **`gallery_src/vendor/MANIFEST.json`**（3 个的 URL 当日重新下载按哈希逐字节对拍命中），换机器跑 `py -3 scripts/fetch_gallery_vendor.py` 补齐（**哈希+字节数双对上才落盘**，`--check` 只校验）。⚠️ **唯一残留缺口**：`vendor/spine/spine-all.js`（实测 3.8.75，非旧文档写的 3.8.99）没有可按哈希校验的下载源——本机这份与上游官方 3.8 构建不同（499623B ≠ 501448B），只能从 `tools/spine-viewer/spine-runtime/` 取，而 `tools/` 也在 gitignore。要彻底封掉需二选一：把 501KB 提交进仓库（先确认 Spine Runtimes License 允许），或改用可哈希校验的上游构建并回归 Spine 播放。**未拍板**。

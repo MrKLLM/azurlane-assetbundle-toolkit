@@ -10,7 +10,8 @@
    另给两个总指标：**可点中率**（该部位自己的中心是否落在自己的可用框内）与**随机性抽查**
    （多候选处连点 6 次：既数出了几条不同动作，也数有几次落在候选外——"点了没反应"必须被量化，不许只报 distinct）。
    候选集合取自产品暴露的 window.__L2_HITALL，探针不复算几何（复算版实测与真实派发 4/38 条不一致）。
-用法: py -3 scripts/diag/hit_verify.py [--limit N] [--only k1,k2]   # 都不给即全量
+用法: py -3 scripts/diag/hit_verify.py [--limit N] [--only k1,k2] [--page index_a0.html]
+#   都不给 --limit/--only 即全量；--page 指向 A/B 对照页（判 WIRING 是不是本轮引入）
 前置: 8777 画廊服务器在跑（否则 Chrome 换成导航失败页，会假报 nAreas=0，见 WF-16 踩坑段）
 """
 import sys, os, json, time, subprocess, urllib.request
@@ -22,6 +23,9 @@ CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
 PORT = 9342
 limit = int(sys.argv[sys.argv.index('--limit') + 1]) if '--limit' in sys.argv else 0
 only = [x for x in (sys.argv[sys.argv.index('--only')+1] if '--only' in sys.argv else '').split(',') if x]
+# --page：指向画廊里的另一个页面文件，用于「改动前 vs 改动后」同一样本的定向复跑
+# （A/B 对照页由 git show HEAD:<正本> 落盘生成，见 WF-16 追加段 / gallery_framing_ab.py）
+page = sys.argv[sys.argv.index('--page') + 1] if '--page' in sys.argv else 'index.html'
 
 idx = json.load(open(os.path.join(ROOT, 'Output', 'gallery_v2', 'index.json'), encoding='utf-8'))
 cands = []
@@ -36,7 +40,7 @@ if limit: cands = cands[:limit]
 proc = subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
   '--remote-allow-origins=*', f'--user-data-dir={ROOT}/.diag/chrome_hitv', '--no-first-run',
   '--no-default-browser-check', '--disable-background-timer-throttling', '--enable-unsafe-swiftshader',
-  '--use-angle=swiftshader', '--window-size=1280,900', 'http://127.0.0.1:8777/gallery_v2/index.html'],
+  '--use-angle=swiftshader', '--window-size=1280,900', f'http://127.0.0.1:8777/gallery_v2/{page}'],
   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 import chrome_tree; chrome_tree.install(proc)   # 异常退出也要收整棵树，见该模块 docstring
 w = None
