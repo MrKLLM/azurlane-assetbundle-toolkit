@@ -108,17 +108,21 @@ def main():
     n_same = sum(1 for r in rows if r[1] == 'same')
     n_diff = [r for r in rows if r[1] == 'diff']
     n_miss = sum(1 for r in rows if r[1] == 'missing')
-    # 分诊：差异区旧图三类里谁占大头
+    # 分诊：**以 MAD 为准**（MAD 高 = 底图这里画的不是这张脸）。三类占比只是提示——
+    # 「彩色」既可能是画好的脸，也可能是**背景**（本轮 boyixi_3/haiwangxing_2/mingniabolisi_3
+    # 彩色占比 0.80~0.98 却全是真洞，那里画的是绿叶/夜空/背景块），所以它不能单独定案。
     def verdict(r):
         cls = r[3]
         if not cls:
             return 'same'
         tr, gr, co = (float(x) for x in cls.split('/'))
-        if co >= 0.5:
-            return '旧图已有彩色画(回退风险,须目视)'
-        if gr >= 0.5:
-            return '旧图不透明白灰块(真洞)'
-        return '旧图透明洞(真洞)'
+        mad = float(r[7])
+        if r[6] != '' and float(r[6]) < 0.5:
+            return '洞(透明：底图这里没落笔)'
+        if mad > C.FACE_MAD_MAX:
+            return f'洞(不透明但画的不是这张脸 MAD={mad:.0f}；旧图该处彩色占 {co:.2f}' \
+                   f'{"=背景而非脸" if co >= 0.5 else ""})'
+        return f'洞(MAD={mad:.0f} 未超阈值，靠不透明分支判的，重点目视)'
     vs = {}
     for r in n_diff:
         vs[verdict(r)] = vs.get(verdict(r), 0) + 1

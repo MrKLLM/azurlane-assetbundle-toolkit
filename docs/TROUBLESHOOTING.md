@@ -2200,7 +2200,9 @@ CDP JSON → websocket 送回来的，中间没有任何终端解码环节。
 
 **取证链（每一环都改过一次结论，按顺序记）**
 1. 待办列的三条假设里 ②③ 先排除：face 槽矩形 `(542,830,242,146)` 与灰块外接框重合；
-   逐层单独落盘核对，`_front` 层在脸区**一个像素都没画** ⇒ 不是槽位不重合、也不是遮挡顺序。
+   逐层单独落盘核对（`scripts/diag/painting_layer_dump.py`，量「这一层在脸槽里落了多少笔」）：
+   底图 `moermansike_2` 在脸槽内落笔 **35332/35332（满）**，`_front` 只有 **1825/35332（5%，且是边缘发丝）**
+   ⇒ 那块灰是**底图自己画的**，不是别的部件盖上去 ⇒ 槽位不重合、遮挡顺序两条都排除。
 2. 门控读数 `frac_opaque=1.000` / `frac_realart(sat≥30)=0.004` ⇒ **当前判据其实判它"洞"并且叠了脸**，
    叠完画面正常 ⇒ 在盘产物是**过期的**（09-15 渲染，从未进 09-20 那 34 张换入）。
 3. 为什么当初没进清单：09-20 那轮扫的是**旧判据**（face 框整框不透明率），`frac_opaque=1.000` 判"已烤好"；
@@ -2238,7 +2240,21 @@ MAD 比的是同一槽、同一张脸谱、已按 rect resize 且已按 mirrors 
 判据演进后必须 ① 全库重扫（对 population 重跑）② 建带标签回归集（**两侧都要有人**），
 并把"在标签集上的符合率"当换入前的闸门。同型前例：§14 的度量口径、WF-15 的"预测与产物必须走同一条渲染路径"。
 
-**全库重扫与换入结果**：见 `PROJECT_STATUS.md` §6.11（本轮收尾填入）。
+**全库重扫与换入结果（2026-09-27）**：2221 候选重扫 → **46 个洞 / err 0 / 未参与判定 0**（56 分钟）；
+其中 **13 个是旧判据完全看不见的「不透明但画的不是这张脸」类**（`moermansike_2`/`baixue_2`/`bisimaiz`/
+`boyixi_3`/`fuerban_h`/`gelunbiya_3`/`haiwangxing_2`/`mingniabolisi_3`/`salatuojia_6`/`shanfeng`/`shanfeng_2`/
+`yunlong_3` + 全图差异的 `haman_4`）。`scripts/diag/painting_face_rerun.py` 逐张重渲并与在盘比 md5：
+**33/46 与在盘逐字节相同**（= 新判据精确复现 09-20 已验收产物，零回退硬证据），13 张有差异。
+13 张**逐张目视**（`make_face_cmp.py` 出改前|改后|差异区放大）：全部是"改前没脸/糊成一团、改后正常"，
+其中 `haman_4` 改前**整条角色身子都不在**（差异覆盖全图、成品高 65px），属另一类陈旧产物而非叠脸。
+换入前逐文件确认 `st_nlink==1`、备份 `Output/_OLD_bak/painting_facefix_20260927/`（13 个，md5 全等）→
+覆盖 → 逐张校验新内容 == 临时渲染 → **全目录快照证明只有这 13 个文件 mtime 变了** → 只删这 13 张的
+`thumbs/<stem>.webp` 后 `make_thumbs.py` 增量重建（ok=16 / err=0）。
+⚠️ 分诊标签的教训：**「旧图该处彩色占比」不能用来判"已有脸"**——`boyixi_3`/`haiwangxing_2`/
+`mingniabolisi_3` 彩色占比 0.80~0.98 却全是真洞，那里画的是绿叶/夜空/背景块。
+所以 `painting_face_rerun.py` 的分诊已改成**以 MAD 为准**、三类占比只作提示。
+由 `haman_4` 引出的更大问题：**「盘上产物过期」不止脸这一类** ⇒ 新增
+`scripts/diag/painting_staleness_scan.py` 对全库 4488 张做「当前管线重渲 vs 在盘 md5」普查（只出清单不动产物）。
 
 **涉及文件**: `scripts/compose_paintings_v2.py`（`FACE_OPAQUE_MIN`/`FACE_MAD_MAX`/`FACE_GATE`、`render()` 内叠脸段）、
 `scripts/diag/face_gate_probe.py`（单皮肤取证：走真实渲染路径 + 读生产侧门控日志）、
@@ -2278,3 +2294,30 @@ MAD 比的是同一槽、同一张脸谱、已按 rect resize 且已按 mirrors 
 
 ---
 
+
+
+---
+
+## §50. 验收脚本把 headless Chrome 漏在机器上，把用户机器压到只剩 1.1GB（2026-09-27）
+
+**日期**: 2026-09-27
+**现象（用户直接反馈）**: 「你到底跑了多少个后台？怎么这么卡」。
+**两个洞（第二个才是主因）**:
+1. `subprocess.Popen([CHROME, ...])` 的 `proc.terminate()` **只杀启动器**，下面的
+   crashpad / gpu(SwiftShader) / network / 若干 renderer 不打整棵树就继续活着。
+2. 多数诊断脚本把 `proc.terminate()` 写在**最后一行**，脚本一抛异常就永远走不到——
+   本轮 `interact_verify.py` 与 `l2d_inspector_verify.py` 各撞了一次
+   `RuntimeError: Execution context was destroyed`，于是各漏一棵树，**共 16 个 chrome 进程**，
+   叠加同时跑的语音全量导出（jobs=3）与立绘全库重扫，空闲内存被压到 1.1GB。
+**修法**: 新增 `scripts/diag/chrome_tree.py`（`install(proc)` 注册 atexit 整树 `taskkill /T /F`，
+异常退出也会执行；`kill_tree(pid)` 供正常收尾调用），已接进
+`interact_verify.py` / `l2d_inspector_verify.py` / `hit_verify.py` / `voice_v2_verify.py`。
+其余 24 个起 Chrome 的脚本按同一形状逐步迁移（`spine_*` 那几个早就自己写了 taskkill，只是没成惯例）。
+**判据（收尾必查，别只信"脚本跑完了"）**:
+`powershell -NoProfile -Command '@((Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "chrome.exe" -and $_.CommandLine -match "headless=new" }).Count)'` 必须为 0。
+⚠️ 用 `CommandLine -match` 找残留时，**模式串会匹配到执行查询的 powershell/bash 自己**
+（本轮就误判成"还有 4 个残留"，差点去 kill 自己的 shell）——按 `Name -eq "chrome.exe"` 先过滤。
+**调度教训（我的失误，不是代码的）**: 把「语音全量导出（多进程解码）」和「立绘全库重扫（单进程但常驻 ~1GB）」
+并跑，又把浏览器验收压在扫描上 ⇒ 扫描 ETA 从 43 分钟被拖到 79 分钟，还挤到了用户正在跑的游戏/ALA。
+本机只有 15.4GB 内存且常开着游戏与模拟器：**重活串行跑，别把并行当免费**。
+**涉及文件**: `scripts/diag/chrome_tree.py`（新）及上述四个验收脚本。相关：WF-16、§48、§49。

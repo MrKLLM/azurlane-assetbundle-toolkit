@@ -38,6 +38,7 @@ proc = subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PO
   '--no-default-browser-check', '--disable-background-timer-throttling', '--enable-unsafe-swiftshader',
   '--use-angle=swiftshader', '--window-size=1280,900', 'http://127.0.0.1:8777/gallery_v2/index.html'],
   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+import chrome_tree; chrome_tree.install(proc)   # 异常退出也要收整棵树，见该模块 docstring
 w = None
 for _ in range(80):
     try:
@@ -223,5 +224,5 @@ if rand:
         print(f"   例 候选{r['candN']} {r['cand']} → 序列 {r['seq']}")
 print("判据：WIRING 必须为 0（A3 下实播必须落在候选集合内）；多候选处连点必须换条目；"
       "HIT 不再是硬指标——同一位置挂多个标记时随机出别条是设计（2026-09-24 用户裁定 A3，见 §27）")
-ws.close(); proc.terminate()
+ws.close(); chrome_tree.kill_tree(proc.pid)
 sys.exit(1 if (wiring or rand_fail) else 0)

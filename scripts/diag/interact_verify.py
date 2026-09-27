@@ -13,6 +13,7 @@ proc = subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PO
   '--no-default-browser-check', '--disable-background-timer-throttling', '--enable-unsafe-swiftshader',
   '--use-angle=swiftshader', '--window-size=1280,900',
   'http://127.0.0.1:8777/gallery_v2/index.html'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+import chrome_tree; chrome_tree.install(proc)   # 异常退出也要收整棵树，见该模块 docstring
 w = None
 for _ in range(90):
     try:
@@ -131,4 +132,4 @@ for k in ['anninvwang_2', 'aersasi_2', 'aersasi_3', 'lafeiii_3']:
 print('\n总判定:', 'ALL PASS' if allok else '有未通过项')
 r = cmd('Page.captureScreenshot', {'format': 'png'})
 open(os.path.join(ROOT, '.diag', 'size_shots', 'interact_final.png'), 'wb').write(base64.b64decode(r['data']))
-ws.close(); proc.terminate()
+ws.close(); chrome_tree.kill_tree(proc.pid)

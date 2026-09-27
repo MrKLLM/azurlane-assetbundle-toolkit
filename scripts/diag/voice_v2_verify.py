@@ -14,6 +14,7 @@ import sys, os, json, time, subprocess, urllib.request
 
 sys.stdout.reconfigure(encoding='utf-8')
 import websocket
+import chrome_tree
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
@@ -202,7 +203,7 @@ def main():
         print('\n判定:', '全部真出声' if not bad else f'{bad} 项未通过')
         return 1 if bad else 0
     finally:
-        proc.terminate()
+        chrome_tree.kill_tree(proc.pid)
 
 
 if __name__ == '__main__':

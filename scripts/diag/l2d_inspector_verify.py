@@ -23,6 +23,7 @@ proc = subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PO
   '--no-default-browser-check', '--disable-background-timer-throttling', '--enable-unsafe-swiftshader',
   '--use-angle=swiftshader', '--window-size=1280,900',
   'http://127.0.0.1:8777/gallery_v2/index.html'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+import chrome_tree; chrome_tree.install(proc)   # 异常退出也要收整棵树，见该模块 docstring
 w = None
 for _ in range(90):
     try:
@@ -115,4 +116,4 @@ open(shot, 'wb').write(base64.b64decode(r['data']))
 print(out)
 print(f'\n截图: {shot}')
 print('判据：areas.ok / panel.ok / roundtrip.ok 全为 true。')
-ws.close(); proc.terminate()
+ws.close(); chrome_tree.kill_tree(proc.pid)
