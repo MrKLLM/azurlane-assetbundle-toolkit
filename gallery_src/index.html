@@ -70,7 +70,7 @@ main{flex:1;overflow:auto;padding:14px}
 .skin .th{width:38px;height:48px;flex:none;border-radius:5px;background:var(--bg) center/contain no-repeat;border:1px solid var(--line)}
 .skin .info{font-size:12px;line-height:1.3;min-width:0}
 .skin .info .s2{font-size:10px;color:var(--dim)}
-.content{flex:1;display:flex;flex-direction:column;min-width:0}
+.content{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
 .tabs{display:flex;gap:2px;background:var(--panel2);border-bottom:1px solid var(--line);flex:none;padding:0 8px}
 .tab{padding:11px 16px;font-size:13px;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent}
 .tab.on{color:var(--txt);border-bottom-color:var(--acc)}
@@ -86,6 +86,17 @@ main{flex:1;overflow:auto;padding:14px}
 .vbox button{font-size:12px;padding:4px 10px;background:#1f2b3d;border:1px solid #3a4a6b;color:#a9c6e6;border-radius:6px;cursor:pointer}
 .vbox button.on{background:#2b6cb0;border-color:#5b9bd8;color:#fff}
 .vbox .pill{color:#8b96ad}
+/* 台词字幕条：三格共用，浮在画面底部控制条之上，纯展示不吃点击 */
+.talksub{position:absolute;left:50%;transform:translateX(-50%);bottom:56px;max-width:min(760px,88%);
+ background:rgba(8,11,20,.9);border:1px solid var(--line);border-radius:8px;padding:8px 14px;
+ font-size:14px;line-height:1.7;color:#f0f3fa;text-align:center;z-index:8;display:none;pointer-events:none}
+.talksub.on{display:block}
+.talksub .who{display:block;font-size:11px;color:var(--dim);margin-bottom:2px}
+/* 顶部全局交互开关（点画面出声 / 显示台词），状态存 localStorage */
+.opt{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.opt button{background:var(--panel2);color:var(--dim);border:none;padding:5px 10px;font-size:12px;cursor:pointer}
+.opt button+button{border-left:1px solid var(--line)}
+.opt button.on{background:var(--ok);color:#06210f}
 .view img.full{max-width:100%;max-height:100%;object-fit:contain;user-select:none}
 .view:fullscreen{width:100vw;height:100vh}
 #imgStage{overflow:hidden}
@@ -110,9 +121,11 @@ main{flex:1;overflow:auto;padding:14px}
 .l2panel .prow button{flex:none;width:17px;height:17px;font-size:9px;padding:0;background:#243049;border:1px solid #3a4a6b;color:#c9d4e6;border-radius:4px;cursor:pointer;line-height:1}
 .audwrap{padding:16px;overflow:auto;height:100%}
 .audwrap h4{font-size:12px;color:var(--dim);margin-bottom:8px}
-.aud{display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:12px}
-.aud .lbl{width:90px;color:var(--dim);flex:none}
-audio{height:30px;flex:1}
+.aud{display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;font-size:12px}
+.aud .lbl{width:90px;color:var(--dim);flex:none;padding-top:6px}
+.aud .col{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.aud .tw{font-size:12px;line-height:1.6;color:#dbe3f4;padding:4px 0}
+audio{height:30px;width:100%;flex:none}
 .pill{font-size:10px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);padding:1px 6px;border-radius:4px}
 .note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:30px;text-align:center;color:var(--dim);font-size:13px;line-height:1.7}
 .note b{color:var(--acc2)}
@@ -136,6 +149,10 @@ audio{height:30px;flex:1}
   <div class="ctl"><label>内容</label><select id="fHas">
     <option value="">全部</option><option value="spine">含Spine</option><option value="live2d">含Live2D</option><option value="voice">含语音</option><option value="cn">有中文名</option>
   </select></div>
+  <div class="ctl"><label>全局</label><div class="opt" id="gOpt">
+    <button data-k="voice" title="点击立绘 / Live2D 部位时是否播放语音">点击出声</button>
+    <button data-k="lines" title="播放台词时是否在画面下方显示中文正文">显示台词</button>
+  </div></div>
   <div class="hint" id="count"></div>
   <div class="hint" id="modehint"></div>
 </header>
@@ -152,6 +169,7 @@ audio{height:30px;flex:1}
     <div class="content">
       <div class="tabs" id="mTabs"></div>
       <div class="view" id="mView"></div>
+      <div class="talksub" id="mSub"></div>
     </div>
   </div>
 </div>
@@ -164,6 +182,16 @@ const P = location.protocol === 'file:' ? '../' : '../'; // 图片相对路径�
 const ships = G.ships;
 let view = ships.slice();
 let catFilter = '';   // ''=全部 / ship=舰船 / story=剧情角色
+
+/* ---------- 全局交互开关（localStorage 持久化，三个视图共用） ----------
+   两条各自独立：关掉「点击出声」后点画面仍然会上字幕（只是不出声），
+   关掉「显示台词」则只出声不上字幕。语音标签页里的 <audio> 是用户明确点的，不受①限制。 */
+const OPT_KEY = 'gallery.opt.v1';
+let OPT = {voice:true, lines:true};
+try{ Object.assign(OPT, JSON.parse(localStorage.getItem(OPT_KEY) || '{}')); }catch(e){}
+function saveOpt(){ try{ localStorage.setItem(OPT_KEY, JSON.stringify(OPT)); }catch(e){} }
+function paintOpt(){ document.querySelectorAll('#gOpt button')
+  .forEach(b=>b.classList.toggle('on', !!OPT[b.dataset.k])); }
 
 /* ---------- 工具 ---------- */
 function thumbOf(skin){ return skin.cg ? ('thumbs/' + skin.key + '_cg.webp') : skin.image ? ('thumbs/' + skin.key + '.webp') : ''; }
@@ -248,7 +276,7 @@ function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f
 let curShip=null, curSkin=null, tab='painting', paintSrc='cg';
 const mask=document.getElementById('mask'), viewEl=document.getElementById('mView');
 function openShip(s){ curShip=s; setSkin(defSkin(s)); buildSkinList(s); mask.classList.add('on'); }
-function closeShip(){ stopSpine(); stopLive2D(); mask.classList.remove('on'); viewEl.innerHTML=''; document.getElementById('mTabs').innerHTML=''; }
+function closeShip(){ stopSpine(); stopLive2D(); hideSub(); mask.classList.remove('on'); viewEl.innerHTML=''; document.getElementById('mTabs').innerHTML=''; }
 document.getElementById('close').onclick=closeShip;
 mask.onclick=e=>{if(e.target===mask)closeShip();};
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&mask.classList.contains('on'))closeShip();});
@@ -345,9 +373,43 @@ function mountImageViewer(){
   init();
 }
 function renderVoice(){
-  const s=curShip; let h='<div class="audwrap"><h4>台词 / 语音（'+s.voices.length+' 条）'+(location.protocol==='file:'?'':' · 可点击播放')+'</h4>';
-  s.voices.forEach(v=>{const fn=v.split('/').pop();const cat=(fn.match(/cv-\d+(-\w+)?\.wav/)||[])[1]||'';h+=`<div class="aud"><span class="lbl">${cat?cat.replace('-',''):'默认'}</span><audio controls preload="none" src="${P+v}"></audio></div>`;});
-  h+='</div>'; viewEl.innerHTML=h;
+  const sk=curSkin||{}, key=sk.key;
+  viewEl.innerHTML='';
+  const wrap=document.createElement('div'); wrap.className='audwrap'; viewEl.appendChild(wrap);
+  const row=(labText, src, tw)=>{
+    const d=document.createElement('div'); d.className='aud';
+    const lab=document.createElement('span'); lab.className='lbl'; lab.textContent=labText;
+    const col=document.createElement('div'); col.className='col';
+    if(tw){ const t=document.createElement('div'); t.className='tw'; t.textContent=tw; col.appendChild(t); }
+    const au=document.createElement('audio'); au.controls=true; au.preload='none'; au.src=vsrc(src);
+    col.appendChild(au);
+    d.appendChild(lab); d.appendChild(col); wrap.appendChild(d); };
+  const draw=()=>{
+    wrap.innerHTML='';
+    const e=(SV||{})[key]||{}, lines=e.lines||[], w=wordsOf(key)||{};
+    const withText=lines.filter(l=>w[l.cat]).length;
+    const h=document.createElement('h4');
+    h.textContent = lines.length
+      ? `台词 ${lines.length} 条（${withText} 条有中文正文） · ${sk.label||key}`
+      : (location.protocol==='file:'
+          ? 'file:// 下取不到台词表：请运行「启动资产浏览器.bat」后在浏览器里看台词'
+          : `该皮肤本地没有语音包（主包 cv-${(e.cv||'?')} 未随包导出） · ${sk.label||key}`);
+    wrap.appendChild(h);
+    lines.forEach(l=>row(l.label||l.cat, l.f, OPT.lines?w[l.cat]:''));
+    /* 主包缺失、盘上只剩变体包（-gift/-battle）的船：这些是 v1 时代就导出好的旧 wav，
+       不并进台词表（没有对应的皮肤档与正文），但也不该因为换口径就听不见了。 */
+    const extra=sk.voiceExtra||[];
+    if(extra.length){
+      const t=document.createElement('h4'); t.textContent='其它已导出语音（变体包，无台词正文）';
+      wrap.appendChild(t);
+      extra.forEach(p=>row('变体包 · '+(p.match(/cv-\d+-(\w+)\.wav$/)||[,'?'])[1], p, ''));
+    }
+    if(!lines.length && !extra.length){
+      const n=document.createElement('div'); n.className='hint';
+      n.textContent='可点开的语音为 0：本地资产里这艘船的主语音包缺失（详见 docs/TROUBLESHOOTING.md §49）。';
+      wrap.appendChild(n); }
+  };
+  Promise.all([loadVoiceMap(), loadWords()]).then(draw,draw);
 }
 /* ---------- 皮肤语音（skin_voice.json，由 scripts/extract_cv_voice.py 从 cue/cv-*.b 导出）----------
    结构 {皮肤key: {cv, idx, src, l2d:{动作组:[路径]}, tap:{touch_body|touch_special|touch_head: 路径},
@@ -359,10 +421,21 @@ function loadVoiceMap(){ return _voiceP||(_voiceP=(async()=>{
     try{ const r=await fetch('./skin_voice.json'); if(!r.ok) return {};
       const j=await r.json(); return (j&&typeof j==='object')?j:{}; }catch(e){ return {}; }
     })().then(j=>{ SV=j; return j; })); }
+/* ---------- 台词正文（skin_words.json，由 scripts/build_skin_words.py 产出）----------
+   {m:{皮肤key: 皮肤行id}, w:{皮肤行id: {类别名|动作组|触摸槽: 中文正文}}}。
+   正文与音频取自同一行（皮肤行 id = cv*10+idx），所以两者天然同档；
+   取不到就是**这一档游戏本来没写台词**（如部分船的摸头），不是链路坏了。 */
+let _wordP=null, SW={m:{},w:{}};
+function loadWords(){ return _wordP||(_wordP=(async()=>{
+    try{ const r=await fetch('./skin_words.json'); if(!r.ok) return null;
+      const j=await r.json(); return (j&&j.m&&j.w)?j:null; }catch(e){ return null; }
+    })().then(j=>{ if(j) SW=j; return j; })); }
+function wordsOf(key){ const id=SW.m[key]; return (id&&SW.w[id])||null; }
+function lineText(key, name){ const w=wordsOf(key); return (w&&w[name])||''; }
 const TAP_LABEL={touch_body:'普通触摸',touch_special:'特殊触摸',touch_head:'摸头'};
 /* 一个自持的 Audio 元素：不走 Live2D 库的 Sound 通道（那条会被下一条动作 dispose 掐断，见 §41） */
 let _vEl=null;
-function stopSkinVoice(){ if(_vEl){ try{_vEl.pause();}catch(e){} _vEl=null; } }
+function stopSkinVoice(){ if(_vEl){ try{_vEl.pause();}catch(e){} _vEl=null; } hideSub(); }
 function playVoicePath(path){ if(!path) return false;
   stopSkinVoice();
   const el=new Audio(path); _vEl=el;
@@ -372,17 +445,43 @@ function playVoicePath(path){ if(!path) return false;
 function skinTap(key){ const e=(SV||{})[key]; return (e&&e.tap)||null; }
 /* 表里存的是相对 Output/ 的路径，页面在 /gallery_v2/ 下，必须经 P('../') 解析后再喂给 Audio */
 function vsrc(p){ return p?new URL(P+p,location.href).href:''; }
+/* 触摸槽回退顺序：语音与字幕必须共用这一条解析，否则回退时会「播身体的声、出头饰的字」 */
+const TAP_ORDER=['touch_body','touch_special','touch_head'];
+function tapSlot(t, which){ if(!t) return ''; if(t[which]) return which;
+  return TAP_ORDER.find(k=>t[k]) || Object.keys(t)[0] || ''; }
+/* 一次「说话」= 同一个槽位的音频 + 正文，再按两个全局开关各自决定出不出声、上不上字幕 */
+function speak(key, name, path){ if(OPT.voice && path) playVoicePath(path); showSub(name, lineText(key,name)); }
 function playTap(key, which){ const t=skinTap(key); if(!t) return false;
-  return playVoicePath(vsrc(t[which]||t.touch_body||t.touch_special||t.touch_head||Object.keys(t).map(k=>t[k])[0])); }
+  const s=tapSlot(t, which); if(!s) return false;
+  speak(key, s, vsrc(t[s])); return true; }
+/* ---------- 底部字幕条 ---------- */
+function showSub(name, text){ const el=document.getElementById('mSub'); if(!el) return;
+  if(!OPT.lines || !text){ hideSub(); return; }
+  const who=document.createElement('span'); who.className='who';
+  /* 「谁在说」这行用表里的中文类别名（SW.L，由 character_voice 的 voice_name 落过来），
+     动作组名（complete / touch_body）是英文的，直接显示等于把内部键露给用户。 */
+  who.textContent=(curShip?curShip.name+' · ':'')+((SW.L||{})[name]||TAP_LABEL[name]||name);
+  const body=document.createElement('span'); body.textContent=text;   // 正文一律 textContent，不进 innerHTML
+  el.innerHTML=''; el.appendChild(who); el.appendChild(body); el.classList.add('on'); }
+/* 字幕**不自动消失**：换皮肤/换标签/点无正文的槽位时清（都走 stopSkinVoice→hideSub）。
+   挂个定时器的话，用户在长语音播完前它就没了，截图取证也会撞上"刚好消失"的竞态。 */
+function hideSub(){ const el=document.getElementById('mSub');
+  if(el){ el.classList.remove('on'); el.innerHTML=''; } }
+/* 「台词 N 条 · 正文 M 条」：M<N 是**游戏本来就没给这一档写词**（如部分船的摸头），
+   M=0 且 N>0 时点下去只有声音没有字幕，这是数据事实，不是链路坏了。 */
+function talkCount(key){ const lines=((SV||{})[key]||{}).lines||[];
+  if(!lines.length) return '';
+  const w=wordsOf(key)||{};
+  return `台词 ${lines.length} 条 · 正文 ${lines.filter(l=>w[l.cat]).length} 条`; }
+function talkPill(key){ const s=talkCount(key); return s?`<span class="pill">${s}</span>`:''; }
 /* 标签条上的语音控件：三个视图共用。clickEl 传 null 表示不做「点画面即触摸」。 */
 function mountSkinVoice(barEl, clickEl, keyOf){
   if(!barEl) return;
   const box=document.createElement('span'); box.className='vbox'; barEl.appendChild(box);
-  const draw=()=>{ const t=skinTap(keyOf()); const e=(SV||{})[keyOf()]||{};
+  const draw=()=>{ const t=skinTap(keyOf());
     const ks=Object.keys(TAP_LABEL).filter(k=>t&&t[k]);
     box.innerHTML=(ks.length?ks.map(k=>`<button data-vk="${k}">${TAP_LABEL[k]}</button>`).join('')
-                   :'<span class="pill">🔇 该皮肤无语音</span>')
-      +(e.lines?`<span class="pill">台词 ${e.lines.length} 条</span>`:'');
+                   :'<span class="pill">🔇 该皮肤无语音</span>')+talkPill(keyOf());
     box.querySelectorAll('button[data-vk]').forEach(b=>b.onclick=()=>{
       playTap(keyOf(),b.dataset.vk);
       b.classList.add('on'); setTimeout(()=>b.classList.remove('on'),900); }); };
@@ -392,7 +491,7 @@ function mountSkinVoice(barEl, clickEl, keyOf){
     clickEl.addEventListener('pointerup',e=>{
       if(Math.abs(e.clientX-px)>6||Math.abs(e.clientY-py)>6) return;
       playTap(keyOf(),'touch_body'); }); }
-  loadVoiceMap().then(draw,draw);
+  Promise.all([loadVoiceMap(), loadWords()]).then(draw,draw);
 }
 /* ---------- Live2D（pixi 6.5.2 + pixi-live2d-display 0.4.0 + cubismcore 5.1.0，均为 vendor/live2d/ 本地脚本） ---------- */
 let l2State = null;
@@ -460,7 +559,8 @@ async function renderLive2D(s, sk){
        改为页面自己持有一个 Audio 元素（模块级 playVoicePath/stopSkinVoice）：只有**用户再次触发动作**
        （下拉/重播/点部位）才打断上一条，运行时回落 idle 不打断；切标签/换皮肤经 my.off() 打断。 */
     const voice=Object.create(null);
-    const playVoice=(g)=>{ const arr=voice[g]; if(arr&&arr.length) playVoicePath(arr[0]); };
+    /* 动作组 → 语音 + 字幕同源于 speak()：关掉「点击出声」仍会上字幕，只是不出声 */
+    const playVoice=(g)=>{ const arr=voice[g]; speak(sk.key, g, arr&&arr.length?arr[0]:''); };
     /* ---------- 运行时保真三补丁（2026-09-23 无头取证，见 docs/TROUBLESHOOTING.md §21） ----------
        ① 采纳 Meta.Loop：vendored pixi-live2d-display 0.4.0 定义了 setIsLoop() 但全 bundle 无调用点，
           Meta.Loop 被无视 → idle 播完即停。此前靠前端定时器「假装循环」，实测该定时器与运行时
@@ -546,12 +646,13 @@ async function renderLive2D(s, sk){
     fillSel();
     /* 表是异步来的（本地小文件），回填后只刷新下拉标签与语音计数，不阻塞模型加载主流程。
        计数只算「模型里真的有的组」，否则会把表里其它类别（战斗/强化…）算进来说话数虚高。 */
-    loadVoiceMap().then(m=>{ const e=m[sk.key]||{}, map=e.l2d||{};
+    Promise.all([loadVoiceMap(), loadWords()]).then(([m])=>{ const e=m[sk.key]||{}, map=e.l2d||{};
       for(const g in map) if(Array.isArray(map[g])&&map[g].length)
         voice[g]=map[g].map(p=>new URL(P+p,location.href).href);
       const vp=document.getElementById('l2Voice');
       const n=groups.filter(g=>voice[g]).length;
-      if(vp) vp.textContent=n?('语音 '+n+' 组'):'该皮肤无语音';
+      const tc=talkCount(sk.key);
+      if(vp) vp.textContent=(n?('语音 '+n+' 组'):'该皮肤无语音')+(tc?' · '+tc:'');
       fillSel(); });
     sel.onchange=()=>{ play(sel.value); };
     document.getElementById('l2Replay').onclick=()=>{ play(sel.value); };
@@ -750,8 +851,9 @@ async function renderLive2D(s, sk){
     const def=idleGroup;
     if(sel.value!==def) sel.value=def||'';
     /* 语音表回填之前先别开播：否则模型刚就绪那一瞬播的动作（含 idle）拿不到 Sound，
-       表现成「第一个动作没声音，之后才有」。表是本地小文件，通常几毫秒就到。 */
-    loadVoiceMap().then(()=>{ if(my.cancelled||seq!==_l2seq) return;
+       表现成「第一个动作没声音，之后才有」。表是本地小文件，通常几毫秒就到。
+       台词正文要一起等：只等到语音表会出现「有声没字幕」的第一下。 */
+    Promise.all([loadVoiceMap(), loadWords()]).then(()=>{ if(my.cancelled||seq!==_l2seq) return;
       if(!played.size && !(mm.state&&mm.state.currentGroup)) play(def); });
     /* 循环与「播完回 idle」全部交给运行时（见上方补丁 ①②），前端不再挂任何定时器 */
   }catch(e){ if(my.cancelled||seq!==_l2seq)return;
@@ -962,6 +1064,21 @@ async function startSpine(s, sk){
     else b.textContent='全部 '+ships.length;
     b.onclick=()=>{catFilter=c; document.querySelectorAll('#fCat button').forEach(x=>x.classList.toggle('on',x===b)); renderGrid();};
   });
+})();
+
+/* ---------- 全局交互开关：点画面出声 / 显示台词 ---------- */
+(function initOpt(){
+  paintOpt();
+  document.querySelectorAll('#gOpt button').forEach(b=>{
+    const k=b.dataset.k;
+    b.onclick=()=>{
+      OPT[k]=!OPT[k]; saveOpt(); paintOpt();
+      if(k==='voice' && !OPT.voice) stopSkinVoice();   // 关掉就把手上正在播的那条停掉，别"关了还有声"
+      if(k==='lines' && !OPT.lines) hideSub();
+      if(tab==='voice') renderVoice();                 // 台词列要随开关显隐，重画一次
+    };
+  });
+  loadVoiceMap(); loadWords();   // 预热两张表：首开皮肤时不必等两次 fetch
 })();
 
 /* 启动必须走 apply() 而不是 renderGrid()：view 的初值是 ships.slice()（索引原序），

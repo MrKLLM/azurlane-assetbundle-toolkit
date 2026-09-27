@@ -12,18 +12,13 @@ OUT = os.path.join(ROOT, 'Output')
 # 支持 GALLERY_OUT_DIR 环境变量把产物写到临时目录，供改造后小规模比对，默认写正式 gallery_v2
 GAL = os.environ.get('GALLERY_OUT_DIR') or os.path.join(OUT, 'gallery_v2')
 
-# ---------- CV_MAP ----------
-cv_src = open(os.path.join(ROOT, 'scripts', 'generate_audio_doc.py'), encoding='utf-8').read()
-mm = re.search(r'CV_MAP\s*=\s*\{(.*?)\n\}', cv_src, re.S)
-CV_MAP = {int(k): v for k, v in re.findall(r'(\d+)\s*:\s*"([^"]+)"', mm.group(1))}
-
-# ---------- 中文名 → 拼音（仅唯一映射）----------
-CN2PIN = {}
-for pin, cn in SHIP_NAME_MAP.items():
-    CN2PIN[cn] = pin if cn not in CN2PIN or CN2PIN[cn] == pin else CN2PIN[cn]
-dup_cn = {}
-for pin, cn in SHIP_NAME_MAP.items():
-    dup_cn.setdefault(cn, []).append(pin)
+# ---------- 语音/台词权威源：skin_voice.json（scripts/extract_cv_voice.py 从 cue/cv-*.b 导出）----------
+# 旧口径是「社区 CV_MAP(719 条) → 中文名 → 拼音」归并 Output/Audio/CV/*.wav，
+# 结果 740/1008 组船显示「语音 0」而其中 590 组其实有语音（docs/TROUBLESHOOTING.md §47）。
+SKIN_VOICE = {}
+_sv_path = os.path.join(OUT, 'gallery_v2', 'skin_voice.json')
+if os.path.exists(_sv_path):
+    SKIN_VOICE = json.load(open(_sv_path, encoding='utf-8'))
 
 # ---------- 元数据 ----------
 meta_by_cn = {}
@@ -155,7 +150,7 @@ def ship_of(base):
     ships[base] = {
         'id': base, 'name': cn or base, 'hasCn': bool(cn), 'npc': npc,
         'type': stype, 'rarity': rarity, 'faction': faction, 'category': category,
-        'skins': [], 'voices': [], 'spineSkins': [], 'live2dSkins': [],
+        'skins': [], 'spineSkins': [], 'live2dSkins': [],
     }
     return ships[base]
 
@@ -224,17 +219,59 @@ for d in glob.glob(os.path.join(OUT, 'Live2D', '*')):
     sk['live2dBase'] = stem
     ship_of(base)['live2dSkins'].append(stem)
 
-# 语音按中文名归到 ship
-for f in glob.glob(os.path.join(OUT, 'Audio', 'CV', 'cv-*.wav')):
-    fn = os.path.basename(f)
-    m2 = re.match(r'cv-(\d+)(-[\w]+)?\.wav', fn)
-    if not m2: continue
-    name = CV_MAP.get(int(m2.group(1)))
-    if not name: continue
-    cn = name.split('-')[0]
-    base = CN2PIN.get(cn)
-    if base and base in ships:
-        ships[base]['voices'].append('Audio/CV/' + fn)
+# 皮肤级语音计数：skin_voice.json 的键就是画廊 bundleID，逐皮肤挂条数与「可点击出声」标记
+VOICE_ORPHAN = 0
+for stem, e in SKIN_VOICE.items():
+    sk = skins.get(stem)
+    if sk is None:
+        VOICE_ORPHAN += 1          # 测试残留(22/33/unknown3)等 JUNK 皮肤不进索引
+        continue
+    files = {l.get('f') for l in (e.get('lines') or []) if l.get('f')}
+    sk['voiceCount'] = len(files)
+    sk['voiceTap'] = bool(e.get('tap'))
+
+# ---------- 变体包语音（主包本地缺失时盘上仅剩的 -gift / -battle 导出）----------
+# 包号来自游戏自己的皮肤表（painting → 皮肤行 id // 10），不再走社区 CV_MAP 那条归并链。
+# 一个 painting 若同时属于两个发声实体（如 lafei 既是舰船 10117 也是剧情角色 90024），
+# 就把这一档**整体放弃**——按 §47 的教训，派错声比留空更糟。
+SKIN_ROWS = {}
+for _r in json.load(open(os.path.join(ROOT, 'inputs', 'azdata',
+                                      'azdata_ship_skin_template.json'), encoding='utf-8')).values():
+    if isinstance(_r, dict):
+        _p = str(_r.get('painting') or '').strip().lower()
+        if _p:
+            SKIN_ROWS.setdefault(_p, set()).add(int(_r.get('id') or 0) // 10)
+VARIANT_PACK = {}
+for _f in glob.glob(os.path.join(OUT, 'Audio', 'CV', 'cv-*.wav')):
+    _m = re.match(r'cv-(\d+)-(\w+)\.wav$', os.path.basename(_f))
+    if _m:
+        VARIANT_PACK.setdefault(int(_m.group(1)), []).append('Audio/CV/' + _m.group(0))
+VAR_TAIL = re.compile(r'(_hx|_n|_rw|_bj|_jz|_alter|_heihei|_hei)+$')
+VOICE_EXTRA = 0
+for stem, sk in skins.items():
+    if sk.get('voiceCount'):
+        continue
+    cands = {stem.lower(), VAR_TAIL.sub('', stem.lower())}
+    packs = set()
+    for c in cands:
+        packs |= SKIN_ROWS.get(c, set())
+    hits = sorted({f for p in packs for f in VARIANT_PACK.get(p, [])})
+    # 「歧义」的判据是**命中的包号**而不是候选包号：lafei 同名有舰船(10117)与剧情角色(90024)两行，
+    # 但盘上只有 cv-10117-gift.wav ⇒ 唯一命中，归属没有二义；两个号都有变体包时才放弃。
+    if len({p for p in packs if p in VARIANT_PACK}) == 1:
+        sk['voiceExtra'] = hits
+        VOICE_EXTRA += 1
+
+
+def ship_voice_count(sh):
+    """船级「语音 N 条」= 该船全部皮肤去重后的音频文件数（同一包同一条台词只算一次）。"""
+    files = set()
+    for sk in sh['skins']:
+        e = SKIN_VOICE.get(sk['key'])
+        if e:
+            files |= {l.get('f') for l in (e.get('lines') or []) if l.get('f')}
+        files |= set(sk.get('voiceExtra') or [])
+    return len(files)
 
 # ---------- 舰船/剧情角色 分层重分类（收集完成后，按皮肤标记+阵营+维基+塞壬覆盖综合判定）----------
 # 单一字段不可靠：塞壬 unknown* 带 900000+ 假 stats（误判 ship）；联动可玩船(hdn/DOA/海王星/NieR)缺 stats（误判 story）。
@@ -266,7 +303,7 @@ def skin_sort(s):
     return (s['label'] != '默认立绘', s['key'])
 for sh in ships.values():
     sh['skins'].sort(key=skin_sort)
-    sh['voiceCount'] = len(sh['voices'])
+    sh['voiceCount'] = ship_voice_count(sh)
 
 ship_list = sorted(ships.values(),
                    key=lambda s: (s['npc'], not s['hasCn'], s['faction'], s['type'], s['name']))
@@ -276,7 +313,8 @@ cnt = {
     'skins': sum(len(s['skins']) for s in ship_list),
     'spine': len(skins and [k for k,v in skins.items() if v['spine']]),
     'live2d': sum(1 for v in skins.values() if v['live2d']),
-    'with_voice': sum(1 for s in ship_list if s['voices']),
+    'with_voice': sum(1 for s in ship_list if s['voiceCount']),
+    'voice_skins': sum(1 for v in skins.values() if v.get('voiceCount')),
     'npc': sum(1 for s in ship_list if s['npc']),
     'with_faction': sum(1 for s in ship_list if s['faction']),
     'ship': sum(1 for s in ship_list if s['category'] == 'ship'),
@@ -291,7 +329,10 @@ js = json.dumps(index, ensure_ascii=False, separators=(',', ':'))
 open(os.path.join(GAL, 'index.js'), 'w', encoding='utf-8').write('window.GALLERY=' + js + ';')
 
 unmapped = [s['id'] for s in ship_list if not s['hasCn'] and not s['npc']]
-lines = [f"统计 {cnt}", f"非NPC未映射 ({len(unmapped)}): {unmapped[:60]}", "样例:"]
+lines = [f"统计 {cnt}",
+         f"语音源未命中索引的皮肤 {VOICE_ORPHAN}（JUNK/未导出目录），"
+         f"skin_voice 共 {len(SKIN_VOICE)} 皮肤",
+         f"非NPC未映射 ({len(unmapped)}): {unmapped[:60]}", "样例:"]
 for s in ship_list[:6]:
     lines.append(f"  {s['id']}->{s['name']} 皮肤{len(s['skins'])} spine{len(s['spineSkins'])} l2d{len(s['live2dSkins'])} 语音{s['voiceCount']}")
 open(os.path.join(GAL, '_build_report.txt'), 'w', encoding='utf-8').write('\n'.join(lines))

@@ -105,7 +105,7 @@ def main():
     p = os.path.join(DST, OUT_FN)
     if not check:
         os.makedirs(DST, exist_ok=True)
-        open(p, 'w', encoding='utf-8').write(blob)
+        open(p, 'wb').write(blob.encode('utf-8'))   # 二进制写，避免 CRLF 让台账 bytes/sha256 对不上
     entry = {'path': OUT_FN, 'bytes': len(blob.encode('utf-8')),
              'sha256': hashlib.sha256(blob.encode('utf-8')).hexdigest(),
              'rows': len(data), 'role': ROLE, 'consumers': CONSUMERS}
