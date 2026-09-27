@@ -1204,6 +1204,11 @@ files/AssetBundles/sharecfgdata/ship_skin_words
 **踩坑记录**：见 §54（闸门把白名单字段剔出比较 = 假绿灯；`flex:1` 压扁 audio；
 探针依赖上一轮 localStorage；阴性对照没点到那个槽位；CRLF 让台账校验长期报假红灯）。
 
+**缺口审计**：「🔇 无语音」的 354 张到底缺什么，用 `scripts/diag/voice_gap_audit.py` 按**可救性**分类，
+别拿一个总数当结论——196 缺包（本地+设备两侧都无）/ 36 只有变体包（**正文齐全却没进前端**）/
+55 剥后缀才命中（**不能做**：游戏把画法单独立行的那 29 行既无包也无词）/ 54 表里查无此名（NPC 皮肤）/
+13 该船无 CV。工具必须复用 `extract_cv_voice.resolve()`，判据不许另写一份；否证细节见 §57。
+
 **涉及文件**：`scripts/build_skin_words.py`、`scripts/diag/gallery_index_diff_check.py`（索引零回退闸门）、
 `scripts/diag/talk_verify.py`、`scripts/build_gallery_index.py`、`gallery_src/index.html`、
 `tools/sharecfg_re/42_publish_gamecfg.py`、`inputs/gamecfg/{ship_skin_words,character_voice}.json`。
