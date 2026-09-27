@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
 description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.4.0
+version: 1.4.1
 ---
 
 # Live2D 网页运行时集成

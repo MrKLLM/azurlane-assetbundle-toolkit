@@ -1,0 +1,103 @@
+{
+  "_说明": "共享长文档/正本的「承重锚点串」台账。每条断言：某个文件里某段原话仍然在盘上，且是由记录的那笔提交带进去的。抓两种失效：被别人的整文件写回静默吞掉（DROPPED）、以及被别人的提交搭车带走（RIDER，内容没丢但归属对不上）。配套判别与缓解见技能 shared-worktree-takeover-commit 第 3c 步。",
+  "_用法": "py -3 scripts/diag/shared_doc_anchor_check.py            # 全量核对，DROPPED/MISSING 才非零退出",
+  "_用法2": "py -3 scripts/diag/shared_doc_anchor_check.py --add <文件> <原话片段> [提交号] [备注]   # 本轮落了新内容就往台账里灌一条；提交号留空取当前 HEAD",
+  "anchors": [
+    {
+      "file": "PROJECT_STATUS.md",
+      "needle": "全量 269 模型 / 3309 部位",
+      "commit": "9bfe4b9",
+      "note": "§2.5 判定区那条的判据（本会话写，被对方整文件写回搭车提交）"
+    },
+    {
+      "file": "PROJECT_STATUS.md",
+      "needle": "六条硬规则",
+      "commit": "9bfe4b9",
+      "note": "WF-16 计数修正"
+    },
+    {
+      "file": "PROJECT_STATUS.md",
+      "needle": "幽灵标签",
+      "commit": "9bfe4b9",
+      "note": "§2.5 本轮修复的状态行（原写于 0e70b41，被 9bfe4b9 整文件写回重新落盘 ⇒ 归属已改记）"
+    },
+    {
+      "file": "PROJECT_STATUS.md",
+      "needle": "静止态就在画面内、却没登记",
+      "commit": "0e70b41",
+      "note": "§6 待办第 12 条"
+    },
+    {
+      "file": "docs/TROUBLESHOOTING.md",
+      "needle": "## §51. 判定区可视化里",
+      "commit": "0e70b41",
+      "note": "本轮新增条目；§51 编号曾被并发会话撞过一次"
+    },
+    {
+      "file": "docs/TROUBLESHOOTING.md",
+      "needle": "2026-09-27 更正（本条原句）",
+      "commit": "0e70b41",
+      "note": "§21 就地更正「编辑器遗留停放标记」"
+    },
+    {
+      "file": "docs/WORKFLOWS.md",
+      "needle": "六条必须记住的硬规则",
+      "commit": "bc50d06",
+      "note": "WF-16 标题计数修正"
+    },
+    {
+      "file": "docs/WORKFLOWS.md",
+      "needle": "__L2_HITSHOW",
+      "commit": "0e70b41",
+      "note": "WF-16 判定区两层基准那条"
+    },
+    {
+      "file": "AGENTS.md",
+      "needle": "连 Edit 这类原地编辑也会断链",
+      "commit": "228ad34",
+      "note": "硬链护栏改写"
+    },
+    {
+      "file": "gallery_src/index.html",
+      "needle": "__L2_HITSHOW",
+      "commit": "0e70b41",
+      "note": "前端正本里的修复本体（正本也会被别的会话整文件写回）"
+    },
+    {
+      "file": ".agents/skills/live2d-web-runtime-integration/SKILL.md",
+      "needle": "不等于脏数据",
+      "commit": "0e5687a",
+      "note": "§4.5 出画 Touch* 那条"
+    },
+    {
+      "file": ".agents/skills/windows-hardlink-dedup-verify/SKILL.md",
+      "needle": "别把护栏立在",
+      "commit": "0e5687a",
+      "note": "第 6 步改写（原地编辑防不住断链）"
+    },
+    {
+      "file": ".agents/skills/headless-chrome-cdp-batch-export/SKILL.md",
+      "needle": "同一类报错还有第二种成因",
+      "commit": "0e5687a",
+      "note": "4b：导航中 evaluate 也会 destroyed"
+    },
+    {
+      "file": ".agents/skills/shared-worktree-takeover-commit/SKILL.md",
+      "needle": "第 3c 步",
+      "commit": "08008a8",
+      "note": "单点插入被整文件写回吞掉那条"
+    },
+    {
+      "file": "docs/WORKFLOWS.md",
+      "needle": "共享长文档收尾必做机械核对",
+      "commit": "",
+      "note": "WF-16 收尾新增那条（与本次提交同时落，归属不校验、只查存在）"
+    },
+    {
+      "file": ".agents/skills/shared-worktree-takeover-commit/SKILL.md",
+      "needle": "把它做成机械核对",
+      "commit": "",
+      "note": "第 3c 步里指向本工具的那条"
+    }
+  ]
+}

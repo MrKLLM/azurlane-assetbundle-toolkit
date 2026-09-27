@@ -825,7 +825,12 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
   ref_diff 比的是正式目录（自证清白），`l2d_ab.py` 的"新侧"会读默认的陈旧目录得出"新旧一致"的假结论；
   而 ref_diff 在只含 `motion/` 的临时目录上曾经**全部 SKIP 却退出 0**。三处假绿灯的根因与判据见 `TROUBLESHOOTING.md` §24。
 
-**收尾**: 一轮 CDP 回归结束后 `py -3 scripts/diag/clean_diag_profiles.py --yes` 清 profile（见上），并确认 `.diag` 里没有本次新写的唯一副本代码（按 AGENTS.md 第 3 步移入 `scripts/diag/` 或删除）。
+**收尾**: 一轮 CDP 回归结束后 `py -3 scripts/diag/clean_diag_profiles.py --yes` 清 profile（见上），并确认 `.diag` 里没有本次新写的唯一副本代码（按 AGENTS.md 第 4 步移入 `scripts/diag/` 或删除）。
+- **共享长文档收尾必做机械核对**：`py -3 scripts/diag/shared_doc_anchor_check.py` —— 逐条断言本轮写进
+  `PROJECT_STATUS.md` / `docs/*.md` / `AGENTS.md` / `gallery_src/` 的正话仍在盘上（台账
+  `scripts/diag/shared_doc_anchors.json`，本轮落新内容用 `--add` 灌一条）。它专抓两种并发失效：
+  `DROPPED`=被别人的整文件写回静默吞掉；`RIDER`=内容还在但字节是别人的提交重新落的（归属对不上）。
+  **`git status` 干净与 `git diff` 为空都发现不了这两种**（2026-09-27 实测：查过 status 仍丢一条）。详见技能 `shared-worktree-takeover-commit` 第 3c 步。
 - **判活用 `powershell -File scripts\diag\wait_for_detached.ps1 -Pattern <脚本名> -Log .diag\_x.log`**，不要拿 `Start-Process -PassThru` 的 PID 去 `Wait-Process`：那只是 `py.exe` 启动器，且 `Wait-Process` 抛错会被 try/catch 读成"已退出"（2026-09-24 把还在跑的 269 模型回归误判成断了）。该工具按「命令行匹配 python.exe 工作进程 + 日志行数是否还在涨 + 有无汇总行/traceback」给三分法结论；加 `-StallRounds 2` 还能判出「进程活着但日志不涨」的**挂死**。
 - **启动长任务用 `py -3 scripts/diag/run_detached.py --log .diag/_x.log -- py -3 <脚本> <参数...>`**，别再用 PowerShell `Start-Process`：含空格路径在「bash → PowerShell → 子进程」三层引号下会被拆断（实测三次）。`DETACHED_PROCESS` 与 `CREATE_NO_WINDOW` 互斥，同时给会 `[WinError 87]`。
 - **含中文的 `.ps1` 必须存成 UTF-8 带 BOM**，否则 Windows PowerShell 5.1 按 GBK 解码会把引号错位成 `字符串缺少终止符`（`wait_for_detached.ps1` 首跑就是这么死的，`py -3` 写文件时用 `encoding='utf-8-sig'`）。
