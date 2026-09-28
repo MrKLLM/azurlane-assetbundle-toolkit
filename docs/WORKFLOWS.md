@@ -883,7 +883,7 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
 py -3 scripts/diag/gallery_motion_probe.py --page index_q.html --baseline index.html --win 1440,900
 ```
 
-**十条判据（脚本里逐条实现，全部走真实入口：点卡片 / 点标签 / 点开关，不直接调内部函数）**
+**十四条判据（脚本里逐条实现，全部走真实入口：点卡片 / 点标签 / 点开关，不直接调内部函数）**
 1. 环境自证：`visibilityState==='visible'` + `document.startViewTransition` 存在，否则整轮不可信；
 2. 倾斜：`--rx/--ry` 幅度 >1°、**换到卡面另一半后符号必须翻**（不翻就是角度没跟随鼠标）、`transform` 含 `matrix3d`；
 3. 倾斜成本：120 次 mousemove 的 ms/次，>4ms 判太贵；同时断言末卡角度非零（防止"计时测了个空转"）；
@@ -894,6 +894,15 @@ py -3 scripts/diag/gallery_motion_probe.py --page index_q.html --baseline index.
 8. 主题：`--cx/--cy` 落在被点开关的几何中心（±1%），**切换后 1.3s** 才读 `data-theme`/localStorage（见 §61 第 3 条）；
 9. 反向证据：`Emulation.setEmulatedMedia` 打开 `prefers-reduced-motion: reduce` 后——不再有 `fly` 类、缩略图 `opacity` 必须已经是 1（淡入靠 load 事件，关动画后不许依赖它）、弹层仍能关上；
 10. 报错：与 `--baseline` 页取**差集**，只有样板多出来的才判失败。
+11. 背景粒子"是不是星"：视差层必须 `[0,1,2]` 且深度递增、半径至少 6 档（不是所有点一样大）、
+    预渲染软精灵 3 张（白/冰蓝/樱粉）——**描边实心圆就是"劣质感"的来源**，`arc+stroke` 一律不算过；
+12. 背景随主题换档：夜里 `globalCompositeOperation==='lighter'`（浅底叠加会糊成白雾，所以白天必须
+    `source-over` + 比底深的颜色）、密度回升（实测 72→144）、流星排程开着且**归零后真能排出一颗**；
+13. 背景成本：手动跑 40 帧 `bgFrame` 计时（无头 rAF 节奏测不出真机成本），单帧 >4ms 判太贵；
+    指针视差要 `dispatchEvent(PointerEvent)` 后等缓动跟上（无头 ~8fps，门槛按"确实动了"定）；
+14. 粒子循环的**停帧能力**归到第 9 条反向证据里测：`bgFrame` 若开头无条件
+    `requestAnimationFrame(bgFrame)`，关掉开关后已排队的那一帧会把自己重新接上 ⇒ 循环永不停。
+    判据就是 reduce 之后 `BG.raf` 必须归 0（本轮真实抓到并修掉）。
 
 **出图**（只给我自己肉眼判，不作判据）：`fly_mid_0.12.png` / `fly_mid_0.3.png`（定格飞入中间帧）、
 `tab_slide.png`、`theme_wipe.png`、`theme_dark.png`。**定格要放在最后一步**——它会 `pause()/cancel()`

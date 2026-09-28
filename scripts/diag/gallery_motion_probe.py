@@ -289,26 +289,40 @@ def main():
     if after['mat'] != 'none':
         fails.append(f'3 飞入：动画结束后弹层仍带 transform {after["mat"]}')
 
-    # ── 5b. 背景层：在动、不遮内容、弹层挡着时不白画、开关能整块关 ────────
+    # ── 5b. 背景粒子：星野在动、真有景深、不遮内容、弹层挡着时不画、开关整块关 ──
     bg = t.j("""
       const host=document.getElementById('bgfx'), cv=host&&host.querySelector('canvas');
       const cs=host?getComputedStyle(host):null, m=getComputedStyle(document.getElementById('main'));
       return JSON.stringify({has:!!host, dis:cs&&cs.display, pe:cs&&cs.pointerEvents,
         z:cs&&cs.zIndex, mz:m.zIndex, cvw:cv?cv.width:0, cvh:cv?cv.height:0,
-        frames:BG.frames, n:BG.b.length, raf:BG.raf>0});""")
+        frames:BG.frames, n:BG.p.length, layers:[...new Set(BG.p.map(q=>q.L))].sort(),
+        sp:BG.sp.length, rad:[...new Set(BG.p.map(q=>+q.r.toFixed(1)))].length,
+        blend:BG.col&&BG.col.blend, shoot:BG.col&&BG.col.shoot,
+        depths:BG_L.map(l=>l.d), raf:BG.raf>0});""")
     if not bg['has'] or bg['dis'] == 'none':
         fails.append(f'5b 背景：#bgfx 不存在或默认就是关的（display={bg.get("dis")}）')
     else:
-        print(f'5b 背景  canvas {bg["cvw"]}x{bg["cvh"]} 气泡 {bg["n"]} z={bg["z"]}/内容{bg["mz"]} '
-              f'pointer-events={bg["pe"]} rAF={bg["raf"]}')
+        print(f'5b 星野  canvas {bg["cvw"]}x{bg["cvh"]} 粒子 {bg["n"]} 层 {bg["layers"]} 半径档 {bg["rad"]} '
+              f'精灵 {bg["sp"]} 混合={bg["blend"]} 流星={bg["shoot"]} z={bg["z"]}/内容{bg["mz"]} pe={bg["pe"]}')
         if bg['pe'] != 'none':
-            fails.append(f'5b 背景：pointer-events={bg["pe"]}，会吃掉卡片点击')
+            fails.append(f'5b 星野：pointer-events={bg["pe"]}，会吃掉卡片点击')
         if int(bg['z']) >= int(bg['mz']):
-            fails.append(f'5b 背景：z-index {bg["z"]} 没低于内容 {bg["mz"]}，会盖画')
+            fails.append(f'5b 星野：z-index {bg["z"]} 没低于内容 {bg["mz"]}，会盖画')
         if bg['cvw'] < 100 or bg['cvh'] < 100:
-            fails.append(f'5b 背景：canvas 尺寸 {bg["cvw"]}x{bg["cvh"]} 没铺上')
-        if not 16 <= bg['n'] <= 56:
-            fails.append(f'5b 背景：气泡数 {bg["n"]} 不在 16~56，按面积封顶这条没生效')
+            fails.append(f'5b 星野：canvas 尺寸 {bg["cvw"]}x{bg["cvh"]} 没铺上')
+        if not 40 <= bg['n'] <= 340:
+            fails.append(f'5b 星野：粒子数 {bg["n"]} 不在 40~340（按面积算并封顶这条没生效）')
+        # 「星辰」的质感来自三件事，逐件量：多层景深、多种尺寸、软精灵而不是描边圆
+        if bg['layers'] != [0, 1, 2]:
+            fails.append(f'5b 星野：视差层只有 {bg["layers"]}，不是一远一近三层')
+        if bg['rad'] < 6:
+            fails.append(f'5b 星野：半径只有 {bg["rad"]} 档，等于所有星一样大')
+        if bg['sp'] != 3:
+            fails.append(f'5b 星野：精灵 {bg["sp"]} 张（应为白/冰蓝/樱粉三张预渲染图）')
+        if bg['depths'] != sorted(bg['depths']) or bg['depths'][0] >= bg['depths'][-1]:
+            fails.append(f'5b 星野：层深度没递增 {bg["depths"]}，视差不会分层次')
+        if bg['blend'] != 'source-over':
+            fails.append(f'5b 星野：浅色底用了 {bg["blend"]} 叠加，会糊成白雾')
         f0 = t.j("return JSON.stringify([BG.frames,BG.clock]);")
         time.sleep(0.5)
         f1 = t.j("return JSON.stringify([BG.frames,BG.clock]);")
@@ -321,8 +335,31 @@ def main():
         print(f'5b 背景  0.5s 推进 {dfr} 帧（无头节奏不代表真机 fps）动画时钟走 {dcl:.2f}s')
         if dfr < 1:
             fails.append('5b 背景：rAF 一帧都没推进')
-        if not 0.15 < dcl <= 0.55:
-            fails.append(f'5b 背景：动画时钟 0.5s 走了 {dcl:.2f}s，不在 (0.15, 0.55] —— dt 尺度可疑')
+        # 下界要留余量：无头 3~4 帧 × 每帧 dt 上限 0.05 = 0.15，正好压在边界上会随机抖
+        if not 0.1 < dcl <= 0.55:
+            fails.append(f'5b 背景：动画时钟 0.5s 走了 {dcl:.2f}s，不在 (0.1, 0.55] —— dt 尺度可疑')
+        # 指针视差：把指针甩到左上角，BG.px/py 要缓动跟过去（"活"的主要来源之一）
+        t.j("""window.dispatchEvent(new PointerEvent('pointermove',{clientX:2,clientY:2,bubbles:true}));
+          return JSON.stringify([BG.px,BG.py]);""")
+        time.sleep(1.4)
+        par = t.j("return JSON.stringify([BG.px,BG.py]);")
+        # 无头 ~8fps，缓动系数 dt*2.4 每帧只走 ~12%，所以门槛按"确实动了"定，不按真机速度定
+        print(f'5b 视差  px/py → {par[0]:.2f},{par[1]:.2f}（目标 0,0）')
+        if par[0] > 0.42 or par[1] > 0.42:
+            fails.append(f'5b 视差：指针移到左上角 1.4s 后 px/py 仍是 {par[0]:.2f},{par[1]:.2f}，没跟上')
+        # 单帧绘制成本：无头 rAF 节奏测不出真机成本，只能手动跑 40 帧计时
+        cost = t.j("""
+          cancelAnimationFrame(BG.raf); BG.raf=0;
+          const t0=performance.now();
+          for(let i=0;i<40;i++) bgFrame(t0+i*16.7);
+          const ms=performance.now()-t0;
+          cancelAnimationFrame(BG.raf); BG.raf=0; bgApply();
+          return JSON.stringify({ms:+(ms/40).toFixed(2), raf:BG.raf>0});""")
+        print(f'5b 成本  单帧绘制 {cost["ms"]}ms（帧预算 16.7ms），计时后循环已恢复={cost["raf"]}')
+        if cost['ms'] > 4:
+            fails.append(f'5b 成本：单帧 {cost["ms"]}ms，背景吃掉 {cost["ms"]/16.7*100:.0f}% 帧预算，太贵')
+        if not cost['raf']:
+            fails.append('5b 成本：计时之后 rAF 没恢复，后面的断言会全测到静止画面')
         # 弹层几乎铺满视口，挡着的时候不许白画
         t.j("document.querySelectorAll('.card')[6].click(); return JSON.stringify([1]);")
         time.sleep(0.35)
@@ -371,6 +408,21 @@ def main():
         fails.append(f"6 昼夜：切换后主题没落到 dark（theme={th2['theme']} ls={th2['ls']}）")
     if not th2['on']:
         fails.append('6 昼夜：夜那颗胶囊没进入选中态')
+    # 夜里背景必须换档：叠加发光 + 开流星 + 密度回升；流星排程要真的能排出来
+    dk = t.j("""BG.next=0.001;
+      return JSON.stringify({blend:BG.col.blend, shoot:BG.col.shoot, n:BG.p.length, k:BG.col.k});""")
+    time.sleep(0.6)
+    mk = t.j("return JSON.stringify(!!BG.shoot);")
+    print(f'6 昼夜  夜里 blend={dk["blend"]} 流星={dk["shoot"]} 粒子 {bg.get("n")}→{dk["n"]} '
+          f'已排出流星={mk}')
+    if dk['blend'] != 'lighter':
+        fails.append(f'6 昼夜：夜里背景仍是 {dk["blend"]}，没换成叠加发光')
+    if not dk['shoot']:
+        fails.append('6 昼夜：夜里没开流星排程')
+    if dk['n'] <= bg.get('n', 0):
+        fails.append(f'6 昼夜：换夜后粒子数 {bg.get("n")}→{dk["n"]} 没回升，密度没跟主题走')
+    if not mk:
+        fails.append('6 昼夜：把排程归零后 0.6s 仍没有流星，这条是死的')
     pg.shot(os.path.join(a.out, 'theme_dark.png'))
     t.raw("document.querySelector('#gTheme button[data-t=light]').click()")
     time.sleep(1.2)
