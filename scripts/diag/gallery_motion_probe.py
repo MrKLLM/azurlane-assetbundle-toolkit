@@ -59,6 +59,9 @@ def main():
         "addEventListener('unhandledrejection',e=>window.__errs.push('rej '+String(e.reason).slice(0,140)));"})
     pg.cmd('Emulation.setDeviceMetricsOverride',
            {'width': win[0], 'height': win[1], 'deviceScaleFactor': 1, 'mobile': False})
+    # 无头实例没有真窗口焦点：document.activeElement 会设上，但 :focus 不匹配，
+    # 于是「聚焦变宽」这类判据恒假（本轮实测 190→190 的假红灯）。
+    pg.cmd('Emulation.setFocusEmulationEnabled', {'enabled': True})
     pg.cmd('Page.navigate', {'url': url})
     time.sleep(6)
     cards, vis, hasvt = t.j("""return JSON.stringify([document.querySelectorAll('.card').length,
@@ -127,6 +130,17 @@ def main():
     if per > 4:
         fails.append(f'1b 成本：{per:.2f}ms/次事件，鼠标一动就吃掉 {per/16.7*100:.0f}% 帧预算，太贵')
 
+    # ── 1c. 掠过高光必须已经拿掉（用户嫌闪，2026-09-28 明确否掉）──────────
+    sheen = t.j("""
+      const th=document.querySelector('.card .thumb');
+      const cs=getComputedStyle(th,'::after');
+      const css=[...document.styleSheets].flatMap(s=>{try{return [...s.cssRules].map(r=>r.cssText)}catch(e){return []}})
+        .join('|');
+      return JSON.stringify({anim:cs.animationName, content:cs.content, keyframes:/@keyframes sheen/.test(css)});""")
+    print(f'1c 高光  animation={sheen["anim"]} content={sheen["content"]} 还留着@keyframes sheen={sheen["keyframes"]}')
+    if sheen['keyframes'] or sheen['anim'] != 'none' or sheen['content'] not in ('none', 'normal'):
+        fails.append(f'1c 高光：掠过高光没删干净（{sheen}）')
+
     # ── 2. 缩略图淡入：load 接线（图不淡入 = 永远透明，属于改坏）──────────
     fade = t.j("""
       const im=[...document.querySelectorAll('.card .thumb img')];
@@ -175,17 +189,22 @@ def main():
 
     # ── 2c. 搜索框聚焦变宽 ───────────────────────────────────────────────
     se0 = t.j("""const s=document.getElementById('search');
-      return JSON.stringify([parseFloat(getComputedStyle(s).width), document.activeElement===s]);""")
+      return JSON.stringify([parseFloat(getComputedStyle(s).width), document.hasFocus()]);""")
     t.raw("document.getElementById('search').focus()")
-    time.sleep(0.45)
-    se1 = t.j("""const s=document.getElementById('search');
-      return JSON.stringify([parseFloat(getComputedStyle(s).width), document.activeElement===s]);""")
+    # 无头出帧慢（实测 ~8fps），0.28s 的宽度过渡要等**足够多帧**才会走完；
+    # 等 1.2s 是给这条判据留出真实余量，否则量到的是"动画还没开始"而不是"没接线"。
+    time.sleep(1.2)
+    se1 = t.j("""const s=document.getElementById('search'), cs=getComputedStyle(s);
+      return JSON.stringify([parseFloat(cs.width), s.matches(':focus'), cs.flexShrink,
+        parseFloat(cs.width) /* 实际用值 */, 270 /* 规则里写的值 */]);""")
     t.raw("document.getElementById('search').blur()")
-    print(f'2c 搜索  宽 {se0[0]} → 聚焦 {se1[0]}（聚焦成功={se1[1]}）')
+    print(f'2c 搜索  宽 {se0[0]} → 聚焦 {se1[0]}（:focus={se1[1]} flex-shrink={se1[2]} 规则值={se1[4]}）')
     if not se1[1]:
-        fails.append('2c 搜索：focus() 没落到搜索框上，这条测不到东西')
+        fails.append('2c 搜索：:focus 没命中（焦点模拟没生效），这条测不到变宽')
     if se1[0] - se0[0] < 20:
-        fails.append(f'2c 搜索：聚焦后没变宽（{se0[0]} → {se1[0]}）')
+        # flex-shrink 会把"指定宽度"压回"实际用值"，这两种失败要能一眼分开
+        fails.append(f'2c 搜索：聚焦后没变宽（{se0[0]} → {se1[0]}，:focus={se1[1]}，'
+                     f'flex-shrink={se1[2]}；若 :focus=True 而宽度仍小，是被 flex 压掉了）')
 
 
     # ── 3. 弹层从卡片飞入 + 关闭按原路缩回（一次开合测两条）───────────────
@@ -270,6 +289,64 @@ def main():
     if after['mat'] != 'none':
         fails.append(f'3 飞入：动画结束后弹层仍带 transform {after["mat"]}')
 
+    # ── 5b. 背景层：在动、不遮内容、弹层挡着时不白画、开关能整块关 ────────
+    bg = t.j("""
+      const host=document.getElementById('bgfx'), cv=host&&host.querySelector('canvas');
+      const cs=host?getComputedStyle(host):null, m=getComputedStyle(document.getElementById('main'));
+      return JSON.stringify({has:!!host, dis:cs&&cs.display, pe:cs&&cs.pointerEvents,
+        z:cs&&cs.zIndex, mz:m.zIndex, cvw:cv?cv.width:0, cvh:cv?cv.height:0,
+        frames:BG.frames, n:BG.b.length, raf:BG.raf>0});""")
+    if not bg['has'] or bg['dis'] == 'none':
+        fails.append(f'5b 背景：#bgfx 不存在或默认就是关的（display={bg.get("dis")}）')
+    else:
+        print(f'5b 背景  canvas {bg["cvw"]}x{bg["cvh"]} 气泡 {bg["n"]} z={bg["z"]}/内容{bg["mz"]} '
+              f'pointer-events={bg["pe"]} rAF={bg["raf"]}')
+        if bg['pe'] != 'none':
+            fails.append(f'5b 背景：pointer-events={bg["pe"]}，会吃掉卡片点击')
+        if int(bg['z']) >= int(bg['mz']):
+            fails.append(f'5b 背景：z-index {bg["z"]} 没低于内容 {bg["mz"]}，会盖画')
+        if bg['cvw'] < 100 or bg['cvh'] < 100:
+            fails.append(f'5b 背景：canvas 尺寸 {bg["cvw"]}x{bg["cvh"]} 没铺上')
+        if not 16 <= bg['n'] <= 56:
+            fails.append(f'5b 背景：气泡数 {bg["n"]} 不在 16~56，按面积封顶这条没生效')
+        f0 = t.j("return JSON.stringify([BG.frames,BG.clock]);")
+        time.sleep(0.5)
+        f1 = t.j("return JSON.stringify([BG.frames,BG.clock]);")
+        dfr, dcl = f1[0] - f0[0], f1[1] - f0[1]
+        # 无头的 rAF 节奏远慢于真机（本轮实测 ~4 帧/0.5s ≈ 8fps），而每帧 dt 上限 0.05s
+        # 是防"标签页切回来一次性跳一大段"的保险 —— 两者叠加会让无头里动画时钟走得比墙钟慢，
+        # 这**不是缺陷**（真机 60fps 时 dt≈0.016 用不到上限）。所以判据取两侧：
+        #   下界：确实在按 dt 累计（不是恒 0）；上界：**不许快过真实时间**（dt 单位写错成 ms
+        #   这类事故会立刻爆掉上界，那才是要抓的）。
+        print(f'5b 背景  0.5s 推进 {dfr} 帧（无头节奏不代表真机 fps）动画时钟走 {dcl:.2f}s')
+        if dfr < 1:
+            fails.append('5b 背景：rAF 一帧都没推进')
+        if not 0.15 < dcl <= 0.55:
+            fails.append(f'5b 背景：动画时钟 0.5s 走了 {dcl:.2f}s，不在 (0.15, 0.55] —— dt 尺度可疑')
+        # 弹层几乎铺满视口，挡着的时候不许白画
+        t.j("document.querySelectorAll('.card')[6].click(); return JSON.stringify([1]);")
+        time.sleep(0.35)
+        g0 = t.j("return JSON.stringify(BG.frames);"); time.sleep(0.5)
+        g1 = t.j("return JSON.stringify(BG.frames);")
+        print(f'5b 背景  弹层开着 0.5s 推进 {g1-g0} 帧（应≈0）')
+        if g1 - g0 > 3:
+            fails.append(f'5b 背景：弹层挡着仍在画（0.5s {g1-g0} 帧）')
+        t.raw("document.querySelector('.close').click()")
+        time.sleep(0.7)
+        tg = t.j("""document.querySelector('#gOpt button[data-k=bgfx]').click();
+          return JSON.stringify({dis:getComputedStyle(document.getElementById('bgfx')).display,
+            raf:BG.raf, ls:JSON.parse(localStorage.getItem('gallery.opt.v1')||'{}').bgfx});""")
+        print(f'5b 背景  关掉开关 → {tg}')
+        pg.shot(os.path.join(a.out, 'bg_off.png'))      # 出图供肉眼比"加不加背景差多少"
+        if tg['dis'] != 'none' or tg['raf'] != 0 or tg['ls'] is not False:
+            fails.append(f'5b 背景：开关没把整块关掉（含辉光）：{tg}')
+        t.raw("document.querySelector('#gOpt button[data-k=bgfx]').click()")
+        time.sleep(0.35)
+        pg.shot(os.path.join(a.out, 'bg_on.png'))
+        bk = t.j("""return JSON.stringify([getComputedStyle(document.getElementById('bgfx')).display, BG.raf>0]);""")
+        if bk[0] == 'none' or not bk[1]:
+            fails.append(f'5b 背景：重新打开后没恢复（{bk}）')
+
     # ── 6. 昼夜圆形擦除：圆心取自被点的开关 ──────────────────────────────
     th = t.j("""
       const b=document.querySelector('#gTheme button[data-t=dark]'), r=b.getBoundingClientRect();
@@ -305,14 +382,17 @@ def main():
       const c=document.querySelectorAll('.card')[6]; c.scrollIntoView({block:'center'}); c.click();
       const m=document.querySelector('.modal'), im=document.querySelector('.card .thumb img');
       return JSON.stringify({fly:m.className, RM:matchMedia('(prefers-reduced-motion: reduce)').matches,
-        op:im?getComputedStyle(im).opacity:'no-img', cx:document.documentElement.style.getPropertyValue('--cx')});""")
-    print(f'7 减动效  class={rm["fly"]!r} RM={rm["RM"]} 图 opacity={rm["op"]}')
+        op:im?getComputedStyle(im).opacity:'no-img',
+        bg:getComputedStyle(document.getElementById('bgfx')).display, raf:BG.raf});""")
+    print(f'7 减动效  class={rm["fly"]!r} RM={rm["RM"]} 图 opacity={rm["op"]} 背景 display={rm["bg"]}')
     if not rm['RM']:
         fails.append('7 减动效：媒体模拟没生效，这条断言是空的')
     if 'fly' in rm['fly']:
         fails.append('7 减动效：仍播放飞入动画')
     if rm['op'] != '1':
         fails.append(f'7 减动效：缩略图仍依赖淡入（opacity={rm["op"]}），关掉动画后可能永久不可见')
+    if rm['bg'] != 'none' or rm['raf'] != 0:
+        fails.append(f'7 减动效：背景层没整块停掉（display={rm["bg"]} rAF={rm["raf"]}）')
     t.raw("document.querySelector('.close').click()")
     time.sleep(0.8)
     if t.j("return JSON.stringify([document.getElementById('mask').classList.contains('on')]);")[0]:
