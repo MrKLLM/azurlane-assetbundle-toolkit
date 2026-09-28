@@ -2860,3 +2860,31 @@ SkeletonGraphic 列表 + 各自 RectTransform"，与静态立绘第 9.1 节"部�
 
 **涉及文件**: `gallery_src/index.html`、`scripts/diag/gallery_framing_ab.py`（新，A/B 取景 + 视角记忆回归）、`.diag/framing/`（对比截图与 `framing.json`）。
 相关：WF-16、§20、§45/§46（Spine 巨幕遮罩那两类撑歪取景的件）。
+
+---
+
+## §61. 动效改动的四条假红灯（2026-09-28）
+
+**日期**: 2026-09-28　**状态**: ✅ 四条全部定位并改掉判据本身，工具 `scripts/diag/gallery_motion_probe.py` 入库
+
+给画廊样板页加「卡片微倾斜 / 缩略图淡入 / 弹层从卡片飞入 / 会滚的选中胶囊 / 昼夜圆形擦除」后，
+第一版探针跑出 4 红 1 疑。**四条都不是产品缺陷，而是判据测错了东西**——但每一条都能让
+下一轮把对的东西当成错的，所以逐条记下修法。
+
+| # | 现象（我以为坏了） | 真实原因 | 改后的判据 |
+|---|---|---|---|
+| 1 | `transform` 不含 `matrix3d`、1008 张缩略图**一张都没加载**（`complete=false`） | 我用的是**前台但被切到后台的标签页**：`document.visibilityState==='hidden'` 时 Chrome 不出帧，CSS 动画**冻结在起始关键帧**（`getAnimations()` 返回 1008 条全停在 0），`loading=lazy` 的图也一张不取 | 动效断言只能在**会出帧**的环境跑：无头 `--headless=new` + `setDeviceMetricsOverride`，并**先断言 `visibilityState==='visible'`**，不对就直接判失败，不再往下比 |
+| 2 | 选中胶囊落位「偏差 8.3/68.3px」、宽度只有 9.97px | 我在弹层**正播飞入动画**时量 `getBoundingClientRect()`——弹层当时被 `scale(0.116)`，rect 连内容一起缩了。产品落位其实是对的（10/83px） | 落位一律用 **`offsetLeft/offsetWidth`（布局值，不受 transform 影响）**，`placeTab`/`slidePill` 也改成同一套；探针再拿 rect 比对就是探针自己的错 |
+| 3 | 点「夜」之后 `documentElement.dataset.theme` 和 localStorage 都还是 light | `startViewTransition(apply)` 的回调是**异步**的（先做整页快照才执行），点击那一刻读必然还是旧值 | 主题落值改到**切换后 1.3s** 再读；点击那一刻只断言同步写入的 `--cx/--cy` |
+| 4 | 页面抛 `Uncaught ReferenceError: THREE is not defined` | `vendor/spine/spine-all.js` 自带的 three.js 集成代码，**正本同样报**，与本次改动无关 | 报错断言改成**与改前页做差集**（`--baseline index.html`），只有「样板比正本多出来的」才判失败 |
+| 5（疑） | 「定格中间帧」截图里弹层已经是满尺寸，看不出在飞 | `--spring-slow` 曲线前段极陡：45% 时长处进度已到 ~0.96 | 定格取 **12% / 30%** 两个点，并顺手把 `matrix(...)` 打进日志（0.627 / 0.959）——弹性曲线的"什么时候到位"是要量出来的，不是猜的 |
+
+**顺带量到的一条成本**：卡片倾斜是「读矩形 → 写两个 CSS 变量」，每个 mousemove 都构成一次
+强制回流。改成**按卡缓存矩形 + 滚动时作废**后，无头实测 120 次事件 65ms（**0.55ms/次**，
+60fps 预算 16.7ms），所以不需要 rAF 批处理。**但这条计时断言必须同时证明它真的在驱动倾斜**
+（末卡 `--ry` 非零、且全场只有 1 张带倾角），否则测的只是 `getBoundingClientRect` 的空转。
+
+**已排除的假设**：① 以为是 `clip-path`/`backdrop-filter` 与 View Transition 冲突——圆形擦除一次就过；
+② 以为是 `will-change` 缺失导致掉帧——实测成本 0.55ms/事件，没加 `will-change`；
+③ 以为 `.tslide` 没显示是 z-index 问题——实际是选中标签自己的 `background` 没清成 `transparent`，
+和胶囊叠成两层（这条**是真缺陷**，探针的 `onbg==='none'` 断言抓到的）。

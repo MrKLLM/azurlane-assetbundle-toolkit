@@ -874,6 +874,38 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
 
 ---
 
+### WF-16 追加（2026-09-28）：动效 / 观感类改动怎么验（`gallery_motion_probe.py`）
+
+**目标**: 「加了动画」和「动画真的接在用户那一下操作上、且系统关掉动效时能退化」是两件事，后者要能红。
+**适用场景**: 改 `gallery_src/index.html` 的 hover / 入场 / 弹层开合 / 主题切换 / 选中态胶囊一类。
+
+```bash
+py -3 scripts/diag/gallery_motion_probe.py --page index_q.html --baseline index.html --win 1440,900
+```
+
+**十条判据（脚本里逐条实现，全部走真实入口：点卡片 / 点标签 / 点开关，不直接调内部函数）**
+1. 环境自证：`visibilityState==='visible'` + `document.startViewTransition` 存在，否则整轮不可信；
+2. 倾斜：`--rx/--ry` 幅度 >1°、**换到卡面另一半后符号必须翻**（不翻就是角度没跟随鼠标）、`transform` 含 `matrix3d`；
+3. 倾斜成本：120 次 mousemove 的 ms/次，>4ms 判太贵；同时断言末卡角度非零（防止"计时测了个空转"）；
+4. 淡入：判据是「**已 `complete` 却没亮**」= 0，不是「还没到货」= 0（懒加载的图本来就该透明）；
+5. 会滚的选中胶囊：`--x/--y/--w/--h` 与选中标签的 `offset*` 偏差 ≤1.5px，**切标签位移 >20px**（位移不到 20px 说明这条断言是空的），且选中那颗自身 `background-image==='none'`（否则和胶囊叠成两层）；
+6. 飞入：点卡片后 `.modal` 立刻带 `fly` 类、`--fx/--fy` 位移非零、`--fs` 在 (0,0.6)；动画结束后 `fly` 必须摘掉且 `transform==='none'`（不摘会盖住下一次关闭动画）；
+7. 缩回：点关闭后同时出现 `flyout` + `closing`，1s 后弹层真关上且 `flyout` 已清；
+8. 主题：`--cx/--cy` 落在被点开关的几何中心（±1%），**切换后 1.3s** 才读 `data-theme`/localStorage（见 §61 第 3 条）；
+9. 反向证据：`Emulation.setEmulatedMedia` 打开 `prefers-reduced-motion: reduce` 后——不再有 `fly` 类、缩略图 `opacity` 必须已经是 1（淡入靠 load 事件，关动画后不许依赖它）、弹层仍能关上；
+10. 报错：与 `--baseline` 页取**差集**，只有样板多出来的才判失败。
+
+**出图**（只给我自己肉眼判，不作判据）：`fly_mid_0.12.png` / `fly_mid_0.3.png`（定格飞入中间帧）、
+`tab_slide.png`、`theme_wipe.png`、`theme_dark.png`。**定格要放在最后一步**——它会 `pause()/cancel()`
+动画并手动摘类，属于篡改状态，早跑会污染后面的断言；而且它必须先撤掉第 9 条的 reduce 模拟，
+否则 `flyGeom` 走退化分支，根本不会有 `flyin` 动画可定格。
+
+**踩坑记录**: 见 §61（四条假红灯：隐藏标签页不出帧、rect 被动画缩放、VT 回调异步、vendor 本来就报错）。
+
+**涉及文件**: `scripts/diag/gallery_motion_probe.py`（新）、`scripts/diag/gallery_ui_shots.py`
+（复用它的 `Page`/`BASE`/`preflight`）、`gallery_src/index.html`。
+相关：`WF-16` 六件套（动效过了之后仍要跑那六件）、`WF-15` 换入闸门。
+
 ### WF-17: Live2D 动作语音导出与接线（ACB cue → 动作组 → 浏览器出声）
 
 **日期**: 2026-09-23

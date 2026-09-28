@@ -93,6 +93,37 @@ def open_state(pg, tab, key):
       return 'ok';})()""" % (key, tab))
 
 
+def preflight(page):
+    """先探一次服务再启动 Chrome。真实翻车：8777 上的服务器静默死掉后，本工具照样
+    截出 5 张"空白页"并逐条打印文件名、退出码 0 —— 判据必须能红。"""
+    url = f'{BASE}/{page}'
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            if r.status != 200:
+                raise RuntimeError(f'{url} -> HTTP {r.status}')
+    except Exception as e:
+        raise SystemExit(f'! 先起服务器再跑（{url} 不可达：{e}）\n'
+                         f'  双击 Output\\gallery_v2\\启动资产浏览器.bat，'
+                         f'或不弹浏览器地起：py -3 scripts/diag/run_detached.py --log .diag/_srv.log -- py -3 Output/gallery_v2/_gallery_server.py')
+    return url
+
+
+def assert_rendered(pg, page, name, tab):
+    """每拍一张都要证明"画面真的渲染了"，而不是只证明脚本没抛异常。"""
+    n = pg.ev("""(()=>{const v=document.getElementById('mView');
+      return JSON.stringify([document.querySelectorAll('.card').length,
+        !!window.GALLERY, v?v.childElementCount:0,
+        (document.querySelector('.note')||{}).textContent||'']);})()""")
+    cards, has_g, vchildren, note = json.loads(n)
+    if not has_g:
+        raise SystemExit(f'! {page} / {name}: window.GALLERY 不存在（index.js 没加载？）')
+    if cards == 0:
+        raise SystemExit(f'! {page} / {name}: 网格一张卡都没渲染（页面脚本崩了或 index.js 坏了）')
+    if tab and vchildren == 0:
+        raise SystemExit(f'! {page} / {name}: #mView 是空的，note={note[:80]!r}')
+    return cards
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--pages', default='index.html,index_b.html', help='逗号分隔：改前页,改后页')
@@ -108,6 +139,7 @@ def main():
     profile = os.path.join(ROOT, '.diag', 'chrome_uishots')
     os.makedirs(profile, exist_ok=True)
     for tag, page in zip(tags, pages):
+        preflight(page)
         print(f'== {tag}  {page} ==')
         pg = Page(a.port, profile, f'{BASE}/{page}', win)
         time.sleep(7)
@@ -118,9 +150,10 @@ def main():
             r = open_state(pg, tab, key)
             if tab:
                 time.sleep(WAIT[tab])
+            cards = assert_rendered(pg, page, name, tab)
             out = os.path.join(a.out, f'{tag}_{name}.png')
             pg.shot(out)
-            print(f'  {name:<12} {str(r):<8} -> {os.path.basename(out)}')
+            print(f'  {name:<12} 卡片{cards:>5}  {str(r):<8} -> {os.path.basename(out)}')
         pg.close()
         time.sleep(1.5)
 
