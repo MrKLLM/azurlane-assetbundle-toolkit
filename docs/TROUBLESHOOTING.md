@@ -2919,3 +2919,31 @@ SkeletonGraphic 列表 + 各自 RectTransform"，与静态立绘第 9.1 节"部�
 `globalCompositeOperation='lighter'` 叠加出辉光，**浅色底反过来必须 `source-over` + 比底深的颜色**
 （浅底上叠加只会糊成一片白雾）；⑤ 偶发流星（头亮尾消的一条渐变线，寿命 ~0.85s）。
 成本实测单帧 0.13ms（帧预算 16.7ms），320 颗封顶也毫无压力。
+
+### 再补（用户仍判"low"，最后发现是**实现层次**不对，不是参数不对）
+
+**根因**：前两版都在 2D canvas 上画点，而参考页 `deepseek.com/harness` 打开的是
+`getContext('webgl2', {alpha:true, premultipliedAlpha:false, powerPreference:'low-power'})`
++ 三段着色器：**值噪声 fbm → 对 fbm 取旋度做域扭曲 → 五色渐变 → 鼠标 flowmap 扰动 →
+自发光 bloom → 活颗粒 → 暗角**（默认参数就写在那份 JS 里：`swirlIterations:12`、
+`distortion:18`、`colors:["#000","#1A3870","#204a7e","#eed8aa","#000"]`、`bloomStrength:.4`、
+`grain:.005`、`vignette:.38`）。**2D 描边圆点在这个层次上追不上，调参也调不出来。**
+⇒ 判"看起来高级不高级"之前，先把参照物**拆开读**：`curl` 拿 HTML/JS，
+grep `getContext(` / `uniform ` / 默认参数对象，十分钟就能确定"它是着色器还是画点"——
+比反复猜三轮便宜得多。
+
+**换成 WebGL2 着色器后又撞三条判据层面的坑：**
+
+| # | 现象 | 原因 | 改后 |
+|---|---|---|---|
+| 9 | `readPixels` 读回来全黑，以为着色器没画 | `preserveDrawingBuffer:false`（默认）下，**跨一次 CDP 调用**再读，缓冲已经还给合成器了 | `draw` 与 `readPixels` 必须写在**同一次 evaluate** 里；判据改成"同块区域两次读的差异" |
+| 10 | 单帧成本量出 0.01ms（假便宜）↔ 47ms（假贵） | WebGL 是异步的：只计提交 → 0.01ms；每帧补一次同步 `readPixels` → 把**软件光栅 + 读回**全算进去 → 47ms。两个都不是真机 GPU 成本 | 成本判据降级为"只抓病态"（>100ms 才红），并在输出里写明它是软件光栅上限；真帧预算要上真 GPU 量（无头量不出来就别声称量得出） |
+| 11 | 动画时钟 0.5s 只走 0.05s，判"dt 尺度错" | 无头里 **rAF 时间戳推进得比墙钟慢**（本轮实测墙钟 0.5s 对应帧时间线 0.77s、时钟 0.05s），拿墙钟当参照系必然错 | 时钟判据换成对**帧时间线**：`BG.clock` 必须 >0 且**不快过 `tlast-ts0`**；画面是否真在动改由第 9 条的逐像素 MAD 判 |
+
+**顺带被反向证据抓出来的两个真 bug**（都不是环境造成的）：
+① 弹层在飞入动画播到一半时被关闭 ⇒ 元素 `display:none` 让 CSS 动画停摆、`animationend`
+永不触发 ⇒ `.fly` 类永久挂着，下次以"减少动效"打开时它还在。修法：开合两侧都
+`classList.remove('flyout','fly')`，**不能只靠动画结束回调摘类**。
+② `dt=(ts-BG.last)/1000` 可能为负（探针用未来时间戳手动驱动过 `bgDraw`，真实场景里
+rAF 时间戳也不保证单调）⇒ 时钟倒退。修法：`Math.max(0, …)` 夹住，并且**探针自己**要把
+`BG.last` 掰回 `performance.now()`，否则它污染被测对象的状态。

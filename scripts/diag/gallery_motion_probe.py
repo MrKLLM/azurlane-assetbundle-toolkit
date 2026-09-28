@@ -289,77 +289,102 @@ def main():
     if after['mat'] != 'none':
         fails.append(f'3 飞入：动画结束后弹层仍带 transform {after["mat"]}')
 
-    # ── 5b. 背景粒子：星野在动、真有景深、不遮内容、弹层挡着时不画、开关整块关 ──
+    # ── 5b. 背景着色器：WebGL2 真编译上了、画面真在动、鼠标真在影响它 ──────
     bg = t.j("""
       const host=document.getElementById('bgfx'), cv=host&&host.querySelector('canvas');
       const cs=host?getComputedStyle(host):null, m=getComputedStyle(document.getElementById('main'));
       return JSON.stringify({has:!!host, dis:cs&&cs.display, pe:cs&&cs.pointerEvents,
         z:cs&&cs.zIndex, mz:m.zIndex, cvw:cv?cv.width:0, cvh:cv?cv.height:0,
-        frames:BG.frames, n:BG.p.length, layers:[...new Set(BG.p.map(q=>q.L))].sort(),
-        sp:BG.sp.length, rad:[...new Set(BG.p.map(q=>+q.r.toFixed(1)))].length,
-        blend:BG.col&&BG.col.blend, shoot:BG.col&&BG.col.shoot,
-        depths:BG_L.map(l=>l.d), raf:BG.raf>0});""")
+        mode:BG.mode, err:BG.err, uni:Object.keys(BG.u).length, rs:BG.rs,
+        P:BG.P, frames:BG.frames, raf:BG.raf>0,
+        glow:getComputedStyle(host.querySelector('.glow')).display});""")
     if not bg['has'] or bg['dis'] == 'none':
         fails.append(f'5b 背景：#bgfx 不存在或默认就是关的（display={bg.get("dis")}）')
     else:
-        print(f'5b 星野  canvas {bg["cvw"]}x{bg["cvh"]} 粒子 {bg["n"]} 层 {bg["layers"]} 半径档 {bg["rad"]} '
-              f'精灵 {bg["sp"]} 混合={bg["blend"]} 流星={bg["shoot"]} z={bg["z"]}/内容{bg["mz"]} pe={bg["pe"]}')
+        P = bg['P'] or {}
+        print(f'5b 背景  mode={bg["mode"]} err={bg["err"][:60]!r} canvas {bg["cvw"]}x{bg["cvh"]} '
+              f'渲染缩放={bg["rs"]} uniform {bg["uni"]} 个 z={bg["z"]}/内容{bg["mz"]} pe={bg["pe"]} '
+              f'CSS辉光={bg["glow"]}')
         if bg['pe'] != 'none':
-            fails.append(f'5b 星野：pointer-events={bg["pe"]}，会吃掉卡片点击')
+            fails.append(f'5b 背景：pointer-events={bg["pe"]}，会吃掉卡片点击')
         if int(bg['z']) >= int(bg['mz']):
-            fails.append(f'5b 星野：z-index {bg["z"]} 没低于内容 {bg["mz"]}，会盖画')
-        if bg['cvw'] < 100 or bg['cvh'] < 100:
-            fails.append(f'5b 星野：canvas 尺寸 {bg["cvw"]}x{bg["cvh"]} 没铺上')
-        if not 40 <= bg['n'] <= 340:
-            fails.append(f'5b 星野：粒子数 {bg["n"]} 不在 40~340（按面积算并封顶这条没生效）')
-        # 「星辰」的质感来自三件事，逐件量：多层景深、多种尺寸、软精灵而不是描边圆
-        if bg['layers'] != [0, 1, 2]:
-            fails.append(f'5b 星野：视差层只有 {bg["layers"]}，不是一远一近三层')
-        if bg['rad'] < 6:
-            fails.append(f'5b 星野：半径只有 {bg["rad"]} 档，等于所有星一样大')
-        if bg['sp'] != 3:
-            fails.append(f'5b 星野：精灵 {bg["sp"]} 张（应为白/冰蓝/樱粉三张预渲染图）')
-        if bg['depths'] != sorted(bg['depths']) or bg['depths'][0] >= bg['depths'][-1]:
-            fails.append(f'5b 星野：层深度没递增 {bg["depths"]}，视差不会分层次')
-        if bg['blend'] != 'source-over':
-            fails.append(f'5b 星野：浅色底用了 {bg["blend"]} 叠加，会糊成白雾')
-        f0 = t.j("return JSON.stringify([BG.frames,BG.clock]);")
-        time.sleep(0.5)
-        f1 = t.j("return JSON.stringify([BG.frames,BG.clock]);")
-        dfr, dcl = f1[0] - f0[0], f1[1] - f0[1]
-        # 无头的 rAF 节奏远慢于真机（本轮实测 ~4 帧/0.5s ≈ 8fps），而每帧 dt 上限 0.05s
-        # 是防"标签页切回来一次性跳一大段"的保险 —— 两者叠加会让无头里动画时钟走得比墙钟慢，
-        # 这**不是缺陷**（真机 60fps 时 dt≈0.016 用不到上限）。所以判据取两侧：
-        #   下界：确实在按 dt 累计（不是恒 0）；上界：**不许快过真实时间**（dt 单位写错成 ms
-        #   这类事故会立刻爆掉上界，那才是要抓的）。
-        print(f'5b 背景  0.5s 推进 {dfr} 帧（无头节奏不代表真机 fps）动画时钟走 {dcl:.2f}s')
-        if dfr < 1:
-            fails.append('5b 背景：rAF 一帧都没推进')
-        # 下界要留余量：无头 3~4 帧 × 每帧 dt 上限 0.05 = 0.15，正好压在边界上会随机抖
-        if not 0.1 < dcl <= 0.55:
-            fails.append(f'5b 背景：动画时钟 0.5s 走了 {dcl:.2f}s，不在 (0.1, 0.55] —— dt 尺度可疑')
-        # 指针视差：把指针甩到左上角，BG.px/py 要缓动跟过去（"活"的主要来源之一）
-        t.j("""window.dispatchEvent(new PointerEvent('pointermove',{clientX:2,clientY:2,bubbles:true}));
-          return JSON.stringify([BG.px,BG.py]);""")
-        time.sleep(1.4)
-        par = t.j("return JSON.stringify([BG.px,BG.py]);")
-        # 无头 ~8fps，缓动系数 dt*2.4 每帧只走 ~12%，所以门槛按"确实动了"定，不按真机速度定
-        print(f'5b 视差  px/py → {par[0]:.2f},{par[1]:.2f}（目标 0,0）')
-        if par[0] > 0.42 or par[1] > 0.42:
-            fails.append(f'5b 视差：指针移到左上角 1.4s 后 px/py 仍是 {par[0]:.2f},{par[1]:.2f}，没跟上')
-        # 单帧绘制成本：无头 rAF 节奏测不出真机成本，只能手动跑 40 帧计时
+            fails.append(f'5b 背景：z-index {bg["z"]} 没低于内容 {bg["mz"]}，会盖画')
+        if bg['mode'] != 'gl':
+            fails.append(f'5b 背景：没走成 WebGL2（mode={bg["mode"]} err={bg["err"][:120]}）')
+        elif bg['uni'] < 19:
+            fails.append(f'5b 背景：只取到 {bg["uni"]} 个 uniform 位置，着色器接口对不上')
+        elif bg['cvw'] < 100 or bg['cvh'] < 100:
+            fails.append(f'5b 背景：canvas 尺寸 {bg["cvw"]}x{bg["cvh"]} 没铺上')
+        elif bg['glow'] != 'none':
+            fails.append('5b 背景：着色器起来了但 CSS 辉光没退休，两层会叠')
+        elif not 0.4 < bg['rs'] < 1.0:
+            fails.append(f'5b 背景：渲染缩放 {bg["rs"]} 没起作用（成本主要靠它）')
+        # 「画面里真有东西」判据：必须**同一次 evaluate 里 draw 完立刻 readPixels**，
+        # 跨调用读会拿到空缓冲（preserveDrawingBuffer=false）——那是假黑屏。
+        px = t.j("""
+          const gl=BG.gl, w=gl.drawingBufferWidth, h=gl.drawingBufferHeight, N=160;
+          const grab=()=>{ BG.clock+=0.9; bgDraw(performance.now()+50);
+            const b=new Uint8Array(N*N*4);
+            gl.readPixels((w-N)>>1,(h-N)>>1,N,N,gl.RGBA,gl.UNSIGNED_BYTE,b);
+            let s=0,ss=0; for(let i=0;i<b.length;i+=4){ const L=0.299*b[i]+0.587*b[i+1]+0.114*b[i+2];
+              s+=L; ss+=L*L; }
+            const n=b.length>>2; return {b, mean:s/n, sd:Math.sqrt(Math.max(0,ss/n-(s/n)*(s/n)))}; };
+          const A=grab(), B=grab();
+          let mad=0; for(let i=0;i<A.b.length;i+=4)
+            mad+=Math.abs(A.b[i]-B.b[i])+Math.abs(A.b[i+1]-B.b[i+1])+Math.abs(A.b[i+2]-B.b[i+2]);
+          return JSON.stringify({mA:+A.mean.toFixed(2), sdA:+A.sd.toFixed(2),
+            sdB:+B.sd.toFixed(2), mad:+(mad/(A.b.length/4*3)).toFixed(2)});""")
+        print(f'5b 画面  中心块 均值={px["mA"]} 标准差={px["sdA"]}→{px["sdB"]} 两帧逐通道平均差={px["mad"]}')
+        if px['sdA'] < 3:
+            fails.append(f'5b 画面：中心块标准差只有 {px["sdA"]}，等于一片纯色（着色器没画出结构）')
+        if px['mad'] < 1.0:
+            fails.append(f'5b 画面：推进时钟后逐像素平均差只有 {px["mad"]}，时间没真接进着色器')
+        # 鼠标影响：**固定采同一块区域**，只换鼠标位置（换位置又换采样区就分不开是谁变的）
+        mo = t.j("""
+          const gl=BG.gl, w=gl.drawingBufferWidth, h=gl.drawingBufferHeight, N=140;
+          const at=(mx,my)=>{ BG.ux=mx; BG.uy=my; BG.vel=1; bgDraw(performance.now()+60);
+            const b=new Uint8Array(N*N*4); gl.readPixels((w-N)>>1,(h-N)>>1,N,N,gl.RGBA,gl.UNSIGNED_BYTE,b);
+            let s=0; for(let i=0;i<b.length;i+=4) s+=0.299*b[i]+0.587*b[i+1]+0.114*b[i+2];
+            return s/(b.length>>2); };
+          return JSON.stringify({inC:+at(0.5,0.5).toFixed(2), out:+at(0.03,0.03).toFixed(2),
+            again:+at(0.5,0.5).toFixed(2)});""")
+        print(f'5b 鼠标  指针在采样区里 {mo["inC"]} / 移开 {mo["out"]} / 移回来 {mo["again"]}')
+        if abs(mo['inC'] - mo['out']) < 1.5:
+            fails.append(f'5b 鼠标：指针进出采样区，画面亮度几乎不变（{mo}）——交互是假的')
+        if abs(mo['inC'] - mo['again']) > 0.8:
+            fails.append(f'5b 鼠标：同一位置两次读数差 {abs(mo["inC"]-mo["again"])}，测的不是鼠标而是漂移')
+        # 单帧成本：手动 20 帧，每帧后补一次 1x1 readPixels **强制同步等待** ——
+        # WebGL 是异步的，只计"提交"会量出 0.0x ms 的假便宜数字。
         cost = t.j("""
           cancelAnimationFrame(BG.raf); BG.raf=0;
-          const t0=performance.now();
-          for(let i=0;i<40;i++) bgFrame(t0+i*16.7);
-          const ms=performance.now()-t0;
-          cancelAnimationFrame(BG.raf); BG.raf=0; bgApply();
-          return JSON.stringify({ms:+(ms/40).toFixed(2), raf:BG.raf>0});""")
-        print(f'5b 成本  单帧绘制 {cost["ms"]}ms（帧预算 16.7ms），计时后循环已恢复={cost["raf"]}')
-        if cost['ms'] > 4:
-            fails.append(f'5b 成本：单帧 {cost["ms"]}ms，背景吃掉 {cost["ms"]/16.7*100:.0f}% 帧预算，太贵')
+          const gl=BG.gl, t0=performance.now(), px1=new Uint8Array(4);
+          for(let i=0;i<20;i++){ BG.clock+=0.016; bgDraw(performance.now()+i*16.7);
+            gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px1); }
+          const ms=(performance.now()-t0)/20;
+          BG.raf=0; BG.last=performance.now(); bgApply();     // 上面喂的是未来时间戳，必须掰回现在
+          return JSON.stringify({ms:+ms.toFixed(2), raf:BG.raf>0});""")
+        print(f'5b 成本  单帧 {cost["ms"]}ms（**软件光栅 + 每帧同步读回的上限**，无头量不出真机 GPU 成本，'
+              f'只用来抓"病态地贵"）；计时后循环已恢复={cost["raf"]}')
+        # 阈值按"病态"定，不按"贵"定：无头 swiftshader 下这个数字比真机高一个量级，
+        # 拿它当帧预算判据会把环境当缺陷（真要判帧预算得在真 GPU 上量）。
+        if cost['ms'] > 100:
+            fails.append(f'5b 成本：单帧 {cost["ms"]}ms，已经病态（正常软件光栅也在几十 ms 量级）')
         if not cost['raf']:
             fails.append('5b 成本：计时之后 rAF 没恢复，后面的断言会全测到静止画面')
+        f0 = t.j("return JSON.stringify([BG.frames,BG.clock,BG.tlast-BG.ts0]);")
+        time.sleep(0.5)
+        f1 = t.j("return JSON.stringify([BG.frames,BG.clock,BG.tlast-BG.ts0]);")
+        dfr, dcl, dts = f1[0] - f0[0], f1[1] - f0[1], (f1[2] - f0[2]) / 1000
+        # 动画时钟的正确参照是**帧时间线**（rAF 时间戳），不是墙钟：无头里 rAF 时间戳
+        # 推进得远慢于墙钟（本轮实测墙钟 0.5s 只走了 ~0.05s 的帧时间线），拿墙钟判会把
+        # 环境当缺陷。所以判两件事：时钟在走，且**不快过帧时间线**（dt 单位/累加写错会爆）。
+        print(f'5b 时钟  0.5s 推进 {dfr} 帧，帧时间线走 {dts:.3f}s，动画时钟走 {dcl:.3f}s（墙钟不作判据）')
+        if dfr < 1:
+            fails.append('5b 时钟：rAF 一帧都没推进')
+        if dcl <= 0:
+            fails.append('5b 时钟：动画时钟没走')
+        if dcl > dts + 0.03:
+            fails.append(f'5b 时钟：动画时钟 {dcl:.3f}s 快过帧时间线 {dts:.3f}s，dt 尺度错了')
         # 弹层几乎铺满视口，挡着的时候不许白画
         t.j("document.querySelectorAll('.card')[6].click(); return JSON.stringify([1]);")
         time.sleep(0.35)
@@ -408,21 +433,22 @@ def main():
         fails.append(f"6 昼夜：切换后主题没落到 dark（theme={th2['theme']} ls={th2['ls']}）")
     if not th2['on']:
         fails.append('6 昼夜：夜那颗胶囊没进入选中态')
-    # 夜里背景必须换档：叠加发光 + 开流星 + 密度回升；流星排程要真的能排出来
-    dk = t.j("""BG.next=0.001;
-      return JSON.stringify({blend:BG.col.blend, shoot:BG.col.shoot, n:BG.p.length, k:BG.col.k});""")
-    time.sleep(0.6)
-    mk = t.j("return JSON.stringify(!!BG.shoot);")
-    print(f'6 昼夜  夜里 blend={dk["blend"]} 流星={dk["shoot"]} 粒子 {bg.get("n")}→{dk["n"]} '
-          f'已排出流星={mk}')
-    if dk['blend'] != 'lighter':
-        fails.append(f'6 昼夜：夜里背景仍是 {dk["blend"]}，没换成叠加发光')
-    if not dk['shoot']:
-        fails.append('6 昼夜：夜里没开流星排程')
-    if dk['n'] <= bg.get('n', 0):
-        fails.append(f'6 昼夜：换夜后粒子数 {bg.get("n")}→{dk["n"]} 没回升，密度没跟主题走')
-    if not mk:
-        fails.append('6 昼夜：把排程归零后 0.6s 仍没有流星，这条是死的')
+    # 夜里着色器要换档：更深的色带、更强的暗角与自发光、整体更暗
+    dk = t.j("""
+      const gl=BG.gl, w=gl.drawingBufferWidth, h=gl.drawingBufferHeight, N=140;
+      BG.clock+=1.3; bgDraw(performance.now()+70);
+      const b=new Uint8Array(N*N*4); gl.readPixels((w-N)>>1,(h-N)>>1,N,N,gl.RGBA,gl.UNSIGNED_BYTE,b);
+      let s=0; for(let i=0;i<b.length;i+=4) s+=0.299*b[i]+0.587*b[i+1]+0.114*b[i+2];
+      return JSON.stringify({P:BG.P, mean:+(s/(b.length>>2)).toFixed(2)});""")
+    dP = dk['P']
+    print(f'6 昼夜  夜里 alpha={dP["alpha"]} vig={dP["vig"]} bloom={dP["bS"]} 色带 {dP["c"][1]}→{dP["c"][3]} '
+          f'中心亮度={dk["mean"]}（白天 vig={bg["P"]["vig"]} bloom={bg["P"]["bS"]}）')
+    if dP['c'] == bg['P']['c']:
+        fails.append('6 昼夜：换夜后着色器色带没换（还是白天那套浅色）')
+    if not (dP['vig'] > bg['P']['vig'] and dP['bS'] > bg['P']['bS']):
+        fails.append(f'6 昼夜：夜里暗角/自发光没加强（vig {bg["P"]["vig"]}→{dP["vig"]}, bloom {bg["P"]["bS"]}→{dP["bS"]}）')
+    if dk['mean'] > 110:
+        fails.append(f'6 昼夜：夜里画面中心亮度 {dk["mean"]}，"深海"没出来（应明显暗于白天）')
     pg.shot(os.path.join(a.out, 'theme_dark.png'))
     t.raw("document.querySelector('#gTheme button[data-t=light]').click()")
     time.sleep(1.2)

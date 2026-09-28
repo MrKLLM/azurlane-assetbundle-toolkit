@@ -894,15 +894,18 @@ py -3 scripts/diag/gallery_motion_probe.py --page index_q.html --baseline index.
 8. 主题：`--cx/--cy` 落在被点开关的几何中心（±1%），**切换后 1.3s** 才读 `data-theme`/localStorage（见 §61 第 3 条）；
 9. 反向证据：`Emulation.setEmulatedMedia` 打开 `prefers-reduced-motion: reduce` 后——不再有 `fly` 类、缩略图 `opacity` 必须已经是 1（淡入靠 load 事件，关动画后不许依赖它）、弹层仍能关上；
 10. 报错：与 `--baseline` 页取**差集**，只有样板多出来的才判失败。
-11. 背景粒子"是不是星"：视差层必须 `[0,1,2]` 且深度递增、半径至少 6 档（不是所有点一样大）、
-    预渲染软精灵 3 张（白/冰蓝/樱粉）——**描边实心圆就是"劣质感"的来源**，`arc+stroke` 一律不算过；
-12. 背景随主题换档：夜里 `globalCompositeOperation==='lighter'`（浅底叠加会糊成白雾，所以白天必须
-    `source-over` + 比底深的颜色）、密度回升（实测 72→144）、流星排程开着且**归零后真能排出一颗**；
-13. 背景成本：手动跑 40 帧 `bgFrame` 计时（无头 rAF 节奏测不出真机成本），单帧 >4ms 判太贵；
-    指针视差要 `dispatchEvent(PointerEvent)` 后等缓动跟上（无头 ~8fps，门槛按"确实动了"定）；
-14. 粒子循环的**停帧能力**归到第 9 条反向证据里测：`bgFrame` 若开头无条件
-    `requestAnimationFrame(bgFrame)`，关掉开关后已排队的那一帧会把自己重新接上 ⇒ 循环永不停。
-    判据就是 reduce 之后 `BG.raf` 必须归 0（本轮真实抓到并修掉）。
+11. 背景"是不是着色器那一档"：`BG.mode==='gl'` 且 `BG.err===''`（WebGL2 + 编译链接都过）、
+    uniform 位置取满（19 个）、CSS 兜底辉光在着色器起来后必须 `display:none`（两层会叠）、
+    渲染缩放 `rs∈(0.4,1)`（成本主要靠它）；
+12. **画面里真有东西且在变**：同一块区域连读两帧算逐通道 MAD（>1）与标准差（>3）——
+    均值高不等于有内容，纯色一片也是高均值。⚠️ `draw` 与 `readPixels` 必须在**同一次 evaluate** 里
+    （`preserveDrawingBuffer:false` 下跨调用读到的是空缓冲）；
+13. 交互是真的：**固定采样区、只换鼠标位置**，采样区亮度必须变（>1.5），且同位置两次读数必须一致
+    （<0.8）——换位置又换采样区就分不清是鼠标变的还是漂移；
+14. 时钟判据对**帧时间线**而不是墙钟（`clock>0` 且 `clock <= tlast-ts0`）；成本判据降级为
+    "只抓病态"（无头量不出真机 GPU 成本，见 §61 第 10 条），别拿软件光栅的几十 ms 当帧预算超标。
+    另有两条通用判据：`reduce` 之后 `BG.raf` 必须归 0（自续循环的 kill switch 在函数内部），
+    弹层开着时帧数不推进。
 
 **出图**（只给我自己肉眼判，不作判据）：`fly_mid_0.12.png` / `fly_mid_0.3.png`（定格飞入中间帧）、
 `tab_slide.png`、`theme_wipe.png`、`theme_dark.png`。**定格要放在最后一步**——它会 `pause()/cancel()`
