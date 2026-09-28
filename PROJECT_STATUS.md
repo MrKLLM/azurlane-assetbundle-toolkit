@@ -321,6 +321,17 @@
        用**绝对像素**（详见 WF-16 追加段）；② **别把长任务写成 `py -3 x.py 2>&1 | tail -25`**：
        `tail` 会吞掉中间明细，且 `$?` 取的是 `tail` 的退出码不是 python 的——本轮就是这么把
        一个 `WIRING=2`（实为探针抖动）读成了 `EXIT=0` 假绿灯。
+19. ⏳ **补跑 WF-16 第 5 件 `hit_verify`（本轮"没跑成"，不是"没跑"）**（2026-09-27）：
+     并发会话正在跑全库 `hit_verify`，而探针的 `PORT=9342` / `--user-data-dir=.diag/chrome_hitv` 是写死的
+     ⇒ 我的驱动附着到它的浏览器，读出「每条 `played` 恰好滞后一个部位」的 38 条假红（§60 末段）。
+     等它跑完（或按第 20 条换端口）后补跑 `py -3 scripts/diag/hit_verify.py --only antu_2,ninghai_4,lafeiii_3`，
+     判据 WIRING=0。本轮其余五件（部署 / 权威基准比对 / 坐标取证 / 检查器 / 交互五项）+ `talk_verify` 14 条全绿。
+20. ⏳ **CDP 探针的端口与 profile 走 env（根治第 19 条的成因）**：`hit_verify`/`talk_verify`/`interact_verify`
+     的 `PORT` 与 `--user-data-dir` 写死，共享工作树里两个会话同时跑必撞（症状是"整序列统一偏移一位"的假数据，
+     不是报错）。改成 env/CLI 可覆盖 + 启动前探测端口占用；**改之前先确认没有会话正在跑它**。
+21. ⏳ **变体包按条切分，让 44 张「仅台词」皮肤也能点播**（用户未拍板，先不做）：那 36 张的 `voiceExtra`
+     是 v1 时代**整包**导出的单个 wav（`Audio/CV/cv-<n>-<battle|gift>.wav`），对不到具体类别 ⇒
+     现在只能整包听、配不上逐句正文。要修得重新解码 `-battle/-gift` 包并按 cue 切分（约 10 分钟 + 一次零回退比对）。
 
 
 ---
