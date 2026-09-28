@@ -223,9 +223,13 @@
      **两条已否证**：① 不是换肤问题——5 个 part（本体/`2B`/`2B2`/`2M`/`2T`）都只有 `default` skin，
      `spine_skin_scan.py --only tianjinfeng_2` 报 `gain=0 / parts_affected=0`，§42 那条 `setSkin` 修法在这里不成立；
      ② 不是缺贴图——每个 part 的 atlas 页与同名 png 一一对应，viewer 也报「5 层部件」零失败。
-     下一步起点：按 part 逐个单独渲染（CG 导出页加 `?only=`/`?part=`）看**哪一层没落笔**，
-     再判是"该层的附件没挂上"还是"多层合成时各层坐标系不一致"。⚠️ 别和 §45/§46 那两类取景问题混——
-     那两类是"框撑太大画面缩中间"，这里是"内容整块缺失 + 形状被转 45°"。
+     下一步起点：按 part 逐个单独渲染看**哪一层没落笔**，
+     再判是"该层的附件没挂上"还是"同名槽在两个骨架里指不同区域"。
+     **具体做法**：给 `gallery_src/cg_export.html` 加 `?parts=` 过滤（只渲指定层）逐 part 出图；
+     再对 `2B`/`2T` 比「槽位名 → 附件 → atlas 区域」的映射，看重名的那 44 个槽在两个骨架里
+     是不是指同一块图。⚠️ 改 `cg_export.html` 前先看第 17 条的 ⏸️（同目录文件可能仍被并行会话占着）。
+     ⚠️ 别和 §45/§46 那两类取景问题混——那两类是"框撑太大画面缩中间"，
+     这里是"内容整块缺失 + 形状被转 45°"。
      **同日续查**：其 prefab 确实列了 5 个 SkeletonGraphic 且**全是单位变换**（游戏把 5 层画在同一
      原点）⇒ 不属于下面第 17 条那个 `_hx` 误叠 bug；但它 5 个 part 槽位重名率 17.5%、
      `2B` 的 44 槽是 `2T` 的 390 槽的**真子集**、`data.width×height` 为
@@ -271,9 +275,22 @@
      位移不一致的 2 个差值仅约 2px 可忽略。**3 个目录起始动画不是 `normal`**
      （`buleisite`=`idle`；`pulimaosi` 两层各播各的 `idle2`/`normal`）。
      层数分布：1 层 191 / 2 层 29 / 3 层 11 / 5 层 1 / 7 层 2。
-     修法：parts 来源换成读 prefab（含各节点 localScale 与 startingAnimation），连带重导受影响 CG。
-     ⏸️ **开工时机**：等并行会话把它在 `gallery_src/index.html`(+172/−38) 与
-     `build_gallery_index.py`(voiceText) 上的未提交改动落地后再动，避免同一文件撞车（2026-09-27 用户拍板）。
+     **实施清单（待办本体，按顺序）**：
+     1. `scripts/extract_spine_v2.py` 导出时把 prefab 的权威层列表**落进每个目录**
+        （`Output/Spine_v2/<folder>/parts.json`：层名 + localScale + startingAnimation + initialSkinName），
+        让"谁写"和"谁读"都只认这一份，避免 `build_gallery_index` 直接依赖 26GB 源包。
+     2. `build_gallery_index.py:187` 改读 `parts.json`；**缺文件要报错，不许回落 glob**——
+        回落等于把这个 bug 留着。
+     3. viewer 与 `cg_export.html` 按 `parts.json` 的 localScale 摆层（缩放可直接用；位移先过 §9.1
+        那套 UI 数学，只有 `duyisibao_2`/`guandao` 两个目录需要且差值 ~2px，可最后做）；
+        起始动画按 `startingAnimation` 逐层设（`buleisite`=`idle`、`pulimaosi` 两层各一）。
+     4. 重导 `CG_v2` 受影响的 **30 个目录**（含那 15 对逐像素相同的）；备份 + 零回退闸门照 WF-15。
+     5. 验收：`spine_parts_prefab_diff.py` 重跑必须**多画 0 / 少画 0**；15 对 `_hx` CG 必须**不再相同**；
+        对照组 `bailong`/`aimudeng_4`/`tianjinfeng_2` 的 CG 必须**逐字节不变**。
+     ⏸️ **开工时机**：等并行会话把它在 `gallery_src/index.html` 与 `build_gallery_index.py`
+     上的未提交改动落地后再动这两个文件，避免同一文件撞车（2026-09-27 用户拍板）。
+     ⚠️ 它 voiceText 那轮（§60）已提交，但**之后还有一轮** `index.html`（弹窗尺寸/缩放记忆）在途
+     ⇒ 开工前先 `git status` 复核这两个文件是否已干净。
 18. ⏳ **画廊「按钮 / 交互反馈」层重做**（2026-09-27 立项，**用户指定次日开工**）：
      - **先记一条否证，别重走**：同日做过一整版**视觉语言重做**（暖墨底 + 单一铜金强调、字阶、卡片三行化、
        头部一行、查看器底换掉棋盘格），样板页 `index_b.html` 已给用户看过并**被否**（"B版不如之前"）
