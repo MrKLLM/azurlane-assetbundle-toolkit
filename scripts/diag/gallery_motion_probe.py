@@ -323,6 +323,9 @@ def main():
         # 跨调用读会拿到空缓冲（preserveDrawingBuffer=false）——那是假黑屏。
         px = t.j("""
           const gl=BG.gl, w=gl.drawingBufferWidth, h=gl.drawingBufferHeight, N=160;
+          /* 先把指针停到角落再读：否则量到的是"鼠标光斑"而不是底图，
+             均值/标准差/时间差全被光斑带偏（本轮就是这么把白天量成 253 的） */
+          BG.ux=0.02; BG.uy=0.02; BG.vel=0; bgDraw(performance.now()+40);
           const grab=()=>{ BG.clock+=0.9; bgDraw(performance.now()+50);
             const b=new Uint8Array(N*N*4);
             gl.readPixels((w-N)>>1,(h-N)>>1,N,N,gl.RGBA,gl.UNSIGNED_BYTE,b);
@@ -337,6 +340,10 @@ def main():
         print(f'5b 画面  中心块 均值={px["mA"]} 标准差={px["sdA"]}→{px["sdB"]} 两帧逐通道平均差={px["mad"]}')
         if px['sdA'] < 3:
             fails.append(f'5b 画面：中心块标准差只有 {px["sdA"]}，等于一片纯色（着色器没画出结构）')
+        # 亮度带：用户判过"白天整体太亮"（整屏削顶到 255）与"太暗"两种失败，
+        # 所以白天均值必须落在一个区间里，而不是只判"有内容"。
+        if not 120 < px['mA'] < 240:
+            fails.append(f'5b 画面：白天中心均值 {px["mA"]} 不在 (120,240) —— 过曝或过暗')
         if px['mad'] < 1.0:
             fails.append(f'5b 画面：推进时钟后逐像素平均差只有 {px["mad"]}，时间没真接进着色器')
         # 鼠标影响：**固定采同一块区域**，只换鼠标位置（换位置又换采样区就分不开是谁变的）
@@ -349,8 +356,10 @@ def main():
           return JSON.stringify({inC:+at(0.5,0.5).toFixed(2), out:+at(0.03,0.03).toFixed(2),
             again:+at(0.5,0.5).toFixed(2)});""")
         print(f'5b 鼠标  指针在采样区里 {mo["inC"]} / 移开 {mo["out"]} / 移回来 {mo["again"]}')
-        if abs(mo['inC'] - mo['out']) < 1.5:
-            fails.append(f'5b 鼠标：指针进出采样区，画面亮度几乎不变（{mo}）——交互是假的')
+        # 门槛按"用户真能看见"定：上一版量到 9 个亮度单位，用户肉眼判"约等于 0"。
+        # 所以这里要 ≥6 且**在浅色主题**（效果最弱的那套）下量。
+        if abs(mo['inC'] - mo['out']) < 6:
+            fails.append(f'5b 鼠标：指针进出采样区只差 {abs(mo["inC"]-mo["out"]):.1f} 亮度，肉眼约等于没反应（{mo}）')
         if abs(mo['inC'] - mo['again']) > 0.8:
             fails.append(f'5b 鼠标：同一位置两次读数差 {abs(mo["inC"]-mo["again"])}，测的不是鼠标而是漂移')
         # 「像大海」的两条结构判据：横向特征比竖向宽（洋流是横着走的）、上浅下深（有深度）
