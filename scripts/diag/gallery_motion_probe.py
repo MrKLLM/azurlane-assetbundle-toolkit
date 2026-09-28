@@ -311,7 +311,7 @@ def main():
             fails.append(f'5b 背景：z-index {bg["z"]} 没低于内容 {bg["mz"]}，会盖画')
         if bg['mode'] != 'gl':
             fails.append(f'5b 背景：没走成 WebGL2（mode={bg["mode"]} err={bg["err"][:120]}）')
-        elif bg['uni'] < 19:
+        elif bg['uni'] < 23:
             fails.append(f'5b 背景：只取到 {bg["uni"]} 个 uniform 位置，着色器接口对不上')
         elif bg['cvw'] < 100 or bg['cvh'] < 100:
             fails.append(f'5b 背景：canvas 尺寸 {bg["cvw"]}x{bg["cvh"]} 没铺上')
@@ -353,6 +353,30 @@ def main():
             fails.append(f'5b 鼠标：指针进出采样区，画面亮度几乎不变（{mo}）——交互是假的')
         if abs(mo['inC'] - mo['again']) > 0.8:
             fails.append(f'5b 鼠标：同一位置两次读数差 {abs(mo["inC"]-mo["again"])}，测的不是鼠标而是漂移')
+        # 「像大海」的两条结构判据：横向特征比竖向宽（洋流是横着走的）、上浅下深（有深度）
+        oc = t.j("""
+          const gl=BG.gl, w=gl.drawingBufferWidth, h=gl.drawingBufferHeight;
+          BG.clock+=0.5; bgDraw(performance.now()+80);
+          const SW=Math.min(360,w-8), SH=Math.min(240,h-8), x0=(w-SW)>>1, y0=(h-SH)>>1;
+          const raw=new Uint8Array(SW*SH*4); gl.readPixels(x0,y0,SW,SH,gl.RGBA,gl.UNSIGNED_BYTE,raw);
+          const L=new Float32Array(SW*SH);
+          for(let i=0;i<SW*SH;i++) L[i]=0.299*raw[i*4]+0.587*raw[i*4+1]+0.114*raw[i*4+2];
+          let hx=0,vy=0;
+          for(let y=1;y<SH-1;y++) for(let x=1;x<SW-1;x++){
+            hx+=Math.abs(L[y*SW+x+1]-L[y*SW+x]);
+            vy+=Math.abs(L[(y+1)*SW+x]-L[y*SW+x]); }
+          const N=(SW-2)*(SH-2);
+          const band=(a,b)=>{ let s=0,c=0; for(let y=a;y<b;y++) for(let x=1;x<SW-1;x+=3){ s+=L[y*SW+x]; c++; } return s/c; };
+          /* readPixels 的 y=0 是画面底部，所以"海面"取高 y 段 */
+          return JSON.stringify({ahx:+(hx/N).toFixed(3), avy:+(vy/N).toFixed(3),
+            top:+band(SH-40,SH-6).toFixed(1), bot:+band(6,40).toFixed(1)});""")
+        ratio = oc['avy'] / max(oc['ahx'], 1e-3)
+        print(f'5c 海洋  横向梯度={oc["ahx"]} 纵向梯度={oc["avy"]}（各向异性 {ratio:.2f}×） '
+              f'上段亮度 {oc["top"]} vs 下段 {oc["bot"]}')
+        if ratio < 1.25:
+            fails.append(f'5c 海洋：横向/纵向特征各向异性只有 {ratio:.2f}×，看不出"横着走的海流"')
+        if oc['top'] - oc['bot'] < 6:
+            fails.append(f'5c 海洋：上段 {oc["top"]} 没比下段 {oc["bot"]} 亮，深度感（上浅下深）没成立')
         # 单帧成本：手动 20 帧，每帧后补一次 1x1 readPixels **强制同步等待** ——
         # WebGL 是异步的，只计"提交"会量出 0.0x ms 的假便宜数字。
         cost = t.j("""
@@ -439,16 +463,23 @@ def main():
       BG.clock+=1.3; bgDraw(performance.now()+70);
       const b=new Uint8Array(N*N*4); gl.readPixels((w-N)>>1,(h-N)>>1,N,N,gl.RGBA,gl.UNSIGNED_BYTE,b);
       let s=0; for(let i=0;i<b.length;i+=4) s+=0.299*b[i]+0.587*b[i+1]+0.114*b[i+2];
-      return JSON.stringify({P:BG.P, mean:+(s/(b.length>>2)).toFixed(2)});""")
+      const SW=300, SH=200, raw=new Uint8Array(SW*SH*4);
+      gl.readPixels((w-SW)>>1,(h-SH)>>1,SW,SH,gl.RGBA,gl.UNSIGNED_BYTE,raw);
+      const L=i=>0.299*raw[i*4]+0.587*raw[i*4+1]+0.114*raw[i*4+2];
+      const band=(a,bb)=>{ let t=0,c=0; for(let y=a;y<bb;y++) for(let x=1;x<SW-1;x+=3){ t+=L(y*SW+x); c++; } return t/c; };
+      return JSON.stringify({P:BG.P, mean:+(s/(b.length>>2)).toFixed(2),
+        top:+band(SH-34,SH-6).toFixed(1), bot:+band(6,34).toFixed(1)});""")
     dP = dk['P']
     print(f'6 昼夜  夜里 alpha={dP["alpha"]} vig={dP["vig"]} bloom={dP["bS"]} 色带 {dP["c"][1]}→{dP["c"][3]} '
-          f'中心亮度={dk["mean"]}（白天 vig={bg["P"]["vig"]} bloom={bg["P"]["bS"]}）')
+          f'中心亮度={dk["mean"]} 上段 {dk["top"]} vs 下段 {dk["bot"]}（白天 vig={bg["P"]["vig"]} bloom={bg["P"]["bS"]}）')
     if dP['c'] == bg['P']['c']:
         fails.append('6 昼夜：换夜后着色器色带没换（还是白天那套浅色）')
     if not (dP['vig'] > bg['P']['vig'] and dP['bS'] > bg['P']['bS']):
         fails.append(f'6 昼夜：夜里暗角/自发光没加强（vig {bg["P"]["vig"]}→{dP["vig"]}, bloom {bg["P"]["bS"]}→{dP["bS"]}）')
     if dk['mean'] > 110:
         fails.append(f'6 昼夜：夜里画面中心亮度 {dk["mean"]}，"深海"没出来（应明显暗于白天）')
+    if dk['top'] - dk['bot'] < 6:
+        fails.append(f'6 昼夜：夜里上段 {dk["top"]} 没比下段 {dk["bot"]} 亮，海面的光没进来')
     pg.shot(os.path.join(a.out, 'theme_dark.png'))
     t.raw("document.querySelector('#gTheme button[data-t=light]').click()")
     time.sleep(1.2)

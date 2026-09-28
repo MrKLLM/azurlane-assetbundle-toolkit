@@ -883,7 +883,7 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
 py -3 scripts/diag/gallery_motion_probe.py --page index_q.html --baseline index.html --win 1440,900
 ```
 
-**十四条判据（脚本里逐条实现，全部走真实入口：点卡片 / 点标签 / 点开关，不直接调内部函数）**
+**十六条判据（脚本里逐条实现，全部走真实入口：点卡片 / 点标签 / 点开关，不直接调内部函数）**
 1. 环境自证：`visibilityState==='visible'` + `document.startViewTransition` 存在，否则整轮不可信；
 2. 倾斜：`--rx/--ry` 幅度 >1°、**换到卡面另一半后符号必须翻**（不翻就是角度没跟随鼠标）、`transform` 含 `matrix3d`；
 3. 倾斜成本：120 次 mousemove 的 ms/次，>4ms 判太贵；同时断言末卡角度非零（防止"计时测了个空转"）；
@@ -906,6 +906,11 @@ py -3 scripts/diag/gallery_motion_probe.py --page index_q.html --baseline index.
     "只抓病态"（无头量不出真机 GPU 成本，见 §61 第 10 条），别拿软件光栅的几十 ms 当帧预算超标。
     另有两条通用判据：`reduce` 之后 `BG.raf` 必须归 0（自续循环的 kill switch 在函数内部），
     弹层开着时帧数不推进。
+15. 「像海」的结构判据（不是口味，是可量）：**横向特征必须比竖向宽** —— 同一帧内比较
+    相邻列差与相邻行差，各向异性 `纵向/横向 ≥1.25`（着色器里靠 `p.x*=0.62 / p.y*=1.35` 做到）；
+    **上浅下深** —— `readPixels` 顶段亮度减底段 ≥6（注意 y=0 是画面底部，别把方向搞反）；
+16. 判"有没有内容"看**标准差**不看均值：纯白与纯黑都是均值极值、方差 0。
+    本轮白天底色三段接近白 + 三束加性光 ⇒ 整屏削顶到 255，`sd>3` 这条把它抓住了（§61 第四补）。
 
 **出图**（只给我自己肉眼判，不作判据）：`fly_mid_0.12.png` / `fly_mid_0.3.png`（定格飞入中间帧）、
 `tab_slide.png`、`theme_wipe.png`、`theme_dark.png`。**定格要放在最后一步**——它会 `pause()/cancel()`
