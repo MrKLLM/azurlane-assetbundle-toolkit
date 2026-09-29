@@ -2,14 +2,14 @@
 name: windows-local-server-launcher
 name_en: Windows Local Server Launcher
 name_zh: Windows 本地服务器双击启动器
-description: Builds a robust Windows double-click launcher that starts a local http.server and auto-opens the browser without the console window flashing closed. Use when the user asks for a double-click start script / .bat launcher / 双击启动 / 启动脚本 / 本地服务器, or reports 窗口闪退, .bat 双击没反应, 端口被占用, 批处理中文乱码, or names the root causes directly - CRLF vs LF line endings, GBK(cp936) vs UTF-8 batch encoding and chcp, `where py >nul 2>nul && set` never firing versus `if not errorlevel 1`, TIME_WAIT leaving a port unbindable for ~30s, `%~dp0` relative roots, or a 404-on-assets page served from the wrong directory - or needs a local web page (asset gallery, Spine player, dashboard, report preview) served over http://127.0.0.1.
+description: Builds a robust Windows double-click launcher that starts a local http.server and auto-opens the browser without the console window flashing closed. Use when the user asks for a double-click start script / .bat launcher / 双击启动 / 启动脚本 / 本地服务器, or reports 窗口闪退, .bat 双击没反应, 端口被占用, 批处理中文乱码, or reports a half-dead local server (accepts connections but returns 0 bytes, silent death with an empty .err log) and needs to prove the mechanism without re-running a long batch, or names the root causes directly - CRLF vs LF line endings, GBK(cp936) vs UTF-8 batch encoding and chcp, `where py >nul 2>nul && set` never firing versus `if not errorlevel 1`, TIME_WAIT leaving a port unbindable for ~30s, `%~dp0` relative roots, or a 404-on-assets page served from the wrong directory - or needs a local web page (asset gallery, Spine player, dashboard, report preview) served over http://127.0.0.1.
 description_en: Builds a robust Windows double-click launcher that starts a local http.server and auto-opens the browser without the console window flashing closed. Use for .bat launchers, flash-closing consoles, occupied ports, batch mojibake, TIME_WAIT bind failures, CRLF/LF and GBK-vs-UTF-8 batch encoding, `where ... && set` not firing, wrong `%~dp0` roots serving 404 assets, or serving a local web page over http://127.0.0.1.
 description_zh: 在 Windows 上做出稳健的“双击即启动本地 http.server 并自动打开浏览器、窗口不闪退”启动器。用于用户要双击启动脚本 / .bat 启动器 / 本地服务器，或遇到窗口闪退、双击没反应、端口被占用、批处理中文乱码；也用于用户直接点出根因时——CRLF/LF 换行、GBK(cp936) 与 UTF-8 及 chcp、`where py >nul 2>nul && set` 不触发（须用 `if not errorlevel 1`）、TIME_WAIT 导致端口约 30 秒绑不上、`%~dp0` 根目录选错导致资源全 404，以及需要把本地网页（资产库、Spine 播放器、看板、报告预览）通过 http://127.0.0.1 打开时。
 argument-hint: Path to the local page to serve (e.g. C:\proj\web\index.html) and the port
 argument-hint-en: Path to the local page to serve (e.g. C:\proj\web\index.html) and the port
 argument-hint-zh: 给出要服务的本地页面路径（如 C:\proj\web\index.html）和端口
 user-invocable: true
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Windows Local Server Launcher
@@ -161,6 +161,38 @@ Debugging order: first prove the server itself works (`py -m http.server <port> 
 | Any error is invisible | No `pause`/`input()` after the blocking server line | End the `.bat` with `pause`; every launcher exit path blocks |
 | Page loads 200 but images/JSON/models all 404 | `--root` is the page's own directory while the page references `../assets` | Serve the parent (`--root "%~dp0.."`) and keep the subdir prefix in the URL |
 | Chinese garbled only when piped | Harness decodes cp936 bytes | Ignore; assert on ASCII markers / HTTP codes |
+| Server **accepts** connections but returns 0 bytes; whole site dead while the port still listens | `ThreadingTCPServer` + `socketserver.handle_error` prints 4 traceback blocks to **stderr**, and it runs *before* `finally: shutdown_request()`. If stderr is a slow consumer (double-clicked console paused by a text selection, or an orphaned process whose parent shell is gone leaving an unread pipe), every browser-cancelled download wedges one thread **and** leaves its socket open with zero bytes flushed | Silence only client-abort exceptions in a `Server.handle_error` override (`ConnectionReset/ConnectionAborted/BrokenPipe/Timeout`); let everything else print |
+| Gate "passes" right after you add it, then a real outage slips through | The gate has never been observed red | Drive it with a stub that reproduces the exact symptom (e.g. accept + `200` + `Content-Length: 0`) and assert it goes red, attributes correctly, and prints its forensic line |
+
+## Proving a leak without re-running the big job
+
+When a long batch run dies on "the local server went half-dead", the tempting move is to
+re-run the 30-minute load and gamble on reproducing it. Don't — build a **dose-response**
+harness instead; it costs minutes and it always returns an answer, including a negative one.
+
+1. **Read the stdlib error path, not just your handler class.** Grep found
+   `ThreadingTCPServer` and the conclusion "it's multithreaded, so it can't block" was
+   wrong-shaped reasoning; the wedge was in `handle_error`'s stderr write. Read down to
+   `serve_forever`.
+2. **Harvest the logs you already have before reproducing anything.** Three historical
+   stderr files on disk contained 30 `WinError 10053/10054` tracebacks — that alone
+   established that browser-cancelled downloads are routine, which is the input to the leak.
+3. **One variable per pair.** Same throwaway instance on a spare port, same 2600 aborted
+   downloads; the only difference is whether `handle_error` writes stderr:
+   `threads 5 → 2605, handles 113 → 18313` vs `5 / 113`. Linear and unbounded.
+4. **Always ship a control that the fix isn't "swallow everything".** Trigger a
+   *non*-abort exception (a `%00` in the URL makes `os.stat` raise `ValueError`) and assert
+   stderr still grows while the abort class stays silent.
+5. **State the tipping point you did *not* reach.** 2600 leaked threads still served 858 KB
+   in 5 ms, so the leak is proven but is *not* proven to be the observed outage. Say so.
+6. **Beware invalid negatives.** A "stalled reader wedges the handler" test failed to wedge
+   anything because Windows loopback auto-tunes the receive window large enough to absorb an
+   18 MB body, and `SO_RCVBUF` set *after* `connect()` is ignored. A test that can't fail
+   proves nothing — size the payload past the buffer and set socket options before connecting.
+7. **Make the next occurrence self-diagnosing.** For a rare state, add an *external* forensic
+   dump to the gate (pid / thread count / handle count / is the parent still alive, via
+   `Get-NetTCPConnection -LocalPort N -State Listen` → `Get-Process`). Note PowerShell has no
+   `print` cmdlet — use `Write-Output`, or you get a nonsense "无法初始化设备 PRN".
 
 ## Additional resources
 

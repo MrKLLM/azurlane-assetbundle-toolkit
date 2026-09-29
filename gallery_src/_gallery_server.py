@@ -123,6 +123,23 @@ def main():
         allow_reuse_address = True            # 关键：规避 TIME_WAIT 导致的绑定失败
         daemon_threads = True
 
+        def handle_error(self, request, client_address):
+            """客户端中途取消下载是本地 dev server 的常态，不能让它泄漏线程。
+
+            socketserver 的默认实现会往 stderr 打 4 段 traceback，而它是在
+            `finally: shutdown_request()` **之前** 被调用的。stderr 只要是个「慢消费者」
+            （双击 bat 起的控制台被选中暂停、或父 shell 已退出留下没人读的管道），
+            这个写就永久阻塞 ⇒ 每次取消泄漏一个线程且 socket 既不吐字节也不关。
+            实测剂量学：stderr 接向从不读取的管道时，掐断 2600 次下载 ⇒
+            线程 5→2605、句柄 113→18313；静默本函数后同剂量 5/113 纹丝不动。
+            只吞这一类，其余异常照旧留痕。
+            """
+            exc = sys.exc_info()[1]
+            if isinstance(exc, (ConnectionResetError, ConnectionAbortedError,
+                               BrokenPipeError, TimeoutError)):
+                return
+            super().handle_error(request, client_address)
+
     try:
         httpd = Server(("127.0.0.1", PORT), handler)
     except OSError as e:

@@ -3049,3 +3049,51 @@ rAF 时间戳也不保证单调）⇒ 时钟倒退。修法：`Math.max(0, …)`
 序列化出来的 `color(srgb R G B / A)` / `oklab(...)`——只写 `rgba()` 正则会把 13% 半透明
 读成"不透明实心块"，逼着人去改本来正确的代码。
 
+
+## §63. 画廊服务器：每次「客户端取消下载」永久泄漏一个 handler 线程（2026-09-29 证死并堵掉）
+
+§62 末段那次"半死"只查到了现象（连接照收、返回 0 字节），根因当时挂着。本轮用
+**定向剂量学**代替"再跑一次 30 分钟大负载赌复现"，三轮下来结论如下。
+
+### 已证死的机制
+
+`socketserver.ThreadingMixIn.process_request_thread` 在 `finally: shutdown_request()`
+**之前** 调 `self.handle_error()`，而默认实现要往 **stderr** 打 4 段 traceback。
+Chrome 换页/关标签会取消在传的贴图，服务端就是 `sendall` 抛 `WinError 10053/10054`
+（`.diag/` 里三份历史 stderr 日志共 30 次这类 traceback，是常态不是意外）。
+⇒ **只要 stderr 是个慢消费者**（双击 bat 起的控制台被选中暂停、或父 shell 已退出
+留下没人读的管道），每次取消就楔死一个线程，且它在 `shutdown_request` 之前 ⇒
+socket 既不吐字节也不关。
+
+**剂量学（D 格 vs E 格，唯一变量是 `Server.handle_error` 静默与否）：**
+
+| 格 | stderr 去向 | 掐断 2600 次后 threads | handles |
+|---|---|---|---|
+| A | 真文件 | 5（不变） | 113 |
+| D | 从不读取的管道 | **2605** | **18313** |
+| E | 同 D，但静默 `handle_error` | 5 | 113 |
+
+线性、无界、每次取消恰好 1 线程 + 7 句柄。修法已落 `gallery_src/_gallery_server.py`：
+`Server.handle_error` 只吞 `ConnectionReset/ConnectionAborted/BrokenPipe/Timeout` 四类。
+**改后复测**：同剂量 2600 次 ⇒ 泄漏 0；对照组一条真异常（URL 塞 `%00` ⇒ `os.stat`
+抛 `ValueError`）stderr 仍写 1526B，取消类写 0B ⇒ 不是把错误全咽了。
+
+### 两条否证（都配了对照，别重走）
+
+1. **"客户端停读但不 RST 会永久卡住 handler"——本机不成立。** 看着像真：无 `timeout` 时
+   线程停在 8 长达 40s，加 `timeout=8` 后 10s 内回落。但 t=70 时前者也回落到 5 而
+   handles 仍是 137（socket 还开着）⇒ **环回口的接收窗口能自动长到吞下整个 18MB 响应体**，
+   `sendall` 直接发完了。第一版更假：用 858KB 测，`SO_RCVBUF` 还设在 connect 之后
+   （Windows 不认），窗口没锁住 ⇒ 那不是"卡不住"的证据，是无效测试。
+   ⇒ 不必给 handler 加 `timeout`（本机场景不存在）。
+2. **"泄漏到拐点 ⇒ 整站 0 字节"没量到。** 2600 个泄漏线程时正常请求仍能 5ms 拿到 858KB。
+   所以**不能声称本机制就是 09-29 那次的成因**，只能声称它是个方向唯一的无界泄漏。
+   "恰好 2.0s" 这个指纹至今没解释。
+
+### 剩下的靠现场，不靠赌复现
+
+预检判红时现在会顺带从进程外部打一行
+`pid=… threads=… handles=… parentAlive=… parent=…`（`wf16_regression.py:server_forensics`）。
+下次再半死，这一行足以三分：线程/句柄暴涨 = 本机制；进程不在 = 静默死掉；两者都正常 = 另有其因。
+红路径本身是测过的（`.diag` 里起一个"照收连接、回 200 但 Content-Length: 0"的桩，
+断言判红 + 归因成"半死" + 现场非空）——**一个从没红过的闸门等于没有闸门**。

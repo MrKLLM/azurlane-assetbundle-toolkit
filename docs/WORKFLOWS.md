@@ -768,11 +768,15 @@ py -3 scripts/diag/talk_verify.py --shots
 > 所以必须串行；② 汇总退出码**绝不许写成 `... | tail -25`**——`tail` 吞明细且 `$?` 是它的退出码，
 > 本轮之前就是这么把一个 WIRING=2 读成 EXIT=0 的。`--skip hit_verify` 跳过 25 分钟那件，
 > `--full-ref` 把第 1 件换成 `--all`（只改前端视觉时不必，动过 motion 数据才要）。
+> **动手前先 `--precheck-only`**（1 秒）：它量的不是"连得上"而是"真吐出 ≥200KB 字节"，
+> 判红时会顺带打一行进程外部现场（pid/threads/handles/父进程是否活着）——
+> 2026-09-29 全库跑就是被"连接照收但每个请求 0 字节"的半死态白坑掉 20 分钟，见 §63。
 >
 > ⚠️ **回归工具自身的两类假失败（2026-09-26 全踩了一遍，各修一处）**——工具红了不代表产品坏了，先证探针再定罪：
 > 1. **固定等待**：`l2d_inspector_verify.py` 等 6s、`interact_verify.py` 等 6.5s 就取
->    `l2State.app.stage.children[0]`。大贴图皮肤（`benningdun_2` 三张共 40MB，且服务器单线程）
->    根本来不及 → 报 `Cannot read properties of undefined (reading 'internalModel')`，
+>    `l2State.app.stage.children[0]`。大贴图皮肤（`benningdun_2` 三张共 40MB，而服务器
+>    是 `ThreadingTCPServer`——**不是**单线程，那句旧结论已在 §62 否证）根本来不及
+>    → 报 `Cannot read properties of undefined (reading 'internalModel')`，
 >    一度表现为"四个皮肤全挂"。已改成轮询到模型出现（上限 40s），改后 4/4 一次过。
 > 2. **异步生效前读状态**：`interact_verify.py` 点部位后只等 900ms 就读 `currentGroup`，
 >    而 `startMotion` 是 async → 读到 `idle` 判成"点击没触发"（`lafeiii_3` 偶发）。
