@@ -189,13 +189,26 @@ def layer_order(name):
     if name.endswith('M') or 'M_' in name: return 2
     if name.endswith('T') or 'T_' in name: return 3
     return 2
+SPINE_NO_PARTS = []      # 有 .skel 却没有 parts.json 的目录 —— 攒起来末尾非零退出
 for d in glob.glob(os.path.join(OUT, 'Spine_v2', '*')):
     if not os.path.isdir(d): continue
     stem = os.path.basename(d)
-    parts = sorted((os.path.basename(f)[:-5] for f in glob.glob(os.path.join(d, '*.skel'))),
-                   key=layer_order)
-    if not parts:  # 空目录（导出缺失），跳过
+    if not glob.glob(os.path.join(d, '*.skel')):
+        continue          # 空壳目录（如 fulangxisike_2 只有一个散 PNG），本来就没有可合成的层
+    # 分层只认 prefab 权威清单，**不再按目录 glob 猜**：同目录里除了真分层还躺着
+    # `_hx`（和谐版）等变体的 skel，它们不是层、是另一张画 —— 实测 30 个目录被多画、
+    # 15 对本体/_hx 的 CG 因此逐像素完全相同（docs/TROUBLESHOOTING.md §58）。
+    pj = os.path.join(d, 'parts.json')
+    if not os.path.isfile(pj):
+        # 刻意不回落到 glob：回落等于把这个 bug 换个地方留着，只是没人再看得见。
+        # 由 `extract_spine_v2.py --parts-only` 补齐后再来。
+        SPINE_NO_PARTS.append(stem)
         continue
+    layers = json.load(open(pj, encoding='utf-8'))['layers']
+    # 维持原有的绘制序（B<M<T、bg 最底）——本轮只改「有哪几层」，不动「层的先后」，
+    # 免得一次改动混进两个视觉变量。active 过滤当前是全 true 的 no-op，留着表达意图。
+    parts = sorted((l['layer'] for l in layers if l.get('active') is not False),
+                   key=layer_order)
     base = normalize(stem)
     sk = skins.get(stem)
     if sk is None:
@@ -203,6 +216,11 @@ for d in glob.glob(os.path.join(OUT, 'Spine_v2', '*')):
         sk = skins[stem]
     sk['spine'] = {'folder': stem, 'parts': parts}
     ship_of(base)['spineSkins'].append(stem)
+if SPINE_NO_PARTS:
+    print(f"! {len(SPINE_NO_PARTS)} 个 Spine 目录有 .skel 但没有 parts.json —— "
+          f"分层的权威清单缺失，拒绝猜。先跑 `py -3 scripts/extract_spine_v2.py --parts-only`。"
+          f"\n  清单: {SPINE_NO_PARTS[:20]}")
+    sys.exit(1)
 
 # Spine setup-pose 全屏 CG（cg_export.html 导出到 CG_v2/，目录名=皮肤 stem）
 for p in glob.glob(os.path.join(OUT, 'CG_v2', '*.png')):

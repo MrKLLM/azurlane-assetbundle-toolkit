@@ -19,6 +19,7 @@
 """
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -107,6 +108,104 @@ def find_obj(bundle_name, path_id):
                 break
     _obj_cache[key] = obj
     return obj
+
+
+_SKEL_SUFFIX = "_SkeletonData"
+_cab_owner_cache = {}
+
+
+def cab_owner(prefab_bundle, cab):
+    """CAB 名 -> 它所在的 bundle（本包或某个依赖包）。与 parse_painting 同一套 PPtr 口径。"""
+    if prefab_bundle not in _cab_owner_cache:
+        m = {}
+        env = load_bundle(prefab_bundle)
+        if env:
+            for cn in cab_names(env):
+                m[cn] = prefab_bundle
+        for dep in manifest().get(prefab_bundle, {}).get("deps", []):
+            d = load_bundle(dep)
+            if d:
+                for cn in cab_names(d):
+                    m[cn] = dep
+        _cab_owner_cache[prefab_bundle] = m
+    return _cab_owner_cache[prefab_bundle].get(cab)
+
+
+def skel_layers(prefab_bundle):
+    """列出 UI prefab 里每个 `SkeletonGraphic` 节点 —— 即游戏**真正挂着**的一个 Spine 图层。
+
+    这是分层的权威来源，用来取代「按导出目录里有哪些 .skel 猜分层」：同一个
+    `Output/Spine_v2/<name>/` 里除了真分层还躺着 `_hx`（和谐版）等**变体**的 skel，
+    它们不是层、是另一张画。`_hx` 的做法是**替换其中一层**（`huajia_2_hx` 的 prefab =
+    `[2B, 2M, 2T_hx]`）而不是多加一层 —— 实测 234 个目录里 30 个被 glob 多画、
+    15 对本体/`_hx` 的 CG 因此逐像素完全相同。取证与判据见 `docs/TROUBLESHOOTING.md` §58。
+
+    层名取自 `skeletonDataAsset` 解析到的 `SkeletonDataAsset.m_Name` 剥掉 `_SkeletonData`
+    后缀，**不受"节点名 `buleisiteB` vs 文件名 `buleisite_B`"这类命名错配影响**。
+    顺带给出每层该用的 `startingAnimation` / `initialSkinName` / 激活位 / localScale /
+    anchoredPosition / 绕 Z 旋转 —— 这几项画廊此前一律没读。
+
+    返回 [] 表示读不到该 prefab 或它里面没有 SkeletonGraphic（调用方**必须**把它当错误，
+    不许回落到 glob，否则等于把这个 bug 留着）。
+    """
+    env = load_bundle(prefab_bundle)
+    if not env:
+        return []
+    objs = {o.path_id: o for o in env.objects}
+    scr = {o.path_id: o.read().m_Name for o in env.objects if o.type.name == "MonoScript"}
+    rect_of_go = {}
+    for o in env.objects:
+        if o.type.name == "RectTransform":
+            r = o.read()
+            rect_of_go[getattr(getattr(r, "m_GameObject", None), "m_PathID", 0)] = r
+    ext_cabs = [x.name for x in serialized_file(env).externals]
+    out = []
+    for o in env.objects:
+        if o.type.name != "MonoBehaviour":
+            continue
+        d = o.read()
+        if scr.get(getattr(getattr(d, "m_Script", None), "m_PathID", 0)) != "SkeletonGraphic":
+            continue
+        gp = getattr(getattr(d, "m_GameObject", None), "m_PathID", 0)
+        go = objs.get(gp)
+        gd = go.read() if go else None
+        layer, why = "", "无 skeletonDataAsset"
+        p = getattr(d, "skeletonDataAsset", None)
+        if p is not None:
+            b = prefab_bundle
+            fid = getattr(p, "m_FileID", 0)
+            if fid:
+                cab = ext_cabs[fid - 1] if 1 <= fid <= len(ext_cabs) else None
+                b = cab_owner(prefab_bundle, cab) if cab else None
+                if b is None:
+                    why = "CAB 不在依赖表"
+            if b:
+                t = find_obj(b, getattr(p, "m_PathID", 0))
+                if t is not None:
+                    nm = t.read().m_Name or ""
+                    layer = nm[:-len(_SKEL_SUFFIX)] if nm.endswith(_SKEL_SUFFIX) else nm
+                    why = ""
+                else:
+                    why = "解析不到 SkeletonDataAsset 对象"
+        r = rect_of_go.get(gp)
+        ap = sc = [0.0, 0.0]
+        rot = 0.0
+        if r is not None:
+            a, l = r.m_AnchoredPosition, r.m_LocalScale
+            ap = [round(float(a.x), 2), round(float(a.y), 2)]
+            sc = [round(float(l.x), 4), round(float(l.y), 4)]
+            q = getattr(r, "m_LocalRotation", None)
+            if q is not None:
+                rot = round(math.degrees(2 * math.atan2(float(q.z), float(q.w))), 3)
+        out.append({
+            "layer": layer, "why": why,
+            "node": gd.m_Name if gd else "",
+            "active": bool(gd.m_IsActive) if gd is not None else None,
+            "anim": str(getattr(d, "startingAnimation", "") or ""),
+            "skin": str(getattr(d, "initialSkinName", "") or ""),
+            "anchoredPosition": ap, "localScale": sc, "rotZ": rot,
+        })
+    return out
 
 
 def decoded_texture(bundle_name, path_id):

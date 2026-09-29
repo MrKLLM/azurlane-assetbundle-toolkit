@@ -19,7 +19,7 @@
   py -3 scripts/diag/spine_parts_prefab_diff.py --only buleisite,huajia_2
 产物: .diag/spine_parts_<stamp>.tsv + 终端汇总
 """
-import sys, os, re, json, io, math, time, argparse, collections
+import sys, os, re, json, io, time, argparse, collections
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'scripts'))
 sys.stdout.reconfigure(encoding='utf-8')
 import compose_paintings_v2 as C
@@ -27,79 +27,18 @@ import compose_paintings_v2 as C
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'scripts', '..'))
 TSV_HEAD = ('bundle\tprefab_layer\twhy\tin_export_dir\tactive\tnode_name\t'
             'startAnim\tinitSkin\tanchoredPos\tscale\trotZ\tglob_layers\n')
-SUF = re.compile(r'_SkeletonData$')
-_cab_cache = {}
-
-
-def cab_owner(prefab_bundle, cab):
-    """CAB 名 -> 所在 bundle（本包或依赖包）。与 compose 的 parse_painting 同一套解析口径。"""
-    if prefab_bundle not in _cab_cache:
-        m = {}
-        env = C.load_bundle(prefab_bundle)
-        if env:
-            for cn in C.cab_names(env):
-                m[cn] = prefab_bundle
-        for dep in C.manifest().get(prefab_bundle, {}).get('deps', []):
-            d = C.load_bundle(dep)
-            if d:
-                for cn in C.cab_names(d):
-                    m[cn] = dep
-        _cab_cache[prefab_bundle] = m
-    return _cab_cache[prefab_bundle].get(cab)
-
-
 def skel_nodes(prefab_bundle):
-    """列出该 prefab 里每个 SkeletonGraphic 节点：层名（解析 skeletonDataAsset）+ 该用的动画/skin/变换。"""
-    env = C.load_bundle(prefab_bundle)
-    if not env:
-        return None
-    objs = {o.path_id: o for o in env.objects}
-    scr = {o.path_id: o.read().m_Name for o in env.objects if o.type.name == 'MonoScript'}
-    rect_of_go = {}
-    for o in env.objects:
-        if o.type.name == 'RectTransform':
-            r = o.read()
-            rect_of_go[getattr(getattr(r, 'm_GameObject', None), 'm_PathID', 0)] = r
-    ext_cabs = [x.name for x in C.serialized_file(env).externals]
+    """薄封装：解析逻辑已抽到 compose_paintings_v2.skel_layers（谁写谁读只认一份）。
+
+    这里只把它返回的结构转成本脚本 TSV 要的字面量形态。
+    """
     out = []
-    for o in env.objects:
-        if o.type.name != 'MonoBehaviour':
-            continue
-        d = o.read()
-        if scr.get(getattr(getattr(d, 'm_Script', None), 'm_PathID', 0)) != 'SkeletonGraphic':
-            continue
-        gp = getattr(getattr(d, 'm_GameObject', None), 'm_PathID', 0)
-        go = objs.get(gp)
-        gd = go.read() if go else None
-        p = getattr(d, 'skeletonDataAsset', None)
-        layer, why = '', '无 skeletonDataAsset'
-        if p is not None:
-            fid = getattr(p, 'm_FileID', 0)
-            b = prefab_bundle
-            if fid:
-                cab = ext_cabs[fid - 1] if 1 <= fid <= len(ext_cabs) else None
-                b = cab_owner(prefab_bundle, cab) if cab else None
-                if b is None:
-                    why = 'CAB %s 不在依赖表' % cab
-            if b:
-                t = C.find_obj(b, getattr(p, 'm_PathID', 0))
-                if t is not None:
-                    layer = SUF.sub('', t.read().m_Name or '')
-                    why = ''
-                else:
-                    why = '解析不到 SkeletonDataAsset 对象'
-        r = rect_of_go.get(gp)
-        ap = sc = rot = ''
-        if r is not None:
-            a, l, q = r.m_AnchoredPosition, r.m_LocalScale, getattr(r, 'm_LocalRotation', None)
-            ap = '%.1f,%.1f' % (a.x, a.y)
-            sc = '%.3f,%.3f' % (l.x, l.y)
-            rot = '%.2f' % (math.degrees(2 * math.atan2(q.z, q.w)) if q else 0.0)
-        out.append(dict(node=gd.m_Name if gd else '', layer=layer, why=why,
-                        active=gd.m_IsActive if gd else None,
-                        anim=str(getattr(d, 'startingAnimation', '') or ''),
-                        skin=str(getattr(d, 'initialSkinName', '') or ''),
-                        ap=ap, sc=sc, rot=rot))
+    for nd in C.skel_layers(prefab_bundle):
+        out.append(dict(node=nd['node'], layer=nd['layer'], why=nd['why'],
+                        active=nd['active'], anim=nd['anim'], skin=nd['skin'],
+                        ap='%.1f,%.1f' % tuple(nd['anchoredPosition']),
+                        sc='%.3f,%.3f' % tuple(nd['localScale']),
+                        rot='%.2f' % nd['rotZ']))
     return out
 
 
@@ -176,7 +115,7 @@ def main():
     print(f'  少画（prefab 挂了、glob 没有）目录数   : {n_under}')
     print(f'  prefab 指到的层在导出目录里找不到 的节点: {n_missing}')
     print(f'  含非单位变换（位移/缩放/旋转）的目录数   : {n_nonident}')
-    print(f'  起始动画不是 normal 的目录数            : {n_anim}  （弹窗硬编码优先播 normal）')
+    print(f'  起始动画不是 normal 的目录数            : {n_anim}  （2026-09-29 起前端已按 parts.json 逐层播）')
     print(f'  读不到 prefab / 无 SkeletonGraphic 的目录: {n_noprefab}')
     if over_by:
         print('  被多画的那一层叫什么:', dict(over_by.most_common(12)))

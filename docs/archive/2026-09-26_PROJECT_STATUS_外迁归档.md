@@ -527,3 +527,43 @@
    但新结论净增 3 行 → 437→440）。**只靠"写得更省"已经压不下去了**，
    溢出主体是 §6 第 5 条元数据历史与 §10 长条目。下一个独立任务：用 `project-doc-governance`
    技能逐字外迁，压回 400 行内。
+
+
+<!-- A16 §6 第 17 条 Spine parts 按 glob 猜 的完整待办原文（含五步实施清单与开工时机约定）——已于 2026-09-29 落地，做法在 WF-14 追加、踩坑在 §64 | 原第 247-282 行，共 36 行 -->
+
+17. ⚠️ **Spine 的 parts 列表是按目录 glob 猜的 ⇒ 15 个和谐版 CG 与本体逐像素完全相同**
+     （2026-09-27 查第 14 条时顺带查出，**未修、待放行**，取证见 **§58**）：
+     `build_gallery_index.py:187` 用 `glob('Output/Spine_v2/<folder>/*.skel')` 决定"由哪几层合成"，
+     但同目录里还躺着 `_hx` 等**变体**的 skel——它们不是层，是另一张画。viewer 与 `cg_export.html`
+     共用这份列表 ⇒ 本体与和谐版被叠在一起画。
+     **权威答案在 prefab 里**：`spinepainting/<name>` 的 `SkeletonGraphic` 节点列表才是真分层，
+     且 `_hx` 是**替换某一层**（`huajia_2_hx` 的 prefab = `[2B, 2M, 2T_hx]`）而不是多加一层。
+     硬指标：234 个 Spine 目录里 **30 个** parts 含"变体后缀且基名也在列表"；
+     `CG_v2` 里 **15 对**本体/`_hx` 的导出图**逐像素完全相同**。
+     判据（区分真分层与误叠）：健康的多 part 皮肤各 part **槽位名互不相交**
+     （`bailong`/`aimudeng_4` 重名率 0%、`lafeier` 3.4%），被误叠的 30~48%。
+     **✅ 全库比对已跑完**（新工具 `scripts/diag/spine_parts_prefab_diff.py`，只读，明细 **§58.1**）：
+     234 个目录里 **多画 30 / 少画 0 / 层文件缺失 0** ⇒ glob 是**纯过包含**，
+     修法是"过滤到 prefab 列表"，不会丢内容。另量出两类画廊从没读过的 prefab 字段：
+     **各层缩放不一致的只有 5 个目录**（`duyisibao_2`/`guandao`/`moermansike_3`/`qiershazhi_3`/
+     `xinzexi_4`，都是 `B` 层 2.0~2.5× 而 `T` 层 1.0×）——⚠️ 原始数字"9 个非单位变换"是虚高的，
+     统一缩放/位移会被取景归一化吃掉，**只有各层之间不一致才真的改变画面**（明细 §58.1）；
+     位移不一致的 2 个差值仅约 2px 可忽略。**3 个目录起始动画不是 `normal`**
+     （`buleisite`=`idle`；`pulimaosi` 两层各播各的 `idle2`/`normal`）。
+     层数分布：1 层 191 / 2 层 29 / 3 层 11 / 5 层 1 / 7 层 2。
+     **实施清单（待办本体，按顺序）**：
+     1. `scripts/extract_spine_v2.py` 导出时把 prefab 的权威层列表**落进每个目录**
+        （`Output/Spine_v2/<folder>/parts.json`：层名 + localScale + startingAnimation + initialSkinName），
+        让"谁写"和"谁读"都只认这一份，避免 `build_gallery_index` 直接依赖 26GB 源包。
+     2. `build_gallery_index.py:187` 改读 `parts.json`；**缺文件要报错，不许回落 glob**——
+        回落等于把这个 bug 留着。
+     3. viewer 与 `cg_export.html` 按 `parts.json` 的 localScale 摆层（缩放可直接用；位移先过 §9.1
+        那套 UI 数学，只有 `duyisibao_2`/`guandao` 两个目录需要且差值 ~2px，可最后做）；
+        起始动画按 `startingAnimation` 逐层设（`buleisite`=`idle`、`pulimaosi` 两层各一）。
+     4. 重导 `CG_v2` 受影响的 **30 个目录**（含那 15 对逐像素相同的）；备份 + 零回退闸门照 WF-15。
+     5. 验收：`spine_parts_prefab_diff.py` 重跑必须**多画 0 / 少画 0**；15 对 `_hx` CG 必须**不再相同**；
+        对照组 `bailong`/`aimudeng_4`/`tianjinfeng_2` 的 CG 必须**逐字节不变**。
+     ⏸️ **开工时机**：等并行会话把它在 `gallery_src/index.html` 与 `build_gallery_index.py`
+     上的未提交改动落地后再动这两个文件，避免同一文件撞车（2026-09-27 用户拍板）。
+     ⚠️ 它 voiceText 那轮（§60）已提交，但**之后还有一轮** `index.html`（弹窗尺寸/缩放记忆）在途
+     ⇒ 开工前先 `git status` 复核这两个文件是否已干净。

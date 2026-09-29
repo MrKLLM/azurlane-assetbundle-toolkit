@@ -3097,3 +3097,53 @@ socket 既不吐字节也不关。
 下次再半死，这一行足以三分：线程/句柄暴涨 = 本机制；进程不在 = 静默死掉；两者都正常 = 另有其因。
 红路径本身是测过的（`.diag` 里起一个"照收连接、回 200 但 Content-Length: 0"的桩，
 断言判红 + 归因成"半死" + 现场非空）——**一个从没红过的闸门等于没有闸门**。
+
+## §64. Spine 分层改认 prefab：`parts.json` 一条链，以及"去重过的产物会吞掉修复"（2026-09-29）
+
+§58 那条"parts 列表按目录 glob 猜"的账本轮结掉：234 个 Spine 目录里 **30 个多画、15 对本体/`_hx`
+的 CG 逐像素完全相同**。做法见 WF-14 追加，这里记两件不显然的事。
+
+### 一、最大的坑：那 15 对"相同"已经被硬链成同一个 inode，不断链就永远修不出来
+
+第一次重导 36 个目录，机器判据全绿（34 张内容变了），但"15 对不再相同"这条**判据红**——
+每对的两个名字仍然指向同一份数据。原因：09-20 那次硬链去重把它们当重复文件链在了一起
+（**它们之所以重复，正是本条 glob bug 造成的**）。往任何一个名字里写，两个一起变，最后一个赢。
+
+⇒ **可复用的判据**：重导一批产物之前，先查这批里有没有 `st_nlink>1` 的；有就先断链
+（读出来 → 写临时文件 → `os.replace` 回同名，内容不变、各自一份数据），再重导。
+否则症状是"改动明明生效了，成对判据却怎么都不过"，而且**看起来像修复失败**。
+本轮断 15 个，之后 15 对全部拉开。
+
+⚠️ 反过来也提醒：任何"逐字节相同"的历史结论，如果那批文件被去重过，就**不能只比哈希**——
+哈希相同可能只是同一个 inode。比之前先看 `st_nlink`。
+
+### 二、分层的权威只有一份 `parts.json`，读写都只认它
+
+- **谁写**：`scripts/extract_spine_v2.py`（`--parts-only` 可只补清单不重解码贴图）。内容取自
+  `spinepainting/<name>` prefab 里每个 `SkeletonGraphic` 节点，层名 = `skeletonDataAsset`
+  解析到的 `SkeletonDataAsset.m_Name` 剥 `_SkeletonData` 后缀，**不受节点名与文件名错配影响**。
+  顺带落 `startingAnimation` / `initialSkinName` / `localScale` / `anchoredPosition` / `rotZ`。
+- **谁读**：`build_gallery_index.py`（层集合）、viewer 与 `cg_export.html`（层集合 + 逐层缩放 + 逐层起始动画）。
+- **缺文件必须大声报错，不许回落 glob** —— 回落等于把这个 bug 换个地方留着，只是没人再看得见。
+  解析函数抽在 `compose_paintings_v2.skel_layers()`，`spine_parts_prefab_diff.py` 也改成调它，
+  避免"谁写谁读各一份实现"。
+- 唯一不写 `parts.json` 的目录是 `fulangxisike_2`：它本来就是个只有散 PNG、没有任何 `.skel`
+  的空壳导出目录，索引一直跳过它。**这是空壳，不是缺清单**，两者不能混成一个报错。
+
+### 三、两条"没变"要分开说，别一起算成战果
+
+- **`pulimaosi` 画面未变**：机制本身由 `buleisite` / `buleisite_hx` 两张变了而证明
+  （页面上 `#spAnim` 默认值确实从 `normal` 变成 prefab 写的 `idle`）。`pulimaosi` 不变的原因
+  **没有查死**——它的 `T` 层写的 `idle2` 与该层动画列表里第一个动画名可能本来就重合。
+  下一步要证它，就在 `cg_export` 的日志里带出每层**实际选中**的动画名，别拿"应该一样"当结论。
+- **`yuanchou_2_hx` 的 CG 是 64×2400 的细长条**，新旧都是 ⇒ **先前就存在的取景塌缩，本轮没弄坏也没修好**。
+  同目录的 `yuanchou_2` 却从同样的 64×2400 被修成了 2400×1332。两者都是单层皮肤，差别只在 skel。
+  已另立待办（§6 第 22 条），别和 §45/§46 那两类混：那两类是"框撑太大画面缩中间"，
+  这里是长宽比直接塌成一条。
+
+### 涉及文件
+
+`scripts/compose_paintings_v2.py`（`skel_layers`）、`scripts/extract_spine_v2.py`（`--parts-only`）、
+`scripts/build_gallery_index.py`、`gallery_src/index.html`、`gallery_src/cg_export.html`、
+`scripts/diag/spine_parts_prefab_diff.py`、`scripts/diag/spine_parts_wiring.py`（★新增，Spine 标签黑盒验收）、
+`scripts/diag/make_pair_sheet.py`（★新增，改前|改后成对总表）。

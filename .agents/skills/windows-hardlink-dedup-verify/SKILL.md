@@ -1,7 +1,7 @@
 ---
 name: windows-hardlink-dedup-verify
 description: Windows/NTFS 批量资产的硬链接去重安全流程——把逐字节相同的重复文件转成硬链接省磁盘，同时证明「按文件名引用的消费方（画廊/静态站/gallery index/图片墙）零破坏」。当用户想去重/省空间/清理重复文件但担心删了断链、磁盘被大量同内容资产占满、或明确说「硬链接去重」时使用。也覆盖第二种用法：把「手写正本 ↔ 构建/运行目录里的同名副本」硬链成同一份数据，从而彻底消掉"改完忘部署"这类静默失败（含漂移探测器与并发会话闸门）。触发词：硬链接去重、hardlink、重复文件省空间、删重复怕断链、按文件名引用不能删、去重后校验画廊能打开、逐字节重复、两份重复副本/点不开、改了忘部署、drift/漂移检查。
-version: 1.2.1
+version: 1.3.0
 ---
 
 # Windows 硬链接去重 + 三重校验安全流程
@@ -91,6 +91,23 @@ DEDUP_ROOT="Output" PYTHONIOENCODING=utf-8 py -3 scripts/dedup_plan.py
 
 ## Pitfalls（踩过的坑）
 
+- **⚠️ 去重是单向门：被链起来的两个名字，之后若"本应变得不同"，不先断链就永远修不出来。**
+  这是 dedup 的反向失效模式，最容易在"修一个让重复文件变得不重复的 bug"时撞上：
+  那批文件之所以重复，正是这个 bug 造成的，于是它们已被链成**同一个 inode**；
+  重新生成时往任何一个名字里写，两个一起变、最后一个赢。
+  症状极具误导性——**改动明明生效了（多数文件哈希变了），但"成对必须不同"这条判据死活不过**，
+  看起来像修复失败，实际是文件系统层面根本写不出两份不同内容。
+  ⇒ **重导一批产物之前，先对这批查 `os.stat(p).st_nlink > 1`；有就先断链再生成。**
+  断链的安全做法（内容不变、只是各自一份数据）：
+  ```python
+  tmp = p + '.unlink.tmp'
+  with open(p, 'rb') as r, open(tmp, 'wb') as w: w.write(r.read())
+  os.replace(tmp, p)          # 该名字拿到新 inode；配对的另一半仍指向旧 inode
+  ```
+  注意只需对**每对拆一次**即可（拆完另一半的 `nlink` 自然回到 1），别按"看着像对"就全拆。
+  代价是磁盘实占回升——这是**正确**的，因为它们本来就不是重复文件。
+- **同一理由的反向用法**：任何"逐字节相同"的历史结论，如果那批文件被去重过，
+  **不能只比哈希**——哈希相同可能只是因为它们是同一个 inode。比内容之前先看 `st_nlink`。
 - **`send2trash` 未安装**：主流程不删文件用不到它；但配套的「回收站兜底删除」若需要，别依赖 `send2trash`，改用 PowerShell `Microsoft.VisualBasic.FileIO.FileSystem::DeleteFile/DeleteItem(..., 'OnlyErrorDialogs', 'SendToRecycleBin')`。
 - **PowerShell `-File` 模式类型字面量绑定失败**：`[Microsoft.VisualBasic.FileIO.FileSystem]` 在 `-File` 脚本里于**解析期**就绑定，报「找不到类型」。加 `-NoProfile` 屏蔽用户 profile 干扰，并改用 `powershell -NoProfile -Command '...'`（bash 用**单引号**包裹、`$` 原样传给 PS，规避引号地狱），`-Command` 模式下类型可正常加载。
 - **跨卷**：硬链接只能同分区/卷；跨盘会 `OSError`，此时应放弃而非静默 copy（脚本已把失败回退为 copy 并计数，需检查回退数是否 >0）。
@@ -108,3 +125,4 @@ DEDUP_ROOT="Output" PYTHONIOENCODING=utf-8 py -3 scripts/dedup_plan.py
 3. 全量 apply「0 问题、0 回退 copy」（有回退要逐条排查跨卷/权限）。
 4. 全量 HTTP 校验**所有**受影响路径 200 + 长度 + sha256 全一致。
 5. 磁盘实占 logical vs physical 差额 ≈ 预估，抽样 `nlink>1`。
+6. **反向闸门**：若本轮要"重新生成一批可能已被链起来的产物"，先证明这批里 `st_nlink>1` 的数量以及它们是否本应变得不同；要变就先断链，再重导。重导后必须验"本该不同的那几对哈希确实不同"——只验"生成了"看不出这个问题。

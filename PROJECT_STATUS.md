@@ -1,8 +1,8 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-29 15:27
+> **生成时间**: 2026-09-29 16:47
 > 历轮会话流水（2026-09-20 ~ 09-27）已**逐字**外迁 `docs/archive/2026-09-26_PROJECT_STATUS_外迁归档.md`（A1~A15 段）；
-> 结论性知识在 `docs/TROUBLESHOOTING.md` §25~§63 与 `docs/WORKFLOWS.md` WF-14~WF-22。本文只留当前状态。
+> 结论性知识在 `docs/TROUBLESHOOTING.md` §25~§64 与 `docs/WORKFLOWS.md` WF-14~WF-22。本文只留当前状态。
 > **最近三轮**：画廊视觉定稿刷进正本（见 **§6 顶部 ★ 块** + §62 + WF-16 追加）｜354 张「🔇 无语音」按可救性拆细并裁定关闭（**§57**）｜静态立绘「只画游戏里开着的层」根因修掉、换入 48 张（**§55**）+ 敦刻尔克改判（**§56**）。逐轮流水已逐字外迁归档 A15 段。
 > **用途**: 跨会话对接。**v1 时代历史已外迁 `docs/archive/PROJECT_STATUS_历史归档.md`**，本文只保留当前状态与主线。当前待办见 §6。
 >
@@ -57,6 +57,10 @@
 > ⚠️ **动效验证必须在播放窗口内高频采样**：运行时把每条 idle 解析成 `isLoop:false`（全 269 模型一致的既有特性），idle 只播一次即回静；等 ~12s 后两次快照比对会因短 idle(5~8s) 已播完而假报 `moved=0`。
 
 ### 2.6 Spine 动态立绘 ✅（v2 提取 + 全屏 CG 导出 + viewer 修复，2026-09-19）
+> ✅ **2026-09-29 分层改认权威清单**：每个 `Output/Spine_v2/<目录>/parts.json` 由 prefab 的
+> `SkeletonGraphic` 节点落盘（层名 + `localScale` + `startingAnimation` + `initialSkinName` + 位移），
+> 索引与 viewer 与 `cg_export.html` **都只读它**，缺文件非零退出不回落 glob。
+> 修掉 30 个目录多画 / 15 对本体与和谐版逐像素相同的 CG。做法 **WF-14 追加**、踩坑 **§64**。
 `scripts/extract_spine_v2.py` 双结构兼容提取到 `Output/Spine_v2/`，232 主包。gallery 内 `spine-all.js`(3.8) 分层实时播放。**2026-09-19 三修复**：①相机视口（`SceneRenderer.resize()` 不更新 viewport → 比例怪）②`my` 变量遮蔽 TDZ（假「N 层失败」+ 取消失效）③过滤 0 秒空占位动画、默认播 `normal`、缺动画层回落 normal；另支持 JSON 骨架（beierfasite_g）。**全屏 CG 导出**：`cg_export.html` 渲染 setup pose 批量落盘 `Output/CG_v2/` **231/231 成功**（含二次像素包围盒构图修正）。
 > ✅ **2026-09-26 Spine 三修**（补 `setSkin`｜CG 按 `animFrame` 全量重导｜弹窗取景 `boundsOf` 不再把"挂了附件"当成"会画出来"）结论与判据在 **§42 / §45 / §46** 与 WF-14 追加，流水外迁 A15 段。两条承重事实：**设 skin 前后画面大小不变、只是腿回来了**；**光加 `setSkin` 对 CG 导出无效**（CG 渲 setup pose，腿是动画第 0 帧的 AttachmentTimeline 挂上去的）。
 > ⚠️ **遗留**：① 取景**第二类已修**（同日第三轮，见上方 §46 段与 WF-14 追加）：不透明纯色巨幕（`heimu`/`1heidi`）alpha=1、真的在渲染，"会不会落笔"拦不住；判据改为「区域纹素 × `slot.data.color` 后，落笔里 `max(r,g,b)>40` 的占比 ≥0.05」，全库 17/325 受影响（最大 2.79 倍），12 个对照指标逐字相同。✅ **CG_v2 已全量重导**（用户拍板后，参数与上一版一致 `--size 2400 --extra animFrame=1 --redo`）：234/234 完成 0 失败；与备份逐文件 md5 比对 **64 张变化、170 张逐字节相同**；逐张量"非近黑内容占画布长轴"→ **变好 19 / 持平 45 / 变差 0**（持平是画布收紧，如 qinli_2 2400×2125→2400×1342）；64 张缩略拼图 + 6 张改前/改后对照均目视过，无裁切。备份 `Output/_OLD_bak/CG_v2_pre_inkframing_20260926/`**（2026-09-26 已瘦身：其中 170 张与现网逐字节相同者删除、释放 659 MB，现存 64 张即全部"旧口径独一无二"的图，回滚能力未减）**。⚠️ 一个踩坑：扫描预测只有 24 个目录会变，实际 64——因为**扫描算 setup pose、CG 渲动画第 0 帧**，附件集合不同 ⇒ "子集式零误伤闸门"要求预测与产物走同一条渲染路径，否则只能直接量产物（§46 追加）。另有**第三类未修**（半透明确实在画的稀疏高亮面/雾：`weikesibao_3` 有效占满 0.387、`hu_2` 0.306、`mojiaduoer_5` 0.539、`z15_2` 0.629、`fage_2` 0.704）——再收要加"落笔覆盖率过低也不算内容"的第二阈值，会裁掉有意画在边缘的光束/雾，属审美判断，交人拍板。② `suweiaitongmeng_4` / `yuanchou` / `yuanchou_hx` 三个报 `Region not found in atlas`。归因**当天改了三次**，当前版本：文件两侧确实都是合法 UTF-8（`图层 664` 逐字节相同），但 mojibake **不是**我日志的 GBK 解码假象——直接读日志原始字节得 `ef bf a5…` = U+FFE5 U+FF9B… = **每个字符恰为 `0xFF00+原字节`**，即**浏览器内的 skel 字符串读取路径**在做单字节解码（cp932/shift_jis/euc_jp/big5 均抛错，latin-1 给 U+00E5，所以不是常见换码表，未查死）。另 `suweiaitongmeng_4` 缺的 `ab_sync_3_1_zuoxiong_1_2` 是**纯 ASCII**，与怨仇不同因。
@@ -244,42 +248,19 @@
        两个会话同时跑会附着同一个浏览器 ⇒ 本轮 WF-16 第 5 件读出 `WIRING=38`（每条 `played` 恰好滞后一个部位）
        这种**假红灯**。修法：端口/profile 走 env。⚠️ 那是并发会话正在用的工具，**别在它跑的时候改**。见 §60 末段。
      - 复核：`py -3 scripts/diag/voice_gap_audit.py`（只读）+ `py -3 scripts/diag/talk_verify.py --shots --textonly aidang`。
-17. ⚠️ **Spine 的 parts 列表是按目录 glob 猜的 ⇒ 15 个和谐版 CG 与本体逐像素完全相同**
-     （2026-09-27 查第 14 条时顺带查出，**未修、待放行**，取证见 **§58**）：
-     `build_gallery_index.py:187` 用 `glob('Output/Spine_v2/<folder>/*.skel')` 决定"由哪几层合成"，
-     但同目录里还躺着 `_hx` 等**变体**的 skel——它们不是层，是另一张画。viewer 与 `cg_export.html`
-     共用这份列表 ⇒ 本体与和谐版被叠在一起画。
-     **权威答案在 prefab 里**：`spinepainting/<name>` 的 `SkeletonGraphic` 节点列表才是真分层，
-     且 `_hx` 是**替换某一层**（`huajia_2_hx` 的 prefab = `[2B, 2M, 2T_hx]`）而不是多加一层。
-     硬指标：234 个 Spine 目录里 **30 个** parts 含"变体后缀且基名也在列表"；
-     `CG_v2` 里 **15 对**本体/`_hx` 的导出图**逐像素完全相同**。
-     判据（区分真分层与误叠）：健康的多 part 皮肤各 part **槽位名互不相交**
-     （`bailong`/`aimudeng_4` 重名率 0%、`lafeier` 3.4%），被误叠的 30~48%。
-     **✅ 全库比对已跑完**（新工具 `scripts/diag/spine_parts_prefab_diff.py`，只读，明细 **§58.1**）：
-     234 个目录里 **多画 30 / 少画 0 / 层文件缺失 0** ⇒ glob 是**纯过包含**，
-     修法是"过滤到 prefab 列表"，不会丢内容。另量出两类画廊从没读过的 prefab 字段：
-     **各层缩放不一致的只有 5 个目录**（`duyisibao_2`/`guandao`/`moermansike_3`/`qiershazhi_3`/
-     `xinzexi_4`，都是 `B` 层 2.0~2.5× 而 `T` 层 1.0×）——⚠️ 原始数字"9 个非单位变换"是虚高的，
-     统一缩放/位移会被取景归一化吃掉，**只有各层之间不一致才真的改变画面**（明细 §58.1）；
-     位移不一致的 2 个差值仅约 2px 可忽略。**3 个目录起始动画不是 `normal`**
-     （`buleisite`=`idle`；`pulimaosi` 两层各播各的 `idle2`/`normal`）。
-     层数分布：1 层 191 / 2 层 29 / 3 层 11 / 5 层 1 / 7 层 2。
-     **实施清单（待办本体，按顺序）**：
-     1. `scripts/extract_spine_v2.py` 导出时把 prefab 的权威层列表**落进每个目录**
-        （`Output/Spine_v2/<folder>/parts.json`：层名 + localScale + startingAnimation + initialSkinName），
-        让"谁写"和"谁读"都只认这一份，避免 `build_gallery_index` 直接依赖 26GB 源包。
-     2. `build_gallery_index.py:187` 改读 `parts.json`；**缺文件要报错，不许回落 glob**——
-        回落等于把这个 bug 留着。
-     3. viewer 与 `cg_export.html` 按 `parts.json` 的 localScale 摆层（缩放可直接用；位移先过 §9.1
-        那套 UI 数学，只有 `duyisibao_2`/`guandao` 两个目录需要且差值 ~2px，可最后做）；
-        起始动画按 `startingAnimation` 逐层设（`buleisite`=`idle`、`pulimaosi` 两层各一）。
-     4. 重导 `CG_v2` 受影响的 **30 个目录**（含那 15 对逐像素相同的）；备份 + 零回退闸门照 WF-15。
-     5. 验收：`spine_parts_prefab_diff.py` 重跑必须**多画 0 / 少画 0**；15 对 `_hx` CG 必须**不再相同**；
-        对照组 `bailong`/`aimudeng_4`/`tianjinfeng_2` 的 CG 必须**逐字节不变**。
-     ⏸️ **开工时机**：等并行会话把它在 `gallery_src/index.html` 与 `build_gallery_index.py`
-     上的未提交改动落地后再动这两个文件，避免同一文件撞车（2026-09-27 用户拍板）。
-     ⚠️ 它 voiceText 那轮（§60）已提交，但**之后还有一轮** `index.html`（弹窗尺寸/缩放记忆）在途
-     ⇒ 开工前先 `git status` 复核这两个文件是否已干净。
+17. ✅ **Spine 的分层不再按目录 glob 猜，改认 prefab 权威清单 `parts.json`（2026-09-29 落地并换入）**
+     - 全库 234 个目录：多画 30 / 少画 0 / 层文件缺失 0 → 修完审计重跑 **多画 0 / 少画 0**；
+       **15 对本体/`_hx` 的 CG 全部拉开**（0 对仍逐像素相同）；重导 36 个目录（30 层集合 ∪ 3 动画 ∪ 5 缩放），
+       34 张画面变化、198 张非目标按 mtime 证明未写、三张对照组未动；34 张改前|改后总表逐张看过。
+     - ⚠️ **本轮最大的坑不是 glob，是硬链接**：那 15 对早在 09-20 去重时被链成同一个 inode，
+       不断链则"往哪个名字里写两个一起变"，成对判据永远不过 —— 必须先断链再重导（详见 §64）。
+     - 顺带修掉两类先前看不见的缺陷：`xinzexi_4`/`duyisibao_2`/`guandao`/`moermansike_3`/`qiershazhi_3`
+       此前**整目录统一缩放被丢弃**（各层 localScale 一律没读，5 个层间不一致的画面差异 50~98%），
+       以及 3 个目录的起始动画此前一律优先 `normal`（现按 prefab 逐层，`buleisite` 实测从 `normal`→`idle`）。
+     - 权威清单由 `extract_spine_v2.py --parts-only` 写、`build_gallery_index.py` 与 viewer/`cg_export.html` 读，
+       **缺文件非零退出不回落 glob**；解析函数只有一份（`compose_paintings_v2.skel_layers`）。
+       做法与判据 **WF-14 追加（2026-09-29）**，踩坑 **§64**。原第 17 条全文（含五步实施清单）外迁 A16 段。
+
 18. ✅ **画廊「按钮 / 交互反馈」层重做（2026-09-27 立项 → 2026-09-29 关闭）**
      - 五条真缺陷（同一"选中"语义 5 种颜色 / Live2D·Spine 两条控制条其实是 UA 原生按钮 / 全文零 `:active` / 零 `:focus-visible` / toggle 与瞬时动作外观不可区分）**已全部关闭**：定稿做法见 §6 顶部 ★ 块与 **WF-16 追加（2026-09-29）**，踩坑见 **§62**。
      - **一条否证别重走**：同日做过一整版**视觉语言重做**（暖墨底 + 单一铜金强调、字阶、卡片三行化、查看器底换掉棋盘格），样板页 `index_b.html` 给用户看过并**被否**（"B版不如之前"）⇒ **整体换色这条路已试且被拒**，方向改为只动按钮与交互反馈、配色基调与布局不动。原文（含判据工具与"占视口比例假回退""`| tail -25` 吃掉退出码"两条坑）外迁 **A15 段**。
@@ -293,6 +274,7 @@
 21. ⏳ **变体包按条切分，让 44 张「仅台词」皮肤也能点播**（用户未拍板，先不做）：那 36 张的 `voiceExtra`
      是 v1 时代**整包**导出的单个 wav（`Audio/CV/cv-<n>-<battle|gift>.wav`），对不到具体类别 ⇒
      现在只能整包听、配不上逐句正文。要修得重新解码 `-battle/-gift` 包并按 cue 切分（约 10 分钟 + 一次零回退比对）。
+22. ⏳ **`yuanchou_2_hx` 的 CG 是 64×2400 的细长条（取景长宽比直接塌成一条）**（2026-09-29 做第 17 条时顺带查出，**先前就存在、本轮没弄坏也没修好**）：新旧两份都是 64×2400，而同目录的 `yuanchou_2` 却从同样的细条被 `localScale` 修复救回成 2400×1332。两者都是单层皮肤，差别只在 skel 本身。⚠️ 别和 §45/§46 那两类混——那两类是"框撑太大画面缩中间"，这里是长宽比直接塌成一条。取证起点：单层皮肤跑 `framingBox` 时 `bw/bh` 为什么是 0.027。
 
 
 ---

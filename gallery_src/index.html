@@ -1643,7 +1643,7 @@ async function startSpine(s, sk){
     const scene=new spine.webgl.SceneRenderer(cv,glctx,false);
     const gl=glctx.gl; gl.clearColor(0,0,0,0); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
 
-    async function loadPart(pn){
+    async function loadPart(pn,cfg){
       const skelR=await fetch(base+pn+'.skel'); if(!skelR.ok)throw new Error('skel '+pn+' 404');
       const bytes=new Uint8Array(await skelR.arrayBuffer());
       const atlasR=await fetch(base+pn+'.atlas'); if(!atlasR.ok)throw new Error('atlas '+pn+' 404');
@@ -1679,14 +1679,27 @@ async function startSpine(s, sk){
 
       const skeleton=new spine.Skeleton(data);
       if(bestSkin!==null) skeleton.setSkin(data.findSkin(bestSkin));
-      skeleton.setSlotsToSetupPose(); skeleton.setBonesToSetupPose(); skeleton.updateWorldTransform();
+      skeleton.setSlotsToSetupPose(); skeleton.setBonesToSetupPose();
+      /* 各层 localScale 照 prefab 写（§58）。只有**层间不一致**才真的改变画面（全库 5 个目录），
+         整目录统一缩放会被 fit() 的取景归一化吃掉。必须在 updateWorldTransform 之前设 ——
+         根骨骼那条分支才乘 skeleton.scaleX/Y。 */
+      if(cfg&&cfg.localScale){ skeleton.scaleX=cfg.localScale[0]||1; skeleton.scaleY=cfg.localScale[1]||1; }
+      skeleton.updateWorldTransform();
       const anim=new spine.AnimationState(new spine.AnimationStateData(data));
       const anims=(data.animations||[]).filter(a=>a.duration>0.01).map(a=>({name:a.name||a,dur:+a.duration.toFixed(1)}));
-      return {skeleton,anim,data,anims,skinNames,skin:bestSkin,cov:bestCov};
+      return {skeleton,anim,data,anims,skinNames,skin:bestSkin,cov:bestCov,
+              startAnim:(cfg&&cfg.startingAnimation)||''};
     }
 
+    /* 分层的权威清单只有一份：`Spine_v2/<目录>/parts.json`（extract_spine_v2.py 从 prefab 落盘）。
+       拿不到就报错，**绝不回落到"目录里有哪些 .skel"** —— 那个 glob 正是把本体与和谐版
+       叠在一起画、造出 15 对逐像素相同 CG 的根因（docs/TROUBLESHOOTING.md §58）。 */
+    const pcfg={};
+    {const r=await fetch(base+'parts.json');
+     if(!r.ok) throw new Error('缺 parts.json（先跑 py -3 scripts/extract_spine_v2.py --parts-only 补）');
+     for(const l of ((await r.json()).layers||[])) pcfg[l.layer]=l;}
     const layers=[]; let loadFail=0;
-    for(const pn of parts){ try{ layers.push(await loadPart(pn)); if(my.cancelled)return; }catch(e){ loadFail++; console.warn('part fail',pn,e); } }
+    for(const pn of parts){ try{ layers.push(await loadPart(pn,pcfg[pn])); if(my.cancelled)return; }catch(e){ loadFail++; console.warn('part fail',pn,e); } }
     if(!layers.length)throw new Error('部件加载失败（'+parts.join(',')+'）');
 
     let camX=0,camY=0,zoom=1,base1=1,playing=true,last=performance.now();
@@ -1780,8 +1793,13 @@ async function startSpine(s, sk){
         if(n && L.anims.some(a=>a.name===n)) L.anim.setAnimation(0,n,true);
         else if(L.anims.some(a=>a.name==='normal')) L.anim.setAnimation(0,'normal',true);
       }catch(e){} }); }
-    const def=animUnion.indexOf('normal')>=0?'normal':animUnion[0];
-    if(def) setAnim(def);
+    /* 默认起播按 prefab **逐层**写的 startingAnimation（§58：buleisite/buleisite_hx=idle、
+       pulimaosi 两层各播各的 idle2/normal），不再一律优先 'normal'。
+       下拉框仍是「选一个、全层跟」的简单语义 —— 用户手动改时覆盖 prefab 的写法。 */
+    const firstStart=layers.map(L=>L.startAnim).find(n=>n&&animUnion.indexOf(n)>=0)||'';
+    const def=firstStart||(animUnion.indexOf('normal')>=0?'normal':animUnion[0]);
+    layers.forEach(L=>{ const n=(L.startAnim&&L.anims.some(a=>a.name===L.startAnim))?L.startAnim:def;
+                        if(n){ try{ L.anim.setAnimation(0,n,true); }catch(e){} } });
     sel.value=def||'';
     sel.onchange=()=>setAnim(sel.value);
     /* skin 下拉：默认用上面算出的覆盖最多者，允许手动切着对比

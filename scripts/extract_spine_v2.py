@@ -15,6 +15,7 @@ atlas 页纹理若不在以上两包内，按 dependencies 官方依赖表去外
 用法:
   python extract_spine_v2.py               # 全部
   python extract_spine_v2.py aersasi 2b_2  # 指定
+  python extract_spine_v2.py --parts-only  # 只给已导出的目录补 parts.json（不重解码贴图）
 """
 import json
 import os
@@ -90,6 +91,49 @@ def to_bytes(script):
     return str(script).encode("utf-8", "surrogateescape")
 
 
+def write_parts(name, out_dir):
+    """把游戏 prefab 真正挂着的层列表落进导出目录，作为分层的**唯一权威**。
+
+    为什么必须是这一份而不是 `glob('*.skel')`：同目录里还躺着 `_hx`（和谐版）等**变体**
+    的 skel，它们不是层、是另一张画；`_hx` 是替换某一层而非多加一层。画廊此前按 glob
+    决定分层，viewer 与 cg_export.html 共用那份列表 ⇒ 本体与和谐版被叠在一起画，
+    实测 234 个目录里 30 个多画、15 对 CG 逐像素完全相同（`docs/TROUBLESHOOTING.md` §58）。
+
+    读不到层列表时**不写文件**，让下游 `build_gallery_index.py` 大声报错 ——
+    写一个空壳 parts.json 等于把同一个 bug 换个地方留着。
+    返回 (payload, "") 或 (None, 原因) —— 原因要说准，别把「层文件没导出」
+    报成「读不到 prefab」（本轮真错过一次）。
+    """
+    import compose_paintings_v2 as C
+    layers = [nd for nd in C.skel_layers(f"spinepainting/{name}") if nd["layer"]]
+    if not layers:
+        return None, "prefab 里没有可解析的 SkeletonGraphic 层"
+    have = {x[:-5] for x in os.listdir(out_dir) if x.endswith(".skel")}
+    missing = [nd["layer"] for nd in layers if nd["layer"] not in have]
+    if missing:
+        # 层文件不在盘上：写出来只会让前端 fetch 404，宁可报错
+        # （实测 `fulangxisike_2` 就是这种空壳目录：只有一个散 PNG、没有任何 .skel）
+        return None, f"prefab 挂了但目录里没有这些 skel: {missing}"
+    payload = {
+        "bundle": f"spinepainting/{name}",
+        "source": "prefab SkeletonGraphic 节点（权威），非目录 glob",
+        "layers": [{
+            "layer": nd["layer"],
+            "skelFile": nd["layer"] + ".skel",
+            "node": nd["node"],
+            "active": nd["active"],
+            "startingAnimation": nd["anim"] or "normal",
+            "initialSkinName": nd["skin"],
+            "anchoredPosition": nd["anchoredPosition"],
+            "localScale": nd["localScale"],
+            "rotZ": nd["rotZ"],
+        } for nd in layers],
+    }
+    with open(os.path.join(out_dir, "parts.json"), "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=1)
+    return payload, ""
+
+
 def extract_one(name):
     key = f"spinepainting/{name}"
     main = os.path.join(AB_ROOT, "spinepainting", name)
@@ -162,6 +206,8 @@ def extract_one(name):
 def main():
     global OUT_ROOT
     argv = sys.argv[1:]
+    parts_only = "--parts-only" in argv
+    argv = [x for x in argv if x != "--parts-only"]
     if "--out" in argv:
         i = argv.index("--out")
         OUT_ROOT = argv[i + 1]
@@ -174,8 +220,22 @@ def main():
                        if os.path.isfile(os.path.join(d, f)) and not f.endswith("_res"))
     ok = miss = 0
     for n in names:
+        out_dir = os.path.join(OUT_ROOT, n)
         try:
-            good, msg = extract_one(n)
+            if parts_only:
+                # 只补分层的权威列表，不重新解码贴图 —— 免得为了写一个小 json
+                # 去碰 234 个目录里已经正确的 PNG/atlas/skel
+                if not os.path.isdir(out_dir):
+                    good, msg = False, "导出目录不存在"
+                else:
+                    p, why = write_parts(n, out_dir)
+                    good = p is not None
+                    msg = f"{len(p['layers'])} 层（prefab 权威）" if good else why
+            else:
+                good, msg = extract_one(n)
+                if good:
+                    p, why = write_parts(n, out_dir)
+                    msg += f" | parts.json {'✓' if p else '✗ ' + why}"
         except Exception as e:
             good, msg = False, f"异常: {e}"
         if good:

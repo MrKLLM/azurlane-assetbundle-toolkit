@@ -66,7 +66,7 @@ const scene=new spine.webgl.SceneRenderer(cv,glctx,false);
 const gl=glctx.gl; gl.clearColor(0,0,0,0); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
 let running=false, stopFlag=false;
 
-async function loadPart(base,pn,textures){
+async function loadPart(base,pn,textures,cfg){
   const skelR=await fetch(base+pn+'.skel'); if(!skelR.ok)throw new Error('skel '+pn+' 404');
   const bytes=new Uint8Array(await skelR.arrayBuffer());
   const atlasR=await fetch(base+pn+'.atlas'); if(!atlasR.ok)throw new Error('atlas '+pn+' 404');
@@ -110,9 +110,15 @@ async function loadPart(base,pn,textures){
      部件是动画第 0 帧的 AttachmentTimeline 挂上去的（设 skin + 应用后为 201）。
      默认仍导出纯 setup pose（保持 231 张既有语义不变）；`animFrame=1` 才应用默认动画第 0 帧。 */
   if(ANIM_FRAME){ const an=(data.animations||[]).map(a=>a&&a.name).filter(Boolean);
-    const pick=an.indexOf('normal')>=0?'normal':an[0];
+    /* 起始动画按 prefab 逐层写的 startingAnimation 来，不再一律优先 'normal'
+       （§58：3 个目录不是 normal —— buleisite / buleisite_hx = idle，pulimaosi 两层各播各的）。 */
+    const want=(cfg&&cfg.startingAnimation)||'normal';
+    const pick=an.indexOf(want)>=0?want:(an.indexOf('normal')>=0?'normal':an[0]);
     if(pick){ const st=new spine.AnimationState(new spine.AnimationStateData(data));
       st.setAnimation(0,pick,true); st.update(0); st.apply(skeleton); } }
+  /* 各层 localScale 照 prefab 写。⚠️ 只有**层间不一致**才真的改变画面（全库 5 个目录），
+     整目录统一缩放会被下面的取景归一化吃掉 —— 那是 §58 量出来的，别拿"9 个非单位变换"当影响面。 */
+  if(cfg&&cfg.localScale){ skeleton.scaleX=cfg.localScale[0]||1; skeleton.scaleY=cfg.localScale[1]||1; }
   skeleton.updateWorldTransform();
   return {skeleton,data};
 }
@@ -176,12 +182,24 @@ function framingBox(skeletons){let cur=[];
     cur=rest; box=nb;}
   return box;}
 
+/* 分层的权威清单只有一份：`Spine_v2/<目录>/parts.json`（由 extract_spine_v2.py 从 prefab 落盘）。
+   拿不到就抛错，**绝不回落到"目录里有哪些 .skel"** —— 那个 glob 正是把本体与和谐版
+   叠在一起画、造出 15 对逐像素相同 CG 的根因（docs/TROUBLESHOOTING.md §58）。 */
+async function partsCfg(base,folder){
+  const r=await fetch(base+'parts.json');
+  if(!r.ok) throw new Error(folder+': 缺 parts.json（先跑 py -3 scripts/extract_spine_v2.py --parts-only）');
+  const j=await r.json(); const m={};
+  for(const l of (j.layers||[])) m[l.layer]=l;
+  return m;
+}
+
 async function exportOne(job,longSide){
   const base='../Spine_v2/'+job.folder+'/';
   const textures={};
   const layers=[]; const errs=[];
+  const pcfg=await partsCfg(base,job.folder);
   for(const pn of job.parts){
-    try{ layers.push(await loadPart(base,pn,textures)); }
+    try{ layers.push(await loadPart(base,pn,textures,pcfg[pn])); }
     catch(e){ errs.push(pn+': '+(e.message||e)); }
   }
   if(!layers.length){ for(const t in textures)try{textures[t].dispose()}catch(e){} throw new Error(errs.join(' | ')||'无部件'); }

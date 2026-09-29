@@ -620,6 +620,50 @@
   实际打开是"一大片纯黑里嵌一小块舞台"。**alpha 包围盒 ≠ 构图对不对**，这一类必须看图。
   （现 `cg_export.html` 的取景已换成与弹窗同一套 `framingBox`；样本已验、全量重导待确认。）
 
+#### WF-14 追加（2026-09-29）：分层这类事实必须落盘成**一份**权威清单，读写都只认它
+
+**适用**：任何"前端/索引靠命名规则或目录 glob 猜游戏侧结构"的场景（本轮是 Spine 分层，
+§9.3 那七条根因全是同一类）。
+
+**步骤**（顺序不能换，每一步都自带判据）：
+
+1. **只读审计先跑，拿到"权威 vs 现状"的差集**。`scripts/diag/spine_parts_prefab_diff.py`
+   → 多画 30 / 少画 0 / 层文件缺失 0。**少画为 0 是关键**：它证明 glob 是纯过包含，
+   修法可以是"过滤"而不是"补"，于是不可能丢内容。
+2. **把权威清单落盘到资产自己旁边**，而不是让每个消费方各自去解析 26GB 源包：
+   `py -3 scripts/extract_spine_v2.py --parts-only` → 每个 `Output/Spine_v2/<目录>/parts.json`。
+   `--parts-only` 这个模式是必要的：不补它就等于为了写一个小 json 去重解码 234 个目录的贴图。
+3. **解析函数只允许有一份**。抽到 `compose_paintings_v2.skel_layers()`，
+   审计工具与导出脚本都调它 —— 否则"谁写"和"谁读"会各自漂移，而这正是本类 bug 的成因。
+4. **消费方改读清单，缺文件必须非零退出，不许回落旧逻辑**。回落 glob = 把 bug 留着且没人看得见。
+   `build_gallery_index.py` 攒够一批再统一 `sys.exit(1)`，这样一次能看全缺哪些。
+5. **重导之前先查 `st_nlink`**：这批产物如果历史上被硬链去重过，必须先断链再重导，
+   否则两个名字共享同一个 inode，写完最后一个赢，成对判据永远不过（本轮真实撞上，见 §64）。
+6. **验收三件套，缺一不可**：
+   - 机器判据：审计工具重跑必须 `多画 0 / 少画 0`；
+   - 零回退：`gallery_index_diff_check.py` 白名单外零差异 + **按 mtime** 证明只有目标文件被写
+     （"我只传了这些名字"是说法，mtime 是凭据）；
+   - **逐张看改前|改后总表**：`scripts/diag/make_pair_sheet.py`。本轮 34 张里 3 张差异 50~98%
+     且都是"旧图塌成一条/裁成小块"，不看图根本不知道修复顺带救回了什么。
+7. **前端那条分支要单独验**。`interact_verify` 走 Live2D，**不碰 `startSpine`**——
+   拿它全绿当"Spine 改对了"就是代理指标冒充观测。新增 `scripts/diag/spine_parts_wiring.py`：
+   只点真实 DOM、只读页面上本来就有的显示（`.spine-bar` 那句 "N 层部件" + `#spAnim` 的 value），
+   期望值现从 `parts.json` 算，不写死在探针里。
+
+**判据**：`spine_parts_wiring.py` 退出码 0 且 6/6 案例过；`spine_parts_prefab_diff.py` 报 `多画 0 少画 0`。
+
+**踩坑**：
+- ⚠️ 探针第一次求值跑在页面脚本加载完之前 ⇒ `openShip is not defined` 被读成产品缺陷。
+  **必须先轮询 `typeof openShip==='function'` 再开测。**
+- ⚠️ 报错文案要说准：`fulangxisike_2` 第一次被报成"读不到 prefab 层列表"，实际是
+  "prefab 挂了 1 层但目录里没有任何 `.skel`"（空壳导出）。两种错的处理方式完全不同。
+- ⚠️ 别把"画面没变"一律算成没生效：`buleisite` 变了证明机制通，`pulimaosi` 没变的原因**没查死**，
+  要留在文档里而不是并进战果。
+
+**涉及文件**：`scripts/compose_paintings_v2.py`、`scripts/extract_spine_v2.py`、
+`scripts/build_gallery_index.py`、`gallery_src/index.html`、`gallery_src/cg_export.html`、
+`scripts/diag/{spine_parts_prefab_diff,spine_parts_wiring,make_pair_sheet,gallery_index_diff_check}.py`。
+
 ---
 
 ### WF-15: 游戏版本更新后的增量重跑（资产同步 → 定位受影响子集 → 定向重建 → 证零回退）
