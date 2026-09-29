@@ -112,7 +112,7 @@
 
 **核心脚本**：`scan_assets.py`、`export_assets.py`、`export_cue_audio.py`、`reconstruct_live2d.py`/`fix_model3.py`/`extract_motions.py`(★2026-09-21 权威映射重写)/`apply_live2d_motions.py`(★临时目录→备份换入)、`compose_paintings_v2.py`(★v2)、`extract_spine_v2.py`(★v2)、`export_dependency_manifest.py`、`build_gallery_index.py`、`make_thumbs.py`、`deploy_gallery.py`(gallery_src↔Output 硬链/漂移检查)、`fetch_gallery_vendor.py`(按 vendor 台账 sha256 补齐第三方库)、`mumu_sync.py`、`ship_name_map.py`、`scrape_wiki_fast.py`、**`run_v2_full.py`**(两阶段全量驱动)、**`update_pipeline.py`**(★2026-09-29 新增：WF-15 那条 runbook 的阶段机，一条命令跑到待确认、第二条命令签字换入，见 **WF-23**)。
 
-**可复用诊断/验证工具 `scripts/diag/`**（68 个脚本，下面只列承重的；"18 件"是长期未更新的旧计数）：`scan_faces.py`(脸洞扫描)、`make_face_cmp.py`/`make_review_sheet.py`(改前后对比图/复核总表)、`l2d_motion_audit.py`(★全量动作健康审计：空壳/错位/PartOpacity/时长，`L2D_OUT_DIR` 可审任意产物目录)、`l2d_ab.py`(★同一模型新旧 motion 的渲染级 A/B，**只在换入前构成对照**)、`l2d_diff_dirs.py`(★两个产物目录逐 clip gained/changed/lost)、`l2d_sweep.py`(★全量加载+动作内容判据扫描；**2026-09-22 重写为 Python 侧逐条 evaluate + 每 N 模型重载页面**，修掉旧版「单次 evaluate 卡第一条不返回」与「单 Chrome ~110 后 WebGL 断连」，全库 269/269 一次跑通)、`l2d_verify.py`/`l2d_click.py`(抽样与真实点击路径无头校验)、`hit_verify.py`(按部位点击触发断言，支持 `--only`；2026-09-23 起合成点击经 V2P 走**真实路径**)、`interact_verify.py`(滚轮/拖拽/兜底/空白/部位五项交互断言)、`l2d_coord_forensics.py`(★**2026-09-23 新增**：坐标系取证——可见头/胸/髋三点反查应落 Head/Special/Body，专治「张冠李戴」且不构成自洽闭环)、`l2d_inspector_verify.py`(★**2026-09-23 新增**：判定区可视化+参数·部件面板+滑杆往返+过滤器四项验收)、`run_cg_export.py`(Spine CG 批量导出驱动)、`dedup_plan.py`/`dedup_apply.py`/`dedup_httpverify.py`(硬链去重三件套)、`gen_story_md.py`(复核清单生成)、`server_wedge_probe.py`(★**2026-09-29 新增**：本地服务器"取消下载 ⇒ 泄漏 handler 线程"的剂量学探针，含真异常仍留痕的对照组，见 §63)、`precheck_red_test.py`(★**2026-09-29 新增**：给 WF-16 预检做红路径测试——用"照收连接、回 200 但 0 字节"的桩验闸门真的会红)。**游戏版本更新怎么跑 → WF-15**；**Live2D 动作重建怎么跑 → WF-7**；**Live2D 网页交互改动/回归怎么跑 → WF-16**。
+**可复用诊断/验证工具 `scripts/diag/`**（68 个脚本，下面只列承重的；"18 件"是长期未更新的旧计数）：`scan_faces.py`(脸洞扫描)、`make_face_cmp.py`/`make_review_sheet.py`(改前后对比图/复核总表)、`l2d_motion_audit.py`(★全量动作健康审计：空壳/错位/PartOpacity/时长，`L2D_OUT_DIR` 可审任意产物目录)、`l2d_ab.py`(★同一模型新旧 motion 的渲染级 A/B，**只在换入前构成对照**)、`l2d_diff_dirs.py`(★两个产物目录逐 clip gained/changed/lost)、`l2d_sweep.py`(★全量加载+动作内容判据扫描；**2026-09-22 重写为 Python 侧逐条 evaluate + 每 N 模型重载页面**，修掉旧版「单次 evaluate 卡第一条不返回」与「单 Chrome ~110 后 WebGL 断连」，全库 269/269 一次跑通)、`l2d_verify.py`/`l2d_click.py`(抽样与真实点击路径无头校验)、`hit_verify.py`(按部位点击触发断言，支持 `--only`；2026-09-23 起合成点击经 V2P 走**真实路径**)、`interact_verify.py`(滚轮/拖拽/兜底/空白/部位五项交互断言)、`l2d_coord_forensics.py`(★**2026-09-23 新增**：坐标系取证——可见头/胸/髋三点反查应落 Head/Special/Body，专治「张冠李戴」且不构成自洽闭环)、`l2d_inspector_verify.py`(★**2026-09-23 新增**：判定区可视化+参数·部件面板+滑杆往返+过滤器四项验收)、`run_cg_export.py`(Spine CG 批量导出驱动)、`dedup_plan.py`/`dedup_apply.py`/`dedup_httpverify.py`(硬链去重三件套)、`gen_story_md.py`(复核清单生成)、`check_diag_hygiene.py`(★**2026-09-29 新增**：`.diag/` 顶层散落代码检查，退出码即结论，`--archive` 打包归档)、`server_wedge_probe.py`(★**2026-09-29 新增**：本地服务器"取消下载 ⇒ 泄漏 handler 线程"的剂量学探针，含真异常仍留痕的对照组，见 §63)、`precheck_red_test.py`(★**2026-09-29 新增**：给 WF-16 预检做红路径测试——用"照收连接、回 200 但 0 字节"的桩验闸门真的会红)。**游戏版本更新怎么跑 → WF-15**；**Live2D 动作重建怎么跑 → WF-7**；**Live2D 网页交互改动/回归怎么跑 → WF-16**。
 
 **文档**（导航见根目录 `README.md`，写入路由见 `AGENTS.md`）：
 - `docs/DEV_LOG.md` 操作手册 · `docs/WORKFLOWS.md` 可复用工作流 · `docs/TROUBLESHOOTING.md` 踩坑 · `docs/ERRORS.log` 错误流水
@@ -151,9 +151,15 @@
    已改成只挡长度 ≥5 的回显串。闸门为此加了 `--expect`（**按值钉死**期望改名，漏声明或值对不上
    都判红；原先只有 `--allow-ship name` 这种按字段放行 = 等于关掉这项检查）。全过程 `docs/name_review_20260929.md`。
 3. ✅ **`.diag/` 已清**（2026-09-29：`clean_diag_profiles.py` 先干跑后 `--yes`，只碰 `chrome_*`）：
-   删 49 个 profile / **释放 4.42 GiB**，`.diag` 现 8.4G。⚠️ 顺带查出一笔**别人欠的债**：
-   `.diag/` 顶层还堆着 **62 个 `.py`**，违反 AGENTS.md 收尾清单第 4 条「不留唯一副本代码」——
-   不是本轮产生的，逐个判归属得单独一轮，别顺手批量删。
+   删 49 个 profile / **释放 4.42 GiB**，`.diag` 现 8.4G。
+   ✅ **同批清掉那笔代码债**（原记"62 个 `.py` 孤儿"，实为 67 个代码文件）：
+   **10 个零损失直删**（6 个被 `scripts/diag/` 同名正本完全取代、只差 `ROOT` 层级一行，其中
+   `l2d_touchidle_probe` 正本还是更晚的修订版；4 个与 git 某提交**逐字节相同**，
+   `git show <rev>:<path>` 可原样取回）+ **57 个独有的打包**进
+   `.diag/cleanup/orphans_20260929.zip`（逐份 md5 回读校验通过，`unzip` 回 `.diag/` 即复原）。
+   `.diag/` 顶层散落代码现 **0**。⚠️ `.diag` 在 `.gitignore` 里 ⇒ **删了没有 git 兜底**，
+   所以独有那批走"打包再删"而非直删。⚠️ 但**那份 zip 也住在 gitignore 的 `.diag/` 里** —— 它只保证"清散文件后还能反悔一次"，**不是永久备份**；真要长期留着某个探针，唯一办法是移进 `scripts/diag/` 入库。防复发：`py -3 scripts/diag/check_diag_hygiene.py`
+   （已写进 AGENTS.md 收尾清单第 4 条——这条规则原先只在被想起来时生效，才堆到 67 个）。
 4. ✅ **本文档已压回红线内**（2026-09-29：`project-doc-governance` 逐字外迁 **12 块 / 84 行** → A15 段，
    搬家本身 **440 → 377 行**，本轮之后又补了第 3/6 两条，故不再钉活数——**红线以 `wc -l` 实测为准**）。四条核对全过：基线每条非空行可查
    （缺失 0，唯一例外是 AGENTS.md 第 3 步要求原地更新的「生成时间」）、12/12 归档块与
