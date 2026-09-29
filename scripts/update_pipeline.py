@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""游戏更新一条龙：把 WF-15 的 11 步变成一条命令跑到「待你确认」，第二条命令签字换入。
+"""资产更新流水线编排器：把 WF-15 的 11 步变成一条命令跑到「待你确认」，第二条命令签字换入。
+界面上的「资产更新控制台」是本文件薄薄一层壳，逻辑都在这。
 
     py -3 scripts/update_pipeline.py --plan                 # 只读：这次更新会动什么
     py -3 scripts/update_pipeline.py                        # 跑到 review 就停（不碰正式产物）
@@ -91,13 +92,26 @@ def scan_hardlinks(paths):
 
 # ---------------------------------------------------------------- 阶段定义
 class Stage:
-    def __init__(self, key, title, tier, fn, judge_desc, produces=None, needs=None):
+    def __init__(self, key, title, tier, fn, judge_desc, produces=None, needs=None,
+                 step=0, writes=''):
         self.key, self.title, self.tier, self.fn = key, title, tier, fn
         self.judge_desc, self.produces, self.needs = judge_desc, produces or [], needs or []
+        self.step, self.writes = step, writes
 
     @property
     def live(self):
         return self.tier == 'live'
+
+
+# 阶段属于哪一步、写到哪里，是**流水线自身的事实**，所以定义在这里而不是面板里：
+# 面板曾经打算自己抄一份分组表，抄了就会有「加了新阶段、界面把它藏起来」这种漂移。
+# step=0 的阶段会被界面显式标成「未归组」并判红，不静默丢弃。
+STEPS = {
+    1: ('接模拟器', '只读地看你设备上多了什么；真把包拉下来要签字'),
+    2: ('重新导出', '从源包重算产物。默认全进暂存区，你能先看再决定'),
+    3: ('看图对比', '出「改前 | 改后」总表。这一步不写任何正式产物'),
+    4: ('签字换入', '把暂存区覆盖进 Output/，随后重建索引并跑回归'),
+}
 
 
 RESULTS = {}
@@ -409,31 +423,44 @@ def st_regress(approved):
 # ---------------------------------------------------------------- 驱动
 STAGES = [
     Stage('preflight', '权威输入 / vendor / 依赖表在位性', 'read', lambda a, f: st_preflight(),
-          'check_inputs×2 + fetch_gallery_vendor --check 退出码（这三个可信）'),
+          'check_inputs×2 + fetch_gallery_vendor --check 退出码（这三个可信）',
+          step=1, writes='不写任何东西'),
     Stage('pull', '模拟器拉新包', 'live', lambda a, f: st_pull(a),
-          'diff 只读；sync --apply 写 files/ 26GB ⇒ live'),
+          'diff 只读；sync --apply 写 files/ 26GB ⇒ live',
+          step=1, writes='未签字：只写差异清单 · 签字：files/AssetBundles（约 30GB 源目录）'),
     Stage('deps', '重生成官方依赖表', 'live', lambda a, f: st_deps(a),
-          '新表必须是旧表超集（丢包即拒），换入前留 prev 副本'),
+          '新表必须是旧表超集（丢包即拒），换入前留 prev 副本',
+          step=2, writes='未签字：暂存区 · 签字：Output/dependency_manifest.json'),
     Stage('meta', '重建 ship_meta 元数据', 'live', lambda a, f: st_meta(a),
-          'ship_meta_authority_diff 绿；⚠️ 索引读死路径，预览必须先换入'),
+          'ship_meta_authority_diff 绿；⚠️ 索引读死路径，预览必须先换入',
+          step=2, writes='未签字：暂存区 · 签字：Output/ship_meta.json'),
     Stage('paintings', '静态立绘合成 → 临时区', 'staged', lambda a, f: st_paintings(f, a),
-          '数 ✗ 行（该脚本失败仍 exit 0）'),
+          '数 ✗ 行（该脚本失败仍 exit 0）',
+          step=2, writes='.diag/pipeline/Paintings_v2'),
     Stage('spine', 'Spine 提取 + parts.json → 临时区', 'staged', lambda a, f: st_spine(f, a),
-          '每个目录都要有 parts.json'),
+          '每个目录都要有 parts.json',
+          step=2, writes='.diag/pipeline/Spine_v2'),
     Stage('live2d', 'Live2D 还原 + motion → 临时区', 'staged', lambda a, f: st_live2d(f, a),
-          '[SUMMARY] 收尾行 + texorder/tex_completeness 两道真闸门'),
+          '[SUMMARY] 收尾行 + texorder/tex_completeness 两道真闸门',
+          step=2, writes='.diag/pipeline/Live2D'),
     Stage('audio', 'CV 语音包解码 + 台词表', 'live', lambda a, f: st_audio(a),
-          'l2d_voice_inventory 退出码（另两个恒 0 只作参考）'),
+          'l2d_voice_inventory 退出码（另两个恒 0 只作参考）',
+          step=2, writes='Output/Audio（该脚本没有暂存通道，直接写正式区）'),
     Stage('cg', 'Spine 全屏 CG 导出', 'live', lambda a, f: st_cg(f, a),
-          '必须读到「完成N 跳过N 失败N」且失败=0'),
+          '必须读到「完成N 跳过N 失败N」且失败=0',
+          step=2, writes='Output/CG_v2（同上，无暂存通道）'),
     Stage('review', '出改前|改后总表 + 硬链扫描', 'read', lambda a, f: st_review(),
-          '人工看图，机器只负责把表做出来'),
+          '人工看图，机器只负责把表做出来',
+          step=3, writes='.diag/pipeline/*.png 对照表 + 两份清单'),
     Stage('swap-in', '备份换入 Paintings_v2', 'live', lambda a, f: st_swapin(a),
-          'painting_swap_in 自带四道硬检查，退出码可信'),
+          'painting_swap_in 自带四道硬检查，退出码可信',
+          step=4, writes='Output/Paintings_v2（先备份到 Output/_OLD_bak/pipeline_<日期>/）'),
     Stage('derive', '缩略图 / 索引 / 部署', 'live', lambda a, f: st_derive(a),
-          'gallery_index_diff_check 绿 + deploy --check 4/4 同 inode'),
+          'gallery_index_diff_check 绿 + deploy --check 4/4 同 inode',
+          step=4, writes='Output/gallery_v2（索引有零回退闸门把着）'),
     Stage('regress', 'WF-16 回归（跳全库 hit_verify）', 'staged', lambda a, f: st_regress(a),
-          '串行 runner 退出码'),
+          '串行 runner 退出码',
+          step=4, writes='只读跑回归，不改产物'),
 ]
 
 
@@ -443,11 +470,19 @@ def cmd_plan(full):
     scope = '**全量**（--full）' if full else (
         f'增量 {len(todo)} 个 stem' if todo else '增量：尚未 detect，先跑 pull 阶段')
     print(f'重跑范围: {scope}')
-    print(f'\n{"阶段":11s} {"档":7s} 干什么 / 判据')
+    print(f'\n{"步骤":6s} {"阶段":11s} {"档":7s} 干什么 / 判据')
     print('-' * 100)
-    for s in STAGES:
-        print(f'{s.key:11s} {s.tier:7s} {s.title}')
-        print(f'{"":11s} {"":7s} 判据: {s.judge_desc}')
+    for n, (t, d) in STEPS.items():
+        print(f'{n} {t} — {d}')
+        for s in STAGES:
+            if s.step == n:
+                print(f'       {s.key:11s} {s.tier:7s} {s.title}')
+                print(f'       {"":11s} {"":7s} 判据: {s.judge_desc}')
+                if s.writes:
+                    print(f'       {"":11s} {"":7s} 写到: {s.writes}')
+    orphan = [s.key for s in STAGES if s.step not in STEPS]
+    if orphan:
+        print(f'\n⚠️ 未归组阶段（新加了阶段但没给 step）: {", ".join(orphan)}')
     live = [s.key for s in STAGES if s.live]
     print(f'\n要签字的 live 档: {", ".join(live)}')
     print('  py -3 scripts/update_pipeline.py --approve ' + ' '.join(live[:1]) + '   # 逐个点名')
@@ -499,12 +534,16 @@ def main():
             s.fn(set(a.approve), a.full)
         except Exception as e:
             verdict(s.key, False, f'阶段自身抛异常 {type(e).__name__}: {e}')
-        # ⚠️ 只缓存**判绿**的阶段：把失败也记成"已完成"，下次跑到这里会被直接跳过，
+        # ⚠️ 只缓存**判绿**的暂存阶段当"已完成"：把失败也记成已完成，下次跑到这里会被直接跳过，
         #    等于一条永远不再复查的流水线 —— 正是本项目最怕的那类静默失效。
         if RESULTS[s.key]['ok'] and s.tier == 'staged':
             st['done'][s.key] = dict(RESULTS[s.key], fingerprint=fp)
         else:
             st['done'].pop(s.key, None)
+        # verdict 是另一件事：**给界面看的"上次结论"**，13 个阶段全都记。
+        # 以前只有 done 那 4 个能被界面读到，其余一律显示"未跑"，看着像整条线没跑过。
+        # 它不参与任何跳过判断。
+        st.setdefault('verdict', {})[s.key] = dict(RESULTS[s.key])
         json.dump(st, open(STATE, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
         if not RESULTS[s.key]['ok']:
             log(f'!! {s.key} 判红 ⇒ 停在这里，不往下跑（红着继续只会把错的换进去）')

@@ -1,8 +1,8 @@
 @echo off
 chcp 936 >nul
-title 资产一条龙 · 可视化控制台 (本地服务器)
+title 资产更新控制台 (本地服务器)
 set "SCRIPT=%~dp0scripts\pipeline_panel.py"
-REM 参数会透传，例如：启动一条龙控制台.bat --port 8790 --no-open
+REM 参数会透传，例如：启动资产更新控制台.bat --port 8790 --no-open
 
 REM 先找 py 再找 python。注意 `where py >nul && set "X=py"` 这种写法永远不触发，
 REM 必须拆成两行用 `if not errorlevel 1` 判（本项目踩过）。

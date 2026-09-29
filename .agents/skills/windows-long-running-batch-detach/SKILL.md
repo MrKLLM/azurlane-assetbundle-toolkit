@@ -79,6 +79,38 @@ powershell -NoProfile -Command 'Get-Process -Id (Get-Content "D:\proj\.diag\_run
 - 长跑期间**不得改动被回归的输入**（页面、产物、配置）。改了，这一轮结果即刻作废并如实说明，不要拿旧日志的局部通过交差。
 - 重跑前先读 PID 确认旧进程已终止：双进程并发写同一输出目录会静默互相污染。
 
+## 规则 7：判"进程还活着"不要用 `os.kill(pid, 0)` —— Windows 上那是杀
+
+任何"父进程轮询子进程是否结束"的实现（面板、监督脚本、串行 runner）里，最顺手的一句是
+`try: os.kill(pid, 0); alive=True / except OSError: alive=False`。
+**CPython 在 Windows 上把 `os.kill` 实现成 `OpenProcess + TerminateProcess(handle, sig)`**，
+传 0 也一样 —— 它真的会把那个进程终止掉。于是"每 8 秒轮一次状态"的控制台，
+第一次轮询就把自己启动的长任务杀了；退出码看着正常，症状是"日志停在半路、状态永远 running"。
+
+```python
+def pid_alive(pid):                       # 只读探活
+    if os.name != 'nt':
+        try:
+            os.kill(pid, 0); return True
+        except OSError:
+            return False
+    import ctypes
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, int(pid))       # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+    finally:
+        k.CloseHandle(h)
+```
+
+⇒ **写完探活必须配一条"任务要跑到自然收尾"的判据**（日志里出现脚本自己打的汇总行）。
+只测"进程死了能不能被判出来"永远测不到这条 —— 判活的那一行就是凶手。
+同类"拿有副作用的 API 当查询"的坑：`Popen.terminate()` 只杀启动器不杀进程树
+（见 `headless-chrome-cdp-batch-export` 第 10 条）。
+
 ## Windows 编码硬约束
 
 `Start-Process` 重定向的 stdout 默认按本地代码页（GBK）写，脚本里任何非 ASCII `print`（哪怕一个勾号 `✓`）都会 `UnicodeEncodeError`，把正常跑完的一轮记成失败——而图像/产物其实已写出。主进程 `sys.stdout.reconfigure(encoding="utf-8")` 加子进程环境 `PYTHONIOENCODING=utf-8`，双保险。细节见 `unity-assetbundle-painting-restore`。
