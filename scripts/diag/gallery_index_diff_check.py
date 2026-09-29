@@ -58,7 +58,8 @@ def index_of(doc):
     return ships, skins
 
 
-def diff(old, new, allow_ship, allow_skin, packs):
+def diff(old, new, allow_ship, allow_skin, packs, expect=None):
+    expect = expect or {}
     o_s, o_k = index_of(old)
     n_s, n_k = index_of(new)
     rep = collections.Counter()
@@ -102,6 +103,15 @@ def diff(old, new, allow_ship, allow_skin, packs):
                     else:
                         bad.append('voiceCount 归零(丢了这艘船自己的语音): %s %s→%s 旧包=%s 本船包号=%s'
                                    % (sid, a.get(k), b.get(k), sorted(olds), sorted(mine)))
+            elif k in expect.get(sid, {}):
+                # 声明过的期望变化：**值必须正好等于声明的那个**，否则照样红。
+                # 比"按字段放行"强得多 —— 按字段放行 name 等于从此任何误改名都不再报，
+                # 而这里清单外的组改名仍然判回退。
+                if b.get(k) == expect[sid][k]:
+                    rep['船标量按声明变化:%s' % k] += 1
+                else:
+                    bad.append('船标量变化与声明不符: %s.%s 期望 %r 实得 %r'
+                               % (sid, k, expect[sid][k], b.get(k)))
             else:
                 bad.append('船标量回退: %s.%s %r→%r' % (sid, k, a.get(k), b.get(k)))
 
@@ -137,6 +147,9 @@ def main():
     ap.add_argument('--allow-ship', default='voiceCount,voices')
     ap.add_argument('--allow-skin', default='voiceCount,voiceTap,voiceExtra')
     ap.add_argument('--azdata', default=DEF_AZDATA, help='判「归零是修正还是回退」要用的游戏皮肤表')
+    ap.add_argument('--expect', default='',
+                    help='JSON：{组键: {字段: 期望新值}}。本次**有意**的改名写在这里，'
+                         '值对不上或清单外的改名照样判红（比按字段放行强：那只等于关掉这项检查）')
     a = ap.parse_args()
     for p in (a.old, a.new):
         if not os.path.isfile(p):
@@ -147,8 +160,11 @@ def main():
     if not os.path.isfile(a.azdata):
         print('[ERROR] 读不到皮肤表 %s —— 没有它无法区分「归零是修正还是回退」，拒绝放行' % a.azdata)
         return 2
+    expect = json.load(open(a.expect, encoding='utf-8')) if a.expect else {}
     rep, bad, misfit = diff(old, new, set(a.allow_ship.split(',')) - {''},
-                            set(a.allow_skin.split(',')) - {''}, skin_packs(a.azdata))
+                            set(a.allow_skin.split(',')) - {''}, skin_packs(a.azdata), expect)
+    if expect:
+        print('[i] --expect 声明 %d 组；未变红的声明项按「有意变化」计数' % len(expect))
     for k in sorted(rep):
         print('  %-34s %d' % (k, rep[k]))
     print('  旧 counts: %s' % old.get('counts'))
