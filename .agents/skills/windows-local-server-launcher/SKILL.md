@@ -9,7 +9,7 @@ argument-hint: Path to the local page to serve (e.g. C:\proj\web\index.html) and
 argument-hint-en: Path to the local page to serve (e.g. C:\proj\web\index.html) and the port
 argument-hint-zh: 给出要服务的本地页面路径（如 C:\proj\web\index.html）和端口
 user-invocable: true
-version: 1.2.0
+version: 1.3.0
 ---
 
 # Windows Local Server Launcher
@@ -159,6 +159,8 @@ Debugging order: first prove the server itself works (`py -m http.server <port> 
 | `where py` is rc 0 yet the branch never runs | `where py >nul 2>nul && set "X=py"` — `&&` does **not** fire after redirections | Split: `where py >nul 2>nul` then `if not errorlevel 1 set "X=py"` |
 | Works once, then every double-click dies instantly | `TIME_WAIT` on the port for ~30 s after closing the window; plain `http.server` fails to bind and the script ends | `allow_reuse_address = True` + probe-and-reuse + `pause` |
 | Any error is invisible | No `pause`/`input()` after the blocking server line | End the `.bat` with `pause`; every launcher exit path blocks |
+| **Two launcher instances "both work"**, and a page's data flickers between two different states | **Windows `SO_REUSEADDR` is not POSIX's**: with `allow_reuse_address = True` a second process **binds the same port successfully, no error**, and connections get split between them at random. Silent — nothing ever says "already running". | Probe before binding: `socket.connect_ex(('127.0.0.1', PORT)) == 0` → someone is already serving; reuse it or exit. Never rely on `allow_reuse_address` to give you `EADDRINUSE`. |
+| `.bat` written from a Git-Bash/MSYS shell contains `>/dev/null` where you typed `>nul` — the launcher dies instantly | MSYS auto-translates arguments that look like paths/devices | Don't let the literal token pass through the shell: build it in Python (`NUL = 'n' + 'ul'`), then **read the file back and assert `'/dev/null' not in content`** |
 | Page loads 200 but images/JSON/models all 404 | `--root` is the page's own directory while the page references `../assets` | Serve the parent (`--root "%~dp0.."`) and keep the subdir prefix in the URL |
 | Chinese garbled only when piped | Harness decodes cp936 bytes | Ignore; assert on ASCII markers / HTTP codes |
 | Server **accepts** connections but returns 0 bytes; whole site dead while the port still listens | `ThreadingTCPServer` + `socketserver.handle_error` prints 4 traceback blocks to **stderr**, and it runs *before* `finally: shutdown_request()`. If stderr is a slow consumer (double-clicked console paused by a text selection, or an orphaned process whose parent shell is gone leaving an unread pipe), every browser-cancelled download wedges one thread **and** leaves its socket open with zero bytes flushed | Silence only client-abort exceptions in a `Server.handle_error` override (`ConnectionReset/ConnectionAborted/BrokenPipe/Timeout`); let everything else print |

@@ -140,6 +140,12 @@ def st_pull(approved):
     log(f'  diff: 新增 {new} / 大小不一致 {diff_n}')
     os.makedirs(WORK, exist_ok=True)
     open(os.path.join(WORK, 'sync_diff.txt'), 'w', encoding='utf-8').write(txt)
+    # 范围清单必须盖上它所属的输入指纹 —— 否则一份过期的 affected.txt 会静默把
+    # 下次真更新的范围钉死在几个测试 stem 上（2026-09-29 首次自跑 --plan 就撞上这个）
+    open(os.path.join(WORK, 'affected.meta'), 'w', encoding='utf-8').write(
+        json.dumps({'fingerprint': fingerprint(),
+                    'at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'new': new, 'changed': diff_n}, ensure_ascii=False))
     if 'pull' not in approved:
         return verdict('pull', True, f'只读到 diff（新增 {new}/变更 {diff_n}）。'
                                      f'**拉包写 files/ 是 live 档**，要放行请 --approve pull')
@@ -198,13 +204,32 @@ def st_meta(approved):
 
 # ---------------------------------------------------------- 5 导出类（全部 staged 到临时区）
 def affected_stems(full):
-    """增量范围：detect 出来的新增/变更包 → 磁盘 stem 集合。"""
+    """增量范围：detect 出来的新增/变更包 → 磁盘 stem 集合。
+
+    ⚠️ 必须校验它属于**当前**输入指纹。范围清单是文本文件、可以留很久，
+    不校验的话一份过期清单会静默把整条流水线钉死在几个旧 stem 上，
+    而且 --plan 会一脸正常地报"增量 N 个"（2026-09-29 首次自跑就撞上）。
+    """
     if full:
         return None
     p = os.path.join(WORK, 'affected.txt')
-    if os.path.isfile(p):
-        return [x.strip() for x in open(p, encoding='utf-8') if x.strip()]
-    return None
+    if not os.path.isfile(p):
+        return None
+    meta_p = os.path.join(WORK, 'affected.meta')
+    if not os.path.isfile(meta_p):
+        log('  ⚠️ affected.txt 没有配套的 affected.meta（不知道它是哪次 detect 产的）'
+            '⇒ **不敢拿来定范围**。请重跑 pull 阶段，或用 --full。')
+        return None
+    try:
+        meta = json.load(open(meta_p, encoding='utf-8'))
+    except Exception:
+        meta = {}
+    if meta.get('fingerprint') != fingerprint():
+        log(f'  ⚠️ affected.txt 是**过期**的（{meta.get("at", "?")} 的指纹 '
+            f'{str(meta.get("fingerprint"))[:28]} ≠ 当前 {fingerprint()[:28]}）'
+            '⇒ 忽略它，重跑 pull 阶段重新 detect，或用 --full。')
+        return None
+    return [x.strip() for x in open(p, encoding='utf-8') if x.strip()]
 
 
 def st_paintings(full, approved):

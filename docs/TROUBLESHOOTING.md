@@ -3147,3 +3147,32 @@ socket 既不吐字节也不关。
 `scripts/build_gallery_index.py`、`gallery_src/index.html`、`gallery_src/cg_export.html`、
 `scripts/diag/spine_parts_prefab_diff.py`、`scripts/diag/spine_parts_wiring.py`（★新增，Spine 标签黑盒验收）、
 `scripts/diag/make_pair_sheet.py`（★新增，改前|改后成对总表）。
+
+## §65. 做本地网页控制台撞上两个 Windows 坑（2026-09-29）
+
+`scripts/pipeline_panel.py`（一条龙可视化控制台）第一次自测就撞上两条，都跟项目无关、换任何
+Windows 本地服务都会中：
+
+### 一、`allow_reuse_address` 在 Windows 上**允许两个进程绑同一个端口**
+
+POSIX 的 `SO_REUSEADDR` 只放行 `TIME_WAIT`；**Windows 的语义是"随便绑"**。于是面板起了两个实例
+都 `bind(8788)` 成功、都不报错，而连接被**随机分给其中一个** —— 表现是"同一个页面，任务列表
+一会儿有一个儿没有"，极难查。发现方式很偶然：`Get-CimInstance` 数了数 `pipeline_panel` 的 python 进程，
+**两个**。
+
+⇒ **凡是自己写 `allow_reuse_address = True` 的本地服务，绑之前必须先探端口**：
+`socket.connect_ex(('127.0.0.1', PORT)) == 0` 就说明已经有人在跑，直接复用/退出，不要继续 bind。
+画廊那个 `_gallery_server.py` 早就有 `port_in_use()` 预检（§43 写的），新写的这个漏了 ——
+**同一个坑在同一个仓库里第二次踩，是因为没去看已有的同类实现怎么写。**
+
+### 二、通过 Git Bash 写 .bat 时，`>nul` 会被改写成 `>/dev/null`
+
+用 heredoc 把批处理内容喂给 python 写盘，结果落盘的是
+`where py >/dev/null 2>nul` —— cmd 里根本没这个设备，**启动器直接坏掉**。
+这是 MSYS 的路径自动转换在作怪（它把看起来像设备/路径的参数翻译成 POSIX 形式）。
+
+⇒ 写 .bat 时**不要让 `nul` 以字面形式经过 shell**，在 Python 里拼出来：`NUL = 'n' + 'ul'`；
+写完必须回读断言 `'/dev/null' not in 内容`。这条断言比"我看了一眼觉得对"可靠。
+
+### 涉及文件
+`scripts/pipeline_panel.py`、`启动一条龙控制台.bat`。

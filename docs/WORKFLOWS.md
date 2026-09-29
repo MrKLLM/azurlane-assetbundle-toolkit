@@ -1467,3 +1467,38 @@ py -3 scripts/update_pipeline.py --only spine --force   # 只重跑某阶段，�
 以及闸门 `diag/{check_inputs,ship_meta_authority_diff,gallery_index_diff_check,l2d_texorder_check,l2d_tex_completeness,l2d_motion_audit,voice_gap_audit,l2d_voice_inventory,make_pair_sheet}.py`。
 相关：`WF-15`（本 WF 想替掉的那份手工 runbook，仍是权威细节来源）、`WF-16`（回归六件套）、
 `WF-22`/`WF-21`（语音与台词链路）、§25（写向走 argv）、§64（硬链吞修复）。
+
+#### WF-23 追加（2026-09-29）：可视化控制台 `scripts/pipeline_panel.py`
+
+命令行编排器之外补了一个**本地网页控制台**——它**不重新实现任何逻辑**，每个按钮都是去起
+`update_pipeline.py` 子进程、把它写的日志实时读回来显示。所以界面和命令行永远是同一套代码，
+不存在两份逻辑各自漂移。
+
+```
+双击  启动一条龙控制台.bat            ← 起服务 + 自动开浏览器（跟开画廊一模一样的习惯）
+或    py -3 scripts/pipeline_panel.py [--port 8790] [--no-open]
+```
+
+界面：13 个阶段一行一行列出来，**档位三色**（read 蓝 / staged 绿 / live 红）、每行写着自己的判据、
+上次结论、以及**只有 live 档才有的"签字"复选框**；右边是实时日志与最近任务列表；
+review 阶段产出的「改前|改后」对照表直接铺在页面里，点开可放大。
+三个主按钮：`只看计划` / `▶ 跑到「待确认」` / `⇩ 签字换入正式产物`（后者要 confirm 二次确认）。
+
+**安全边界（这是个能起子进程的本地服务，所以写死三条）**：只绑 `127.0.0.1`；
+能跑什么由 `update_pipeline.STAGES` 的**阶段名白名单**决定，前端传来的名字不在白名单直接拒
+（所以不存在"把输入拼进命令行"这条路）；图片只从 `.diag/pipeline/` 出，`realpath` 前缀校验防穿越。
+`--full` 在网页上**故意不做** —— 它要手输 `FULL` 二次确认，那种确认不该是一个 click。
+
+**面板自身的验收**：`/api/state` 要报出 13 个阶段与正确的 tier/scope/指纹；
+`POST /api/run {"plan":true}` 起任务且日志能读回；未知阶段名 → 400；
+`/file?path=../../...` → 403；`{"full":true}` → 400 并给出命令行替代；
+**任务结束后 `/api/log` 的 state 必须变成 done**（第一版不会变 —— 前端追日志期间停掉了
+8 秒一次的 `/api/state` 轮询，而状态只在 `/api/state` 里刷新，于是面板永远显示"运行中"）；
+再起第二个实例必须拒绝（Windows 的 `SO_REUSEADDR` 允许同端口重复 bind，见 §65）；
+无头浏览器截图 + 数 DOM：13 行、7 个签字框、档位序列正确。
+
+**踩坑**：
+- ⚠️ `.bat` 里的 `>nul` 经 Git Bash 写盘会被改成 `>/dev/null`，启动器直接坏 —— 拼字符串绕开，
+  写完回读断言（§65）。
+- ⚠️ 控制台读阶段清单用 `importlib.reload(update_pipeline)`，**不要把阶段名再抄一份到面板里** ——
+  抄了就会漂移。
