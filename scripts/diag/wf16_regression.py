@@ -42,11 +42,21 @@ def main():
     skips = [s.strip() for s in a.skip.split(',') if s.strip()]
 
     # 先确认服务器活着：8777 静默死掉时探针照样能截出"空白页"并逐条打印文件名
+    # 预检必须量"真吐出字节"，不能只看连得上：服务器在大文件负载下会**半死**——
+    # 连接照收、每个请求恰好 2.0s 返回 0 字节，于是 hit_verify 把每个皮肤都判成
+    # "GALLERY is not defined"（本轮全库跑就被这个坑掉一次，白跑 20 分钟）。
     import urllib.request
-    try:
-        urllib.request.urlopen('http://127.0.0.1:8777/gallery_v2/index.html', timeout=5)
-    except Exception as e:
-        raise SystemExit(f'! 8777 上的画廊服务器不可达（{e}）——先起服务器再跑回归')
+    for path, min_bytes in (('gallery_v2/index.js', 200000), ('gallery_v2/index.html', 10000)):
+        try:
+            with urllib.request.urlopen(f'http://127.0.0.1:8777/{path}', timeout=15) as r:
+                got = len(r.read())
+        except Exception as e:
+            raise SystemExit(f'! 8777 上的画廊服务器不可达（{path}：{e}）——先起服务器再跑回归')
+        if got < min_bytes:
+            raise SystemExit(f'! 服务器半死：{path} 只返回 {got}B（应 ≥{min_bytes}B）。'
+                             f'典型指纹是每个请求恰好 ~2.0s 返回 0 字节——重启它再跑，'
+                             f'别把这判成产品缺陷')
+    print('预检通过：服务器能真吐出 index.js / index.html')
 
     steps = list(STEPS)
     if a.full_ref:
