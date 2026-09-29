@@ -761,6 +761,14 @@ py -3 scripts/diag/hit_verify.py
 py -3 scripts/diag/talk_verify.py --shots
 ```
 
+> **一条命令跑完六件**：`py -3 scripts/diag/wf16_regression.py`
+> （长任务用 `py -3 scripts/diag/run_detached.py --log .diag/_wf16.log -- py -3 scripts/diag/wf16_regression.py` 起）。
+> 它存在的理由是两件具体的事：① 六件里五件是 CDP 探针、`PORT`/`--user-data-dir` 写死，
+> **并发跑会静默附着到同一个浏览器**，症状是数据整齐地偏移一位而不是报错（§6 第 19/20 条），
+> 所以必须串行；② 汇总退出码**绝不许写成 `... | tail -25`**——`tail` 吞明细且 `$?` 是它的退出码，
+> 本轮之前就是这么把一个 WIRING=2 读成 EXIT=0 的。`--skip hit_verify` 跳过 25 分钟那件，
+> `--full-ref` 把第 1 件换成 `--all`（只改前端视觉时不必，动过 motion 数据才要）。
+>
 > ⚠️ **回归工具自身的两类假失败（2026-09-26 全踩了一遍，各修一处）**——工具红了不代表产品坏了，先证探针再定罪：
 > 1. **固定等待**：`l2d_inspector_verify.py` 等 6s、`interact_verify.py` 等 6.5s 就取
 >    `l2State.app.stage.children[0]`。大贴图皮肤（`benningdun_2` 三张共 40MB，且服务器单线程）
