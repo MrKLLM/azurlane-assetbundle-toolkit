@@ -4,141 +4,581 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>碧蓝航线资产浏览器 · Azur Lane Asset Browser</title>
+<script>/* 先定主题再渲染，否则刷新会闪一下默认色 */try{document.documentElement.dataset.theme=localStorage.getItem('gallery.theme')||'light'}catch(e){document.documentElement.dataset.theme='light'}</script>
 <style>
+/* ══════════════════════════════════════════════════════════════════════
+   两套配色共用一套形状与动效：
+     · 浅色（默认）取自游戏自己的界面语言——白色圆角面板 + 天蓝标题条 + 樱粉点缀；
+     · 深色 = 原来那套（`--bg:#0f1320` 一族），作为「夜」保留。
+   颜色的"个性"由 token 承担，形状/弹性两边一致，切主题时只有配色在动。
+   ⚠️ 组件规则里**不许出现字面颜色**，否则另一套主题会漏色。新增控件请引用 token。
+   ══════════════════════════════════════════════════════════════════════ */
 :root{
-  --bg:#0f1320; --panel:#171c2e; --panel2:#1e2438; --line:#2b3350;
-  --txt:#e6e9f2; --dim:#8b93ad; --acc:#e94560; --acc2:#4d8bff; --ok:#37c26e;
-  --r1:#ff5c8a; --r2:#b07bff; --r3:#5aa2ff; --r4:#37c26e; --r0:#c9a24b;
+  --r-card:16px; --r-panel:20px; --r-chip:999px; --r-in:12px;
+  /* 弹性曲线：末段过冲再落回 —— "Q弹"里"弹"的那一半 */
+  /* ⚠️ 2026-09-28 第二次改口：先做的是"Q弹/果冻"（末段过冲 + 按下压扁），用户看过实机
+     明确否掉——"不要那种点击一下就弹一下的反应，要 iPhone 那种丝滑"。
+     ⇒ 交互全部改走这一条**无过冲**的平滑曲线（iOS 的加速-减速），
+        压扁 / 鼓起 / 回弹三件套一起删；按下只剩极轻的一下 scale(.97)。
+     三个旧 token 名保留为别名：调用点有三十来处，逐处改容易漏。
+     ⚠️ 以后加动效默认用 --ease-ios；要过冲必须先问。 */
+  --ease-ios:cubic-bezier(.32,.72,0,1);
+  --spring:var(--ease-ios); --spring-jelly:var(--ease-ios); --spring-slow:var(--ease-ios);
+  --t-col:.34s;                       /* 主题切换时配色过渡的时长 */
+}
+:root,[data-theme=light]{
+  color-scheme:light;
+  --bg:#eef4fb; --bg2:#e3ecf8; --panel:#ffffff; --panel2:#f4f8fd; --line:#d8e4f2;
+  --txt:#3a4a63; --txt2:#5b6d8c; --dim:#93a3bd;
+  --brand:#5fb0ef; --brand-d:#3d87d4; --brand-l:#e8f4ff;
+  --pop:#ff9ec4; --pop-d:#f4779f; --pop-l:#fff0f6;
+  --ok:#4fc787; --ok-d:#2f8a5d;
+  --acc:var(--pop); --acc2:var(--brand);
+  --sh1:0 2px 8px rgba(96,140,190,.14); --sh2:0 6px 18px rgba(96,140,190,.18);
+  --sh3:0 14px 34px rgba(96,140,190,.24);
+  --mask:rgba(120,150,190,.42);
+  --stage:repeating-linear-gradient(45deg,#f7fafd 0 12px,#eaf1fa 12px 24px);
+  --bar:rgba(255,255,255,.94);
+  --chip:#ffffff; --chip-line:#d8e4f2; --rar-bg:#f4f8fd;
+  --grad-brand:linear-gradient(180deg,#7cc3f6 0%,#5fb0ef 45%,#3d87d4 100%);
+  --grad-pop:linear-gradient(180deg,#ffb8d3 0%,#f4779f 100%);
+  --grad-mint:linear-gradient(180deg,#8fe3bd 0%,#2f9e63 100%);
+  /* 卡片名称条的压暗底：白天用半透明墨蓝，夜里更深；文字两套都用近白 */
+  --scrim:linear-gradient(0deg,rgba(26,48,78,.90) 0%,rgba(26,48,78,.62) 46%,rgba(26,48,78,0) 100%);
+  --scrim-txt:#f4f9ff;
+  /* 水面着色参数（只有背景那层读，组件不碰）：泡沫/高光/水体色 + 斜率增益与起沫阈值。
+     白天泡沫纯白、水体往蓝里压；夜里泡沫偏冰蓝、高光更亮。 */
+  --w-foam:#ffffff; --w-glint:#ffffff; --w-deep:#5fa0d8;
+  --w-gain:8; --w-foamth:0.012; --w-alpha:0.97;
+  /* 卡片"悬空"：面板留一点透明度，海面才不是只在缝隙里露一下；
+     --gloss 是果冻的高光（上半亮、下半透），只用于按钮表面。 */
+  /* 玻璃拟态（liquid glass），不是磨砂白卡：面板**几乎全透**、只给极轻的一层模糊，
+     真正的玻璃感来自三样东西——① 上沿一道镜面亮边 ② 一圈更厚的"边墙"折射背后
+     ③ 跟着鼠标跑的高光。模糊只给进过视口的卡挂（见 .g / GLASS_IO）。 */
+  --card-bg:rgba(255,255,255,.05); --glass-line:rgba(152,182,214,.30);
+  --glass-blur:2.5px; --rim-blur:17px;
+  /* 亮边从 98% 白压到 20%：真玻璃的边缘靠"透"读出来，画一条白线只会像塑料贴皮 */
+  --rim-hi:rgba(255,255,255,.20); --spec:rgba(255,255,255,.30);
+  /* 常驻的斜向反光：玻璃在任何角度都会反一条光，这是"是玻璃"最直接的一笔。
+     它跟跟着鼠标跑的圆斑叠在一起（::after 的两层背景），不是只在高光时才出现。 */
+  --spec2:linear-gradient(118deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,.04) 23%,rgba(255,255,255,0) 46%);
+  /* 文字区那层底：原来给到 60% 白 —— 那就是"奶膜"，是上一版被判"还是毛玻璃"的主因 */
+  --body-tint:rgba(255,255,255,.24);
+  --sh-float:0 14px 30px rgba(38,62,96,.16);
+  /* 导航栏是"厚材质"：比卡片实，但仍然是玻璃——下沿一条亮发丝边代替灰边 */
+  --nav-bg:rgba(255,255,255,.16); --nav-line:rgba(255,255,255,.18);
+  --title:var(--brand-d);
+  --nav-blur:6px; --nav-rim:17px;
+  --gloss:linear-gradient(180deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,.06) 42%,rgba(255,255,255,0) 60%);
+  /* 材质态三件套：选中不再整块填色，而是"更亮一档的玻璃 + 一圈细彩色内描边 + 彩色文字"。
+     整页只留 brand 一个强调色（pop 从此只出现在标签/角标这类**内容**上，不再出现在控件上）。 */
+  --on-bg:color-mix(in srgb,var(--brand) 13%,transparent);
+  --on-ring:color-mix(in srgb,var(--brand) 52%,transparent);
+  --on-txt:var(--brand-d);
+  --r0:#b8860b; --r1:#f4779f; --r2:#8f6fd0; --r3:#3d87d4; --r4:#2f9e63;
+}
+[data-theme=dark]{
+  color-scheme:dark;
+  --bg:#0f1320; --bg2:#0b0e18; --panel:#171c2e; --panel2:#1e2438; --line:#2b3350;
+  --txt:#e6e9f2; --txt2:#b9c3da; --dim:#8b93ad;
+  --brand:#4d8bff; --brand-d:#2b6cb0; --brand-l:#18223c;
+  --pop:#e94560; --pop-d:#c9304c; --pop-l:#2a1822;
+  --ok:#37c26e; --ok-d:#2a8f52;
+  --acc:#e94560; --acc2:#4d8bff;
+  --sh1:0 2px 8px rgba(0,0,0,.34); --sh2:0 6px 18px rgba(0,0,0,.4);
+  --sh3:0 14px 34px rgba(0,0,0,.52);
+  --mask:rgba(5,7,14,.82);
+  --stage:repeating-conic-gradient(#12172a 0 25%,#0d1120 0 50%) 0 0/28px 28px;
+  --bar:rgba(10,13,24,.86);
+  --chip:#1e2438; --chip-line:#2b3350; --rar-bg:#1e2438;
+  --grad-brand:linear-gradient(180deg,#5f97ff 0%,#2b6cb0 100%);
+  --grad-pop:linear-gradient(180deg,#ff6b81 0%,#c9304c 100%);
+  --grad-mint:linear-gradient(180deg,#4fd489 0%,#2a8f52 100%);
+  --scrim:linear-gradient(0deg,rgba(4,8,18,.94) 0%,rgba(4,8,18,.70) 46%,rgba(4,8,18,0) 100%);
+  --scrim-txt:#eaf0ff;
+  --w-foam:#eaf6ff; --w-glint:#cfe9ff; --w-deep:#2f6f9f;
+  --w-gain:11; --w-foamth:0.008; --w-alpha:1.0;
+  /* 夜里面板本来就深，透明度收一点就够"悬空"，再多缩略图就糊在海里了 */
+  --card-bg:rgba(10,16,30,.14); --glass-line:rgba(255,255,255,.2);
+  --glass-blur:2.5px; --rim-blur:17px;
+  --rim-hi:rgba(255,255,255,.16); --spec:rgba(210,232,255,.16);
+  --title:#9dc2ff;
+  --spec2:linear-gradient(118deg,rgba(255,255,255,.09) 0%,rgba(255,255,255,.02) 23%,rgba(255,255,255,0) 46%);
+  --body-tint:rgba(10,16,30,.32);
+  --sh-float:0 14px 30px rgba(0,0,0,.42);
+  --nav-bg:rgba(10,16,30,.2); --nav-line:rgba(255,255,255,.10);
+  --nav-blur:6px; --nav-rim:17px;
+  --gloss:linear-gradient(180deg,rgba(255,255,255,.08) 0%,rgba(255,255,255,.025) 42%,rgba(255,255,255,0) 60%);
+  --on-bg:color-mix(in srgb,var(--brand) 18%,transparent);
+  --on-ring:color-mix(in srgb,var(--brand) 46%,transparent);
+  --on-txt:#a9c8ff;
+  --r0:#c9a24b; --r1:#ff5c8a; --r2:#b07bff; --r3:#5aa2ff; --r4:#37c26e;
 }
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Segoe UI',"Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--txt);height:100vh;display:flex;flex-direction:column;overflow:hidden}
-header{background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-header h1{font-size:15px;color:var(--acc);white-space:nowrap;font-weight:600}
+/* 主题切换时给配色加过渡：只在 .theming 期间生效，平时不干扰下面的 hover 弹性 */
+html.theming *{transition:background-color var(--t-col),color var(--t-col),
+  border-color var(--t-col),box-shadow var(--t-col) !important}
+body{font-family:'Segoe UI',"Microsoft YaHei",system-ui,sans-serif;color:var(--txt);height:100vh;
+  display:flex;flex-direction:column;overflow:hidden;
+  background:linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%) fixed}
+/* 导航栏：和卡片同一块玻璃。⚠️ 上一版它是"一眼就看出是毛玻璃"的元凶——
+   62% 白 + 20px 背景模糊，那就是磨砂玻璃的标准配方（模糊越大越像磨砂，越不像玻璃）。
+   真玻璃的配方反过来：**几乎不糊**（6px，够让背后的形状保持轮廓）+ **近乎全透**
+   （底色只留 16%，够压住文字对比度即可）+ 三样"玻璃特征"：
+     ① 下沿一条亮发丝边（玻璃的截面高光）
+     ② 下沿 14px 一条更厚的"边墙"，折射强度明显高于栏体
+     ③ 一道斜穿整条栏的反光（--spec2，和卡片同一张材质）
+   ⚠️ 伪元素是 ::before/::after，栏内所有子元素必须抬到它们上面（下面 header>* 那条）。 */
+header{background:var(--nav-bg);
+  backdrop-filter:blur(var(--nav-blur)) saturate(1.8) brightness(1.05);
+  -webkit-backdrop-filter:blur(var(--nav-blur)) saturate(1.8) brightness(1.05);
+  border-bottom:1px solid transparent;padding:9px 14px;
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  box-shadow:inset 0 -1px 0 var(--rim-hi),
+             0 8px 26px color-mix(in srgb,var(--brand) 12%,transparent);
+  position:relative;z-index:10}
+/* ② 下沿的"边墙"：一条 14px 厚、折射更重的玻璃截面（和卡片 ::before 同一个手法） */
+header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:14px;
+  pointer-events:none;z-index:-1;
+  -webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);
+  backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}
+/* ③ 斜穿整条栏的反光：静止就在，不跟鼠标（栏子长，跟着鼠标会太吵） */
+header::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:-1;
+  background:var(--spec2)}
+/* ⚠️ 这里**绝不能给 header 的直接子元素设 z-index**：一设就各自生成层叠上下文，
+   下拉面板那个 z-index:40 就被关在自己那个 .ctl 里出不来，于是排在后面的提示文字
+   会压在展开的面板上（用户截图里的"混在一起了"就是这个）。
+   position:relative 单独用是安全的（z-index:auto 不生成层叠上下文）。 */
+header>*{position:relative}
+header h1{font-size:16px;color:var(--title);white-space:nowrap;font-weight:800;letter-spacing:.02em}
 header .sub{font-size:11px;color:var(--dim)}
 .ctl{display:flex;align-items:center;gap:6px}
-.ctl label{font-size:12px;color:var(--dim)}
-input[type=text],select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);padding:5px 9px;border-radius:6px;font-size:13px;outline:none}
-input[type=text]:focus,select:focus{border-color:var(--acc2)}
-#search{width:180px}
-.grow{flex:1}
-.hint{font-size:11px;color:var(--dim)}
-.hint b{color:var(--acc2)}
-main{flex:1;overflow:auto;padding:14px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;transition:.15s;display:flex;flex-direction:column}
-.card:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.4)}
-.card .thumb{aspect-ratio:3/4;background:var(--panel2) center/contain no-repeat;position:relative}
-.card .thumb img{width:100%;height:100%;object-fit:contain;display:block}
-.card .body{padding:7px 8px}
-.card .nm{font-size:13px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .py{font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}
-.tag{font-size:9px;padding:1px 5px;border-radius:4px;background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
-.tag.f{color:#cfe0ff}.tag.s{color:#ffd9a0}.tag.v{color:#b7f0c8}
-.rar-海上传奇{color:var(--r0)}.rar-超稀有{color:var(--r1)}.rar-精锐{color:var(--r2)}.rar-稀有{color:var(--r3)}.rar-普通{color:var(--r4)}
-.badge{position:absolute;top:6px;right:6px;display:flex;flex-direction:column;gap:3px}
-.badge span{font-size:9px;padding:1px 5px;border-radius:4px;font-weight:600;background:rgba(0,0,0,.55)}
-.b-spine{color:#7bd88f}.b-l2d{color:#ffb27b}.b-voice{color:#7bb8ff}
-.empty{color:var(--dim);text-align:center;padding:40px;font-size:14px}
+.ctl label{font-size:11px;color:var(--dim);font-weight:700;letter-spacing:.04em}
 
-/* 类别分段控件 + 分区标题 */
-.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
-.seg button{background:var(--panel2);color:var(--dim);border:none;padding:5px 10px;font-size:12px;cursor:pointer}
-.seg button+button{border-left:1px solid var(--line)}
-.seg button.on{background:var(--acc2);color:#fff}
-.sec-hd{font-size:14px;color:var(--txt);font-weight:600;margin:18px 2px 10px;display:flex;align-items:center;gap:8px}
+/* ── 自绘下拉 ──────────────────────────────────────────────────────────
+   原生 <select> 展开的那层是**操作系统画的**，CSS 一行都碰不到 ⇒ 想要"落下来"
+   的动效只能自己画。做法：原生 select 留在 DOM 里当数据源与状态（只缩成 1px 透明、
+   不参与交互），所以 apply() 与它的 change 监听**一行都不用改**；外面套一个
+   真按钮 + 绝对定位的面板，选中时回写 select.value 并 dispatch change。 */
+.dd{position:relative;display:inline-block}
+.dd>select{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;margin:0}
+.dd-btn{display:inline-flex;align-items:center;gap:10px;justify-content:space-between;min-width:106px;
+  background:var(--panel2);color:var(--txt);border:1.5px solid var(--line);padding:6px 12px;
+  border-radius:var(--r-chip);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;
+  transition:border-color .16s var(--spring),box-shadow .16s,background .16s}
+.dd-btn:hover{border-color:var(--glass-line);background:var(--panel)}
+.dd-btn:focus-visible{outline:none;border-color:var(--brand);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}
+.dd-btn[aria-expanded=true]{border-color:var(--brand);background:var(--panel);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}
+.dd-arw{font-style:normal;font-size:9px;color:var(--dim);transition:transform .24s var(--spring)}
+.dd-btn[aria-expanded=true] .dd-arw{transform:rotate(180deg)}
+.dd-panel{position:absolute;top:calc(100% + 6px);left:0;z-index:40;min-width:100%;width:max-content;
+  max-width:min(330px,72vw);max-height:56vh;overflow:auto;padding:5px;display:none;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh3)}
+/* 面板整体"落下并坐定"（overshoot），条目再逐条错开 12ms —— 这两层叠加才像掉下来的 */
+.dd.open .dd-panel{display:block;animation:ddrop .26s var(--spring)}
+@keyframes ddrop{from{opacity:0;transform:translateY(-10px) scale(.96)}to{opacity:1;transform:none}}
+.dd-opt{display:flex;justify-content:space-between;gap:12px;padding:6px 11px;border-radius:9px;
+  font-size:13px;color:var(--txt2);font-weight:600;cursor:pointer;white-space:nowrap;
+  animation:ddin .2s ease-out backwards;animation-delay:calc(min(var(--i,0),14)*12ms)}
+@keyframes ddin{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.dd-opt:hover,.dd-opt.cur{background:var(--brand-l);color:var(--brand-d)}
+.dd-opt .n{color:var(--dim);font-weight:700}
+.dd-opt:hover .n{color:var(--brand-d)}
+input[type=text],select{background:var(--panel2);color:var(--txt);border:1.5px solid var(--line);
+  padding:6px 12px;border-radius:var(--r-chip);font-size:13px;outline:none;font-weight:600;
+  transition:border-color .16s var(--spring),box-shadow .16s,background .16s}
+input[type=text]:hover,select:hover{border-color:var(--brand);background:var(--panel)}
+input[type=text]:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}
+#search{width:190px;flex:none;transition:width .28s var(--spring-slow),border-color .16s var(--spring),
+  box-shadow .16s,background .16s}
+#search:focus{width:270px}
+.grow{flex:1}
+.hint{font-size:11px;color:var(--dim);font-weight:600}
+.hint b{color:var(--brand-d)}
+/* 底部那条 76px 空带**已按用户要求去掉**（2026-09-28）：卡片改成半透明面板"悬空"在
+   海面上，背景从每张卡的底下透出来，不再需要专门空一条没人看的带子。
+   padding-bottom 只留 22px 给最后一行喘口气（它跟着内容滚，不是常驻条）。 */
+main{flex:1;overflow:auto;padding:16px 16px 22px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(154px,1fr));gap:14px}
+/* 卡片：入场逐张弹起（--i 由 JS 给，超过 24 号不再排队，避免千张卡排到天荒地老）
+   ⚠️ 术语纠正（2026-09-28 用户点名）：**毛玻璃 ≠ 玻璃拟态**。我上一版做的是"磨砂白卡"
+   （半透明白 + 14px 背景模糊），那东西看着像蒙了层雾，不是玻璃。玻璃拟态的识别特征是：
+     ① 面板**几乎全透**（白天只留 13% 白），背后的海直接看得见；
+     ② 上沿一道**镜面亮边**（inset 高光），加一圈更厚的"边墙"去折射背后（::before）；
+     ③ 一道**常驻的斜向反光**（::after）。
+        ⚠️ 原来这里做的是"跟着鼠标跑的高光"，用户 2026-09-29 否掉：
+        "不要鼠标发光这个效果" —— 反光是材质自带的，不是一团跟着光标走的光晕。
+   原来那圈 1.5px 灰色边框按用户要求去掉：灰边在玻璃上就是"塑料盒"的来源。
+     · **跟随鼠标倾斜**：上一版我量到幅度只有 1.4°/1.8°、肉眼约等于零，就把整条删了——
+       判错了，用户要的是"看得见"，不是"不要"。现在 ±11°/±9°，perspective 收到 760px。
+       倾斜量走 CSS 变量而不是内联 transform：内联会盖掉 :hover/:active 两条规则。
+     · 悬停仍然是「描边点亮 + 外圈柔光 + 上浮 + 缩略图微放大」，**不再有名条/动作条**
+       （用户：舰名不需要显示两遍 → 直接去掉那条，舰名只在下方出现一次）。 */
+.card{position:relative;background:var(--card-bg);border:1px solid var(--glass-line);
+  border-radius:var(--r-card);overflow:hidden;cursor:pointer;
+  /* 四层：外投影给"浮起来"的深度 + 上沿镜面亮边 + 一圈内侧柔光（玻璃的"体"）+
+     下沿一抹厚度色。玻璃是**有厚度的透明体**，这三条 inset 就是那个厚度。 */
+  box-shadow:var(--sh2), inset 0 1px 0 var(--rim-hi),
+             inset 0 0 30px color-mix(in srgb,var(--panel) 30%,transparent),
+             inset 0 -20px 34px color-mix(in srgb,var(--brand) 7%,transparent);
+  display:flex;flex-direction:column;
+  --rx:0deg;--ry:0deg;--lift:0px;--sc:1;
+  transform:perspective(620px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--sc));
+  transition:transform .14s ease-out,box-shadow .24s var(--spring-slow),border-color .18s ease-out;
+  animation:pop .34s var(--spring) backwards;animation-delay:calc(min(var(--i,0),24)*16ms)}
+/* ① 面板本身：极轻的一层模糊（5px）——玻璃会折射，但不会把背后糊成一团白 */
+.card.g{-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(1.5);
+  backdrop-filter:blur(var(--glass-blur)) saturate(1.5)}
+/* ② 边墙：一圈 12px 的"更厚的玻璃"，折射强度明显高于面板 —— 玻璃拟态最出特征的一笔。
+   做法是 backdrop-filter 挂在 ::before 上，再用两层 mask 做 exclude，只留外圈那一环。
+   ⚠️ 厚度从 9px 加到 12px、模糊从 13px 加到 17px：上一版这一圈太薄，看不出"边"和"面"的差别。 */
+.card.g::before{content:'';position:absolute;inset:0;z-index:4;pointer-events:none;
+  border-radius:inherit;padding:12px;
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;
+  -webkit-backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08);
+  backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08)}
+/* ③ 反光：只留**常驻的那道斜向反光**（--spec2）。
+   ⚠️ 原来这里还叠了一层"跟着鼠标跑的圆斑"（radial-gradient at var(--mx)/var(--my)），
+   用户 2026-09-29 明确否掉："不要鼠标发光这个效果" —— 已删，JS 侧也不再写 --mx/--my。
+   玻璃仍然有反光，但反光是材质自带的，不是一团跟着光标走的光晕。 */
+.card::after{content:'';position:absolute;inset:0;z-index:5;pointer-events:none;
+  background:var(--spec2)}
+@keyframes pop{from{opacity:0;transform:translateY(10px) scale(.94)}to{opacity:1;transform:none}}
+/* 发光用 box-shadow 两层（贴边描边环 + 扩散投影），不用 outline：outline 会被相邻卡片
+   盖住，环在网格上会断。 */
+/* 悬停：**不发光**（用户 2026-09-28 明确："划过卡片不用发光"）。
+   反馈改成"玻璃被照亮"——描边转纯白高光、反光加强、投影换成中性并加深一点、抬 1px。
+   ⚠️ 这条必须把静止态的三条 inset **一起重写**：box-shadow 是整属性替换，
+   只写外投影就会把玻璃的厚度一起丢掉，悬停瞬间会塌成一张纸（探针的层数判据抓过）。 */
+.card:hover{--lift:-5px;--sc:1.015;border-color:var(--rim-hi);
+  box-shadow:var(--sh-float), inset 0 1px 0 var(--rim-hi),
+             inset 0 0 34px color-mix(in srgb,var(--panel) 40%,transparent),
+             inset 0 -20px 34px color-mix(in srgb,var(--brand) 10%,transparent)}
+.card:active{--lift:-1px;--sc:.985;box-shadow:var(--sh1)}   /* 按下只压 1.5%，不回弹 */
+/* 键盘走到卡片上给一圈**更实**的环（用 brand-d，浅色下也够对比）——
+   这是 §6.18 第 ④ 条：以前键盘导航零可见反馈。 */
+.card:focus{outline:none}
+.card:focus-visible{--lift:-4px;border-color:var(--brand-d);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-d) 55%,transparent),
+             0 12px 28px color-mix(in srgb,var(--brand) 32%,transparent),
+             inset 0 1px 0 var(--rim-hi),
+             inset 0 -20px 34px color-mix(in srgb,var(--brand) 9%,transparent)}
+.card .thumb{aspect-ratio:3/4;background:transparent center/contain no-repeat;position:relative;overflow:hidden}
+.card .thumb img{width:100%;height:100%;object-fit:contain;display:block;opacity:0;
+  transition:transform .3s var(--spring-slow),opacity .3s ease-out}
+.card .thumb img.ld{opacity:1}
+.card:hover .thumb img,.card:focus-visible .thumb img{transform:scale(1.06)}
+/* 文字区单独压一层淡底：面板全透之后，拼音/标签压在海上会读不清。
+   玻璃拟态本来就是这么做的——**内容区有色调，装饰区透明**。 */
+.card .body{padding:8px 10px 10px;background:linear-gradient(180deg,transparent,var(--body-tint) 42%)}
+.card .nm{font-size:13px;font-weight:800;color:var(--txt);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .py{font-size:10px;color:var(--dim);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.tag{font-size:9px;padding:2px 7px;border-radius:var(--r-chip);background:var(--rar-bg);
+  background:color-mix(in srgb,var(--txt2) 8%,var(--panel));color:var(--txt2);border:1px solid var(--line);font-weight:700}
+.tag.f{color:var(--brand-d)}.tag.s{color:var(--pop-d)}
+.rar-海上传奇{color:var(--r0)}.rar-超稀有{color:var(--r1)}.rar-精锐{color:var(--r2)}.rar-稀有{color:var(--r3)}.rar-普通{color:var(--r4)}
+.badge{position:absolute;top:7px;right:7px;display:flex;flex-direction:column;gap:4px;align-items:flex-end}
+.badge span{font-size:9px;padding:2px 7px;border-radius:var(--r-chip);font-weight:800;
+  background:var(--panel);box-shadow:var(--sh1);border:1px solid var(--line)}
+.b-spine{color:var(--ok-d)}.b-l2d{color:var(--pop-d)}.b-voice{color:var(--brand-d)}
+.empty{color:var(--dim);text-align:center;padding:44px;font-size:14px;font-weight:600}
+
+/* 分段控件：整颗胶囊，选中那颗由一粒会滚的胶囊承担（和弹层标签条同一套语言） */
+.seg{display:inline-flex;gap:4px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:var(--r-chip);padding:3px;position:relative}
+.seg>span.segslide{position:absolute;left:0;top:var(--y,3px);width:var(--w,0);height:var(--h,26px);
+  border-radius:var(--r-chip);background:var(--on-bg);
+  box-shadow:inset 0 0 0 1px var(--on-ring), var(--sh1);
+  transform:translateX(var(--x,0));transition:transform .32s var(--spring),width .32s var(--spring);z-index:0}
+.seg button{background:transparent;color:var(--dim);border:none;padding:5px 13px;font-size:12px;
+  font-weight:700;border-radius:var(--r-chip);cursor:pointer;transition:all .18s var(--spring);position:relative;z-index:1}
+.seg button:hover{color:var(--brand-d);background:var(--panel)}
+.seg button.on{background:transparent;color:var(--on-txt)}   /* 选中胶囊变浅了，文字必须跟着从白换成强调色，否则白字压浅底=看不见 */
+.seg button.on:hover{background:transparent;color:var(--on-txt)}
+.sec-hd{font-size:15px;color:var(--txt);font-weight:800;margin:20px 4px 11px;display:flex;align-items:center;gap:9px}
 .sec-hd:first-child{margin-top:2px}
-.sec-hd .n{color:var(--dim);font-weight:400;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:0 8px}
-.sec-hd::before{content:'';width:3px;height:15px;background:var(--acc);border-radius:2px}
-.sec-hd.story::before{background:var(--acc2)}
+.sec-hd .n{color:#fff;font-weight:800;font-size:11px;background:var(--grad-brand);
+  border-radius:var(--r-chip);padding:1px 9px;box-shadow:var(--sh1)}
+.sec-hd::before{content:'';width:10px;height:10px;background:var(--grad-pop);border-radius:50%;box-shadow:var(--sh1)}
+.sec-hd.story::before{background:var(--grad-brand)}
 
 /* modal */
-.mask{position:fixed;inset:0;background:rgba(5,7,14,.82);display:none;align-items:stretch;justify-content:center;z-index:50}
+.mask{position:fixed;inset:0;background:var(--mask);backdrop-filter:blur(3px);
+  display:none;align-items:stretch;justify-content:center;z-index:50}
 .mask.on{display:flex}
-/* 弹窗尺寸：原来的 min(1100px,96vw)×min(880px,96vh) 在 2560×1600 上只占屏 43%×55%，
-   这就是「打开皮肤总是缩得有点小」的外层根因。放宽到 96vw/96vh + 上限 1900×1400。
-   ⚠️ 视口比例必须保持 ≥ 原来的 96vw/96vh：实测写成 95vw/94vh 时，在窗口高度不足
-   （innerHeight < ~917）的机器上 94vh 会小于原来的 880px 硬上限，弹窗反而**变矮**，
-   Live2D/Spine 是高度受限的 ⇒ 观感直接回退。 */
-.modal{background:var(--panel);width:min(1900px,96vw);height:min(1400px,96vh);border-radius:12px;border:1px solid var(--line);display:flex;overflow:hidden}
+/* 弹层入场：从 96% 弹到位 + 淡入；关闭时缩回去（.closing 由 JS 加，动画跑完再真关） */
+.modal{background:var(--panel);width:min(1900px,96vw);height:min(1400px,96vh);border-radius:var(--r-panel);
+  border:1px solid var(--line);display:flex;overflow:hidden;box-shadow:var(--sh3);
+  animation:zoomin .28s var(--spring)}
+@keyframes zoomin{from{opacity:0;transform:scale(.955) translateY(14px)}to{opacity:1;transform:none}}
+.mask.closing .modal{animation:zoomout .18s ease-in forwards}
+@keyframes zoomout{to{opacity:0;transform:scale(.96) translateY(8px)}}
 .side{width:264px;flex:none;background:var(--panel2);border-right:1px solid var(--line);display:flex;flex-direction:column}
-.side .hd{padding:14px 14px 10px}
-.side .hd .t{font-size:18px;font-weight:700}
-.side .hd .p{font-size:11px;color:var(--dim);margin-top:2px}
-.meta{padding:8px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);display:flex;flex-wrap:wrap;gap:6px}
+.side .hd{padding:15px 14px 10px}
+.side .hd .t{font-size:22px;font-weight:800;color:var(--txt);line-height:1.15}
+.side .hd .p{font-size:11px;color:var(--dim);margin-top:2px;font-weight:600}
+.meta{padding:8px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);
+  display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-weight:600}
 .meta b{color:var(--txt)}
 .skinlist{flex:1;overflow:auto;padding:8px}
-.skinlist .lab{font-size:11px;color:var(--dim);margin:6px 4px 4px}
-.skin{display:flex;gap:8px;align-items:center;padding:5px;border-radius:8px;cursor:pointer;border:1px solid transparent}
-.skin:hover{background:var(--panel)}
-.skin.on{background:var(--panel);border-color:var(--acc)}
-.skin .th{width:46px;height:58px;flex:none;border-radius:5px;background:var(--bg) center/contain no-repeat;border:1px solid var(--line)}
-.skin .info{font-size:12px;line-height:1.3;min-width:0}
-.skin .info .s2{font-size:10px;color:var(--dim)}
+.skinlist .lab{font-size:11px;color:var(--dim);margin:6px 5px 5px;font-weight:700}
+.skin{display:flex;gap:9px;align-items:center;padding:5px;border-radius:var(--r-in);cursor:pointer;
+  border:1.5px solid transparent;transition:transform .18s var(--spring),background .18s,border-color .18s,box-shadow .18s}
+.skin:hover{background:var(--panel);transform:translateX(3px)}
+.skin.on{background:var(--on-bg);border-color:var(--on-ring);box-shadow:var(--sh1)}
+.skin .th{width:46px;height:58px;flex:none;border-radius:9px;background:var(--bg) center/contain no-repeat;
+  border:1px solid var(--line);box-shadow:var(--sh1);transition:transform .2s var(--spring)}
+.skin:hover .th{transform:scale(1.07) rotate(-1.5deg)}
+.skin .info{font-size:12px;line-height:1.35;min-width:0;font-weight:700}
+.skin .info .s2{font-size:10px;color:var(--dim);font-weight:600}
 .content{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
-.tabs{display:flex;gap:2px;background:var(--panel2);border-bottom:1px solid var(--line);flex:none;padding:0 8px}
-.tab{padding:11px 16px;font-size:13px;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent}
-.tab.on{color:var(--txt);border-bottom-color:var(--acc)}
+.tabs{display:flex;gap:4px;background:var(--panel2);border-bottom:1px solid var(--line);flex:none;padding:6px 10px}
+.tab{padding:7px 15px;font-size:13px;color:var(--dim);cursor:pointer;border-radius:var(--r-chip);
+  font-weight:700;transition:all .18s var(--spring)}
+.tab:hover{color:var(--brand-d);background:var(--panel)}
+.tab.on{color:var(--on-txt);background:transparent}
 .tab.dis{opacity:.35;cursor:not-allowed}
-.kbhint{margin-left:auto;align-self:center;font-size:10px;color:var(--dim);padding:0 10px;white-space:nowrap}
-.view{flex:1;position:relative;overflow:hidden;background:
-  repeating-conic-gradient(#12172a 0 25%, #0d1120 0 50%) 0 0/28px 28px}
+.tab.dis:hover{color:var(--dim);background:transparent}
+.kbhint{margin-left:auto;align-self:center;font-size:10px;color:var(--dim);padding:0 10px;white-space:nowrap;font-weight:600}
+/* 查看器底：浅色是斜纹、深色是原来的棋盘格 —— 都保证透明区一眼可辨 */
+.view{flex:1;position:relative;overflow:hidden;background:var(--stage)}
+.view.swap{animation:fadein .26s ease-out}
+@keyframes fadein{from{opacity:0;transform:scale(.995)}to{opacity:1;transform:none}}
 .view .fitwrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-.srcbar{position:absolute;left:0;right:0;bottom:0;background:rgba(10,13,24,.85);border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;z-index:5}
-.srcbar button{font-size:12px;padding:4px 10px;background:#243049;border:1px solid #3a4a6b;color:#c9d4e6;border-radius:6px;cursor:pointer}
-.srcbar button.on{background:#2b6cb0;border-color:#5b9bd8;color:#fff}
-.srcbar .pill{color:#8b96ad}
+.srcbar,.spine-bar{position:absolute;left:0;right:0;bottom:0;background:var(--bar);border-top:1px solid var(--line);
+  padding:8px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;z-index:5;box-shadow:var(--sh2)}
+.srcbar button,.spine-bar button,.vbox button{font-size:12px;padding:5px 13px;background:var(--chip);
+  border:1.5px solid var(--chip-line);color:var(--txt2);border-radius:var(--r-chip);cursor:pointer;font-weight:700;
+  transition:transform .18s var(--spring),border-color .18s,color .18s,box-shadow .18s,background .18s}
+.srcbar button:hover,.spine-bar button:hover,.vbox button:hover{color:var(--txt)}
+.srcbar button:active,.spine-bar button:active,.vbox button:active{filter:brightness(.94);transform:scale(.985)}
+.srcbar button.on,.spine-bar button.on{background:var(--on-bg);border-color:var(--on-ring);color:var(--on-txt);box-shadow:var(--sh1)}
+.vbox button.on{background:var(--on-bg);border-color:var(--on-ring);color:var(--on-txt);box-shadow:var(--sh1)}
+.srcbar .pill,.vbox .pill{color:var(--dim)}
 .vbox{display:flex;gap:6px;align-items:center}
-.vbox button{font-size:12px;padding:4px 10px;background:#1f2b3d;border:1px solid #3a4a6b;color:#a9c6e6;border-radius:6px;cursor:pointer}
-.vbox button.on{background:#2b6cb0;border-color:#5b9bd8;color:#fff}
-.vbox .pill{color:#8b96ad}
-/* 台词字幕条：三格共用，浮在画面底部控制条之上，纯展示不吃点击 */
-.talksub{position:absolute;left:50%;transform:translateX(-50%);bottom:56px;max-width:min(760px,88%);
- background:rgba(8,11,20,.9);border:1px solid var(--line);border-radius:8px;padding:8px 14px;
- font-size:14px;line-height:1.7;color:#f0f3fa;text-align:center;z-index:8;display:none;pointer-events:none}
-.talksub.on{display:block}
-.talksub .who{display:block;font-size:11px;color:var(--dim);margin-bottom:2px}
-/* 顶部全局交互开关（点画面出声 / 显示台词），状态存 localStorage */
-.opt{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
-.opt button{background:var(--panel2);color:var(--dim);border:none;padding:5px 10px;font-size:12px;cursor:pointer}
-.opt button+button{border-left:1px solid var(--line)}
-.opt button.on{background:var(--ok);color:#06210f}
+.spine-bar select{font-size:12px;padding:5px 10px;border-radius:var(--r-chip);border:1.5px solid var(--chip-line);
+  background:var(--chip);color:var(--txt);font-weight:700}
+/* 台词字幕条：出现时从下方弹进 */
+.talksub{position:absolute;left:50%;bottom:58px;max-width:min(760px,88%);
+  background:var(--panel);border:1.5px solid var(--line);border-radius:var(--r-in);padding:9px 15px;box-shadow:var(--sh2);
+  font-size:14px;line-height:1.7;color:var(--txt);text-align:center;z-index:8;display:none;pointer-events:none;font-weight:600}
+.talksub.on{display:block;transform:translateX(-50%);animation:subin .3s var(--spring)}
+@keyframes subin{from{opacity:0;transform:translateX(-50%) translateY(12px) scale(.96)}
+  to{opacity:1;transform:translateX(-50%)}}
+.talksub .who{display:block;font-size:11px;color:var(--pop-d);margin-bottom:2px;font-weight:800}
+/* 顶部全局交互开关：胶囊组，开=樱粉渐变，关=浅底 */
+.opt{display:inline-flex;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-chip);padding:3px}
+.opt button{background:transparent;color:var(--dim);border:none;padding:5px 12px;font-size:12px;
+  font-weight:700;border-radius:var(--r-chip);cursor:pointer;transition:all .18s var(--spring)}
+.opt button:hover{color:var(--txt)}
+.opt button.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+/* 配色胶囊用主色，和上面三个功能开关（樱粉）区分开 */
+#gTheme button.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
 .view img.full{max-width:100%;max-height:100%;object-fit:contain;user-select:none}
 .view:fullscreen{width:100vw;height:100vh}
 #imgStage{overflow:hidden}
 .view canvas{width:100%;height:100%;display:block;cursor:grab}
-.close{position:absolute;top:10px;right:12px;z-index:60;background:var(--panel2);border:1px solid var(--line);color:var(--txt);width:34px;height:34px;border-radius:8px;font-size:20px;cursor:pointer;line-height:1}
-.close:hover{background:var(--acc);border-color:var(--acc)}
-.spine-bar{position:absolute;left:0;right:0;bottom:0;background:rgba(10,13,24,.85);border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;z-index:5}
-.spine-bar select,.spine-bar button{font-size:12px;padding:4px 8px}
-.spine-bar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
-/* Live2D 检查器面板（判定区可视化 + 参数/部件，l2d.su 同款） */
-.l2panel{position:absolute;top:48px;right:8px;width:258px;max-height:calc(100% - 110px);overflow:auto;background:rgba(10,13,24,.93);border:1px solid var(--line);border-radius:8px;z-index:5;font-size:11px;padding:8px;display:none}
-.l2panel.on{display:block}
-.l2panel .pf{position:sticky;top:0;background:rgba(10,13,24,.97);padding:0 0 6px;margin-bottom:2px;z-index:2}
-.l2panel .pf input{width:100%;box-sizing:border-box;background:#141a2c;border:1px solid var(--line);color:var(--txt);border-radius:5px;padding:3px 6px;font-size:11px}
-.l2panel h5{font-size:11px;color:var(--dim);margin:6px 2px 4px;cursor:pointer;user-select:none}
+.close{position:absolute;top:12px;right:14px;z-index:60;background:var(--chip);border:1.5px solid var(--chip-line);
+  color:var(--txt2);width:34px;height:34px;border-radius:50%;font-size:19px;cursor:pointer;line-height:1;
+  box-shadow:var(--sh1);transition:transform .22s var(--spring),background .18s,color .18s,border-color .18s}
+.close:hover{background:var(--pop);border-color:transparent;color:#fff;transform:rotate(90deg) scale(1.1)}
+.close:active{transform:rotate(90deg) scale(.92)}
+/* Live2D 检查器面板 */
+.l2panel{position:absolute;top:52px;right:10px;width:258px;max-height:calc(100% - 116px);overflow:auto;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-in);z-index:5;font-size:11px;
+  padding:8px;display:none;box-shadow:var(--sh2)}
+.l2panel.on{display:block;animation:slidein .24s var(--spring)}
+@keyframes slidein{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+.l2panel .pf{position:sticky;top:0;background:var(--panel);padding:0 0 6px;margin-bottom:2px;z-index:2}
+.l2panel .pf input{width:100%;box-sizing:border-box;background:var(--panel2);border:1.5px solid var(--line);
+  color:var(--txt);border-radius:var(--r-chip);padding:4px 10px;font-size:11px;outline:none}
+.l2panel .pf input:focus{border-color:var(--brand)}
+.l2panel h5{font-size:11px;color:var(--dim);margin:6px 2px 4px;cursor:pointer;user-select:none;font-weight:800}
 .l2panel h5::before{content:'▸ '}
 .l2panel h5.open::before{content:'▾ '}
 .l2panel .prow{display:flex;align-items:center;gap:5px;margin-bottom:2px}
-.l2panel .prow .nm{width:100px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c9d4e6}
-.l2panel .prow input[type=range]{flex:1;min-width:0;height:12px}
-.l2panel .prow .vl{width:40px;flex:none;text-align:right;color:#8b96ad;font-size:10px}
-.l2panel .prow button{flex:none;width:17px;height:17px;font-size:9px;padding:0;background:#243049;border:1px solid #3a4a6b;color:#c9d4e6;border-radius:4px;cursor:pointer;line-height:1}
+.l2panel .prow .nm{width:100px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--txt2);font-weight:600}
+.l2panel .prow input[type=range]{flex:1;min-width:0;height:12px;accent-color:var(--brand)}
+.l2panel .prow .vl{width:40px;flex:none;text-align:right;color:var(--dim);font-size:10px}
+.l2panel .prow button{flex:none;width:17px;height:17px;font-size:9px;padding:0;background:var(--chip);
+  border:1px solid var(--line);color:var(--txt2);border-radius:50%;cursor:pointer;line-height:1;transition:all .16s var(--spring)}
+.l2panel .prow button:hover{color:var(--on-txt);border-color:var(--on-ring)}
 .audwrap{padding:16px;overflow:auto;height:100%}
-.audwrap h4{font-size:12px;color:var(--dim);margin-bottom:8px}
+.audwrap h4{font-size:12px;color:var(--dim);margin-bottom:8px;font-weight:800}
 .aud{display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;font-size:12px}
-.aud .lbl{width:90px;color:var(--dim);flex:none;padding-top:6px}
+.aud .lbl{width:90px;color:var(--dim);flex:none;padding-top:6px;font-weight:700}
 .aud .col{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
-.aud .tw{font-size:12px;line-height:1.6;color:#dbe3f4;padding:4px 0}
-audio{height:30px;width:100%;flex:none;color-scheme:dark}
-.pill{font-size:10px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);padding:1px 6px;border-radius:4px}
-.note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:30px;text-align:center;color:var(--dim);font-size:13px;line-height:1.7}
-.note b{color:var(--acc2)}
-::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#333a56;border-radius:5px}::-webkit-scrollbar-track{background:transparent}
+.aud .tw{font-size:12px;line-height:1.6;color:var(--txt);padding:4px 0;font-weight:600}
+audio{height:32px;width:100%;flex:none}
+.pill{font-size:10px;color:var(--txt2);background:var(--brand-l);border:1px solid var(--line);
+  padding:2px 8px;border-radius:var(--r-chip);font-weight:700}
+.note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:30px;
+  text-align:center;color:var(--dim);font-size:13px;line-height:1.7;font-weight:600}
+.note b{color:var(--brand-d)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#b6cde8;border-radius:var(--r-chip);border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:#8fb6de;background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
+[data-theme=dark] ::-webkit-scrollbar-thumb{background:#333a56;background-clip:content-box}
+[data-theme=dark] ::-webkit-scrollbar-thumb:hover{background:#465074;background-clip:content-box}
+/* ══ 背景层：干净柔色底 + 三团大色块（2026-09-28 拆掉整屏噪声着色器）══════
+   上一版是 WebGL2 的 fbm 域扭曲（光柱/海面亮带/焦散/颗粒/暗角全在着色器里）。
+   用户判"很丑"，取证后确认**不是参数没调好，是手法本身的问题**：整屏低频噪声 +
+/* ══ 背景层：静止的柔色底 + 「一划就起浪」的水面（2026-09-28 第四版）══════
+   前三版（气泡+正弦线 / 2D 粒子星野 / WebGL 噪声着色器 / 三团漂移色块）全部被否，
+   共同的毛病不是"好不好看"，而是**背景自己在动**：只要它不响应操作，就只是一张装饰壁纸。
+   这一版把"动"整个交还给用户：
+     · 静止时 = 完全平的（底色渐变 + 三团**不动**的柔色块），没人在划就一帧都不画
+     · 滑动时 = 指针轨迹往水高场注入偶极脉冲 → 波动方程向外传播 → 波峰处渲染出白沫
+     · 停下后 = 场在 ~2 秒内衰减回平面，循环自己停掉，回到"完全不动"
+   ⇒ 于是这版对不对有一条极干脆的硬指标：**静止时任意两帧逐像素完全相同**
+     （前几版做不到，它们一直在漂），而**划过之后必须先亮起来、再回到那个静止态**。
+   实现：CPU 上跑 240×N 的波动方程（Float32 三缓冲，一次遍历几千次加法），
+   高度场当纹理上传，WebGL 只负责按法线画高光与泡沫。零噪声函数、零 fbm、零域扭曲
+   ——上一版"蓝色绸缎"的肌理就是从那几个函数里长出来的，这版结构上不存在它们。
+   色块仍然纯 CSS、颜色全走 token ⇒ 切主题背景自己跟着换，不需要 JS 参与。
+   三条硬约束不变：pointer-events:none；z-index 低于内容；卡片是不透明面板。 */
+#bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+/* ⚠️ 这里**不留四周渐隐遮罩**（上一版留了，是错的）：#bgfx 是 inset:0 的固定层，
+   它的四条边就是屏幕的四条边 —— 被裁在屏幕边上根本看不见，遮罩换不来任何东西；
+   而它偏偏把**底部那条唯一露着背景的空带**淡掉了 9%，等于把浪藏起来不给看。 */
+#bgfx .bfield{position:absolute;inset:-10%}
+/* closest-side + 中间停靠点 = 平滑衰减；不用 filter:blur（74vmax 的元素上那是白烧 GPU，
+   而且径向渐变本身已经足够软）。**没有 animation**：静止就是这版的卖点。 */
+#bgfx .glow{position:absolute;width:74vmax;height:74vmax;border-radius:50%}
+#bgfx .g1{left:-24vmax;top:-28vmax;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--brand) 80%,transparent) 0%,
+    color-mix(in srgb,var(--brand) 36%,transparent) 40%,transparent 100%)}
+#bgfx .g2{right:-26vmax;bottom:-32vmax;width:68vmax;height:68vmax;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--pop) 66%,transparent) 0%,
+    color-mix(in srgb,var(--pop) 26%,transparent) 40%,transparent 100%)}
+#bgfx .g3{right:2vmax;top:-26vmax;width:54vmax;height:54vmax;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--ok) 56%,transparent) 0%,
+    color-mix(in srgb,var(--ok) 22%,transparent) 40%,transparent 100%)}
+[data-theme=light] #bgfx .glow{opacity:.8}
+[data-theme=dark]  #bgfx .glow{opacity:.62}
+/* 水面画布盖在色块之上：静止时它是全透明的，所以看上去就是"柔色底"本身 */
+#bgfx canvas{position:absolute;inset:0;width:100%;height:100%}
+header{position:relative;z-index:10}   /* 原本就有，这里只是把"内容压在背景上"这件事写全 */
+main{position:relative;z-index:1}
+/* 弹层开着的时候不再 wake 水面 —— 这条**只在 JS 侧做**（既不注入脉冲也不排下一帧）。
+   这里不留 CSS 规则：背景已经没有任何自移动画，没有东西可"暂停"。
+   （上一版这条挂在 .glow 的 animation-play-state 上，那时有漂移动画才需要。） */
+/* ══ 交互反馈层：一个语义一种表现（§6.18 五条真缺陷的收口）══════════════
+   本轮 grep 出来的事实：① 同一个「选中」语义有 5 种颜色 ② Live2D/Spine 两条控制条
+   其实是浏览器原生按钮（CSS 只给了 font-size/padding）③ 全文 :active 命中 0 次
+   ④ 全文 :focus-visible 命中 0 次，且 `input,select{outline:none}` 连默认焦点环一起杀了
+   ⑤ 状态开关与瞬时动作外观一模一样。
+   ①②③ 已由上一轮的 token + 弹性曲线顺带解决，这里补 ④ 与 ⑤。 */
+/* ④ 键盘焦点环：:focus-visible 只在**键盘**导航时出现，鼠标点击不会留一个环。
+   统一用 outline + offset（不是 box-shadow）——环要能盖在卡片自己的发光阴影外面。
+   写在 :where() 里是为了让 specificity 归零，任何组件自己的焦点样式都能盖过它。 */
+:where(button,input,select,textarea,a,[tabindex]):focus-visible{
+  outline:2.5px solid var(--brand-d);outline-offset:2px}
+/* 自带「环」语义的几处接管掉，避免同一元素上出现两圈 */
+.card:focus-visible,.dd-btn:focus-visible,input[type=text]:focus-visible,select:focus-visible,
+.l2panel .pf input:focus-visible{outline:none}
+/* ⑤ 状态开关 vs 瞬时动作：以前外观一模一样。这里**不用颜色**区分（颜色已经全部被
+   「一个语义一种表现」占用），改用形状 —— 开关左侧一颗 LED（关=空心、开=实心带辉光），
+   瞬时动作按钮没有 LED、保持纯胶囊。 */
+.opt button::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;
+  margin-right:6px;background:transparent;border:1.5px solid currentColor;opacity:.5;
+  transition:background .18s,opacity .18s,box-shadow .18s}
+.opt button.on::before{background:currentColor;border-color:currentColor;opacity:1;
+  box-shadow:0 0 7px currentColor}
+/* 昼/夜那两个是「分段单选」，不是开关，不给 LED（否则四个全局开关的语义就糊了） */
+#gTheme button::before{content:none;margin:0;border:0;width:0;height:0;box-shadow:none}
+/* 查看器里的两个状态开关（判定区 / 参数·部件）由 JS 打上 .tg 走同一套 */
+.srcbar button.tg::before,.spine-bar button.tg::before{content:'';display:inline-block;
+  width:7px;height:7px;border-radius:50%;margin-right:6px;background:transparent;
+  border:1.5px solid currentColor;opacity:.5;transition:background .18s,opacity .18s,box-shadow .18s}
+.srcbar button.tg.on::before,.spine-bar button.tg.on::before{background:currentColor;
+  border-color:currentColor;opacity:1;box-shadow:0 0 7px currentColor}
+/* 剩下两条补齐：控制条里的原生下拉此前没有 hover；标签/皮肤行没有按压反馈 */
+.spine-bar select:hover,.spine-bar select:focus{border-color:var(--brand);background:var(--panel)}
+.tab:active,.skin:active,.dd-opt:active{filter:brightness(.94);transform:scale(.985)}
+/* ══ 动效增补：标签滑块 / 弹层从卡片飞入 / 昼夜圆形擦除 ══════════════
+   .diag/q2_style.css 是本块之前的配色正本，这里三段同样只引用 token。 */
+/* 标签条：选中那颗的底色换成一条会滑的胶囊，切标签时整条飞过去
+   （原来逐颗变背景，视觉上是"闪一下"而不是"换过去"） */
+.tabs{position:relative}
+.tslide{position:absolute;left:0;top:var(--y,6px);height:var(--h,28px);width:var(--w,0);
+  border-radius:var(--r-chip);background:var(--on-bg);
+  box-shadow:inset 0 0 0 1px var(--on-ring), var(--sh1);
+  transform:translateX(var(--x,0));transition:transform .3s var(--ease-ios),width .3s var(--ease-ios);
+  z-index:0;pointer-events:none}
+.tabs .tab{position:relative;z-index:1}
+.tabs .tab.on{color:var(--on-txt);background:transparent;box-shadow:none}
+.tabs .tab.on:hover{background:transparent}
+/* 弹层：从被点那张卡片的**缩略图**位置/大小长大到位（FLIP）。
+   --fx/--fy/--fs 由 JS 量出来写进变量；只动 transform，不改布局尺寸，
+   所以 Live2D / Spine 初始化读到的 clientWidth 与动画无关，不会被压扁。 */
+.modal.fly{animation:flyin .36s var(--spring-slow)}
+@keyframes flyin{from{opacity:.15;transform:translate(var(--fx,0),var(--fy,0)) scale(var(--fs,.12))}
+  to{opacity:1;transform:none}}
+/* 关闭时按原路缩回那张卡片（.mask.closing .modal 是原地缩回，这条更具体，覆盖它） */
+.mask.closing .modal.flyout{animation:flyout .26s cubic-bezier(.4,0,.75,.4) forwards}
+@keyframes flyout{to{opacity:0;transform:translate(var(--fx,0),var(--fy,0)) scale(var(--fs,.12))}}
+.mask.on{animation:maskin .2s ease-out}
+@keyframes maskin{from{opacity:0}}
+/* 昼夜切换：以开关为圆心的圆形擦除 —— 整页快照后让新主题的 clip-path 由 0 涨到全覆盖。
+   比交叉溶解更"像天黑下来"，也顺带绕开了渐变不可过渡的问题。 */
+::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
+::view-transition-old(root){z-index:1}
+::view-transition-new(root){z-index:2;animation:vtwipe .52s cubic-bezier(.4,0,.2,1) both}
+@keyframes vtwipe{from{clip-path:circle(0% at var(--cx,50%) var(--cy,0%))}
+  to{clip-path:circle(150% at var(--cx,50%) var(--cy,0%))}}
+/* ══ 交互反馈：iOS 式丝滑（无过冲、无形变）══════════════════════════════
+   悬停只做「点亮」——描边亮起 + 底色变化 + 1px 抬升，**不放大、不鼓出**；
+   按下只有一下 scale(.97) 的轻压感（iOS 的按钮就是这个手感）；松手平滑回位。
+   全程没有回弹、没有压扁，也没有任何弹簧曲线。
+   ⚠️ .close 故意不进这组：它自己的 hover 是「转 90° + 放大」，被通用规则一盖就没了。 */
+.seg button,.opt button,.tab,.dd-btn,.srcbar button,.spine-bar button,.vbox button,
+.l2panel .prow button{
+  transition:transform .22s var(--ease-ios),box-shadow .22s var(--ease-ios),
+    border-color .18s ease-out,color .16s ease-out,background-color .16s ease-out}
+.seg button:hover,.opt button:hover,.tab:hover,.dd-btn:hover,.srcbar button:hover,
+.spine-bar button:hover,.vbox button:hover,.l2panel .prow button:hover{filter:brightness(1.06)}
+/* 按下：压暗 + 等比缩 .985，**不位移、不形变、不回弹**。
+   有回弹/有形变就是果冻，只有亮度变化才是 iOS。 */
+.seg button:active,.opt button:active,.tab:active,.dd-btn:active,.srcbar button:active,
+.spine-bar button:active,.vbox button:active,.skin:active,.dd-opt:active,
+.l2panel .prow button:active{filter:brightness(.94);transform:scale(.985)}
+/* 悬停既然只改亮度，过渡必须带上 filter */
+.seg button,.opt button,.tab,.dd-btn,.srcbar button,.spine-bar button,.vbox button,
+.l2panel .prow button{transition:transform .2s var(--ease-ios),filter .18s var(--ease-ios),
+  box-shadow .2s var(--ease-ios),border-color .18s ease-out,color .16s ease-out}
+/* 表面高光：只给"有边框的芯片"。选中态用的是 background 简写（渐变），会自然盖掉这层。 */
+.dd-btn,.srcbar button,.spine-bar button,.vbox button,.seg,.opt,.tabs,.spine-bar select{
+  background-image:var(--gloss)}
+/* 材质态之下不再给选中项叠"实心渐变 + 高光"——那正是"整块填色"的来源。
+   选中只靠三件事表达：更亮一档的底（--on-bg）、一圈细彩色内描边（--on-ring）、彩色文字。 */
+/* 系统要求减少动效时，只留必要的淡入，去掉所有回弹 */
+@media (prefers-reduced-motion: reduce){
+  .card,.card:hover,.card:active,.skin:hover,.skin .th,.close:hover,.tbtn:hover,.tab:hover,
+  .srcbar button:hover,.spine-bar button:hover,.vbox button:hover{transition:none;transform:none}
+  /* 果冻的"鼓起/压扁"是形变，减动效下全部退成不动，只留颜色反馈 */
+  .seg button:hover,.seg button:active,.opt button:hover,.opt button:active,.tab:hover,.tab:active,
+  .dd-btn:hover,.dd-btn:active,.srcbar button:active,.spine-bar button:active,.vbox button:active,
+  .skin:active,.dd-opt:active,.l2panel .prow button:hover,.l2panel .prow button:active{
+    transition:none;transform:none}
+  .card,.modal,.talksub.on,.l2panel.on,.view.swap,.modal.fly,.mask.on{animation:none}
+  .card .thumb img{opacity:1}          /* 淡入靠 load 事件，这里必须直接可见，否则图永不显示 */
+  /* 背景：色块本来就没有动画；水面那层由 JS 看 RM 决定**根本不初始化**，
+     所以这里无需再写退化规则（写了也没东西可退）。 */
+  .tslide,.segslide{transition:none}
+  #search,#search:focus{width:190px;transition:border-color .16s,box-shadow .16s,background .16s}
+  ::view-transition-new(root){animation:none}
+}
 </style>
 </head>
 <body>
+<div id="bgfx" aria-hidden="true"><div class="bfield"><i class="glow g1"></i><i class="glow g2"></i><i class="glow g3"></i></div></div>
 <header>
   <h1>碧蓝航线资产浏览器</h1>
   <div class="ctl"><input type="text" id="search" placeholder="搜索 中文名 / 拼音ID"></div>
@@ -151,14 +591,17 @@ audio{height:30px;width:100%;flex:none;color-scheme:dark}
   <div class="ctl"><label>排序</label><select id="fSort">
     <option value="cn">按名称</option><option value="faction">按阵营</option><option value="type">按舰种</option><option value="rarity">按稀有度</option>
   </select></div>
-  <div class="grow"></div>
   <div class="ctl"><label>内容</label><select id="fHas">
     <option value="">全部</option><option value="spine">含Spine</option><option value="live2d">含Live2D</option><option value="voice">含语音</option><option value="cn">有中文名</option>
   </select></div>
+  <div class="grow"></div>
   <div class="ctl"><label>全局</label><div class="opt" id="gOpt">
     <button data-k="voice" title="点击立绘 / Live2D 部位时是否播放语音">点击出声</button>
     <button data-k="lines" title="播放台词时是否在画面下方显示中文正文">显示台词</button>
     <button data-k="remember" title="记住每个皮肤上次的缩放与位置，下次打开直接回到那里">记住视角</button>
+  </div></div>
+  <div class="ctl"><label>配色</label><div class="opt" id="gTheme" title="昼 / 夜配色（状态会记住）">
+    <button data-t="light">昼</button><button data-t="dark">夜</button>
   </div></div>
   <div class="hint" id="count"></div>
   <div class="hint" id="modehint"></div>
@@ -193,11 +636,47 @@ let catFilter = '';   // ''=全部 / ship=舰船 / story=剧情角色
    两条各自独立：关掉「点击出声」后点画面仍然会上字幕（只是不出声），
    关掉「显示台词」则只出声不上字幕。语音标签页里的 <audio> 是用户明确点的，不受①限制。 */
 const OPT_KEY = 'gallery.opt.v1';
+const RM = matchMedia('(prefers-reduced-motion: reduce)');   // 动效总开关（系统设置）
+/* 三个全局开关。⚠️ 这里**不再有 bgfx**：背景现在只在被划的时候才动、不划就完全静止，
+   没有"需要关掉的花哨"，所以那颗按钮按用户要求删掉了（2026-09-28）。
+   老用户 localStorage 里残留的 `bgfx:false` 会被 Object.assign 塞进来，但没人再读它——
+   不清理是故意的：清它要写迁移代码，而那个键无害。 */
 let OPT = {voice:true, lines:true, remember:true};
 try{ Object.assign(OPT, JSON.parse(localStorage.getItem(OPT_KEY) || '{}')); }catch(e){}
 function saveOpt(){ try{ localStorage.setItem(OPT_KEY, JSON.stringify(OPT)); }catch(e){} }
 function paintOpt(){ document.querySelectorAll('#gOpt button')
   .forEach(b=>b.classList.toggle('on', !!OPT[b.dataset.k])); }
+
+/* ---------- 昼 / 夜主题 与 筛选栏折叠（各自持久化） ----------
+   主题在 <head> 里已先落 data-theme 防闪烁，这里只负责切换与同步按钮文字。
+   配色过渡靠临时挂 .theming（见 CSS），不挂时 hover 的弹性曲线才不会被拖慢。 */
+const THEME_KEY='gallery.theme';
+function paintTheme(){ const t=document.documentElement.dataset.theme||'light';
+  document.querySelectorAll('#gTheme button').forEach(b=>b.classList.toggle('on', b.dataset.t===t)); }
+function setTheme(t){
+  const apply=()=>{ document.documentElement.dataset.theme=t;
+    try{ localStorage.setItem(THEME_KEY,t); }catch(e){} paintTheme();
+    /* 三团色块是 color-mix 自 token 的，CSS 自己就跟着换了；但**水面参数**
+       （泡沫色 / 斜率增益 / 起沫阈值）是 JS 一次性读进 BG.P 的，必须在这里重取一次，
+       否则夜里还在用白天那套泡沫色。bgColors 是函数声明，提升得到，放前面也能调。 */
+    if(typeof bgColors==='function') bgColors(); };
+  /* 渐变类背景（body 的 linear-gradient、选中胶囊的渐变、查看器底纹）在 CSS 里
+     **根本不可过渡**，只给 background-color 加 transition 就会一半在淡、一半瞬切 ——
+     这就是"不够自然"的来源。View Transition 是对整页做快照再交叉溶解，
+     渐变/阴影/底纹一起参与，Chrome・Edge 111+ 原生支持；不支持时退回配色过渡。 */
+  if(!RM.matches && document.startViewTransition) document.startViewTransition(apply);
+  else if(RM.matches) apply();
+  else { const h=document.documentElement; h.classList.add('theming'); apply();
+    clearTimeout(setTheme._t); setTheme._t=setTimeout(()=>h.classList.remove('theming'),400); }
+}
+/* 圆心取被点那颗胶囊的位置：--cx/--cy 写在 html 上，::view-transition-new(root) 继承得到 */
+document.querySelectorAll('#gTheme button').forEach(b=>b.onclick=()=>{
+  const r=b.getBoundingClientRect();
+  const h=document.documentElement;
+  h.style.setProperty('--cx',((r.left+r.width/2)/h.clientWidth*100).toFixed(2)+'%');
+  h.style.setProperty('--cy',((r.top+r.height/2)/h.clientHeight*100).toFixed(2)+'%');
+  setTheme(b.dataset.t);
+});
 
 /* ---------- 视角记忆（按 皮肤key|标签页 存相机，下次打开回到这里） ----------
    存的必须是**尺度无关量**，否则换窗口尺寸 / 进全屏后位置会错位：
@@ -246,10 +725,22 @@ function makeCard(s){
   const tags=[]; if(s.rarity)tags.push(`<span class="tag ${rarClass(s.rarity)}">${s.rarity}</span>`); if(s.faction)tags.push(`<span class="tag f">${s.faction}</span>`); if(s.type)tags.push(`<span class="tag s">${s.type}</span>`);
   card.innerHTML=`<div class="thumb">${th?`<img loading="lazy" src="${th}">`:'<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:12px">无立绘</div>'}<div class="badge">${badges.join('')}</div></div>
     <div class="body"><div class="nm">${s.name}</div><div class="py">${s.id} · ${s.skins.length}皮肤</div><div class="tags">${tags.join('')}</div></div>`;
-  card.onclick=()=>openShip(s);
+  /* 卡片可 Tab 聚焦：以前整张网格只有鼠标一条路，键盘走不到任何一张卡（§6.18 ④）。
+     Enter/Space 的激活走 mainEl 上的**一个**委托监听器，不给千张卡各挂一个。 */
+  if(GLASS_IO) GLASS_IO.observe(card); else card.classList.add('g');   // 毛玻璃按需挂载
+  card.tabIndex=0; card.setAttribute('role','button');
+  card.setAttribute('aria-label',s.name+' · '+s.skins.length+' 个皮肤');
+  card.onclick=()=>openShip(s,card);
+  /* 缩略图淡入：懒加载的图到货那一刻不该"啪"地跳出来。
+     complete 分支必须有 —— 命中缓存时 load 事件根本不会再发。 */
+  const im=card.querySelector('img');
+  if(im){ const on=()=>im.classList.add('ld');
+    if(im.complete) on();
+    else { im.addEventListener('load',on,{once:true}); im.addEventListener('error',on,{once:true}); } }
   return card;
 }
 function renderGrid(){
+  if(GLASS_IO) GLASS_IO.disconnect();   // 卡片整批换新，旧目标必须全摘（见 GLASS_IO 注释）
   mainEl.innerHTML='';
   const cntEl=document.getElementById('count');
   if(!view.length){ mainEl.innerHTML='<div class="empty">没有匹配的内容</div>'; cntEl.textContent='共 0 项'; return; }
@@ -265,12 +756,62 @@ function renderGrid(){
     mainEl.appendChild(hd);
     const g=document.createElement('div'); g.className='grid';
     const frag=document.createDocumentFragment();
-    list.forEach(s=>frag.appendChild(makeCard(s)));
+    list.forEach((s,i)=>{ const c=makeCard(s); c.style.setProperty('--i',i); frag.appendChild(c); });
     g.appendChild(frag); mainEl.appendChild(g);
   });
   if(!shown){ mainEl.innerHTML='<div class="empty">该类别下没有匹配项</div>'; }
   cntEl.textContent = catFilter==='' ? `共 ${shown} 项 · 舰船 ${per.ship||0} / 剧情 ${per.story||0}` : `共 ${shown} 项`;
 }
+
+/* ---------- 卡片跟随鼠标倾斜 + 毛玻璃按需挂载 ----------
+   倾斜：整张网格只有**一个**委托监听器（1000+ 张卡不能各挂 mousemove），
+   只写 --rx/--ry 两个变量，不写内联 transform —— 内联会把 :hover/:active 两条规则
+   整个盖掉，抬起和按压就全失效了。
+   ⚠️ 幅度：满偏 ±8°/±6.5°（dx*16 / dy*13），perspective 从 760px 收到 620px 再放大
+   一点透视感。上一版是 ±4.5°/±3.5°，探针在鼠标停在 0.68/0.32 那个点时量到 1.4°/1.8°
+   —— 我当时把"取样点太靠中心"当成了"设计幅度太小"，直接删了整条动效，判错：
+   用户要的是"看得见"，不是"不要"。教训记进 TROUBLESHOOTING：判"看不见"要按**满偏**算，
+   不能拿一个随手取的点当上限。
+   ⚠️ transform 的过渡压到 .14s：跟着鼠标转的东西如果挂上 .24s 的弹性曲线，
+   每帧都被重新触发一次回弹，手感是"糊"而不是"跟"。
+   ⚠️ 卡面矩形按卡缓存：每帧都 getBoundingClientRect 再写 style 就构成
+   「写→读」强制回流，1008 张卡的网格上会掉帧。滚动时把缓存作废即可。 */
+let tiltOn=null, tiltRect=null;
+function tiltReset(){ if(tiltOn){
+  tiltOn.style.setProperty('--rx','0deg');
+  tiltOn.style.setProperty('--ry','0deg');
+  tiltOn=null; tiltRect=null; } }
+mainEl.addEventListener('scroll',()=>{ tiltRect=null; },{passive:true});
+mainEl.addEventListener('mousemove',e=>{
+  if(RM.matches){ tiltReset(); return; }
+  const c=e.target.closest('.card');
+  if(!c){ tiltReset(); return; }
+  if(c!==tiltOn||!tiltRect){ tiltReset(); tiltOn=c; tiltRect=c.getBoundingClientRect(); }
+  const dx=(e.clientX-tiltRect.left)/tiltRect.width-.5, dy=(e.clientY-tiltRect.top)/tiltRect.height-.5;
+  c.style.setProperty('--ry',(dx*16).toFixed(2)+'deg');
+  c.style.setProperty('--rx',(-dy*13).toFixed(2)+'deg');
+});
+mainEl.addEventListener('mouseleave',tiltReset);
+
+/* 毛玻璃（backdrop-filter）只给**进过视口**的卡片挂：1008 张各挂一层背景模糊是必掉的帧，
+   而 IntersectionObserver 把同时生效的数量压到同屏那几十张。
+   ⚠️ 每次重画网格必须先 disconnect()：观察器会持有它 observe 过的元素，
+   卡片是每次筛选都整批新建的，不摘就会一路攒下去（泄漏）。 */
+const GLASS_IO = ('IntersectionObserver' in window) ? new IntersectionObserver(es=>{
+  es.forEach(en=>en.target.classList.toggle('g', en.isIntersecting));
+},{rootMargin:'140px'}) : null;
+
+/* ---------- 卡片键盘激活 ----------
+   键盘那条路：Enter / Space 激活焦点所在的卡片（整张网格一个委托监听器，不给千张卡各挂）。
+   悬停的描边发光 / 上浮 / 缩略图微放大全部由 CSS 的 :hover / :focus-visible 承担；
+   JS 在这张网格上只写倾斜的两个变量，不碰别的。 */
+mainEl.addEventListener('keydown',e=>{
+  if(e.key!=='Enter' && e.key!==' ' && e.key!=='Spacebar') return;
+  const c=e.target.closest && e.target.closest('.card');
+  if(!c) return;
+  e.preventDefault();          // 空格默认会翻页，必须吃掉
+  c.click();
+});
 
 /* ---------- 搜索/筛选 ---------- */
 function apply(){
@@ -297,15 +838,89 @@ function apply(){
 }
 ['search'].forEach(id=>document.getElementById(id).addEventListener('input',debounce(apply,180)));
 ['fFaction','fType','fRarity','fHas','fSort'].forEach(id=>document.getElementById(id).addEventListener('change',apply));
+
+/* ---------- 把原生 select 包成带动效的下拉 ----------
+   状态仍然只存在 select.value 上：选中时回写 value 并 dispatch change，
+   所以上面那行 change→apply 的绑定、以及 apply() 读 value 的代码一行都不用改。
+   放在这里是因为 fillSelects 已经跑完，阵营/舰种/稀有度的 option 才填好。 */
+function enhanceSelect(sel){
+  const dd=document.createElement('div'); dd.className='dd';
+  sel.parentNode.insertBefore(dd,sel); dd.appendChild(sel);
+  const btn=document.createElement('button'); btn.type='button'; btn.className='dd-btn';
+  btn.setAttribute('aria-haspopup','listbox'); btn.setAttribute('aria-expanded','false');
+  btn.innerHTML='<span class="dd-cur"></span><i class="dd-arw">▼</i>';
+  const panel=document.createElement('div'); panel.className='dd-panel'; panel.setAttribute('role','listbox');
+  dd.append(btn,panel);
+  const cur=btn.querySelector('.dd-cur');
+  const build=()=>{ panel.innerHTML='';
+    [...sel.options].forEach((o,i)=>{ const d=document.createElement('div');
+      d.className='dd-opt'; d.setAttribute('role','option'); d.dataset.v=o.value; d.style.setProperty('--i',i);
+      const m=/^(.*?)\s*\((\d+)\)$/.exec(o.textContent.trim());   // "重樱 (161)" → 名字 + 数字分两栏对齐
+      d.innerHTML=m?`<span>${m[1]}</span><span class="n">${m[2]}</span>`:`<span>${o.textContent}</span>`;
+      panel.appendChild(d); }); };
+  const sync=()=>{ const o=sel.selectedOptions[0]; cur.textContent=o?o.textContent:'';
+    panel.querySelectorAll('.dd-opt').forEach(d=>d.classList.toggle('cur',d.dataset.v===sel.value)); };
+  const open=v=>{ dd.classList.toggle('open',v); btn.setAttribute('aria-expanded',String(v)); if(v) sync(); };
+  btn.onclick=()=>{ const willOpen=!dd.classList.contains('open');
+    if(willOpen) document.querySelectorAll('.dd.open').forEach(x=>x.classList.remove('open'));  // 一次只开一个
+    open(willOpen); };
+  panel.onclick=e=>{ const d=e.target.closest('.dd-opt'); if(!d) return;
+    sel.value=d.dataset.v; sel.dispatchEvent(new Event('change',{bubbles:true})); open(false); };
+  sel.addEventListener('change',sync);
+  document.addEventListener('pointerdown',e=>{ if(!dd.contains(e.target)) open(false); },true);
+  btn.onkeydown=e=>{ const list=[...panel.children];
+    if(e.key==='Escape'){ open(false); return; }
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){ e.preventDefault();
+      if(!dd.classList.contains('open')){ open(true); return; }
+      const i=list.findIndex(d=>d.classList.contains('cur'));
+      const j=Math.max(0,Math.min(list.length-1, i+(e.key==='ArrowDown'?1:-1)));
+      list[j] && list[j].click(); return; }
+    if(e.key==='Enter'&&dd.classList.contains('open')){ e.preventDefault();
+      const t=panel.querySelector('.dd-opt.cur')||list[0]; if(t) t.click(); } };
+  build(); sync();
+}
+['fFaction','fType','fRarity','fHas','fSort'].forEach(id=>enhanceSelect(document.getElementById(id)));
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
 
 /* ---------- 详情弹层 ---------- */
 let curShip=null, curSkin=null, tab='painting', paintSrc='cg';
 let curVM=null;   // 当前视图的「视角记忆」提交器（切视图/关弹层时先 flush，否则最后一次滚轮会丢）
 const mask=document.getElementById('mask'), viewEl=document.getElementById('mView');
-function openShip(s){ curShip=s; setSkin(defSkin(s)); buildSkinList(s); mask.classList.add('on'); }
+let flySrc=null;   // 打开弹层那张卡片的缩略图：进场从这里长大，退场缩回这里
+/* FLIP 的三段几何：起点(卡片)与终点(弹层)的中心差 + 宽度比，全写进 CSS 变量。
+   卡片可能已滚出视口、或这次不是从卡片打开的（键盘/皮肤列表），此时返回 0 用原地动画。 */
+function flyGeom(from){
+  const m=document.querySelector('.modal');
+  if(!m||!from||!from.isConnected||RM.matches) return 0;
+  const r=from.getBoundingClientRect(), b=m.getBoundingClientRect();
+  if(r.width<3||b.width<3||b.height<3) return 0;
+  m.style.setProperty('--fx',((r.left+r.width/2)-(b.left+b.width/2)).toFixed(1)+'px');
+  m.style.setProperty('--fy',((r.top+r.height/2)-(b.top+b.height/2)).toFixed(1)+'px');
+  m.style.setProperty('--fs',Math.min(1,r.width/b.width).toFixed(4));
+  return 1;
+}
+function openShip(s,from){
+  curShip=s; setSkin(defSkin(s)); buildSkinList(s);
+  flySrc=from?(from.querySelector('.thumb')||from):null;
+  mask.classList.remove('closing'); mask.classList.add('on');
+  placeTab(false);   // setSkin 跑在 mask 显示之前，那时量不到尺寸，这里补落位
+  const m=document.querySelector('.modal'); if(!m) return;
+  /* 开合都要把两个动画类清干净：弹层一旦 display:none，CSS 动画直接停摆、
+     animationend 不再触发 ⇒ 只靠动画结束回调摘类会留下永久挂着的 .fly。 */
+  m.classList.remove('flyout','fly');
+  if(flyGeom(flySrc)){ m.classList.add('fly');
+    m.addEventListener('animationend',function h(){ m.classList.remove('fly'); m.removeEventListener('animationend',h); }); }
+}
 function closeShip(){ if(curVM){ curVM.flush(); curVM=null; }
-  stopSpine(); stopLive2D(); hideSub(); mask.classList.remove('on'); viewEl.innerHTML=''; document.getElementById('mTabs').innerHTML=''; }
+  stopSpine(); stopLive2D(); hideSub();
+  const done=()=>{ mask.classList.remove('on','closing'); viewEl.innerHTML=''; document.getElementById('mTabs').innerHTML='';
+    const m=document.querySelector('.modal'); if(m) m.classList.remove('flyout','fly'); };
+  const fly=flyGeom(flySrc);
+  if(mask.classList.contains('on') && !RM.matches){
+    if(fly) document.querySelector('.modal').classList.add('flyout');
+    mask.classList.add('closing');
+    setTimeout(()=>{ if(mask.classList.contains('closing')) done(); }, fly?250:170);
+  } else done(); }
 document.getElementById('close').onclick=closeShip;
 mask.onclick=e=>{if(e.target===mask)closeShip();};
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&mask.classList.contains('on'))closeShip();});
@@ -348,17 +963,39 @@ function setSkin(sk){ curSkin=sk; paintSrc='cg'; const s=curShip;
   const canVoice=s.voiceCount>0||s.voiceText>0;
   const tabs=[['painting','静态立绘',!!(sk.image||sk.cg)],['spine','Spine 动态',spineOn],['live2d','Live2D',l2dOn],['voice',s.voiceCount?('语音 '+s.voiceCount):(('台词 '+(s.voiceText||''))||'语音'),canVoice]];
   const tl=document.getElementById('mTabs'); tl.innerHTML='';
+  const sl=document.createElement('span'); sl.className='tslide'; tl.appendChild(sl);
   tabs.forEach(([k,lab,en])=>{const d=document.createElement('div');d.className='tab'+(en?'':' dis')+(k===tab?' on':'');d.textContent=lab;d.dataset.k=k;
-    d.onclick=()=>{if(!en)return; tab=k; [...tl.children].forEach(c=>c.classList.toggle('on',c.dataset.k===k)); renderView();}; tl.appendChild(d);});
+    d.onclick=()=>{if(!en)return; tab=k; [...tl.children].forEach(c=>c.classList.toggle('on',c.dataset.k===k)); placeTab(true); renderView();}; tl.appendChild(d);});
   const kh=document.createElement('span'); kh.className='kbhint';
   kh.textContent='←/→ 换皮肤 · 1-4 切标签 · F 全屏 · R 复位'; tl.appendChild(kh);
   // 自动切到有内容的标签
   if(!tabs.find(t=>t[0]===tab&&t[2])) tab = tabs.find(t=>t[2])?tabs.find(t=>t[2])[0]:'painting';
   [...tl.children].forEach(c=>c.classList.toggle('on',c.dataset.k===tab));
+  placeTab(false);
   renderView();
 }
+/* 把「会滚的胶囊」落到选中那颗上。一律用 offset*（布局值）：
+   getBoundingClientRect 会把弹层飞入动画的 scale(0.12) 乘进去，量到的落位是错的。
+   anim=false 时关掉过渡（首次落位 / 标签条重建），否则每次打开弹层它都从上个位置飞一次。 */
+function slidePill(sl, on, anim){
+  if(!sl||!on) return;
+  const set=()=>{ sl.style.setProperty('--x',on.offsetLeft+'px'); sl.style.setProperty('--y',on.offsetTop+'px');
+    sl.style.setProperty('--w',on.offsetWidth+'px'); sl.style.setProperty('--h',on.offsetHeight+'px'); };
+  if(anim){ set(); return; }
+  const t=sl.style.transition; sl.style.transition='none'; set();
+  void sl.offsetWidth; sl.style.transition=t;
+}
+/* 标签条滑块落位。⚠️ 弹层 display:none 时 offset* 全为 0：openShip 里 setSkin 跑得比
+   显示早，所以那里补了一次 placeTab(false)。 */
+function placeTab(anim){
+  const tl=document.getElementById('mTabs'); if(!tl) return;
+  slidePill(tl.querySelector('.tslide'), tl.querySelector('.tab.on'), anim);
+}
+window.addEventListener('resize',()=>placeTab(false));
 function renderView(){
   if(curVM){ curVM.flush(); curVM=null; }
+  /* 换标签/换皮肤时整块内容淡入一下：强制重排让 animation 每次都能重放 */
+  viewEl.classList.remove('swap'); void viewEl.offsetWidth; viewEl.classList.add('swap');
   stopSpine(); stopLive2D(); stopSkinVoice(); const sk=curSkin;
   if(tab==='painting'){
     const hasCg=!!sk.cg, hasRaw=!!sk.image;
@@ -767,7 +1404,7 @@ async function renderLive2D(s, sk){
       if(k>=1) rest=null; };
     app.ticker.add(restTick);
     const bar=document.getElementById('l2bar');
-    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn">判定区</button><button id="l2PanelBtn">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     const fillSel=()=>{ const cur=sel.value;
       sel.innerHTML=groups.map(g=>`<option value="${g}">${g}${voice[g]?'（语音）':''}</option>`).join('');
@@ -1197,18 +1834,25 @@ async function startSpine(s, sk){
 /* ---------- 类别分段控件：总数标注 + 点击切换分区 ---------- */
 (function initCatSeg(){
   const all=ships.reduce((a,s)=>{a[catOf(s)]++;return a;},{ship:0,story:0});
+  const seg=document.getElementById('fCat');
+  const sl=document.createElement('span'); sl.className='segslide'; seg.appendChild(sl);
+  const on=()=>seg.querySelector('button.on');
   document.querySelectorAll('#fCat button').forEach(b=>{
     const c=b.dataset.c;
     if(c==='ship')b.textContent='舰船 '+all.ship;
     else if(c==='story')b.textContent='剧情角色 '+all.story;
     else b.textContent='全部 '+ships.length;
-    b.onclick=()=>{catFilter=c; document.querySelectorAll('#fCat button').forEach(x=>x.classList.toggle('on',x===b)); renderGrid();};
+    b.onclick=()=>{catFilter=c; document.querySelectorAll('#fCat button').forEach(x=>x.classList.toggle('on',x===b));
+      slidePill(sl,on(),true); renderGrid();};
   });
+  slidePill(sl,on(),false);          // 文案带数字，宽度会变 ⇒ 必须填完文案再落位
+  window.addEventListener('resize',()=>slidePill(sl,on(),false));
 })();
 
 /* ---------- 全局交互开关：点画面出声 / 显示台词 ---------- */
 (function initOpt(){
   paintOpt();
+paintTheme();
   document.querySelectorAll('#gOpt button').forEach(b=>{
     const k=b.dataset.k;
     b.onclick=()=>{
@@ -1220,6 +1864,218 @@ async function startSpine(s, sk){
   });
   loadVoiceMap(); loadWords();   // 预热两张表：首开皮肤时不必等两次 fetch
 })();
+
+/* ---------- 背景：静止的水面，划过才起浪 ----------
+   实现分两半，各挑了各自最省事的那条路：
+     · 波动**模拟**在 CPU 上跑：一张 240×N 的 Float32 高度场 + 经典水高场递推
+       `next = (四邻之和/2 - prev) * 阻尼`。三缓冲轮换，一次遍历约三万次加减，
+       比搭 ping-pong FBO 省一半代码，也不依赖浮点纹理的可滤波性。
+     · **着色**交给 WebGL：高度场当 R8 纹理上传（LINEAR 滤波），片元里按邻域差
+       求法线 → 高光，按梯度模长 + 波峰位置 → 白沫。
+   ⚠️ 着色器里**没有 noise / fbm / curl 任何一个**——上一版那层"蓝色绸缎"肌理
+   就是从这几个函数里长出来的，这版在结构上不存在它们：画面上的每一道纹
+   都是用户自己划出来的，静止时场是平的，画布是全透明的。
+   循环是"有浪才跑"：能量掉到阈值下就清一次画布、不排下一帧 ⇒ 静止时逐像素完全相同。
+   ⚠️ 这段仍放在脚本末尾：它引用 mask / RM，写在它们前面会踩到 const 的暂时性死区。 */
+const BG = { mode:'none', err:'', cv:null, gl:null, prog:null, u:{}, tex:null, pack:null,
+             raf:0, lastT:0, last:null, t0:0, w:0, h:0, sw:0, sh:0, cur:null, prv:null, buf:null,
+             energy:0, peak:0, frames:0, strokes:0, rs:0.72, HS:620, P:null };
+function bgHex(h){ h=(h||'').trim();
+  if(h[0]!=='#'||(h.length!==7&&h.length!==4)) return [1,1,1];
+  let s=h.slice(1); if(s.length===3) s=s.split('').map(c=>c+c).join('');
+  return [parseInt(s.slice(0,2),16)/255, parseInt(s.slice(2,4),16)/255, parseInt(s.slice(4,6),16)/255]; }
+function bgColors(){
+  /* 颜色全部从 token 读 ⇒ 切主题只要重取一次，着色器不写死任何字面色。 */
+  const cs=getComputedStyle(document.documentElement);
+  BG.P = { foam:bgHex(cs.getPropertyValue('--w-foam')), glint:bgHex(cs.getPropertyValue('--w-glint')),
+           deep:bgHex(cs.getPropertyValue('--w-deep')),
+           gain:+(cs.getPropertyValue('--w-gain')||8), foamT:+(cs.getPropertyValue('--w-foamth')||0.010),
+           alpha:+(cs.getPropertyValue('--w-alpha')||0.95) };
+}
+function bgResize(){
+  if(!BG.cv) return;
+  BG.w=innerWidth; BG.h=innerHeight;
+  const k=Math.min(1.5, window.devicePixelRatio||1)*BG.rs;
+  BG.cv.width=Math.max(2,Math.floor(BG.w*k)); BG.cv.height=Math.max(2,Math.floor(BG.h*k));
+  /* 场按视口长宽比取格子：短边固定 240 格，够细到看不出方块、又少到 CPU 扛得住。 */
+  BG.sw=240; BG.sh=Math.max(60, Math.round(240*BG.h/Math.max(1,BG.w)));
+  const n=BG.sw*BG.sh;
+  BG.cur=new Float32Array(n); BG.prv=new Float32Array(n); BG.buf=new Float32Array(n);
+  BG.pack=new Uint8Array(n); BG.t0=0;
+  BG.last=null; BG.energy=0; BG.peak=0;
+  if(BG.gl){ BG.gl.viewport(0,0,BG.cv.width,BG.cv.height); bgClear(); }
+}
+function bgClear(){ if(BG.gl){ const g=BG.gl; g.clearColor(0,0,0,0); g.clear(g.COLOR_BUFFER_BIT); } }
+/* 帽形脉冲：比 exp 便宜得多，一圈内二次衰减，划出来的波源足够圆 */
+function bgStamp(sx, sy, amt, rad){
+  const sw=BG.sw, sh=BG.sh, cur=BG.cur, r2=rad*rad;
+  const x0=Math.max(1,Math.floor(sx-rad)), x1=Math.min(sw-1,Math.ceil(sx+rad));
+  const y0=Math.max(1,Math.floor(sy-rad)), y1=Math.min(sh-1,Math.ceil(sy+rad));
+  for(let y=y0;y<y1;y++){ const row=y*sw, dy=y-sy;
+    for(let x=x0;x<x1;x++){ const dx=x-sx, d2=dx*dx+dy*dy;
+      if(d2<r2) cur[row+x]+=amt*(1-d2/r2); } }
+}
+/* ⚠️ 阻尼必须按**秒**算，不能按帧：写成"每帧乘 0.964"的话，浪多久平完全取决于帧率——
+   60fps 下 2.4 秒平，挂上毛玻璃后无头只有十几帧，实测 20 秒还剩 0.015 不平（本轮撞到）。
+   真机上低端设备同样会被判成"背景永远在动"，所以这不是探针的问题，是实现的问题。
+   0.11 这个数是换算来的：0.964^60 ≈ 0.111，即"一秒衰减到 11%"，与原设计等价。 */
+function bgStep(dt){
+  const sw=BG.sw, sh=BG.sh, cur=BG.cur, prv=BG.prv, buf=BG.buf,
+        damp=Math.pow(0.11, Math.min(0.1, Math.max(0.001, dt)));
+  let e=0, pk=0;
+  for(let y=1;y<sh-1;y++){ const row=y*sw;
+    for(let x=1;x<sw-1;x++){ const i=row+x;
+      const v=((cur[i-1]+cur[i+1]+cur[i-sw]+cur[i+sw])*0.5 - prv[i])*damp;
+      buf[i]=v; e+=v*v; const a=v<0?-v:v; if(a>pk) pk=a; } }
+  /* 边界留一圈静水（吸收而非反射），否则浪回到池边会反弹回来把整个池子搅浑。 */
+  for(let x=0;x<sw;x++){ buf[x]=0; buf[(sh-1)*sw+x]=0; }
+  for(let y=0;y<sh;y++){ buf[y*sw]=0; buf[y*sw+sw-1]=0; }
+  BG.prv=cur; BG.cur=buf; BG.buf=prv;
+  BG.energy=e/(sw*sh); BG.peak=pk;
+}
+function bgUpload(){
+  const g=BG.gl, cur=BG.cur, pk=BG.pack, HS=BG.HS;
+  for(let i=0;i<pk.length;i++){ let v=128+cur[i]*HS; pk[i]=v<0?0:(v>255?255:v|0); }
+  g.bindTexture(g.TEXTURE_2D, BG.tex);
+  g.texImage2D(g.TEXTURE_2D,0,g.R8,BG.sw,BG.sh,0,g.RED,g.UNSIGNED_BYTE,pk);
+}
+const BG_VS = '#version 300 es\nin vec2 a_pos; out vec2 vUv;\nvoid main(){ vUv = a_pos*0.5+0.5; gl_Position = vec4(a_pos,0.0,1.0); }';
+const BG_FS = [
+'#version 300 es',
+'precision mediump float;',
+'in vec2 vUv;',
+'uniform sampler2D u_h;',
+'uniform vec2 u_tx;',
+'uniform vec3 u_foam, u_glint, u_deep;',
+'uniform float u_gain, u_foamT, u_alpha;',
+'out vec4 frag;',
+'void main(){',
+'  float h = texture(u_h, vUv).r;',
+'  float re= texture(u_h, vUv+vec2(u_tx.x,0.0)).r;',
+'  float le= texture(u_h, vUv-vec2(u_tx.x,0.0)).r;',
+'  float up= texture(u_h, vUv+vec2(0.0,u_tx.y)).r;',
+'  float dn= texture(u_h, vUv-vec2(0.0,u_tx.y)).r;',
+'  vec2 gr = vec2(re-le, up-dn);',
+'  float gm = length(gr);',
+'  vec3 nz = normalize(vec3(-gr.x*u_gain, -gr.y*u_gain, 1.0));',
+'  vec3 L  = normalize(vec3(-0.42, 0.55, 0.72));',
+'  float sp = pow(max(dot(reflect(-L,nz), vec3(0.0,0.0,1.0)),0.0), 28.0);',
+'  float crest = smoothstep(0.545, 0.70, h);',
+'  /* 两条来路取大：陡（梯度大）起沫 + 到了波顶也起沫。',
+'     只留前一条的话缓坡那一大片根本不白，看着就是"水变蓝了"而不是"起了浪花"。 */',
+'  float foam  = max(smoothstep(u_foamT, u_foamT*2.2, gm) * (0.30 + 0.70*crest), crest);',
+'  float body  = abs(h-0.5)*2.0;',
+'  float a = clamp(foam + sp*0.9 + body*0.06, 0.0, 1.0) * u_alpha;',
+'  vec3 col = (u_foam*foam + u_glint*sp*0.9 + u_deep*body*0.06) / max(a, 1e-3);',
+'  frag = vec4(clamp(col,0.0,1.0), a);',
+'}'].join('\n');
+function bgShader(ty, src){
+  const g=BG.gl, s=g.createShader(ty); g.shaderSource(s,src); g.compileShader(s);
+  if(!g.getShaderParameter(s,g.COMPILE_STATUS)){ BG.err=g.getShaderInfoLog(s)||'compile'; return null; }
+  return s;
+}
+function bgInit(){
+  const g=BG.gl=BG.cv.getContext('webgl2',{alpha:true, premultipliedAlpha:false, powerPreference:'low-power'});
+  if(!g){ BG.mode='css'; BG.err='no webgl2'; return; }
+  const vs=bgShader(g.VERTEX_SHADER,BG_VS), fs=bgShader(g.FRAGMENT_SHADER,BG_FS);
+  if(!vs||!fs){ BG.mode='css'; return; }
+  const pr=g.createProgram(); g.attachShader(pr,vs); g.attachShader(pr,fs); g.linkProgram(pr);
+  if(!g.getProgramParameter(pr,g.LINK_STATUS)){ BG.mode='css'; BG.err=g.getProgramInfoLog(pr)||'link'; return; }
+  BG.prog=pr; BG.mode='gl'; g.useProgram(pr);
+  const vao=g.createVertexArray(); g.bindVertexArray(vao);
+  const b=g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER,b);
+  g.bufferData(g.ARRAY_BUFFER,new Float32Array([-1,-1, 3,-1, -1,3]),g.STATIC_DRAW);
+  const loc=g.getAttribLocation(pr,'a_pos'); g.enableVertexAttribArray(loc);
+  g.vertexAttribPointer(loc,2,g.FLOAT,false,0,0);
+  ('u_h u_tx u_foam u_glint u_deep u_gain u_foamT u_alpha').split(' ')
+    .forEach(n=>{ BG.u[n]=g.getUniformLocation(pr,n); });
+  BG.tex=g.createTexture(); g.bindTexture(g.TEXTURE_2D,BG.tex);
+  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_MIN_FILTER,g.LINEAR);
+  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_MAG_FILTER,g.LINEAR);
+  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_WRAP_S,g.CLAMP_TO_EDGE);
+  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_WRAP_T,g.CLAMP_TO_EDGE);
+  g.disable(g.DEPTH_TEST); g.enable(g.BLEND);
+  g.blendFunc(g.SRC_ALPHA,g.ONE_MINUS_SRC_ALPHA);
+}
+function bgRender(){
+  const g=BG.gl, P=BG.P;
+  g.useProgram(BG.prog); g.activeTexture(g.TEXTURE0); g.bindTexture(g.TEXTURE_2D,BG.tex);
+  g.uniform1i(BG.u.u_h,0);
+  g.uniform2f(BG.u.u_tx, 1/BG.sw, 1/BG.sh);
+  g.uniform3fv(BG.u.u_foam,P.foam); g.uniform3fv(BG.u.u_glint,P.glint); g.uniform3fv(BG.u.u_deep,P.deep);
+  g.uniform1f(BG.u.u_gain,P.gain); g.uniform1f(BG.u.u_foamT,P.foamT); g.uniform1f(BG.u.u_alpha,P.alpha);
+  g.drawArrays(g.TRIANGLES,0,3);
+}
+/* 收摊阈值定在**峰值高度**而不是平均能量：平均会被一大片微弱余波摊薄，
+   而肉眼看到的从来只是最高的那道浪。
+   ⚠️ 这个数**不能贴着衰减尾端定**：实测划满两笔后 peak 从 0.18 一路衰减，
+   到第 5.7 秒是 0.00446 —— 而旧阈值正好是 0.0045，于是"能不能收到摊"
+   取决于最后一帧的运气，探针 10 秒轮询直接读成"水永远不平"（本轮真实撞到）。
+   现在按可见性反推：HS=620 ⇒ v=0.012 对应纹理里 58/255 的偏离，
+   着色器里 body = |h-0.5|*2 = 0.116、alpha 上限 0.116×0.06 ≈ 0.007 —— 仍然不可见，
+   但离衰减尾端有 2.7 倍余量。 */
+const BG_EPS = 0.012;
+function bgDraw(ts){
+  if(RM.matches || mask.classList.contains('on')){ BG.raf=0; bgClear(); return; }
+  const dt=BG.t0 ? Math.min(0.1,(ts-BG.t0)/1000) : 1/60; BG.t0=ts;
+  bgStep(dt); bgUpload(); bgRender(); BG.frames++;
+  if(BG.peak > BG_EPS){ BG.raf=requestAnimationFrame(bgDraw); }
+  else { BG.raf=0; bgClear(); }          // 收摊：清成全透明，回到"逐像素静止"
+}
+function bgStart(){ if(!BG.raf && BG.mode==='gl') { BG.raf=requestAnimationFrame(bgDraw); } }
+/* 指针 → 水高场。走 window 的 pointermove：卡片自己也要收 hover，不能抢事件。 */
+function bgWake(x, y, down){
+  if(RM.matches || BG.mode!=='gl' || mask.classList.contains('on')) return;
+  const sx=x/innerWidth*BG.sw, sy=(1-y/innerHeight)*BG.sh;      // 纹理 y 轴翻转对齐 gl_FragCoord
+  let lx=sx, ly=sy, dx=0, dy=0;
+  if(BG.last){ lx=BG.last[0]; ly=BG.last[1]; dx=sx-lx; dy=sy-ly; }
+  BG.last=[sx,sy]; BG.lastT=performance.now();
+  const sp=Math.hypot(dx,dy);
+  /* 指针「瞬移」不算划水：光标从窗口外进来、跨标签页回来、探针把光标一下挪到角落，
+     都会给出一个几百格的位移 —— 按速度插值就等于**沿那条直线糊一道浪**，
+     用户看到的是"我什么都没做，背景自己被划了一道"，而且这道浪正好落在底部空带里。
+     （本轮就是靠"静止两帧必须逐像素相同"这条判据抓出来的。）超过阈值只挪锚点、不起浪。 */
+  if(!down && sp>45) return;
+  if(down || sp<0.3){
+    bgStamp(sx, sy, down?0.028:0.0022, down?5.0:2.4);            // 按下 = 一颗水滴；慢速 = 微澜
+  } else {
+    const amt=Math.min(0.042, 0.009+sp*0.0040);                 // 上限必须有：不然划一下糊一屏白
+    const rad=Math.max(2.2, Math.min(7.0, 2.0+sp*0.45));
+    const steps=Math.max(1, Math.min(12, Math.round(sp/(rad*0.5))));
+    /* 偶极注入：前进方向给正、身后给负 —— 才有"船头波"那种向外摊开的浪，
+       只注正脉冲等于在原地搅水，波前是圆的不走方向。 */
+    for(let k=1;k<=steps;k++){
+      const f=k/steps, px=lx+dx*f, py=ly+dy*f;
+      bgStamp(px+dx*0.12, py+dy*0.12,  amt,        rad);
+      bgStamp(px-dx*0.16, py-dy*0.16, -amt*0.70,   rad*0.85);
+    }
+    BG.strokes++;
+  }
+  bgStart();
+}
+let bgPend=null;
+window.addEventListener('pointermove',e=>{
+  /* 节流到每帧一次：触摸板 pointermove 能到 120Hz，每次都写场就是白烧 CPU。
+     但**不能丢坐标**——丢中间点会让快速拖动在场上留下断口，所以取最新值。 */
+  if(RM.matches || BG.mode!=='gl') return;
+  if(bgPend) return;
+  bgPend=requestAnimationFrame(()=>{ bgPend=null; bgWake(e.clientX,e.clientY,false); });
+},{passive:true});
+window.addEventListener('pointerdown',e=>{ bgWake(e.clientX,e.clientY,true); },{passive:true});
+window.addEventListener('blur',()=>{ BG.last=null; });
+function bgSync(){
+  const host=document.getElementById('bgfx'); if(!host) return;
+  if(RM.matches){ if(BG.raf){ cancelAnimationFrame(BG.raf); BG.raf=0; } bgClear(); return; }
+  if(!BG.cv){
+    BG.cv=document.createElement('canvas'); host.appendChild(BG.cv);
+    bgColors(); bgInit(); bgResize();
+    window.addEventListener('resize',bgResize);
+    if(BG.mode!=='gl'){ BG.cv.remove(); BG.cv=null; return; }
+  }
+  bgStart();
+}
+RM.addEventListener('change',bgSync);
+bgSync();
 
 /* 启动必须走 apply() 而不是 renderGrid()：view 的初值是 ships.slice()（索引原序），
    而排序只发生在 apply() 里，apply() 又只绑在筛选控件的 change/input 事件上。

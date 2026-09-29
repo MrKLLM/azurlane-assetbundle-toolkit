@@ -66,7 +66,12 @@ class Page:
     def ev(self, expr):
         r = self.cmd('Runtime.evaluate', {'expression': expr, 'returnByValue': True, 'awaitPromise': True})
         if r.get('exceptionDetails'):
-            return 'EXC ' + str(r['exceptionDetails'].get('exception', {}).get('message'))[:200]
+            ed = r['exceptionDetails']
+            ex = ed.get('exception', {}) or {}
+            # SyntaxError 的信息在 text / description 里，**不在 message 里**——
+            # 只取 message 会输出一句没用的 "EXC None"（2026-09-28 白转两轮）。
+            msg = ex.get('description') or ex.get('value') or ed.get('text') or 'no detail'
+            return 'EXC ' + str(msg)[:300]
         return r.get('result', {}).get('value')
 
     def shot(self, path):
