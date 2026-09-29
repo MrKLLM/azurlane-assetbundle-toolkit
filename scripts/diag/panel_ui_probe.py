@@ -9,9 +9,9 @@
   py -3 scripts/diag/panel_ui_probe.py --port 8791          # CDP 口默认 8791+100
   py -3 scripts/diag/panel_ui_probe.py --win 2560,1440      # 按真实分辨率看观感
 
-背景层沿用画廊已验证的两条硬判据（`docs/WORKFLOWS.md` WF-16 追加、§62）：
+背景层（东京夜星野）沿用画廊换来的两条硬判据（`docs/WORKFLOWS.md` WF-16 追加、§62、§66）：
   · 静止：隔 1.3s 两帧**逐像素完全相同**（背景自己在动就过不了这条）
-  · 起浪 → 散回：真实划动后峰值 >0.004，且衰减完回到**同一个**静止态（不是另一个）
+  · 散开 → 聚回：真实划动后星点峰值位移 >6px，且收摊后回到**同一个**静止态（不是另一个）
 外加本界面特有的三条：
   · 颜色语义唯一：档位徽标不得与任何状态色同色（并反向断言状态色确实在用，防空判据）
   · 背景不渗进内容：卡片内部区域开/关背景两态逐像素一致
@@ -217,6 +217,29 @@ def region_diff(a_bytes, b_bytes, rects):
             'bg_px': int(bg.sum()), 'bg_chg': int((d[bg] > 3).sum())}
 
 
+def key(pg, k, code, vk):
+    """发一次**完整**的键盘事件。只给 text 不给 key 时 e.key 是 undefined，
+    页面里按 e.key 分派的键位全都不会触发 —— 那是探针没模拟到位，不是产品坏了。"""
+    for t in ('keyDown', 'keyUp'):
+        pg.cmd('Input.dispatchKeyEvent', {'type': t, 'key': k, 'code': code,
+                                          'text': k if len(k) == 1 else '',
+                                          'windowsVirtualKeyCode': vk,
+                                          'nativeVirtualKeyCode': vk})
+
+
+def quiesce(pg):
+    """把画面钉死到"没有进行中的动画、也没有轮询会来打断"，再量几何/拍照。
+
+    ⚠️ 少了这步会假红：阶段卡带 animation-delay + backwards 填充，刚 render 完的
+    零点几秒里它其实停在 translateY(7px) 上 ⇒ 此时量的矩形比最终位置低 7px，
+    两张照片一比就在卡片下沿多出一条 11px 差异带（实测把"背景渗进数据面"顶到 162，
+    量的其实是入场动画淡入到第几帧）。
+    """
+    pg.ev(EV('window.__probe && window.__probe.stop(); return 1'))
+    pg.ev(EV('document.getAnimations().forEach(a=>{try{a.finish()}catch(e){}}); return 1'))
+    time.sleep(0.25)
+
+
 def park(pg, x=6, y=6, wait=0.35):
     """把指针停到没有任何 hover 的角落。划水那步用的是 CDP 可信鼠标，
     停在哪就点亮哪张卡的 :hover（实测把卡片抬 1px ⇒ 文字逐通道差 209）——
@@ -307,8 +330,11 @@ def main():
     chk('抽屉能关（Esc）', pg.ev(EV("return !document.querySelector('#help').classList.contains('on')")))
 
     print('\n── 背景层：静止 / 起浪 / 不遮挡 ──────────────────')
-    chk('水面着色器起来了', pg.ev('BG.mode') == 'gl', pg.ev('BG.err') or '(css 兜底)')
-    chk('静止时不排帧（循环自己停了）', pg.ev('BG.raf') == 0, f"raf={pg.ev('BG.raf')}")
+    chk('星野建起来了（不是空画布）', (pg.ev('ST.list.length') or 0) > 200,
+        f"{pg.ev('ST.list.length')} 颗星")
+    chk('静止时不排帧（循环自己停了）', pg.ev('ST.raf') == 0, f"raf={pg.ev('ST.raf')}")
+    # 量背景之前：停轮询 + 等入场动画收敛（两条都是假红来源，见 quiesce 的注释）
+    quiesce(pg)
     park(pg)
     rects = paint_rects(pg)
     size = Image.open(io.BytesIO(pg.shot('size'))).size
@@ -322,62 +348,96 @@ def main():
         f"内容区 {r12['ct_max']} · hero 纱区 {r12['hs_max']}")
     chk('静止两帧：不透明内容区也完全相同', r12['ct_max'] == 0, f"内容区最大差 {r12['ct_max']}")
 
-    pg.ev(EV('BG.strokes=0; BG.peak=0; return 1'))
-    # 两笔：一笔横穿底部海平面（背景可见区最该看到浪的地方），一笔斜穿到卡片之间的空隙
+    pg.ev(EV('ST.strokes=0; ST.peak=0; return 1'))
+    # 两笔：一笔横穿底部夜空带，一笔斜穿卡片之间的空隙——星点被推开的地方要在背景可见区里
     for i in range(24):
         pg.move(int(size[0] * (0.10 + 0.78 * i / 23)), int(size[1] * 0.955))
         time.sleep(0.02)
     for i in range(18):
         pg.move(int(size[0] * (0.85 - 0.70 * i / 17)), int(size[1] * (0.60 + 0.30 * i / 17)))
         time.sleep(0.02)
-    strokes = pg.ev('BG.strokes') or 0
-    time.sleep(0.30)              # 给波一点传播时间：它得从卡片底下走到露出来的带子里
-    park(pg, wait=0.10)         # 只把 hover 停回原处，不多等——等 0.55s 浪就衰到看不见了
-    peak = pg.ev('BG.peak') or 0
-    wave = pg.shot('wave')
-    rw = region_diff(still2, wave, rects)
-    chk('划过之后确实起浪（峰值 / 笔画 / 背景可见区像素三者都动）',
-        peak > 0.02 and strokes > 0 and rw['bg_chg'] > 300,
-        f"peak={peak:.4f} strokes={strokes} 背景可见区变了 {rw['bg_chg']} 个像素"
+    strokes = pg.ev('ST.strokes') or 0
+    peak = pg.ev('ST.peak') or 0
+    scattered = pg.shot('scattered')     # ⚠️ 立刻拍：一 park 就把指针停 0.35s，星点早聚回去了
+    park(pg, wait=0.10)                  # 只为了把 hover 停回原处，再拍一张"聚回前"的对照
+    rw = region_diff(still2, scattered, rects)
+    chk('划过之后星点确实散开（位移峰值 / 笔画 / 背景可见区像素三者都动）',
+        peak > 6 and strokes > 0 and rw['bg_chg'] > 300,
+        f"峰值位移 {peak:.1f}px strokes={strokes} 背景可见区变了 {rw['bg_chg']} 个像素"
         f"（最大差 {rw['bg_max']}）· 内容区差 {rw['ct_max']} · hero 纱区差 {rw['hs_max']}")
 
     for _ in range(60):
-        if pg.ev('BG.raf') == 0:
+        if pg.ev('ST.raf') == 0:
             break
         time.sleep(0.5)
-    time.sleep(0.4)
+    quiesce(pg)
     back = pg.shot('still_back')
     rb = region_diff(still1, back, rects)
-    field = pg.ev(EV('let m=0; for(const v of BG.cur) if(Math.abs(v)>m) m=Math.abs(v); return m'))
-    chk('浪散完回到**同一张**静止帧（不是另一张）',
-        pg.ev('BG.raf') == 0 and rb['bg_max'] == 0 and rb['ct_max'] == 0,
-        f"raf={pg.ev('BG.raf')} 高场残留 {field:.2e} 背景区差 {rb['bg_max']} "
-        f"内容区差 {rb['ct_max']} hero 纱区差 {rb['hs_max']}")
+    resid = pg.ev(EV('let m=0;for(const t of ST.list){const d=Math.abs(t.x-t.hx)+Math.abs(t.y-t.hy);'
+                     'if(d>m)m=d;}return m'))
+    # 背景可见区**严格为 0** + 每颗星残留位移为 0 —— 这两条才是"聚回同一张帧"的本体。
+    # 内容区只报不判：画布每重绘一次，Chrome 就把文字层重新光栅化一遍，字边缘能差到 150+，
+    # 那是合成器的行为，不是"背景渗进来了"（本轮先误当成产品问题查了一轮）。
+    # 数据面到底漏不漏，改由下面两条结构性判据来定：底色 alpha + 几何包含。
+    chk('星点聚回**同一张**静止帧（背景区严格为 0、残留位移为 0）',
+        pg.ev('ST.raf') == 0 and resid == 0 and rb['bg_max'] == 0,
+        f"raf={pg.ev('ST.raf')} 残留位移 {resid:.2e}px 背景区差 {rb['bg_max']} "
+        f"（内容区差 {rb['ct_max']} 与 hero 纱区差 {rb['hs_max']} 只报不判：重光栅化噪声）")
 
+    opaque = pg.ev(EV("""
+      const bad=[];
+      document.querySelectorAll('header,.pane,.stage,pre,.sheets a,.sheets img,.meter,.step')
+        .forEach(e=>{ const c=getComputedStyle(e).backgroundColor;
+          const m=c.match(/[\d.]+\s*[,\/]\s*([\d.]+)\)?$/);
+          const a=c.startsWith('rgba')?(m?parseFloat(m[1]):0):1;
+          if(c!=='rgba(0, 0, 0, 0)' && a<0.995) bad.push(e.className+' '+c); });
+      return bad.slice(0,6)
+    """))
+    chk('数据面底色全部不透明（alpha=1）', not opaque, '漏: ' + str(opaque))
+    quiesce(pg)
     boxes = card_boxes(pg)
-    pg.shot('sea_on')
+    pg.shot('stars_on')
     pg.ev(EV("document.querySelector('#bSea').click(); return 1"))
     time.sleep(0.7)
     plain_on = pg.ev(EV("return document.body.classList.contains('plain')"))
-    chk('素面开关关掉：class 生效且不排帧', bool(plain_on) and pg.ev('BG.raf') == 0,
-        f'plain={plain_on} raf={pg.ev("BG.raf")}')
+    chk('星辰开关关掉：class 生效且不排帧', bool(plain_on) and pg.ev('ST.raf') == 0,
+        f'plain={plain_on} raf={pg.ev("ST.raf")}')
     plain = pg.shot('plain')
-    # 正向对照：「背景不渗进卡片」这条**只有背景真的在画**才算数，
-    # 否则把背景整层删掉也能得满分（本项目最容易犯的假绿灯之一）。
-    smax, smean, _ = diff_png(still1, plain)
-    chk('关背景后整屏确实变了（背景层是活的，防上一条成为空判据）',
-        smax > 40 and smean > 0.5, f'整屏最大差 {smax} 均值差 {smean:.3f}')
-    per = []
-    for bx in boxes:
-        m, mn, _ = diff_png(still1, plain, tuple(bx))
-        per.append((m, round(mn, 4), bx))
-    per.sort(reverse=True)
-    dmax = per[0][0] if per else -1
-    dmean = max(p[1] for p in per) if per else 0.0
-    worst = per[0][2] if per else None
-    chk(f'背景不渗进数据面（{len(boxes)} 处卡+日志，开/关两态逐像素一致）',
-        dmax == 0 and len(boxes) > 0,
-        f'最大差 {dmax}（最差块 {worst}）· 逐块 {[(p[0], p[2][0]) for p in per[:8]]}')
+    # 正向对照：这条**只有背景真的在画**才算数，否则把背景整层删掉也能拿满分。
+    # 只比背景可见区——切开关会改变合成层，Chrome 重新光栅化后全站文字边缘都能差 ±20，
+    # 那与"渗不渗进来"无关（实测整屏比会量到 20 万个这种点，全是字边缘）。
+    rt = region_diff(still1, plain, rects)
+    chk('关背景后背景可见区确实空了（星野是活的，防"不渗进来"成为空判据）',
+        rt['bg_chg'] > 3000,
+        f"背景可见区少了 {rt['bg_chg']} 个像素的内容（整屏最大差 {rt['bg_max']} 含重光栅化"
+        f"的字边缘，不作判据）")
+    # 结构判据：**每个数据元素整张坐在一个不透明面板里**。
+    # 与"面板底色 alpha=1"两条合起来，才是"背景渗不进来"的可证形式——
+    # 逐像素那条在这个页面上量到的是重光栅化噪声（见上）。
+    leak = pg.ev(EV('''
+      const out=[];
+      document.querySelectorAll('.stage,pre,.sheets a,.sheets img,.meter,.runs td')
+        .forEach(e=>{
+          const r=e.getBoundingClientRect();
+          if(r.width<2||r.height<2) return;
+          const p=e.closest('.pane,header');
+          if(!p){ out.push((e.className||e.tagName)+':不在任何面板里'); return; }
+          const q=p.getBoundingClientRect();
+          if(r.left<q.left-0.5||r.top<q.top-0.5||r.right>q.right+0.5||r.bottom>q.bottom+0.5)
+            out.push((e.className||e.tagName)+' 越出面板');
+        });
+      return out.slice(0,8)
+    '''))
+    chk('每个数据元素都整张坐在不透明面板内', not leak, '漏: ' + str(leak))
+    inside = pg.ev(EV('''
+      const b=boxes=>boxes;
+      const cs=getComputedStyle(document.querySelector('.stage'));
+      const ps=getComputedStyle(document.querySelector('.pane'));
+      const a=c=>{const m=c.match(/rgba\([^)]*,\s*([\d.]+)\)/);return m?+m[1]:1;};
+      return [a(cs.backgroundColor)<=0.995?0:1, a(ps.backgroundColor)<=0.995?0:1]
+    '''))
+    chk('卡片与面板底色实测不透明（正向：防上面那条成为空判据）',
+        inside == [1, 1], f'实测 [卡片, 面板] 不透明={inside}')
 
     shbox = pg.ev(EV("""
       const e=document.querySelector('.sheets img'); if(!e) return null;
@@ -439,6 +499,48 @@ def main():
         pg.ev(EV(f'step={n}; render(); return 1'))
         time.sleep(0.35)
         pg.shot(f'step{n}')
+
+    # ── 交互：键位 / 日志筛选 / 签字点亮 / 卡与左轨联动 ────────────────
+    print()
+    print('── 交互（键盘 / 筛选 / 联动）─────────────────────')
+    pg.ev(EV('window.__probe.go(1); return 1'))
+    quiesce(pg)
+    key(pg, '3', 'Digit3', 52)
+    time.sleep(0.35)
+    chk('键盘 3 直接跳到第③步', pg.ev(EV('return step')) == 3,
+        'step=%s 标题=%s' % (pg.ev(EV('return step')),
+                             pg.ev(EV('return document.getElementById("sTitle").textContent'))))
+    key(pg, 'h', 'KeyH', 72)
+    time.sleep(0.3)
+    opened = pg.ev(EV("return document.querySelector('#help').classList.contains('on')"))
+    key(pg, 'Escape', 'Escape', 27)
+    time.sleep(0.25)
+    closed = pg.ev(EV("return !document.querySelector('#help').classList.contains('on')"))
+    chk('键盘 H 开抽屉、Esc 再关掉', bool(opened) and bool(closed),
+        f'开={opened} 关={closed}')
+    pg.ev(EV('LINES=["✅ a","❌ b","!! c","普通行","未签字 d"];'
+             'FILT="all"; renderLog(); return 1'))
+    n_all = len(pg.ev(EV("return document.getElementById('log').textContent")).splitlines())
+    pg.ev(EV('FILT="bad"; renderLog(); return 1'))
+    bad = pg.ev(EV('return document.getElementById("log").textContent'))
+    chk('日志筛选「只看红」只留红行',
+        ('❌' in bad) and ('!!' in bad) and ('普通行' not in bad),
+        f'全量 {n_all} 行 → 筛后 {len(bad.splitlines())} 行')
+    pg.ev(EV('FILT="all"; renderLog(); return 1'))
+    pg.ev(EV('window.__probe.go(4); return 1')); quiesce(pg)
+    lit = pg.ev(EV("""
+      const cb=document.querySelector('.appr');
+      if(!cb) return 'no-checkbox';
+      cb.checked=true; cb.dispatchEvent(new Event('change'));
+      return document.querySelector('.signbox').classList.contains('on')"""))
+    chk('勾上签字框会把该框点亮（签字要有反馈）', lit is True, str(lit))
+    pg.ev(EV('window.__probe.go(2); return 1')); quiesce(pg)
+    pg.ev(EV("""
+      const el=document.querySelector('.stage');
+      el.dispatchEvent(new MouseEvent('mouseenter')); return 1"""))
+    hot = pg.ev(EV("return !!document.querySelector('.dot.hot')"))
+    chk('悬停阶段卡会点亮左轨对应的状态点', bool(hot),
+        '卡=%s' % pg.ev(EV('return document.querySelector(".stage .skey").textContent')))
     chk('全程无 JS 异常', not pg.exc, ' | '.join(pg.exc[:3]))
     pg.close()
 
