@@ -888,7 +888,7 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
 **适用场景**: 改 `gallery_src/index.html` 的 hover / 入场 / 弹层开合 / 主题切换 / 选中态胶囊一类。
 
 ```bash
-py -3 scripts/diag/gallery_motion_probe.py --page index_q.html --baseline index.html --win 1440,900
+py -3 scripts/diag/gallery_motion_probe.py --page index.html --win 1440,900   # 09-29 起样板页已刷进正本
 ```
 
 **十六条判据（脚本里逐条实现，全部走真实入口：点卡片 / 点标签 / 点开关，不直接调内部函数）**
