@@ -1391,3 +1391,79 @@ files/AssetBundles/sharecfgdata/ship_skin_words
 `scripts/diag/talk_verify.py`、`scripts/build_gallery_index.py`、`gallery_src/index.html`、
 `tools/sharecfg_re/42_publish_gamecfg.py`、`inputs/gamecfg/{ship_skin_words,character_voice}.json`。
 相关：`WF-21`（语音 v2 导出）、`WF-16`（回归六件套，第 6 件就是本 WF 的 `talk_verify`）、`WF-15`（换入闸门）、§47/§49/§53/§54。
+
+---
+
+### WF-23: 游戏更新一条龙 —— `scripts/update_pipeline.py` 阶段机（把 WF-15 变成一条命令）
+
+**日期**: 2026-09-29
+**目标**: 游戏出新版本后，不用人对着 WF-15 那 11 步手敲十几个命令。**一条命令跑到「待你确认」**
+（所有重活只写临时区），看过对照表再**第二条命令签字换入**。
+
+```bash
+py -3 scripts/update_pipeline.py --plan                 # 只读：这次会动什么、哪些档要签字
+py -3 scripts/update_pipeline.py                        # preflight→…→review，live 档一律不放行
+py -3 scripts/update_pipeline.py --approve deps meta    # 点名放行指定 live 档
+py -3 scripts/update_pipeline.py --approve swap-in derive   # 看过对照表后换入
+py -3 scripts/update_pipeline.py --full                 # 全量（先报规模、要手输 FULL 才动）
+py -3 scripts/update_pipeline.py --only spine --force   # 只重跑某阶段，绕过"本指纹已完成"缓存
+```
+
+**阶段三档**（决定它能不能自动跑）：
+
+| 档 | 含义 | 行为 |
+|---|---|---|
+| `read` | 只读检查 | 永远自动跑，**永不缓存** |
+| `staged` | 只写 `.diag/pipeline/` | 自动跑，按输入指纹缓存 |
+| `live` | 写 `Output/` 或 `files/` | **必须 `--approve` 点名**，否则只做该阶段的只读那半并告诉你怎么放行 |
+
+`pull deps meta audio cg swap-in derive` 是 live 档。
+
+**三条设计约束（改这个文件前先读，都是踩出来的）**：
+
+1. **退出码不作通过证据。** 盘点出来的事实是：`export_cue_audio` / `make_thumbs` /
+   `fix_model3` / `extract_spine_v2` / `compose_paintings_v2` / `l2d_motion_audit` /
+   `spine_parts_prefab_diff` / `voice_gap_audit` / `run_cg_export` **失败时照样 exit 0**。
+   所以每个阶段自带判据：数 `✗` 行、数 `完成N 跳过N 失败N`、要求 `[SUMMARY] 模型 i/n 处理完`
+   这种收尾行、或直接跑对应的 gate 脚本（`l2d_texorder_check` / `l2d_tex_completeness` /
+   `ship_meta_authority_diff` / `gallery_index_diff_check` / `deploy_gallery --check`）。
+   **没有判据的阶段不许算通过。**
+2. **写向优先 argv；只有 env 通道的脚本必须把注入值打出来。**
+   `build_gallery_index.py`（只有 `GALLERY_OUT_DIR`，无任何 argv）、`fix_model3.py`
+   （只有 `L2D_OUT_DIR`）、`make_thumbs.py`、`deploy_gallery.py` 属此类。
+   2026-09-24 那次 269 个模型被原地覆写（§25），根因就是脱离进程下 env 能不能被子进程读到
+   **不可复现**。⇒ 编排器对这几个显式注入并回读打印；也因此"用新元数据预览索引"
+   这一步**没法只落临时区**（`ship_meta.json` 路径写死），只能归进 live 档。
+3. **覆写一批产物之前先扫 `st_nlink`。** 历史上做过逐字节去重，共享 inode 的两个名字
+   「写一个变两个」，会让修复看起来完全失效（§64）。`review` 阶段把待断清单写
+   `.diag/pipeline/hardlinks.txt`，`swap-in` 据此决定是否带 `--break-hardlink`。
+
+**状态与续跑**：`.diag/pipeline/pipeline_state.json` 记输入指纹（源包文件数 + 依赖表 md5）
+与每个 staged 阶段的结论。**只缓存判绿的 staged 档** —— 把失败或 `read` 档缓存下来，
+等于下次不再检查，正是这类工具最容易造的静默失效。输入指纹变了自动全部作废重判。
+
+**判据（怎么确认编排器本身没坏）**：
+- `--plan` 退出码 0 且列出 13 个阶段与 live 档清单；
+- `--only preflight,review` 在**没有任何临时产物**时也必须优雅判绿（不能抛异常）——
+  第一版就是 `chg` 未初始化直接崩，被这条抓到；
+- `--only spine` 配一个 2 行的 `.diag/pipeline/affected.txt`，应只处理这 2 个 stem、
+  产物落 `.diag/pipeline/Spine_v2/`、`Output/` 一字不动；
+- 再跑一次同一命令应打 `⏭ 本指纹下已完成…要重跑请加 --force`；加 `--force` 应真的重跑；
+- `--only deps`（live、未签字）应**跑完只读那半**（重生成到临时区 + 比出丢失数）再停下要签字。
+
+**踩坑**：
+- ⚠️ f-string 里嵌同种引号在 Python 3.11 直接 SyntaxError（3.12 才允许）。第一版
+  `f"增量 {len(todo) if todo else "未 detect"}"` 就是这么写的，编译期才炸。
+- ⚠️ `--only` 是**过滤器**不是"强制重跑"。第一版的跳过提示写成"要重跑请用 --only <key>"，
+  自相矛盾、照着做会以为缓存没生效 —— 另加 `--force` 才说清楚。
+- ⚠️ 别把一条龙做成"一键覆写一切"：AGENTS.md 要求全量运行前经确认，而换入不可逆。
+  两档命令（跑到待确认 / 签字换入）是这套东西能安全存在的前提。
+
+**涉及文件**：`scripts/update_pipeline.py`（★新增）、被它编排的
+`mumu_sync.py`、`export_dependency_manifest.py`、`build_ship_meta.py`、`compose_paintings_v2.py`、
+`extract_spine_v2.py`、`reconstruct_live2d.py`/`extract_motions.py`/`fix_model3.py`、
+`extract_cv_voice.py`、`run_cg_export.py`、`painting_swap_in.py`、`make_thumbs.py`、
+`build_gallery_index.py`、`deploy_gallery.py`、`wf16_regression.py`，
+以及闸门 `diag/{check_inputs,ship_meta_authority_diff,gallery_index_diff_check,l2d_texorder_check,l2d_tex_completeness,l2d_motion_audit,voice_gap_audit,l2d_voice_inventory,make_pair_sheet}.py`。
+相关：`WF-15`（本 WF 想替掉的那份手工 runbook，仍是权威细节来源）、`WF-16`（回归六件套）、
+`WF-22`/`WF-21`（语音与台词链路）、§25（写向走 argv）、§64（硬链吞修复）。

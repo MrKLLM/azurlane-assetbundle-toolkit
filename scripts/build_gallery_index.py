@@ -45,9 +45,31 @@ if os.path.exists(_sm_path):
     except Exception:
         SHIP_META = {}
 PLACEH = re.compile(r'\{namecode:\d+\}')
+# 配置表里有一类值**根本不是名字**：游戏自己用遮蔽块字符（▅▇■ 等 U+2580–U+259F）表示被和谐掉的
+# 字，还有一整串问号、以及长的拼音/十六进制回显。一旦当组名用，卡片上就会出现
+# `▅海▊▇洛▅■芬特▇▆`（实测组 hierophant）或 `？？？`（实测 dosair / unknown1）。
+# 判据按「像不像一个真名」写，**不按组名开例外名单**。
+# ⚠️ 纯 ASCII 那条只挡**长串**：`2B` / `A2` 是尼尔联动角色的真名（实测被误杀过一次），
+#    而 `544845544F574552`、`ladyE` 这类才是回显 —— 用长度 5 分开这两类。
+NOT_A_NAME = re.compile(r'^[\s？?！!。，,、\-—·]*$|[\u2580-\u259f]|^[A-Za-z0-9_\-\.\s]{5,}$')
+def _derived(cn, e):
+    """这个名字能撑起的三项字段（配置优先、Wiki 按中文名兜底）。"""
+    m = meta_by_cn.get(cn, {}) if cn else {}
+    return (bool(e.get('faction') or m.get('faction', '')),
+            bool(e.get('type') or m.get('ship_type', '') or m.get('type', '')),
+            bool(e.get('rarity') or m.get('rarity', '')))
+
+
+def _emptier(a, b):
+    """a 是否比 b 少撑起至少一项、且一项都没多起来。"""
+    return any((not x) and y for x, y in zip(a, b)) and not any(x and not y for x, y in zip(a, b))
+
+
 def _clean_cn(v):
-    """占位符/空/等于 stem 本身的 cn 视为无有效名。"""
-    return '' if (not v or PLACEH.search(v)) else v
+    """占位符/空/不像真名的 cn 视为无有效名；首尾空白先去掉再判
+    （实测 `仲裁者·英普拉·IV ` 带一个尾空格 —— 那是真名，不该和占位符一起被挡）。"""
+    v = (v or '').strip()
+    return '' if (not v or PLACEH.search(v) or NOT_A_NAME.search(v)) else v
 
 # 社区快照/拼音表译名与游戏官方中文名差异修正（与 build_ship_meta 保持一致，兜底路径也生效）
 NAME_FIX = {'贾斯科涅': '加斯科涅'}
@@ -139,15 +161,27 @@ def ship_of(base):
     # ⚠️ 只认「基皮肤自身」的 cn 作舰名（变体皮肤 cn 是皮肤标题，不能当舰名）；{namecode}占位符视为无名(§6#8)。
     resolved = bool(e.get('faction'))
     name_meta = _clean_cn(SHIP_META[base].get('cn')) if (resolved and base in SHIP_META) else ''
-    cn = name_meta or SHIP_NAME_MAP.get(base) or ''
-    # 组名最后一级兜底：base 是**合成前缀**（`linghangyuan1`/`nabulesi` 这类不是任何 stem 的组键）时，
-    # 取同 base 兄弟里最权威那条的 cn。刻意排在 SHIP_NAME_MAP 之后 —— 只可能把"当前显示拼音"的组
-    # 变成有名，既有名字一律不动；且要求该兄弟的 source 属于「从表里查到」的档，
-    # 否则 cn 可能只是未被解析的拼音回显。
-    if not cn and e.get('source') in AUTHORITATIVE_CN:
-        sib = _clean_cn(e.get('cn') or '')
-        cn = '' if sib == base else sib
+    # 同 base 兄弟上的配置权威名：base 是**合成前缀**（`linghangyuan1`/`nabulesi` 这类不是任何
+    # stem 的组键）、或组键自己那条没解析出阵营时，兄弟里可能恰恰带着干净的真名。
+    # 要求该条目的 source 属于「从表里查到」的档，否则 cn 可能只是未被解析的拼音回显。
+    sib_name = ''
+    if e.get('source') in AUTHORITATIVE_CN:
+        s = _clean_cn(e.get('cn') or '')
+        sib_name = '' if s == base else s
+    # ⚠️ 2026-09-29 用户拍板：兜底顺序改成**配置优先**，含已知错名的手抄表 SHIP_NAME_MAP 退到最后
+    # （旧顺序下 80 个组显示的是手抄表名而配置里另有真名，如 missr R小姐→好人理查德、
+    #   aijiang 海酱→绊爱、strength 力量→仲裁者·司特莲库斯·VIII）。
+    # 配置名要先过 `_clean_cn` 那道"像不像真名"的闸——挡掉 `？？？`/遮蔽块/纯 ASCII 之后，
+    # 这些组**保留手抄表名**，因为换了就是把占位符摆到卡片上。
+    cn = name_meta or sib_name or SHIP_NAME_MAP.get(base) or ''
     cn = NAME_FIX.get(cn, cn)   # 官方译名修正（兜底路径也生效）
+    # ⚠️ 零回退不变式：**改名不得让阵营/舰种/稀有度变得比原来更空**。
+    #    这三项是「配置优先，Wiki 按中文名兜底」，所以换一个名字会连带换掉 Wiki 那一跳的命中——
+    #    实测 kelei 从手抄表的「可畏」换成配置的「柯蕾」后，皇家/航母/超稀有 全掉、
+    #    category 从 ship 翻成 story。这类"名字更权威但字段塌了"的配置名一律不用。
+    hand = NAME_FIX.get(SHIP_NAME_MAP.get(base) or '', SHIP_NAME_MAP.get(base) or '')
+    if cn and hand and cn != hand and _emptier(_derived(cn, e), _derived(hand, e)):
+        cn = hand
     meta = meta_by_cn.get(cn, {}) if cn else {}
     npc = bool(re.match(r'(npc|linghangyuan|lingyangzhe)', base))
     # 阵营/舰种/稀有度：ship_meta 主，Wiki meta_by_cn 兜底（Wiki 覆盖仅 445，且须舰名先正确才可信）

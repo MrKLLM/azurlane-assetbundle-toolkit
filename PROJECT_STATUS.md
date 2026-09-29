@@ -1,6 +1,7 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-09-29 16:47
+> **生成时间**: 2026-09-29 18:11
+2026-09-29 16:47
 > 历轮会话流水（2026-09-20 ~ 09-27）已**逐字**外迁 `docs/archive/2026-09-26_PROJECT_STATUS_外迁归档.md`（A1~A15 段）；
 > 结论性知识在 `docs/TROUBLESHOOTING.md` §25~§64 与 `docs/WORKFLOWS.md` WF-14~WF-22。本文只留当前状态。
 > **最近三轮**：画廊视觉定稿刷进正本（见 **§6 顶部 ★ 块** + §62 + WF-16 追加）｜354 张「🔇 无语音」按可救性拆细并裁定关闭（**§57**）｜静态立绘「只画游戏里开着的层」根因修掉、换入 48 张（**§55**）+ 敦刻尔克改判（**§56**）。逐轮流水已逐字外迁归档 A15 段。
@@ -109,7 +110,7 @@
 
 ## 5. 关键文件清单
 
-**核心脚本**：`scan_assets.py`、`export_assets.py`、`export_cue_audio.py`、`reconstruct_live2d.py`/`fix_model3.py`/`extract_motions.py`(★2026-09-21 权威映射重写)/`apply_live2d_motions.py`(★临时目录→备份换入)、`compose_paintings_v2.py`(★v2)、`extract_spine_v2.py`(★v2)、`export_dependency_manifest.py`、`build_gallery_index.py`、`make_thumbs.py`、`deploy_gallery.py`(gallery_src↔Output 硬链/漂移检查)、`fetch_gallery_vendor.py`(按 vendor 台账 sha256 补齐第三方库)、`mumu_sync.py`、`ship_name_map.py`、`scrape_wiki_fast.py`。
+**核心脚本**：`scan_assets.py`、`export_assets.py`、`export_cue_audio.py`、`reconstruct_live2d.py`/`fix_model3.py`/`extract_motions.py`(★2026-09-21 权威映射重写)/`apply_live2d_motions.py`(★临时目录→备份换入)、`compose_paintings_v2.py`(★v2)、`extract_spine_v2.py`(★v2)、`export_dependency_manifest.py`、`build_gallery_index.py`、`make_thumbs.py`、`deploy_gallery.py`(gallery_src↔Output 硬链/漂移检查)、`fetch_gallery_vendor.py`(按 vendor 台账 sha256 补齐第三方库)、`mumu_sync.py`、`ship_name_map.py`、`scrape_wiki_fast.py`、**`run_v2_full.py`**(两阶段全量驱动)、**`update_pipeline.py`**(★2026-09-29 新增：WF-15 那条 runbook 的阶段机，一条命令跑到待确认、第二条命令签字换入，见 **WF-23**)。
 
 **可复用诊断/验证工具 `scripts/diag/`**（68 个脚本，下面只列承重的；"18 件"是长期未更新的旧计数）：`scan_faces.py`(脸洞扫描)、`make_face_cmp.py`/`make_review_sheet.py`(改前后对比图/复核总表)、`l2d_motion_audit.py`(★全量动作健康审计：空壳/错位/PartOpacity/时长，`L2D_OUT_DIR` 可审任意产物目录)、`l2d_ab.py`(★同一模型新旧 motion 的渲染级 A/B，**只在换入前构成对照**)、`l2d_diff_dirs.py`(★两个产物目录逐 clip gained/changed/lost)、`l2d_sweep.py`(★全量加载+动作内容判据扫描；**2026-09-22 重写为 Python 侧逐条 evaluate + 每 N 模型重载页面**，修掉旧版「单次 evaluate 卡第一条不返回」与「单 Chrome ~110 后 WebGL 断连」，全库 269/269 一次跑通)、`l2d_verify.py`/`l2d_click.py`(抽样与真实点击路径无头校验)、`hit_verify.py`(按部位点击触发断言，支持 `--only`；2026-09-23 起合成点击经 V2P 走**真实路径**)、`interact_verify.py`(滚轮/拖拽/兜底/空白/部位五项交互断言)、`l2d_coord_forensics.py`(★**2026-09-23 新增**：坐标系取证——可见头/胸/髋三点反查应落 Head/Special/Body，专治「张冠李戴」且不构成自洽闭环)、`l2d_inspector_verify.py`(★**2026-09-23 新增**：判定区可视化+参数·部件面板+滑杆往返+过滤器四项验收)、`run_cg_export.py`(Spine CG 批量导出驱动)、`dedup_plan.py`/`dedup_apply.py`/`dedup_httpverify.py`(硬链去重三件套)、`gen_story_md.py`(复核清单生成)、`server_wedge_probe.py`(★**2026-09-29 新增**：本地服务器"取消下载 ⇒ 泄漏 handler 线程"的剂量学探针，含真异常仍留痕的对照组，见 §63)、`precheck_red_test.py`(★**2026-09-29 新增**：给 WF-16 预检做红路径测试——用"照收连接、回 200 但 0 字节"的桩验闸门真的会红)。**游戏版本更新怎么跑 → WF-15**；**Live2D 动作重建怎么跑 → WF-7**；**Live2D 网页交互改动/回归怎么跑 → WF-16**。
 
@@ -139,7 +140,14 @@
    全库 `hit_verify` **269 模型 / 3309 部位 / WIRING=0 / OUTSIDE=0**，可点中率 3212/3309=97.1%，
    随机性抽查 197 模型不合格 0；与 §27 基线（HIT 2338/INGROUP 905/WIRING 0）比 HIT-11/INGROUP+11
    而总数不变 ⇒ 多候选处随机分布抖动，非回退。`talk_verify` 全 PASS。
-2. 元数据那条活待办仍在：112 组手抄表名 vs 配置权威名，换兜底顺序**未经拍板不得动**（见下）。
+2. 🟡 **元数据那条活待办：前提已被实测推翻，等用户勾表**。原记"112 组显示手抄表名、换配置优先会影响 112 张卡"；
+   2026-09-29 逐组量过：**84 组**两个名字都有且不同 → 其中 **49 组配置名属于另一个实体**
+   （`gangute`→`甘古特·META`、`dahuangfeng`→`大黄蜂·META` 等 META 形态，零回退不变式自动挡下）；
+   剩下 55 组里 **10 组只是去掉首尾空白**（配置表里名字自带尾空格，此前直接印在卡片上），
+   **45 组真换名**（含 10 组仲裁者系列"短显示名→全称"属口味题）。**待勾表在 `docs/name_review_20260929.md`**。
+   ⚠️ 配置名混有**占位垃圾**（`hierophant` 的配置名是 `▅海▊▇洛▅■芬特▇▆`、`dosair` 是 `？？？`、
+   `ladyE`），已按"像不像真名"写成判据挡掉而非开例外名单；`2B`/`A2` 是尼尔联动真名，
+   纯 ASCII 规则第一版误杀过、已改成只挡长串。**代码已入库但线上索引未换入** —— 所以下次跑 `build_gallery_index.py`（或 `update_pipeline.py --approve derive`）会一次改掉 55 组显示名，那一步是 live 档、要签字。
 3. ✅ **`.diag/` 已清**（2026-09-29：`clean_diag_profiles.py` 先干跑后 `--yes`，只碰 `chrome_*`）：
    删 49 个 profile / **释放 4.42 GiB**，`.diag` 现 8.4G。⚠️ 顺带查出一笔**别人欠的债**：
    `.diag/` 顶层还堆着 **62 个 `.py`**，违反 AGENTS.md 收尾清单第 4 条「不留唯一副本代码」——
