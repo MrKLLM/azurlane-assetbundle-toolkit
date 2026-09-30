@@ -11,7 +11,8 @@
 
 背景层（东京夜星野）沿用画廊换来的两条硬判据（`docs/WORKFLOWS.md` WF-16 追加、§62、§66）：
   · 静止：隔 1.3s 两帧**逐像素完全相同**（背景自己在动就过不了这条）
-  · 散开 → 聚回：真实划动后星点峰值位移 >6px，且收摊后回到**同一个**静止态（不是另一个）
+  · 显影 → 淡净：静止时几乎不画星（只有经过才亮）；真实划动后亮着的星 >150 颗，
+    且**只有指针经过的那一片亮**（远处必须仍是 0 颗），淡净后回到**同一个**静止态
 外加本界面特有的三条：
   · 颜色语义唯一：档位徽标不得与任何状态色同色（并反向断言状态色确实在用，防空判据）
   · 背景不渗进内容：卡片内部区域开/关背景两态逐像素一致
@@ -330,8 +331,10 @@ def main():
     chk('抽屉能关（Esc）', pg.ev(EV("return !document.querySelector('#help').classList.contains('on')")))
 
     print('\n── 背景层：静止 / 起浪 / 不遮挡 ──────────────────')
-    chk('星野建起来了（不是空画布）', (pg.ev('ST.list.length') or 0) > 200,
+    chk('星野够密（>1200 颗）', (pg.ev('ST.list.length') or 0) > 1200,
         f"{pg.ev('ST.list.length')} 颗星")
+    lit0 = pg.ev(EV('return ST.list.filter(t=>t.lit>0.05).length'))
+    chk('静止时显影场是空的（只有经过才显示）', lit0 == 0, f'静止时亮着 {lit0} 颗')
     chk('静止时不排帧（循环自己停了）', pg.ev('ST.raf') == 0, f"raf={pg.ev('ST.raf')}")
     # 量背景之前：停轮询 + 等入场动画收敛（两条都是假红来源，见 quiesce 的注释）
     quiesce(pg)
@@ -348,23 +351,26 @@ def main():
         f"内容区 {r12['ct_max']} · hero 纱区 {r12['hs_max']}")
     chk('静止两帧：不透明内容区也完全相同', r12['ct_max'] == 0, f"内容区最大差 {r12['ct_max']}")
 
-    pg.ev(EV('ST.strokes=0; ST.peak=0; return 1'))
-    # 两笔：一笔横穿底部夜空带，一笔斜穿卡片之间的空隙——星点被推开的地方要在背景可见区里
+    pg.ev(EV('ST.strokes=0; ST.lit=0; return 1'))
+    # 只划**左半边**：这样"远处不该跟着亮"这条 locality 判据才有意义
     for i in range(24):
-        pg.move(int(size[0] * (0.10 + 0.78 * i / 23)), int(size[1] * 0.955))
+        pg.move(int(size[0] * (0.06 + 0.36 * i / 23)), int(size[1] * 0.955))
         time.sleep(0.02)
     for i in range(18):
-        pg.move(int(size[0] * (0.85 - 0.70 * i / 17)), int(size[1] * (0.60 + 0.30 * i / 17)))
+        pg.move(int(size[0] * (0.40 - 0.32 * i / 17)), int(size[1] * (0.60 + 0.30 * i / 17)))
         time.sleep(0.02)
     strokes = pg.ev('ST.strokes') or 0
-    peak = pg.ev('ST.peak') or 0
-    scattered = pg.shot('scattered')     # ⚠️ 立刻拍：一 park 就把指针停 0.35s，星点早聚回去了
-    park(pg, wait=0.10)                  # 只为了把 hover 停回原处，再拍一张"聚回前"的对照
+    litN = pg.ev(EV('return ST.list.filter(t=>t.lit>0.05).length'))
+    farN = pg.ev(EV('return ST.list.filter(t=>t.lit>0.05 && t.hx>innerWidth*0.62).length'))
+    scattered = pg.shot('scattered')     # ⚠️ 立刻拍：显影只有 ~520ms，晚一拍就淡干净了
     rw = region_diff(still2, scattered, rects)
-    chk('划过之后星点确实散开（位移峰值 / 笔画 / 背景可见区像素三者都动）',
-        peak > 6 and strokes > 0 and rw['bg_chg'] > 300,
-        f"峰值位移 {peak:.1f}px strokes={strokes} 背景可见区变了 {rw['bg_chg']} 个像素"
-        f"（最大差 {rw['bg_max']}）· 内容区差 {rw['ct_max']} · hero 纱区差 {rw['hs_max']}")
+    chk('划过才显影（亮着的星 >150 颗、背景可见区真的出现星点）',
+        litN > 150 and strokes > 0 and rw['bg_chg'] > 300,
+        f"亮着 {litN} 颗 / 共 {pg.ev('ST.list.length')}，笔画 {strokes} 笔，"
+        f"背景可见区多了 {rw['bg_chg']} 个像素的星点（最大差 {rw['bg_max']}）")
+    chk('只有经过的地方亮（右半边仍为 0 颗，防"整片一起亮"）', farN == 0,
+        f'右半边亮着 {farN} 颗')
+    park(pg, wait=0.10)                  # 把 hover 停回原处，再等它淡净
 
     for _ in range(60):
         if pg.ev('ST.raf') == 0:
@@ -375,14 +381,16 @@ def main():
     rb = region_diff(still1, back, rects)
     resid = pg.ev(EV('let m=0;for(const t of ST.list){const d=Math.abs(t.x-t.hx)+Math.abs(t.y-t.hy);'
                      'if(d>m)m=d;}return m'))
-    # 背景可见区**严格为 0** + 每颗星残留位移为 0 —— 这两条才是"聚回同一张帧"的本体。
+    # 背景可见区**严格为 0** + 残留位移 0 + 显影场清零 —— 这三条才是"淡回同一张帧"的本体。
     # 内容区只报不判：画布每重绘一次，Chrome 就把文字层重新光栅化一遍，字边缘能差到 150+，
     # 那是合成器的行为，不是"背景渗进来了"（本轮先误当成产品问题查了一轮）。
     # 数据面到底漏不漏，改由下面两条结构性判据来定：底色 alpha + 几何包含。
-    chk('星点聚回**同一张**静止帧（背景区严格为 0、残留位移为 0）',
-        pg.ev('ST.raf') == 0 and resid == 0 and rb['bg_max'] == 0,
-        f"raf={pg.ev('ST.raf')} 残留位移 {resid:.2e}px 背景区差 {rb['bg_max']} "
-        f"（内容区差 {rb['ct_max']} 与 hero 纱区差 {rb['hs_max']} 只报不判：重光栅化噪声）")
+    lit_end = pg.ev(EV('return ST.list.filter(t=>t.lit>0.05).length'))
+    chk('星点淡净后回到**同一张**静止帧（背景区严格 0、残留位移 0、显影场清零）',
+        pg.ev('ST.raf') == 0 and resid == 0 and rb['bg_max'] == 0 and lit_end == 0,
+        f"淡净后仍亮着 {lit_end} 颗；raf={pg.ev('ST.raf')} 残留位移 {resid:.2e}px "
+        f"背景区差 {rb['bg_max']}（内容区差 {rb['ct_max']} 与 hero 纱区差 {rb['hs_max']} "
+        f"只报不判：那是重光栅化噪声，见 §67 三）")
 
     opaque = pg.ev(EV("""
       const bad=[];

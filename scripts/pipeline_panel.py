@@ -741,8 +741,8 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
 
 <div class="skyband">
   <span class="hl">夜空</span>
-  <p>划过任意位置，星点会被推开、约两秒后再聚回原位；没人划时它一帧都不动。
-     阶段卡、日志、对照图全在不透明面板里，星点渗不进去。</p>
+  <p>静止时这片天是黑的：鼠标经过哪里，哪里的星点才亮起来，约半秒后淡掉、不留痕。
+     没人划时它一帧都不动；阶段卡、日志、对照图全在不透明面板里，星点渗不进去。</p>
 </div>
 </div>
 
@@ -822,11 +822,14 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
   <code>Esc</code> 关掉弹层。日志区上方还能按「只看红 / 等你签字 / 只看阶段行」筛。</p>
 
   <h3>背景那层是什么</h3>
-  <p>东京夜的星野：底上是三团不动的城市光晕（钠灯橙 / 霓虹品红 / 高架青），
-  星点画在一张画布上。<b>你划过哪里，哪里的星点就被推开；停手后弹簧把它们拉回原位</b>，
-  约两秒聚回——而且收摊时会把每颗星写回原位再画一帧，所以"散过又聚回"的终点
-  和最初那张<b>逐像素相同</b>。它静止时一帧都不动，这是被验证过不挡正事的做法。
-  觉得干扰就点顶栏「星辰 · 关」，整层直接停用并记住你的选择。</p>
+  <p>东京夜的星野，<b>显影式</b>的：底上是三团不动的城市光晕（钠灯橙 / 霓虹品红 / 高架青），
+  星点约 1800 颗画在一张画布上，但<b>静止时它们全灭</b>——你划过哪里，哪里的星才亮起来，
+  亮的范围随划速变大（慢挪约 9px、快扫约 130px），约半秒淡干净、不留痕，
+  亮着的星之间还会临时连出星座线。</p>
+  <p>收摊时程序会把每颗星的亮度写回 0、位置写回原位再画一帧，所以"亮过又淡掉"的终点
+  和最初那张<b>逐像素相同</b>——静止时一帧都不动，这是被验证过不挡正事的做法。
+  觉得干扰就点顶栏「星辰 · 关」，整层直接停用并记住你的选择。
+  想让它常驻一点微光（不划也能看见几颗），改 <code>ST.AMB</code> 这一个数就行。</p>
 
   <h3>出问题自己先查的三行</h3>
   <p><code>py -3 scripts/diag/check_inputs.py azdata</code> ·
@@ -857,84 +860,97 @@ function statusOf(k){
   return 'pass';
 }
 
-/* ── 背景：东京夜的星野 —— 划过推开、点一下炸开、松手聚回**同一静止帧** ────
-   四条硬约束（前三条是画廊三轮被否换来的，最后一条是本轮自己撞出来的）：
-     · 静止时逐像素完全相同：能量归零时把每颗星**写回 home 再画一帧**，连线端点也回到
-       home ⇒ "推开又聚回"的终点必须和初始那张是同一张图（探针就是逐像素比这个）。
-     · 力学按**秒**积分（弹簧与阻尼都乘 dt），不按帧 —— 按帧写会导致低帧率下永远聚不回。
-     · pointer-events:none / z-index 低于内容 / 数据面不透明 ⇒ 星点渗不进文字与图。
-     · ⚠️ "指针瞬移不算划过"**不能按固定像素距离判**：上一版写死 >45px 就当瞬移，
-       而正常快扫一步就是 48~58px ⇒ 整层背景对真实鼠标几乎无反应（探针实测 strokes=0）。
-       改成按**速度**判：>4200 px/s 或距上一拍 >250ms（跨标签回来、首次进入）才算瞬移。
-   没有 WebGL、没有噪声函数：一张 2D 画布 + 每颗星一个 home/位移/速度/深度。 */
+/* ── 背景：东京夜的星野 —— 静止时全黑，指针经过才显影、约 520ms 淡净 ──────
+   口径照 https://mimo.xiaomi.com/coder 那页：它不是"把东西推开"，是**擦除式显影** ——
+   一个遮罩被光标擦出洞来，洞随笔画速度从约 8px 长到约 128px，亮点不残留、约 520ms 内淡完。
+   所以这里每颗星只有一个 `lit`(0..1)：光标经过就充到 1，之后按秒指数衰减；
+   **只有 lit 够亮的星才画** ⇒ 静止时整片天空是空的，划过才出现一条星带。
+
+   三条硬约束仍然一条不丢：
+     · 静止时逐像素完全相同：能量归零时把所有 lit 强制写回 0、位置写回 home 再画一帧
+       ⇒ 显影过又淡掉的终点与初始帧是同一张图（探针逐像素比这个）。
+     · 衰减与弹簧都按**秒**积分（乘 dt），不按帧 —— 按帧写在低帧率下会"永远淡不干净"。
+     · 指针「瞬移」不算划过，且**按速度判**（>4200px/s 或距上一拍 >250ms），
+       不能按固定像素：正常快扫一步就 48~58px，按像素判会把整层背景判成"对鼠标没反应"。
+   没有 WebGL、没有噪声函数：一张 2D 画布 + 每颗星一个 home/位移/速度/亮度。 */
 function mul32(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
   t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
-const ST={cv:null,g:null,w:0,h:0,list:[],pairs:[],raf:0,t0:0,peak:0,strokes:0,bursts:0,
-          rings:[],C:[],LC:'#b489ff',R:232,SPRING:34,DAMP:4.2,EPS:0.12,
+const ST={cv:null,g:null,w:0,h:0,list:[],pairs:[],raf:0,t0:0,frames:0,
+          peak:0,lit:0,strokes:0,bursts:0,rings:[],C:[],LC:'#b489ff',
+          AMB:0.10,          // 常驻星点占比的亮度；想要"完全只有经过才亮"就把它设成 0
+          RMIN:9,RMAX:130,   // 显影半径：随笔画速度从 9px 长到 130px（参考页 8→128）
+          DECAY:4.6,         // 亮度衰减 /秒 ⇒ 520ms 后只剩 9%
+          SPRING:34,DAMP:4.2,EPS:0.12,LIT_EPS:0.012,
           last:null,lastT:0,pend:null};
 function starColors(){
   const cs=getComputedStyle(document.documentElement);
   const g=n=>(cs.getPropertyValue(n)||'').trim();
   ST.C=[g('--s-1')||'#f6e7d3',g('--s-2')||'#cfe6ff',g('--s-3')||'#ffd6a5',g('--s-4')||'#ff9ecb'];
-  ST.LC=g('--s-link')||'#a06bff';
+  ST.LC=g('--s-link')||'#b489ff';
 }
 function starsBuild(){
   const R=mul32(20260929);                    // 同种子 ⇒ 刷新后星位不变，不会"每次进来换一片天"
-  const w=ST.w, h=ST.h, n=Math.round(Math.min(680,Math.max(280,w*h/2000)));
+  const w=ST.w, h=ST.h;
+  const n=Math.round(Math.min(2800,Math.max(900,w*h/620)));   // 密：1440×900 下约 2100 颗
   ST.list=[];
-  const gx=w*0.04, gy=h*1.08, dx=w*0.96, dy=-h*0.84;   // 一条斜着的银河带
+  const gx=w*0.04, gy=h*1.08, dx=w*0.96, dy=-h*0.84;          // 一条斜着的银河带
   for(let i=0;i<n;i++){
     let x,y;
-    if(i<n*0.70){ const t=R(), o=(R()-0.5)*w*0.26;
+    if(i<n*0.66){ const t=R(), o=(R()-0.5)*w*0.26;
       x=gx+dx*t+o; y=gy+dy*t+(R()-0.5)*w*0.15; }
     else { x=R()*w; y=R()*h; }
-    const z=0.34+R()*0.66;                     // 深度：近处的星更大更亮、也更容易被推开
-    const big=R()<0.055+z*0.05;
-    ST.list.push({hx:x,hy:y,x:x,y:y,vx:0,vy:0,z:z,big:big,
-      r:(big?1.1:0.3)+R()*(big?1.6:1.0)*(0.6+z*0.7),
-      a:Math.min(1,(big?0.72:0.20)+R()*(big?0.28:0.55)*(0.6+z*0.6)),
+    const z=0.34+R()*0.66;
+    const big=R()<0.045+z*0.05;
+    ST.list.push({hx:x,hy:y,x:x,y:y,vx:0,vy:0,z:z,big:big,lit:0,
+      amb:(i%41===0? ST.AMB*(0.5+R()*0.5) : 0),   // 极少数几颗常驻，免得整页像坏了
+      r:(big?1.0:0.28)+R()*(big?1.5:0.9)*(0.6+z*0.7),
+      a:Math.min(1,(big?0.80:0.42)+R()*(big?0.20:0.45)*(0.6+z*0.6)),
       c:ST.C[(R()*ST.C.length)|0]});
   }
-  /* 星座连线：只连"近处"的亮星，每颗最多两条、限长。连线在**建表时**算好，
-     每帧只按当前坐标画 ⇒ 聚回 home 后端点与初始帧完全一致。 */
+  /* 星座连线只算一次（建表时），每帧按当前亮度画：两端都亮才连线 ⇒
+     划过时会"连出"一片星座，走开就整条一起淡掉。 */
   ST.pairs=[];
-  const far=ST.list.filter(t=>t.z>0.62), lim=Math.min(190,w*0.13);
+  const far=ST.list.filter(t=>t.z>0.72), lim=Math.min(150,w*0.10);
   for(let i=0;i<far.length;i++){
-    const a=far[i]; const cand=[];
+    const a=far[i], cand=[];
     for(let j=0;j<far.length;j++){
       if(j===i) continue; const b=far[j];
       const d=Math.hypot(b.hx-a.hx,b.hy-a.hy);
       if(d<lim) cand.push([d,b]);
     }
     cand.sort((p,q)=>p[0]-q[0]);
-    for(const [d,b] of cand.slice(0,2))
-      if(d>18) ST.pairs.push([a,b,d]);
+    for(const [d,b] of cand.slice(0,2)) if(d>16) ST.pairs.push([a,b,d]);
   }
 }
+function vis(st){ return Math.max(st.lit, st.amb); }
 function starsDraw(){
   const g=ST.g; if(!g) return;
   g.clearRect(0,0,ST.w,ST.h);
   g.lineWidth=0.75; g.strokeStyle=ST.LC;
-  for(const [a,b,rest] of ST.pairs){          // 连线：越靠近原始长度越亮，被扯太远就断
+  for(const [a,b,rest] of ST.pairs){
+    const v=Math.min(vis(a),vis(b));
+    if(v<0.30) continue;                       // 两端都亮才连：显影区里才出现星座
     const d=Math.hypot(b.x-a.x,b.y-a.y), over=Math.abs(d-rest)/Math.max(1,rest);
-    const al=Math.max(0,0.40-over*0.75)*Math.min(a.a,b.a)*2.4;
+    const al=Math.max(0,0.40-over*0.75)*v*2.2;
     if(al<0.012) continue;
     g.globalAlpha=Math.min(0.52,al);
     g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke();
   }
   for(const st of ST.list){
-    g.globalAlpha=st.a; g.fillStyle=st.c;
+    const v=vis(st);
+    if(v<0.014) continue;                      // 静止时几乎一颗都不画 —— 这就是"只有经过才显示"
+    g.globalAlpha=st.a*v; g.fillStyle=st.c;
     g.beginPath(); g.arc(st.x,st.y,st.r,0,6.2832); g.fill();
-    if(st.big){                                // 亮星带一圈柔光 + 十字星芒（静止，不闪）
-      g.globalAlpha=st.a*0.15;
+    if(st.big&&v>0.25){
+      g.globalAlpha=st.a*v*0.16;
       g.beginPath(); g.arc(st.x,st.y,st.r*3.6,0,6.2832); g.fill();
-      g.globalAlpha=st.a*0.45; g.strokeStyle=st.c; g.lineWidth=0.65;
+      g.globalAlpha=st.a*v*0.5; g.strokeStyle=st.c; g.lineWidth=0.65;
       g.beginPath(); g.moveTo(st.x-st.r*4.2,st.y); g.lineTo(st.x+st.r*4.2,st.y);
       g.moveTo(st.x,st.y-st.r*4.2); g.lineTo(st.x,st.y+st.r*4.2); g.stroke();
-      g.lineWidth=0.6; g.strokeStyle=ST.LC;
+      g.lineWidth=0.75; g.strokeStyle=ST.LC;
     }
   }
-  for(const r of ST.rings){                    // 点击星爆的冲击环（只在有能量时存在）
+  for(const r of ST.rings){
     g.globalAlpha=Math.max(0,r.a); g.strokeStyle=r.c; g.lineWidth=1.4;
     g.beginPath(); g.arc(r.x,r.y,r.r,0,6.2832); g.stroke();
   }
@@ -950,56 +966,59 @@ function starsResize(){
 }
 function starsFrame(ts){
   const dt=ST.t0?Math.min(0.05,(ts-ST.t0)/1000):1/60; ST.t0=ts;
-  const k=ST.SPRING, d=Math.exp(-ST.DAMP*dt);
-  let peak=0;
+  const k=ST.SPRING, d=Math.exp(-ST.DAMP*dt), ld=Math.exp(-ST.DECAY*dt);
+  let peak=0, lit=0;
   for(const st of ST.list){
-    st.vx+=((st.hx-st.x)*k)*dt; st.vy+=((st.hy-st.y)*k)*dt;   // 弹簧拉回 home
+    st.vx+=((st.hx-st.x)*k)*dt; st.vy+=((st.hy-st.y)*k)*dt;
     st.vx*=d; st.vy*=d;
     st.x+=st.vx*dt; st.y+=st.vy*dt;
     const ad=Math.abs(st.x-st.hx)+Math.abs(st.y-st.hy);
     if(ad>peak) peak=ad;
+    st.lit*=ld; if(st.lit>lit) lit=st.lit;
   }
   for(const r of ST.rings){ r.r+=r.v*dt; r.a-=dt*1.5; }
   ST.rings=ST.rings.filter(r=>r.a>0.02);
-  ST.peak=peak; ST.frames=(ST.frames||0)+1;
-  if(peak>ST.EPS || ST.rings.length){ starsDraw(); ST.raf=requestAnimationFrame(starsFrame); }
-  else {          // 收摊：写回 home、清空冲击环，再画一帧 ⇒ 与初始静止帧逐像素相同
+  ST.peak=peak; ST.lit=lit; ST.frames++;
+  if(lit>ST.LIT_EPS || peak>ST.EPS || ST.rings.length){
+    starsDraw(); ST.raf=requestAnimationFrame(starsFrame);
+  } else {                    // 收摊：亮度清零、位置写回 home，再画一帧 ⇒ 与初始帧逐像素相同
     ST.raf=0;
-    for(const st of ST.list){ st.x=st.hx; st.y=st.hy; st.vx=0; st.vy=0; }
-    ST.rings.length=0; starsDraw();
+    for(const st of ST.list){ st.x=st.hx; st.y=st.hy; st.vx=0; st.vy=0; st.lit=0; }
+    ST.rings.length=0; ST.lit=0; starsDraw();
   }
 }
 function starsStart(){ if(!ST.raf && SEA){ ST.t0=0; ST.raf=requestAnimationFrame(starsFrame); } }
-function starsPush(x,y,down){
-  const R=down?ST.R*1.6:ST.R, R2=R*R;
+/* 显影：半径随笔画速度长大（参考页 8→128px 的同一条曲线口径） */
+function starsLight(x,y,speed,down){
+  const R=down?ST.RMAX*1.5:Math.min(ST.RMAX, ST.RMIN + (speed||0)*1.5), R2=R*R;
   let hit=0;
   for(const st of ST.list){
     const dx=st.x-x, dy=st.y-y, d2=dx*dx+dy*dy;
-    if(d2>R2||d2<1e-4) continue;
-    const d=Math.sqrt(d2), f=1-d2/R2;
-    /* 近处的星推得多（z），且越靠近指尖越猛（1/(1+d/70)）—— 才有"拨开一片"的手感。
-       ⚠️ 这个数是**速度增量 px/s**，不是位移：上一版给 11，弹簧(ω=√34≈5.8/s)当场拉回去，
-       峰值位移只有 0.0x px ⇒ 整层背景看着完全没反应。按 ω 反推：要 50px 的让位就得给 ~300 px/s。 */
-    const imp=(down?900:330)*f*st.z/(1+d/70);
-    st.vx+=dx/d*imp; st.vy+=dy/d*imp; hit++;
+    if(d2>R2) continue;
+    const f=Math.pow(1-d2/R2, 1.15);
+    if(f>st.lit) st.lit=f;
+    hit++;
+    if(down){                                  // 点击顺带轻轻拨一下，让"亮"有物理感
+      const d=Math.sqrt(d2)||1, imp=520*(1-d2/R2)*st.z/(1+d/70);
+      st.vx+=dx/d*imp; st.vy+=dy/d*imp;
+    }
   }
   if(down && hit){ ST.bursts++; ST.rings.push({x:x,y:y,r:6,v:520,a:0.5,c:ST.LC}); }
-  if(hit){ ST.strokes++; starsStart(); }   // ⚠️ 推完必须自己把循环起来：漏这句=星点被赋了速度但永不积分
+  if(hit){ ST.strokes++; starsStart(); }
   return hit;
 }
-/* 划水判定：按**速度**而不是按固定像素 —— 见顶部第四条 */
 function starMove(x,y){
   if(!SEA) return;
   const now=performance.now();
-  let jump=true;
+  let jump=true, speed=0;
   if(ST.last){
     const dt=Math.max(0.004,(now-ST.lastT)/1000);
-    const v=Math.hypot(x-ST.last[0],y-ST.last[1])/dt;
-    jump=(now-ST.lastT>250)||v>4200;
+    speed=Math.hypot(x-ST.last[0],y-ST.last[1])/dt;
+    jump=(now-ST.lastT>250)||speed>4200;
   }
   ST.last=[x,y]; ST.lastT=now;
   if(jump) return;
-  starsPush(x,y,false);
+  starsLight(x,y,speed,false);
 }
 window.addEventListener('pointermove',e=>{
   if(!SEA) return;
@@ -1011,7 +1030,7 @@ window.addEventListener('pointermove',e=>{
 window.addEventListener('pointerdown',e=>{
   if(!SEA) return;
   ST.last=[e.clientX,e.clientY]; ST.lastT=performance.now();
-  starsPush(e.clientX,e.clientY,true);
+  starsLight(e.clientX,e.clientY,0,true);
 },{passive:true});
 window.addEventListener('blur',()=>{ ST.last=null; });
 function seaApply(){
