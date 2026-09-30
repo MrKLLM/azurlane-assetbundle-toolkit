@@ -510,31 +510,113 @@ body:not(.calm) #fxbeam.go,body:not(.calm) #fxpool.on{display:block}
 /* 不用 fill：播完 opacity 自己回到 0 ⇒ "光走了不留痕"是可断言的，而不是靠 JS 记时清类 */
 @keyframes beam{0%{opacity:0;--ang:var(--a0,0deg)}14%{opacity:1}84%{opacity:1}
   100%{opacity:0;--ang:calc(var(--a0,0deg) + 360deg)}}
-/* 左轨当前步的那道标记：不再每张卡各画一根，而是**一根从旧步走到新步**。
-   新版面是实色 2px 紫条、不挂光晕（Linear 的当前项标记就是纯色一条）。 */
-#railwrap{position:relative}
-#railmark{position:absolute;left:-1px;width:2px;border-radius:2px;top:0;height:0;opacity:0;
-  background:var(--brand);
-  transition:top .42s var(--ez),height .42s var(--ez),opacity .3s var(--ez);pointer-events:none}
 #chipmark{position:absolute;bottom:-1px;height:2px;border-radius:2px;left:0;width:0;
   background:var(--brand);opacity:0;pointer-events:none;
   transition:left .34s var(--ez),width .34s var(--ez),opacity .2s var(--ez)}
 #chips{position:relative}
-body.legacy #railmark,body.legacy #chipmark{
-  background:linear-gradient(180deg,#a06bff,#ff3d7f);box-shadow:0 0 12px rgba(255,61,127,.7)}
 /* 磁吸：只有主操作与左轨会朝指针让出 2px，普通按钮不让（它们挨得太近会晃）。
    写全 transition 列表而不是只写 transform —— 简写会连带抹掉底色/描边的过渡。 */
 .mag{transition:transform .55s var(--ez),background .16s var(--ez),
   border-color .16s var(--ez),box-shadow .2s var(--ez),opacity .16s}
 
-/* ══ 大气区与数据区的分工 ═══════════════════════════════════════════════
-   规矩只有一条：**能读数据、能看图的位置一律不透明**。
-   hero 是全局唯一让正文"坐在星野上"的地方，只放标题级短文（带 text-shadow 压亮度），
-   阶段卡、日志、对照图、指标 pill 一个都不许放进去。 */
-.wrap{flex:1 1 auto;min-height:0;display:grid;gap:var(--s4);
-  padding:var(--s4) var(--s5) var(--s5);
-  grid-template-columns:264px minmax(520px,1fr) minmax(360px,.66fr);max-width:1760px;
-  margin:0 auto;width:100%;align-items:stretch}
+/* ══ 主屏：一次只暴露下一步 ═══════════════════════════════════════════
+   整块版面只回答一个问题：**"现在该做什么，点下去会发生什么"**。
+   13 个阶段、日志、对照表、指纹全部搬进「细节」抽屉——那是证据，不是决策。
+   ⚠️ 主屏**没有面板**：大字直接坐在夜面上。可读性不靠半透明纱来救
+      （alpha .90 的"已经很实"实测仍会被一颗星在字下面顶出 36 级差异），
+      而是靠**星野在文字区主动避让**（见 starsLight 的 avoid 矩形）——
+      装饰给数据让路，是让装饰让步，不是给数据蒙一层膜。 */
+.now{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center;
+  padding:0 var(--s6);max-width:1060px;margin:0 auto;width:100%;position:relative;z-index:2}
+.eyebrow{margin:0 0 var(--s4);font:400 11.5px/1 var(--fm);letter-spacing:.2em;color:var(--dim);
+  display:flex;align-items:center;gap:var(--s2)}
+.eyebrow i{width:5px;height:5px;border-radius:50%;background:var(--brand);flex:0 0 auto}
+/* 唯一的大字。CJK 走雅黑 Light —— 中文界面上"简约"几乎只能靠字重与留白做出来，
+   细体大字 + 紧行距比任何装饰都干净。 */
+.ask{margin:0;font:300 clamp(30px,4.3vw,52px)/1.18 var(--fb);letter-spacing:-.015em;
+  color:var(--txt);max-width:20ch}
+.ask b{font-weight:500;color:#fff}
+.ask em{font-style:normal;font-family:var(--fd);font-weight:600;letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums;color:#fff}
+.why{margin:var(--s4) 0 0;font-size:14px;line-height:1.65;color:var(--dim);max-width:48ch}
+.do{display:flex;align-items:center;gap:var(--s5);margin:var(--s6) 0 0;flex-wrap:wrap}
+/* 主行动：全站唯一一块实心。静止时一动不动，表现力全部留给"被操作那一瞬"
+   （压缩 + 弹簧回弹 + 把光泄进背景星野，见 JS spring 与 pointerdown）。 */
+.pact{font:500 15px/1 var(--fb);letter-spacing:.01em;padding:15px 26px;
+  border-radius:var(--r-ctl);border:1px solid var(--brand);background:var(--brand);
+  color:#0a0b10;cursor:pointer;display:inline-flex;align-items:center;gap:10px;
+  will-change:transform;transition:background .18s var(--ez),border-color .18s var(--ez)}
+.pact:hover{background:var(--brand-hi);border-color:var(--brand-hi)}
+.pact.sign{background:transparent;border-color:rgba(242,189,114,.6);color:var(--await)}
+.pact.sign:hover{background:rgba(242,189,114,.14);border-color:var(--await)}
+.pact:disabled{opacity:.35;cursor:not-allowed}
+.link2{background:none;border:0;padding:9px 1px;color:var(--dim);font-size:13.5px;
+  cursor:pointer;position:relative}
+.link2:hover{color:var(--txt)}
+.link2::after{content:'';position:absolute;left:0;right:0;bottom:5px;height:1px;
+  background:currentColor;transform:scaleX(0);transform-origin:right;
+  transition:transform .34s var(--ez)}
+.link2:hover::after{transform:scaleX(1);transform-origin:left}
+.foot{margin:var(--s5) 0 0;font-size:12.5px;color:var(--await);min-height:19px}
+/* 这三块必须**贴着内容**撑开：block 元素默认拉满 .now 的 1060px，
+   那会让「星野避让」矩形横盖半屏 —— 实测把"划过才显影"判成对鼠标没反应。 */
+.eyebrow,.do,.foot{align-self:flex-start;max-width:fit-content}
+.eyebrow.red i{background:var(--fail)}
+.eyebrow.red{color:var(--fail)}
+.eyebrow.run i{background:var(--run);animation:pulse 1.1s infinite}
+/* 换句：旧句淡出上移、新句从下方顶进来。**只在内容真的变了时加**，
+   所以 8 秒轮询不会让它重播（和 `.stage.in` 同一条纪律）。 */
+@keyframes swapin{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.ask.swap{animation:swapin .42s var(--ez)}
+#detail .body{transform:translateX(100%)}
+#detail{transition:opacity .2s var(--ez)}
+#detail .veil{animation:fadein .26s var(--ez)}
+@keyframes fadein{from{opacity:0}}
+body.calm #detail .body{transition:none}
+
+/* ══ 底部步骤条：一根会**长过去**的进度线 + 四个节点 ══════════════════
+   取代左轨那四张大块。节点上仍带该步全部阶段的状态方块 —— 13 个阶段
+   一个都不许被藏起来，这是上一版就立的判据，换了版面也得保住。 */
+.steps{flex:0 0 auto;position:relative;z-index:3;display:flex;align-items:flex-start;
+  justify-content:space-between;gap:var(--s4);padding:var(--s5) var(--s6) var(--s6);
+  max-width:1060px;margin:0 auto;width:100%}
+.steps .track{position:absolute;left:calc(var(--s6) + 44px);right:calc(var(--s6) + 44px);
+  top:calc(var(--s5) + 13px);height:1px;background:var(--line);pointer-events:none}
+.steps .fill{position:absolute;left:0;top:-1px;height:3px;border-radius:3px;width:0;
+  background:var(--brand);transform-origin:left center;pointer-events:none}
+.snode{position:relative;display:flex;flex-direction:column;align-items:center;gap:7px;
+  background:none;border:0;padding:0;cursor:pointer;color:var(--dim2);min-width:88px}
+.snode .bead{width:9px;height:9px;border-radius:50%;background:var(--pane);
+  border:1px solid var(--line2);transition:background .2s var(--ez),border-color .2s var(--ez),
+  box-shadow .2s var(--ez)}
+.snode:hover .bead{border-color:var(--line3)}
+.snode.on .bead{background:var(--brand);border-color:var(--brand)}
+.snode.done .bead{background:var(--pass);border-color:var(--pass)}
+.snode.fail .bead{background:var(--fail);border-color:var(--fail)}
+.snode.await .bead{background:var(--await);border-color:var(--await)}
+.snode.run .bead{background:var(--run);border-color:var(--run);animation:pulse 1.1s infinite}
+.snode label{font:500 12.5px/1 var(--fb);letter-spacing:.01em;color:var(--dim);
+  transition:color .2s var(--ez)}
+.snode.on label{color:var(--txt)}
+.snode .sdots{display:flex;gap:3px;align-items:center}
+.snode .cnt{font:10.5px/1 var(--fm);color:var(--dim2)}
+/* 旧版左轨那套（四张大块 + 图例面板）整体退役，只挂在 legacy 下给 V 键对照用 */
+/* ══ 细节抽屉：证据都在这儿 ═══════════════════════════════════════════
+   抽屉里的东西**一律不透明**（延续那条用三轮换来的纪律），主屏才允许坐在夜面上。 */
+#detail{position:fixed;inset:0;z-index:50;display:none}
+#detail.on{display:block}
+#detail .veil{position:absolute;inset:0;background:rgba(4,5,9,.6);backdrop-filter:blur(2px)}
+#detail .body{position:absolute;right:0;top:0;bottom:0;width:min(1180px,96vw);
+  background:var(--deep);border-left:1px solid var(--line2);
+  display:grid;grid-template-columns:minmax(400px,1fr) minmax(340px,.86fr);
+  gap:var(--s4);padding:var(--s5);overflow:hidden;will-change:transform}
+#detail .dhead{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;
+  gap:var(--s4);margin-bottom:var(--s1)}
+#detail .dhead h2{margin:0;font:500 17px/1.2 var(--fb);letter-spacing:-.01em;color:var(--txt)}
+#detail .dhead .meters{flex:0 1 auto;justify-content:flex-end}
+body:not(.legacy) #detail .col:first-of-type{order:1}
+body:not(.legacy) #detail .col.side{order:2}
+
 /* 列是 flex 容器：面板必须 flex-shrink:0，否则"内容比列高"时**每个面板都被压扁**，
    再叠上 overflow:hidden 就是把卡片和日志的下沿直接切掉（实测第二张卡被切 45px、
    日志被切 81px）。要滚的是列本身，不是把内容塞进固定高度的盒子里。 */
@@ -563,21 +645,6 @@ body.legacy .pane:hover::before{opacity:1}
   color:var(--dim);
   margin:0 0 var(--s3);display:flex;align-items:center;justify-content:space-between;gap:var(--s2)}
 
-/* ══ 步骤导航 ═════════════════════════════════════════════════════════ */
-.step{position:relative;display:grid;grid-template-columns:26px 1fr auto;gap:10px;
-  align-items:start;width:100%;text-align:left;padding:var(--s2) 10px;
-  border-radius:var(--r-ctl);background:transparent;border:1px solid transparent;
-  color:var(--txt)}
-.step:hover{background:var(--card);border-color:var(--line)}
-.step.on{background:var(--card);border-color:var(--line2)}
-.step .num{font:600 17px/1.45 var(--fd);letter-spacing:-.3px;color:var(--dim);
-  text-align:center;border:1px solid var(--line);border-radius:var(--r-ctl);
-  background:var(--pane)}
-.step.on .num{color:var(--brand-hi);border-color:rgba(139,140,245,.55)}
-.step b{display:block;font-size:13px;font-weight:600;letter-spacing:-.05px}
-.step em{display:block;font:400 11px/1.45 var(--fb);color:var(--dim);font-style:normal;
-  margin-top:1px}
-.step .cnt{font:11px/1 var(--fm);color:var(--dim2);margin-top:5px;display:block}
 .dots{display:flex;gap:3px;align-items:center;margin-top:6px}
 .dot{width:7px;height:7px;border-radius:2px;background:var(--idle)}
 .dot.pass{background:var(--pass)}.dot.fail{background:var(--fail)}
@@ -591,26 +658,10 @@ body.legacy .pane:hover::before{opacity:1}
 @keyframes pulse{50%{opacity:.25}}
 
 /* ══ 工作区 ═══════════════════════════════════════════════════════════ */
-/* 页头**不再是一个盒子**：正经仪表盘里"当前在哪一步"就是一行标题 + 一行副标题，
-   不需要再套一道描边和一块底色（那正是"卡片套卡片"的 AI 味来源）。
-   只留 text-shadow 压住任何星点亮度；卡片、日志、对照图全在不透明面板里。 */
-.hero{padding:2px 4px 6px}
-body.legacy .hero{padding:15px 17px 14px;border-radius:16px;
-  border:1px solid rgba(178,166,214,.14);
-  background:linear-gradient(180deg,rgba(8,6,18,.20),rgba(6,4,14,.06))}
-.whead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
-.whead h2{margin:0;font:500 var(--hero-fs)/1.25 var(--fb);letter-spacing:var(--hero-ls);
-  color:var(--txt);text-shadow:0 1px 12px rgba(3,4,10,.95),0 0 2px rgba(3,4,10,.8)}
-.whead p{margin:3px 0 0;color:var(--dim);font-size:12.5px;max-width:70ch;
-  text-shadow:0 1px 8px rgba(3,4,10,.95)}
-.cta{display:flex;gap:var(--s2);flex-wrap:wrap;margin:var(--s3) 0 2px}
-.scopenote{font-size:11.5px;color:var(--await);margin:6px 0 0;display:none}
-.scopenote.on{display:block}
-
 .g{display:flex;flex-direction:column;gap:var(--s2)}
 /* 入场动画挂在 `.in` 上，**只有首次挂载才加**（见 render 里的 mounted 集合）。
    写在基础类上 = 每次数据刷新重建节点就重播一次，那就是"每 8 秒整屏闪一下"的根因。 */
-.step.in,.stage.in{animation:rise .44s var(--ez) backwards}
+.stage.in,.snode.in{animation:rise .44s var(--ez) backwards}
 /* 卡片层级 = 底色比面板抬一档 + 发丝线；hover 再抬一档，**不投影、不上浮**。
    （Linear：hover 是"shift toward lighter backgrounds or higher surface tiers"。） */
 .stage{position:relative;border:1px solid var(--line);border-radius:var(--r-card);
@@ -744,14 +795,15 @@ body.legacy #help .panel{background:linear-gradient(180deg,#141024,#0c0817);
 #lightbox.on{display:flex}
 #lightbox img{max-width:96vw;max-height:96vh;object-fit:contain}
 /* ── M 键「动效从简」：整层光效停用，但**状态指示一个都不跟着没** ──────────
-   #railmark 表达的是"当前在哪一步"，那是信息不是装饰 ⇒ 只掐它的位移，不掐它本身。 */
+   #stepfill 表达的是"当前在哪一步"，那是信息不是装饰 ⇒ 只掐它的位移，不掐它本身。 */
 body.calm #fxbeam,body.calm #fxpool{display:none!important}
-body.calm #railmark,body.calm #chipmark{transition:none}
+body.calm #stepfill,body.calm #chipmark{transition:none}
 body.calm .mag{transition:none}
 body.calm .stage::before{transform:none!important}
 body.calm .signbox.on::after{display:none}
-@media (max-width:1240px){.wrap{grid-template-columns:230px minmax(400px,1fr)}
-  .col.side{grid-column:1/-1}}
+@media (max-width:1080px){#detail .body{grid-template-columns:1fr;overflow:auto}
+  .now{padding:0 var(--s5)} .steps{padding-left:var(--s5);padding-right:var(--s5)}
+  .ask{font-size:clamp(26px,6.2vw,38px)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style></head><body>
 
@@ -762,7 +814,7 @@ body.calm .signbox.on::after{display:none}
 <div class="app">
 <header>
   <div class="brand">
-    <svg width="24" height="24" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+    <svg width="22" height="22" viewBox="0 0 26 26" fill="none" aria-hidden="true">
       <path d="M17.4 2.6l1.5 4.3 4.3 1.5-4.3 1.5-1.5 4.3-1.5-4.3L11.6 8.4l4.3-1.5z"
             fill="#8b8cf5"/>
       <circle cx="5.4" cy="6.6" r="1.1" fill="#eef4ff"/>
@@ -770,92 +822,96 @@ body.calm .signbox.on::after{display:none}
       <circle cx="3.6" cy="14.2" r=".7" fill="#dbe6f7" opacity=".7"/>
       <path d="M1 21.4c2.2 0 2.2-2 4.4-2s2.2 2 4.4 2 2.2-2 4.4-2 2.2 2 4.4 2 2.2-2 4.4-2"
             stroke="#f2bd72" stroke-width="1.2" stroke-linecap="round" fill="none" opacity=".5"/>
-      <path d="M1 25.2c2.2 0 2.2-1.6 4.4-1.6s2.2 1.6 4.4 1.6" stroke="#8b8cf5"
-            stroke-width="1" stroke-linecap="round" fill="none" opacity=".45"/>
     </svg>
-    <div><h1>资产更新控制台</h1><p>拉包 · 重导 · 看图 · 换入</p></div>
-  </div>
-  <div class="meters">
-    <span class="meter"><b>输入指纹</b><span id="fp">计算中</span></span>
-    <span class="meter"><b>本次范围</b><span id="scope">…</span></span>
-    <span class="meter"><b>阶段</b><span id="prog">…</span></span>
-    <span class="meter" id="mjob"><b>任务</b><span id="jobstat">空闲</span></span>
+    <div><h1>资产更新控制台</h1></div>
   </div>
   <div class="act">
+    <button id="bDetail" class="ghost" title="D：展开证据（13 个阶段 / 日志 / 对照表 / 指纹）">细节</button>
     <button id="bSea" class="ghost" title="S：星野背景 开/关">星辰 · 开</button>
-    <span class="kbd" title="1-4 步骤 · R 跑 · P 只看计划 · H 帮助 · S 背景 · M 动效从简 · V 新旧版面对照">
-      <b>1-4</b> 步骤 · <b>R</b> 跑 · <b>H</b> 帮助</span>
-    <button id="bPlan" class="ghost">只看计划</button>
+    <span class="kbd" title="1-4 切步骤 · R 跑当前这一步 · D 细节 · P 只看计划 · H 帮助 · Esc 关闭 · S 背景 · M 动效从简 · V 新旧配色">
+      <b>1-4</b> 步骤 · <b>R</b> 跑 · <b>D</b> 细节</span>
     <button id="bHelp" class="help">怎么用</button>
   </div>
 </header>
 
-<div class="wrap">
-  <!-- 左：四步主线 -->
-  <div class="col">
-    <div class="pane">
-      <div class="ph">主线</div>
-      <div id="railwrap"><div id="rail"></div><i id="railmark"></i></div>
+<div id="warn" class="warn"></div>
+
+<!-- 主屏：一句话 + 一个行动。整页只回答"现在该做什么"。 -->
+<main class="now">
+  <p class="eyebrow" id="eyebrow"><i></i><span id="eyebrowTx">正在读盘…</span></p>
+  <h2 class="ask" id="ask">—</h2>
+  <p class="why" id="why">—</p>
+  <div class="do" id="cta"></div>
+  <p class="foot" id="scopeNote"></p>
+</main>
+
+<!-- 底部：一根会长过去的进度线 + 四个节点，节点上带该步全部阶段的状态方块 -->
+<nav class="steps" id="stepsbar" aria-label="四个步骤">
+  <span class="track"><i class="fill" id="stepfill"></i></span>
+</nav>
+</div>
+
+<!-- 细节抽屉：证据全在这儿，且一律不透明 -->
+<div id="detail">
+  <div class="veil" data-dclose></div>
+  <div class="body">
+    <div class="dhead">
+      <h2>细节</h2>
+      <div class="meters">
+        <span class="meter"><b>本次更新包</b><span id="fp">计算中</span></span>
+        <span class="meter"><b>范围</b><span id="scope">…</span></span>
+        <span class="meter"><b>阶段</b><span id="prog">…</span></span>
+        <span class="meter" id="mjob"><b>任务</b><span id="jobstat">空闲</span></span>
+      </div>
+      <button class="mini ghost" data-dclose>关闭 ✕</button>
     </div>
-    <div class="pane">
-      <div class="ph">状态是什么意思</div>
-      <div class="legend">
-        <div class="lrow">
-          <span><i class="sw" style="background:var(--idle)"></i>未跑</span>
-          <span><i class="sw" style="background:var(--pass)"></i>判绿</span>
-          <span><i class="sw" style="background:var(--run)"></i>在跑</span>
-        </div>
-        <div class="lrow">
-          <span><i class="sw" style="background:var(--await)"></i>等你签字</span>
-          <span><i class="sw" style="background:var(--fail)"></i>判红</span>
+    <div class="col">
+      <div class="pane">
+        <div class="ph">阶段 <span id="sCount" class="dim" style="font-size:11px"></span></div>
+        <div class="g" id="cards"></div>
+      </div>
+      <div class="pane">
+        <div class="ph">改前 | 改后 对照表</div>
+        <div id="sheets" class="sheets"></div>
+      </div>
+      <div class="pane">
+        <div class="ph">颜色是什么意思</div>
+        <div class="legend">
+          <div class="lrow">
+            <span><i class="sw" style="background:var(--idle)"></i>还没跑</span>
+            <span><i class="sw" style="background:var(--pass)"></i>这步过了</span>
+            <span><i class="sw" style="background:var(--run)"></i>正在跑</span>
+          </div>
+          <div class="lrow">
+            <span><i class="sw" style="background:var(--await)"></i>等你签字</span>
+            <span><i class="sw" style="background:var(--fail)"></i>卡住了</span>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- 中：当前步的阶段卡 -->
-  <div class="col">
-    <div id="warn" class="warn"></div>
-    <div class="hero">
-      <div class="whead"><div><h2 id="sTitle">—</h2><p id="sDesc">—</p></div>
-        <div id="sAct"></div></div>
-      <div class="cta" id="cta"></div>
-      <p class="scopenote" id="scopeNote"></p>
-    </div>
-    <div class="pane">
-      <div class="ph">阶段 <span id="sCount" class="dim" style="font-size:11px"></span></div>
-      <div class="g" id="cards"></div>
-    </div>
-    <div class="pane">
-      <div class="ph">改前 | 改后 对照表</div>
-      <div id="sheets" class="sheets"></div>
-    </div>
-  </div>
-
-  <!-- 右：日志 + 任务 -->
-  <div class="col side">
-    <div class="pane logpane">
-      <div class="ph">运行日志
-        <span style="display:flex;gap:6px;align-items:center">
-          <button id="bFollow" class="mini ghost">跟随最新</button>
-          <button id="bClear" class="mini ghost">清空显示</button></span></div>
-      <div class="chips" id="chips">
-        <button class="chip on" data-f="all">全部</button>
-        <button class="chip" data-f="bad">只看红</button>
-        <button class="chip" data-f="await">等你签字</button>
-        <button class="chip" data-f="stage">只看阶段行</button><i id="chipmark"></i></div>
-      <pre id="log">等待任务</pre>
-      <div style="display:flex;gap:8px;margin-top:9px;align-items:center">
-        <button id="bForce" class="mini ghost">缓存：按指纹复用</button>
-        <span class="dim" id="jobinfo" style="font-size:11.5px">—</span></div>
-    </div>
-    <div class="pane">
-      <div class="ph">最近任务</div>
-      <table class="runs"><thead><tr><th>时间</th><th>做什么</th><th></th></tr></thead>
-        <tbody id="runs"></tbody></table>
+    <div class="col side">
+      <div class="pane logpane">
+        <div class="ph">运行日志
+          <span style="display:flex;gap:6px;align-items:center">
+            <button id="bFollow" class="mini ghost">跟随最新</button>
+            <button id="bClear" class="mini ghost">清空显示</button></span></div>
+        <div class="chips" id="chips">
+          <button class="chip on" data-f="all">全部</button>
+          <button class="chip" data-f="bad">只看红</button>
+          <button class="chip" data-f="await">等你签字</button>
+          <button class="chip" data-f="stage">只看阶段行</button><i id="chipmark"></i></div>
+        <pre id="log">等待任务</pre>
+        <div style="display:flex;gap:8px;margin-top:9px;align-items:center">
+          <button id="bForce" class="mini ghost">缓存：按指纹复用</button>
+          <span class="dim" id="jobinfo" style="font-size:11.5px">—</span></div>
+      </div>
+      <div class="pane">
+        <div class="ph">最近任务</div>
+        <table class="runs"><thead><tr><th>时间</th><th>做什么</th><th></th></tr></thead>
+          <tbody id="runs"></tbody></table>
+      </div>
     </div>
   </div>
-</div>
 </div>
 
 <i id="fxbeam"></i><i id="fxpool"></i>
@@ -1031,7 +1087,7 @@ const ST={cv:null,g:null,w:0,h:0,list:[],pairs:[],neb:null,raf:0,t0:0,frames:0,
           DECAY:4.6,         // 亮度衰减 /秒 ⇒ 520ms 后只剩 9%
           SPRING:34,DAMP:4.2,EPS:0.12,LIT_EPS:0.012,
           LINK_A:0.16,        // 星座连线的 alpha 上限（旧版 0.52 太像连点图）
-          last:null,lastT:0,pend:null};
+          last:null,lastT:0,pend:null,avoid:[]};
 function rgbOf(h){
   h=(h||'#ffffff').trim();
   if(h[0]==='#'){ const s=h.length===4? h.slice(1).split('').map(c=>c+c).join('') : h.slice(1);
@@ -1236,9 +1292,13 @@ function starsStart(){ if(!ST.raf && SEA){ ST.t0=0; ST.raf=requestAnimationFrame
 function starsLight(x,y,speed,down){
   const R=down?ST.RMAX*1.5:Math.min(ST.RMAX, ST.RMIN + (speed||0)*1.5), R2=R*R;
   let hit=0;
+  const av=ST.avoid||[];
   for(const st of ST.list){
     const dx=st.x-x, dy=st.y-y, d2=dx*dx+dy*dy;
     if(d2>R2) continue;
+    if(av.length){ let skip=false;                   // 主屏文字区：装饰给它让路
+      for(const a of av) if(st.hx>=a[0]&&st.hx<=a[2]&&st.hy>=a[1]&&st.hy<=a[3]){skip=true;break;}
+      if(skip) continue; }
     const f=Math.pow(1-d2/R2, 1.15);
     if(f>st.lit) st.lit=f;
     hit++;
@@ -1328,7 +1388,7 @@ function fxTone(el){
   return ['rgba(206,212,228,.75)','rgba(220,225,240,.13)'];
 }
 function fxOff(){ FX.pool&&(FX.pool.classList.remove('on')); FX.beam&&FX.beam.classList.remove('go');
-                 if(FX.cur){ FX.cur.el.style.transform=''; FX.cur=null; } }
+                 if(FX.cur){ magClear(); MAG.el=null; FX.cur.el.style.transform=''; FX.cur=null; } }
 function fxEnter(el,e){
   if(CALM||!FX.beam) return;
   const r=el.getBoundingClientRect();
@@ -1360,10 +1420,10 @@ function fxMove(e){
   FX.pool.style.setProperty('--px',(p.clientX-r.left)+'px');
   FX.pool.style.setProperty('--py',(p.clientY-r.top)+'px');
   if(el.classList.contains('mag')){
+    // 位移上限 7px、按下压到 0.972 —— 全交给弹簧，所以松手有轻微过冲
     const dx=(p.clientX-(r.left+r.width/2))/(r.width/2);
     const dy=(p.clientY-(r.top+r.height/2))/(r.height/2);
-    el.style.transform='translate('+(dx*2.6).toFixed(2)+'px,'+(dy*2.0).toFixed(2)+'px)'+
-                       (FX.down?' scale(.978)':'');
+    magTo(el, dx*7, dy*5.4, FX.down);
   }
 }
 document.addEventListener('pointerover',e=>{
@@ -1392,11 +1452,6 @@ document.addEventListener('pointerdown',e=>{
 },{passive:true});
 document.addEventListener('pointerup',()=>{ FX.down=false; fxMove(); },{passive:true});
 addEventListener('scroll',()=>{ FX.last=null; fxOff(); },true);
-function railMark(){
-  const on=$('.step.on'), mk=$('#railmark'); if(!on||!mk) return;
-  mk.style.top=(on.offsetTop+9)+'px'; mk.style.height=Math.max(8,on.offsetHeight-18)+'px';
-  mk.style.opacity='1';
-}
 function chipMark(){
   const on=$('.chip.on'), mk=$('#chipmark'); if(!on||!mk) return;
   mk.style.left=on.offsetLeft+'px'; mk.style.width=on.offsetWidth+'px'; mk.style.opacity='1';
@@ -1434,81 +1489,237 @@ async function apiState(force){
 }
 function stagesOf(n){ return (S.stages||[]).filter(s=>(s.step||0)===n); }
 let LOADED=false, LOADERR='';
+/* ══ 弹簧：所有"贵气"都来自这里 ══════════════════════════════════════
+   为什么不用 cubic-bezier：贝塞尔曲线的尾巴是**匀速**的，弹簧会过冲再收回，
+   那才是物理感。但弹簧有个必须付的代价 —— 它靠 rAF 跑，而本项目的硬约束是
+   「静止时零个动画在跑、逐像素相同」。所以这里每条弹簧都在
+   |位移|<0.0012 且 |速度|<0.012 时**写死到终点并停机**，
+   全部停了就关掉 rAF；探针数 `__probe.springs()` 验这条。 */
+const SPRG={m:new Map(),raf:0,last:0,
+  to(id,t,apply,k,d,from){
+    let c=this.m.get(id);
+    if(!c){c={x:(from==null?t:from),v:0,t:t,apply:apply};this.m.set(id,c);}
+    c.t=t; c.apply=apply; c.k=k||190; c.d=d==null?17:d;
+    if(from!=null&&c.x===c.t&&c.x!==from) c.x=from;
+    this.run(); return c;},
+  run(){ if(this.raf) return; this.last=performance.now();
+    const tick=ts=>{ let live=0;
+      const dt=Math.min(0.034,(ts-this.last)/1000)||0.016; this.last=ts;
+      for(const c of this.m.values()){
+        const a=-c.k*(c.x-c.t)-c.d*c.v;         // 阻尼谐振子：k 刚度、d 阻尼
+        c.v+=a*dt; c.x+=c.v*dt;
+        if(Math.abs(c.x-c.t)<0.0012&&Math.abs(c.v)<0.012){c.x=c.t;c.v=0;}
+        else live++;
+        c.apply(c.x);
+      }
+      if(live) this.raf=requestAnimationFrame(tick); else this.raf=0;};
+    this.raf=requestAnimationFrame(tick);},
+  live(){ return this.raf?1:0; }};
+
+/* ── 主行动按钮的磁吸 + 按压，全部走弹簧 ─────────────────────────────
+   静止时 transform 必须回到**完全空**，否则"划过一圈再离开→回到同一张帧"会红。 */
+const MAG={el:null};
+function magPaint(){ const e=MAG.el; if(!e) return;
+  // ⚠️ 弹簧条目只有 {x,v,t,k,d,apply}：位移是 x、速度是 v。这里曾把 y 轴写成 y.y
+  //    （读一个不存在的字段）→ undefined.toFixed 抛异常 → **整条 rAF 循环被打死**，
+  //    之后所有弹簧（含抽屉的进出）都不再更新，症状是"抽屉关不掉/卡片量不到"，
+  //    看起来像版面问题，其实是一行拼写。apply 回调必须自己保证不抛。 */
+  const x=SPRG.m.get('mx'), y=SPRG.m.get('my'), s=SPRG.m.get('ms');
+  e.style.transform='translate3d('+(x?x.x:0).toFixed(2)+'px,'+(y?y.x:0).toFixed(2)+'px,0)'+
+                     ' scale('+(s?s.x:1).toFixed(4)+')'; }
+function magTo(el,dx,dy,press){
+  if(MAG.el&&MAG.el!==el) magClear();
+  MAG.el=el;
+  SPRG.to('mx',dx,magPaint,260,20); SPRG.to('my',dy,magPaint,260,20);
+  SPRG.to('ms',press?0.972:1,magPaint,320,22); }
+function magClear(){ const e=MAG.el; if(!e) return;
+  SPRG.to('mx',0,magPaint,150,17); SPRG.to('my',0,magPaint,150,17);
+  SPRG.to('ms',1,magPaint,300,16);
+  // 收敛后清掉内联 transform —— 留个 translate3d(0,0,0) 会改变合成层，像素比对会飘
+  setTimeout(()=>{ if(!MAG.el&&e.style.transform&&/0\.000?0?\)/.test(e.style.transform))
+                     e.style.transform=''; },420); }
+
+/* ── 数字滚动：主屏那句里的量词是**数据**，让它从旧值滚到新值，
+   而不是瞬间替换。滚动一次性收敛，不是常驻循环。 */
+function rollNums(root){
+  root.querySelectorAll('em[data-n]').forEach(el=>{
+    const to=+el.dataset.n, from=el._shown==null?0:el._shown;
+    if(from===to){ el.textContent=String(to); el._shown=to; return; }
+    const t0=performance.now(), dur=760;
+    const step=ts=>{ const p=Math.min(1,(ts-t0)/dur), e=1-Math.pow(1-p,3);
+      el.textContent=String(Math.round(from+(to-from)*e));
+      if(p<1) requestAnimationFrame(step); else el._shown=to; };
+    requestAnimationFrame(step);
+  });
+}
+
+/* ── 星野避让：主屏大字与主按钮**不坐面板**，可读性靠"星点不在这些矩形里显影"来保证。
+   这是让装饰让步，不是给数据蒙一层纱 —— 蒙纱那条路实测 alpha .90 仍会被顶出 36 级差异。 */
+function avoidRefresh(){
+  const a=[];
+  document.querySelectorAll('.eyebrow,.ask,.why,.do,.foot').forEach(e=>{
+    const r=e.getBoundingClientRect();
+    if(r.width>2&&r.height>2&&r.bottom>0&&r.top<innerHeight)
+      a.push([r.left-34,r.top-26,r.right+34,r.bottom+26]);});
+  ST.avoid=a;
+}
+
+/* ══ 主屏那句话是怎么推出来的 ══════════════════════════════════════════
+   优先级写死、可核对，不靠"看起来顺眼"：
+     正在跑 > 卡住了 > 等你签字 > 还没做 > 这一步过了
+   13 个阶段各自的「写到哪儿 / 判据 / 上次结论」是**证据**，全在「细节」抽屉里；
+   主屏只留决策：一句现状 + 一个动作 + 一行"点下去会发生什么"。 */
+const STEPNAME={1:'接模拟器',2:'重新导出',3:'看图对比',4:'签字换入'};
+function askOf(n){
+  const all=S.stages||[], list=n===0?all:stagesOf(n), stn=k=>statusOf(k);
+  const st=S.state||{}, eb='第 '+n+' 步 · '+STEPNAME[n]+' · 共 4 步';
+  const fail=list.find(s=>stn(s.key)==='fail');
+  const aw=list.filter(s=>stn(s.key)==='await');
+  const idle=list.filter(s=>stn(s.key)==='idle');
+  const nEm=v=>'<em data-n="'+v+'">'+v+'</em>';
+
+  if(n===1){
+    const pf=st.preflight, pl=st.pull;
+    if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
+      why:esc((pf&&fail.key==='preflight'?pf.detail:fail.key)+'：先看它为什么红。'),
+      acts:[{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
+    if(pf&&!pf.ok) return {eb, red:1, ask:'权威输入缺东西，先别往下走',
+      why:'inputs/azdata、inputs/gamecfg 与画廊 vendor 是重导的唯一起点，缺了跑出来的是错的。',
+      acts:[{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看缺了哪些',k:'link2'}]};
+    if(!pf) return {eb, ask:'先确认权威输入还在位',
+      why:'只读地查一遍，不写任何东西。',
+      acts:[{a:'diff',t:'▶ 预检 + 看差异',k:'pact mag'}]};
+    const m=/新增 (\d+)\/变更 (\d+)/.exec((pl&&pl.detail)||'');
+    if(!pl) return {eb, ask:'看看模拟器上多了什么',
+      why:'只读地列一遍设备上的包、算出新增与变更，不下载。',
+      acts:[{a:'diff',t:'▶ 看差异',k:'pact mag'}]};
+    if(aw.length) return {eb, ask:'模拟器上有 '+nEm(+(m?m[1]:0))+' 个新包、'+nEm(+(m?m[2]:0))+
+        ' 个变更还没拉到本地',
+      why:'拉下来会写 files/AssetBundles。源包一旦被覆盖，旧版本本地就没有了——所以这一步要你签字。',
+      acts:[{a:'pull',t:'⚑ 拉进本地',k:'pact sign mag'},{a:'diff',t:'重新算一遍差异',k:'link2'}]};
+    return {eb, ask:'包已经在本地了', why:'下一步：从这些源包重算产物，全部先进暂存区。',
+      acts:[{a:'next',t:'去第 2 步 →',k:'pact mag'},{a:'diff',t:'再算一遍差异',k:'link2'}]};
+  }
+  if(n===2){
+    if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
+      why:'它停在这里不往下跑。日志里有那行原因。',
+      acts:[{a:'tocheck',t:'▶ 重跑到待确认',k:'pact mag'},{a:'detail',t:'看日志',k:'link2'}]};
+    if(idle.length===list.length) return {eb, ask:'从源包重算 '+nEm(list.length)+' 类产物',
+      why:'立绘 / Spine / Live2D 只写暂存区；依赖表、元数据、语音、CG 要你签字才动正式区。要跑一会儿。',
+      acts:[{a:'tocheck',t:'▶ 开始重导',k:'pact mag'}]};
+    if(aw.length) return {eb, ask:'重导好了 '+nEm(list.length-idle.length)+' / '+nEm(list.length)+
+        ' 项，其中 '+nEm(aw.length)+' 项要你签字才写正式区',
+      why:'没签字的那几项只算了差异，正式区一个字节没碰。勾上签字再跑才会覆盖。',
+      acts:[{a:'tocheck',t:'▶ 重跑到待确认',k:'pact mag'},{a:'staged',t:'只重跑导出三件',k:'link2'}]};
+    if(idle.length) return {eb, ask:'重导跑好了 '+nEm(list.length-idle.length)+' 项，还剩 '+nEm(idle.length)+' 项',
+      why:'继续跑会把剩下的算完。',
+      acts:[{a:'tocheck',t:'▶ 跑完剩下的',k:'pact mag'}]};
+    return {eb, ask:'产物都重导好了', why:'下一步：出改前 | 改后的对照表，纯读。',
+      acts:[{a:'next',t:'去第 3 步 →',k:'pact mag'},{a:'detail',t:'看这 7 项写到哪儿',k:'link2'}]};
+  }
+  if(n===3){
+    const rv=st.review;
+    if(fail) return {eb, red:1, ask:'对照表没做出来', why:esc(rv&&rv.detail||''),
+      acts:[{a:'review',t:'▶ 再出一次',k:'pact mag'},{a:'detail',t:'看日志',k:'link2'}]};
+    if(!rv) return {eb, ask:'出一张改前 | 改后的对照表',
+      why:'纯读，随时可以反复跑。图会放在「细节」里，点开能放大。',
+      acts:[{a:'review',t:'▶ 出对照表',k:'pact mag'}]};
+    return {eb, ask:'对照表好了，'+nEm((S.sheets||[]).length)+' 张，看一眼再决定换不换',
+      why:'这一步不写任何正式产物。换入是第 4 步，要你签字。',
+      acts:[{a:'detail',t:'打开对照表',k:'pact mag'},{a:'next',t:'去第 4 步 →',k:'link2'}]};
+  }
+  const live4=list.filter(s=>s.tier==='live'), aw4=live4.filter(s=>stn(s.key)==='await');
+  if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
+    why:'闸门判红说明这次换入会丢东西——别绕，先查源包。',
+    acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},{a:'detail',t:'看日志',k:'link2'}]};
+  if(aw4.length) return {eb, ask:nEm(aw4.length)+' 项暂存产物等着换进正式区',
+    why:'换入前整批备份到 Output/_OLD_bak/；索引有零回退闸门，会掉条目就直接停。',
+    acts:[{a:'swap',t:'⚑ 换入正式区',k:'pact sign mag'},{a:'regress',t:'只跑回归',k:'link2'}]};
+  if(!live4.some(s=>stn(s.key)==='pass')&&!S.running)
+    return {eb, ask:'现在没有待换入的东西',
+      why:'先跑第 2 步（重导）和第 3 步（看图），暂存区里有货了这里才会亮。',
+      acts:[{a:'prev',t:'← 回第 2 步',k:'pact mag'},{a:'detail',t:'看暂存区有什么',k:'link2'}]};
+  return {eb, ask:'这次更新已经换完了', why:'画廊已部署、回归跑过；要再来一轮就从第 1 步开始。',
+    acts:[{a:'regress',t:'▶ 只跑回归',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
+}
+
 function render(){
   RENDERED=true;
   if(!S) return;
   if(LASTSTEP!==step){ mounted.clear(); LASTSTEP=step; }   // 切步骤 = 这批卡的首次出现
   $('#fp').textContent=S.fingerprint||'—';
-  $('#scope').textContent = S.scope==null ? '未 detect（先跑 ①）' : '增量 '+S.scope+' 个 stem';
+  $('#scope').textContent = S.scope==null ? '未算' : '增量 '+S.scope+' 项';
   const all=S.stages||[];
   const passN=all.filter(s=>statusOf(s.key)==='pass').length;
-  $('#prog').textContent=passN+' / '+all.length+' 判绿';
-  if(LOADERR){ $('#warn').textContent='读 /api/state 失败：'+LOADERR+'（2.5 秒后自动重试）';
+  $('#prog').textContent=passN+' / '+all.length;
+  if(LOADERR){ $('#warn').textContent='读状态失败：'+LOADERR+'（2.5 秒后自动重试）';
     $('#warn').classList.add('on'); }
   else if(S.error){ $('#warn').textContent='读阶段清单失败：'+S.error; $('#warn').classList.add('on'); }
   else if(!all.length){ $('#warn').textContent='阶段清单为空：update_pipeline 没读到。';
     $('#warn').classList.add('on'); }
   else $('#warn').classList.remove('on');
 
-  /* 左轨 */
-  const steps=S.steps||{}; const rail=$('#rail'); rail.innerHTML='';
+  /* ── 底部步骤条：四个节点，节点上带该步全部阶段的状态方块 ─────────────
+     判据「13 个阶段一个都不许被折叠掉」靠这里每个 dot 都在。 */
+  const steps=S.steps||{}, bar=$('#stepsbar');
+  bar.querySelectorAll('.snode').forEach(e=>e.remove());
   Object.keys(steps).sort().forEach(k=>{
     const n=+k, list=stagesOf(n);
     const worst=list.map(s=>statusOf(s.key))
       .reduce((a,b)=>['fail','run','await','pass','idle'].indexOf(a)<=['fail','run','await','pass','idle'].indexOf(b)?a:b,'idle');
     const doneN=list.filter(s=>statusOf(s.key)==='pass').length;
     const b=document.createElement('button');
-    const fresh='s'+n; const first=!mounted.has(fresh); mounted.add(fresh);
-    b.className='step mag'+(n===step?' on':'')+(first?' in':'');
-    if(first) b.style.animationDelay=(n*55)+'ms';
-    // 左轨不放步骤说明：那句话在中间 hero 里已经占了一整行，重复一遍会把图例挤到折叠线以下
-    b.innerHTML='<span class="num">'+n+'</span><span><b>'+esc(steps[k][0])+'</b><span class="dots">'+
-      list.map(s=>'<i class="dot '+statusOf(s.key)+'" title="'+esc(s.key)+'"></i>').join('')+
-      '</span><span class="cnt">'+list.length+' 个阶段 · 判绿 '+doneN+'</span></span>'+
-      (worst==='fail'?'<span class="stt fail">红</span>'
-        :worst==='await'?'<span class="stt await">签</span>'
-        :doneN===list.length&&list.length?'<span class="stt pass">齐</span>':'');
+    const fresh='s'+n, first=!mounted.has(fresh); mounted.add(fresh);
+    b.className='snode'+(n===step?' on':'')+(first?' in':'')+
+      (worst==='fail'?' fail':worst==='await'?' await':worst==='run'?' run':
+       doneN===list.length&&list.length?' done':'');
+    if(first) b.style.animationDelay=(n*70)+'ms';
+    b.innerHTML='<span class="bead"></span><label>'+esc(steps[k][0])+'</label>'+
+      '<span class="sdots">'+list.map(s=>'<i class="dot '+statusOf(s.key)+'" title="'+esc(s.key)+'"></i>').join('')+'</span>'+
+      '<span class="cnt">'+doneN+'/'+list.length+'</span>';
     b.onclick=()=>{ step=n; render(); };
-    rail.appendChild(b);
+    bar.appendChild(b);
   });
-  railMark();
+  stepFill();
+
+  /* ── 主屏 ─────────────────────────────────────────────────────────── */
+  const A=askOf(step);
+  const eb=$('#eyebrowTx'), ask=$('#ask'), why=$('#why'), foot=$('#scopeNote');
+  eb.textContent = S.running ? ('正在跑 · '+S.running.label) : A.eb;
+  $('#eyebrow').classList.toggle('red', !!A.red);
+  $('#eyebrow').classList.toggle('run', !!S.running);
+  if(ask.innerHTML!==A.ask){
+    ask.innerHTML=A.ask; rollNums(ask);
+    if(RENDERED&&!CALM){ ask.classList.remove('swap'); void ask.offsetWidth; ask.classList.add('swap'); }
+  }
+  why.textContent=A.why;
+  foot.textContent=A.foot||'';
+  foot.classList.toggle('on',!!A.foot);
+  $('#cta').innerHTML=A.acts.map(c=>c.k.indexOf('link2')>=0
+      ? '<button class="link2" data-a="'+c.a+'">'+c.t+'</button>'
+      : '<button class="'+c.k+'" data-a="'+c.a+'">'+c.t+'</button>').join('');
+  avoidRefresh();
+
   const ungrouped=all.filter(s=>!steps[s.step||0]);
   if(ungrouped.length){
-    const b=document.createElement('div'); b.className='step';
-    b.innerHTML='<span class="num">?</span><span><b>未归组</b>'+
-      '<span class="cnt">缺 step：'+ungrouped.map(s=>s.key).join(', ')+'</span></span>'+
-      '<span class="stt fail">红</span>';
-    rail.appendChild(b);
+    foot.textContent='有 '+(ungrouped.map(s=>s.key).join(', '))+' 没归到任何一步，先补 step';
+    foot.classList.add('on');
   }
 
-  /* 中间 */
+  /* ── 抽屉里的证据（结构与旧版一致，判据一条都不放松） ───────────────── */
   const list=step===0?all:stagesOf(step);
-  $('#sTitle').textContent=(steps[step]?('①②③④'[step-1]+'  '+steps[step][0]):'全部阶段');
-  $('#sDesc').textContent=steps[step]?steps[step][1]:'未归组的阶段';
   $('#sCount').textContent=list.length+' 个';
-  $('#cta').innerHTML=ctaFor(step).map(c=>'<button class="'+c.c+'" data-a="'+c.a+'"'+
-    (S.running?' disabled':'')+'>'+c.t+'</button>').join('');
-  const liveUnapproved=list.filter(s=>s.tier==='live'&&statusOf(s.key)==='await');
-  const sn=$('#scopeNote');
-  if(step===2&&liveUnapproved.length){
-    sn.textContent='未签字：'+liveUnapproved.map(s=>s.key).join(' / ')+' 只算差异，不写正式区';
-    sn.classList.add('on');
-  } else if(S.scope==null&&step>=2){
-    sn.textContent='未做增量 detect · 先跑 ① 看差异';
-    sn.classList.add('on');
-  } else sn.classList.remove('on');
-
   const cards=$('#cards'); cards.innerHTML='';
   list.forEach((s,i)=>{
-    const st=statusOf(s.key), r=(S.state||{})[s.key]||{}, T=TIER[s.tier]||['?','r'];
+    const stt=statusOf(s.key), r=(S.state||{})[s.key]||{}, T=TIER[s.tier]||['?','r'];
     const d=document.createElement('div');
     const first=!mounted.has(s.key); mounted.add(s.key);
     d.className='stage'+(first?' in':'')+
-      (st==='fail'?' fail':st==='await'?' await':'');
+      (stt==='fail'?' fail':stt==='await'?' await':'');
     if(first) d.style.animationDelay=(60+i*26)+'ms';
     d.innerHTML='<div class="srow"><span class="skey">'+esc(s.key)+'</span>'+
       '<span class="tier '+T[1]+'">'+T[0]+'</span>'+
-      '<span class="stt '+st+'">'+STT[st]+'</span></div>'+
+      '<span class="stt '+stt+'">'+STT[stt]+'</span></div>'+
       '<p class="stitle">'+esc(s.title)+'</p>'+
       '<dl class="kv">'+
       '<dt>写到</dt><dd>'+esc(s.writes||'—')+'</dd>'+
@@ -1525,7 +1736,7 @@ function render(){
 
   const sh=$('#sheets');
   if(!(S.sheets||[]).length) sh.innerHTML='<p class="dim" style="font-size:12px;margin:0">'+
-    '还没有对照表 · 先跑 ③</p>';
+    '还没有对照表 · 先跑第 3 步</p>';
   else sh.innerHTML=S.sheets.map(x=>'<a target="_blank" href="/file?path='+encodeURIComponent(x.name)+
     '"><img loading="lazy" src="/file?path='+encodeURIComponent(x.name)+'" alt="'+esc(x.name)+
     '"><div class="cap"><span>'+esc(x.name)+'</span><span>'+x.kb+'KB '+esc(x.mt)+'</span></div></a>').join('');
@@ -1537,14 +1748,13 @@ function render(){
     (rr.state==='running'?'在跑':'看日志')+'</span></td></tr>').join('')||
     '<tr><td colspan="3" class="dim">还没有任务</td></tr>';
   $$('#runs tr').forEach((tr,i)=>{ const rr=(S.runs||[])[i]; if(!rr) return;
-    tr.style.cursor='pointer'; tr.onclick=()=>tail(rr.id); });
+    tr.style.cursor='pointer'; tr.onclick=()=>{ tail(rr.id); openDetail(); }; });
   $$('#cta button').forEach(b=>b.onclick=()=>ctaRun(b.dataset.a));
   $$('#cards .appr').forEach(cb=>cb.onchange=e=>
     e.target.closest('.signbox').classList.toggle('on', e.target.checked));
-  // 悬停阶段卡 → 左轨那颗状态点跟着亮：省掉"这行对应上面哪个点"的眼力活
-  $$('#cards .stage').forEach((el,i)=>{
+  $$('#cards .stage').forEach(el=>{
     el.addEventListener('mouseenter',()=>{ const k=el.querySelector('.skey').textContent;
-      const d=document.querySelector('.step .dot[title="'+k+'"]'); if(d) d.classList.add('hot'); });
+      const d=document.querySelector('.snode .dot[title="'+k+'"]'); if(d) d.classList.add('hot'); });
     el.addEventListener('mouseleave',()=>{ [...document.querySelectorAll('.dot.hot')]
       .forEach(d=>d.classList.remove('hot')); });
   });
@@ -1554,25 +1764,35 @@ function render(){
     if(ap&&!confirm('签字放行 '+k+'：它会写进正式区（会先备份）。确认？')) return;
     post({stages:[k],approve:ap?[k]:[],force:force},null); });
 }
-function ctaFor(n){
-  if(n===1) return [{a:'diff',c:'go mag',t:'▶ 预检 + 看差异'},
-                   {a:'pull',c:'sign mag',t:'⚑ 拉包进 files/'}];
-  if(n===2) return [{a:'tocheck',c:'go mag',t:'▶ 跑到待确认'},
-                   {a:'staged',c:'',t:'只重跑导出'}];
-  if(n===3) return [{a:'review',c:'go mag',t:'▶ 出对照表'}];
-  return [{a:'swap',c:'sign mag',t:'⚑ 换入正式区'},{a:'regress',c:'',t:'只跑回归'}];
+
+/* 进度线**长到**当前节点，不是瞬间跳过去。弹簧用高阻尼（不过冲）——
+   它会从左边伸出头，那看着像 bug 不像物理。 */
+function stepFill(){
+  const nodes=$$('.snode'), fill=$('#stepfill'), bar=$('#stepsbar');
+  if(!nodes.length||!fill) return;
+  const br=bar.getBoundingClientRect();
+  const on=nodes[step-1]||nodes[0];
+  const r=on.getBoundingClientRect();
+  const target=Math.max(0, r.left+r.width/2-br.left);
+  const prev=fill._x==null?target:fill._x;
+  fill._x=target;
+  if(CALM||prev===target){ fill.style.width=target+'px'; return; }
+  SPRG.to('fill',target,v=>{ fill.style.width=Math.max(0,v).toFixed(1)+'px'; },150,26,prev);
 }
 function ctaRun(a){
+  if(a==='next') return void (step=Math.min(4,step+1), render());
+  if(a==='prev') return void (step=Math.max(1,step-1), render());
+  if(a==='detail') return void openDetail();
   const live4=(S.stages||[]).filter(s=>s.step===4&&s.tier==='live').map(s=>s.key);
   if(a==='diff') return post({stages:['preflight','pull'],force:force});
-  if(a==='pull') return sign(['pull'],'① 从模拟器拉包',
+  if(a==='pull') return sign(['pull'],'第 1 步：从模拟器拉包',
     'adb pull 写进 files/AssetBundles（只补缺的和变了的）。'+
-    '源包一旦覆盖，旧版本本地就没了 —— 所以它是「写正式」。');
+    '源包一旦覆盖，旧版本本地就没了 —— 所以它要你签字。');
   if(a==='tocheck') return post({stages:[],force:force});
   if(a==='staged') return post({stages:['paintings','spine','live2d'],force:force});
   if(a==='review') return post({stages:['review'],force:force});
   if(a==='regress') return post({stages:['regress'],force:force});
-  if(a==='swap') return sign(live4,'④ 换入：'+live4.join(' + '),
+  if(a==='swap') return sign(live4,'第 4 步：换入 '+live4.join(' + '),
     '换入前整批备份到 Output/_OLD_bak/pipeline_<日期>/；随后重建缩略图与索引，'+
     '要过「索引零回退闸门」和「部署 4/4 同 inode」两道检查，任一判红就停。');
 }
@@ -1625,6 +1845,25 @@ $('#chips').onclick=e=>{ const b=e.target.closest('.chip'); if(!b) return;
 $('#bForce').onclick=e=>{ force=!force; e.target.textContent=force?'缓存：已绕过':'缓存：按指纹复用';
   e.target.style.borderColor=force?'var(--await)':''; };
 $('#bHelp').onclick=()=>$('#help').classList.add('on');
+/* 「细节」抽屉：弹簧推入（高阻尼、不过冲 —— 右侧抽屉过冲会在边上闪出一条缝，
+   那是 bug 不是物理）。关掉时把焦点还给主屏。 */
+function openDetail(){ $('#detail').classList.add('on');
+  const b=$('#detail .body');
+  if(CALM){ b.style.transform=''; return; }
+  SPRG.to('drawer',0,v=>{ b.style.transform='translateX('+(v*100).toFixed(3)+'%)'; },170,26,1); }
+function closeDetail(){ const d=$('#detail'), b=d.querySelector('.body');
+  if(!d.classList.contains('on')) return;
+  if(CALM){ d.classList.remove('on'); b.style.transform='translateX(100%)'; return; }
+  SPRG.to('drawer',1.02,v=>{ b.style.transform='translateX('+(v*100).toFixed(3)+'%)'; },200,24);
+  /* ⚠️ 摘 `.on` 交给**定时器**，不交给弹簧回调。
+     交给弹簧时一旦那一帧没跑完（rAF 被节流、或 apply 里抛异常把整个弹簧循环打死），
+     那层 position:fixed;inset:0 的遮罩就永远赖在屏上：抽屉里的卡片被推到视口外
+     （hover 判据全量不到）、"背景可见区"退化成 0 像素、帧率被 backdrop-filter 拖垮。
+     视觉出口动画照样有，但**状态落定不依赖动画跑完**。 */
+  setTimeout(()=>{ d.classList.remove('on'); b.style.transform='translateX(100%)'; },260); }
+function toggleDetail(){ $('#detail').classList.contains('on')?closeDetail():openDetail(); }
+$('#bDetail').onclick=toggleDetail;
+$$('#detail [data-dclose]').forEach(el=>el.onclick=closeDetail);
 /* 键位：这类界面要反复切步骤、反复跑同一件事，摸熟键盘比找按钮快。
    输入框里打字时一律不劫持。 */
 document.addEventListener('keydown',e=>{
@@ -1634,7 +1873,9 @@ document.addEventListener('keydown',e=>{
   const t=e.target;
   if(t && t.matches && t.matches('input,textarea,select')) return;
   const k=(e.key||'').toLowerCase();
-  if(k==='escape'){ $('#help').classList.remove('on'); $('#lightbox').classList.remove('on'); return; }
+  if(k==='escape'){ $('#help').classList.remove('on'); $('#lightbox').classList.remove('on');
+                    closeDetail(); return; }
+  if(k==='d'){ toggleDetail(); e.preventDefault(); return; }
   if(k>='1'&&k<='4'&&Number(k)<=Object.keys((S&&S.steps)||{}).length){
     step=Number(k); render(); e.preventDefault(); return; }
   if(k==='h'){ $('#help').classList.toggle('on'); }
@@ -1652,7 +1893,7 @@ document.addEventListener('click',e=>{ if(e.target.matches('.sheets img')){
   $('#lightbox img').src=e.target.src; $('#lightbox').classList.add('on'); e.preventDefault(); } });
 $('#lightbox').onclick=e=>e.currentTarget.classList.remove('on');
 legacyApply(); seaApply(); calmApply(); apiState();
-addEventListener('resize',()=>{ railMark(); chipMark(); });
+addEventListener('resize',()=>{ stepFill(); chipMark(); avoidRefresh(); });
 chipMark();
 let pollT=setInterval(()=>{ if(!timer) apiState(); },8000);
 /* 验收钩子。`stop()` 是上一版留下的绕道：那时轮询会重播卡片入场动画，
@@ -1662,8 +1903,8 @@ let pollT=setInterval(()=>{ if(!timer) apiState(); },8000);
 window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                 poll(on){ if(on&&!pollT) pollT=setInterval(()=>{ if(!timer) apiState(); },8000);
                           if(!on&&pollT){ clearInterval(pollT); pollT=null; } },
-                pin(){ window.__pin=[...document.querySelectorAll('.step,.stage')]; return 1; },
-                pinned(){ const now=[...document.querySelectorAll('.step,.stage')];
+                pin(){ window.__pin=[...document.querySelectorAll('.snode,.stage')]; return 1; },
+                pinned(){ const now=[...document.querySelectorAll('.snode,.stage')];
                           const p=window.__pin||[];
                           return p.length>0 && p.length===now.length && p.every(e=>now.includes(e)); },
                 anims(){ return document.getAnimations().length; },
@@ -1680,10 +1921,22 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                 hover(sel){ const el=$(sel); if(!el) return null;
                   const r=el.getBoundingClientRect();
                   return {x:r.left+r.width*0.3,y:r.top+r.height*0.5}; },
-                marks(){ const a=$('#railmark'), b=$('#chipmark');
-                  return {rail:a?a.style.opacity+'|'+a.style.top+'|'+a.style.height:null,
-                          chip:b?b.style.opacity+'|'+b.style.left+'|'+b.style.width:null}; }};
-window.ST=ST; window.SPR=SPR; window.panelState=()=>S;
+                marks(){ const a=$('#stepfill'), b=$('#chipmark');
+                  return {fill:a?a.style.width:null,
+                          chip:b?b.style.opacity+'|'+b.style.left+'|'+b.style.width:null}; },
+                springs(){ return SPRG.raf?SPRG.m.size:0; },
+                live(){ return SPRG.live(); },
+                det(on){ on?openDetail():closeDetail(); return 1; },
+                ask(){ return {eb:$('#eyebrowTx').textContent, ask:$('#ask').textContent.trim(),
+                                why:$('#why').textContent.trim(),
+                                acts:[...document.querySelectorAll('#cta button')]
+                                      .map(x=>x.className+'|'+x.textContent)}; },
+                detail(){ const d=$('#detail');
+                  return {on:d.classList.contains('on'),
+                          vis:getComputedStyle(d).display!=='none',
+                          cards:d.querySelectorAll('.stage').length}; },
+                avoid(){ return (ST.avoid||[]).length; }};
+window.ST=ST; window.SPR=SPR; window.SPRG=SPRG; window.panelState=()=>S;
 </script></body></html>
 '''
 

@@ -92,8 +92,13 @@ class Pg:
             if r.get('method') == 'Runtime.exceptionThrown':
                 d = r.get('params', {}).get('exceptionDetails', {})
                 ex = d.get('exception') or {}
+                # 带上栈顶两帧：只报 message 的话，"undefined.toFixed" 这种
+                # 根本定位不到是哪条弹簧的 apply 回调（本轮就卡过一次）。
+                st = [f"{x.get('functionName','?')}:{x.get('lineNumber')}:{x.get('columnNumber')}"
+                      for x in (d.get('stackTrace') or {}).get('callFrames', [])][:3]
                 self.exc.append(str(d.get('text') or '') + ' '
-                                + str(ex.get('description') or ex.get('value') or '')[:200])
+                                + str(ex.get('description') or ex.get('value') or '')[:200]
+                                + ('  << ' + ' <- '.join(st) if st else ''))
             if r.get('id') == mid:
                 return r.get('result', {})
 
@@ -104,8 +109,14 @@ class Pg:
             ed = r['exceptionDetails']
             ex = ed.get('exception') or {}
             # SyntaxError 的信息在 text/description 里，不在 message 里
-            return 'EXC ' + str(ex.get('description') or ex.get('value')
-                                  or ed.get('text') or 'no detail')[:300]
+            msg = str(ex.get('description') or ex.get('value')
+                      or ed.get('text') or 'no detail')[:300]
+            # ⚠️ 以前这里只往 self.exc 收 Runtime.exceptionThrown **事件**，
+            # 但 Runtime.evaluate 抛错时错误是在**响应里**回来的、不发事件 ——
+            # 于是「全程无 JS 异常」对一个真实的 TypeError 放了绿灯（假绿灯）。
+            # 探针自己调出来的异常必须同样计入。
+            self.exc.append('ev: ' + msg)
+            return 'EXC ' + msg
         return r.get('result', {}).get('value')
 
     def shot(self, name):
@@ -257,6 +268,51 @@ def quiesce(pg):
     time.sleep(0.25)
 
 
+
+def _wait_det(pg, want, timeout=14):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if pg.ev(EV("return document.querySelector('#detail').classList.contains('on')")) == want:
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def open_detail(pg, wait=0.6):
+    """打开「细节」抽屉。抽屉是 display:none 的覆盖层 —— **关着的时候里面所有元素
+    getBoundingClientRect() 全是 0**，凡是量几何的判据都必须先开它，否则会拿到
+    "没有可量的对象"式的假绿灯。"""
+    pg.ev(EV("window.__probe && __probe.det(true); return 1"))
+    ok = _wait_det(pg, True)
+    time.sleep(wait)
+    if not ok:
+        print('  FAIL  抽屉没能打开（后面的判据全部失去前提）')
+    return pg.ev(EV("return document.querySelectorAll('#detail .stage').length"))
+
+
+def close_detail(pg, wait=0.5):
+    pg.ev(EV("window.__probe && __probe.det(false); return 1"))
+    # ⚠️ 这里以前只 sleep(0.5)：关抽屉是弹簧推出去的，0.5s 内没到位就往下量，
+    #    那层 position:fixed;inset:0 且带 backdrop-filter 的遮罩还盖着整屏 ——
+    #    "背景可见区"被算成 0 像素（region_diff 拿 999 判红）、帧率被拖垮、
+    #    划动全被 250ms 阈值判成瞬移（实测笔画从 41 掉到 4）。必须轮询到真的关了。
+    ok = _wait_det(pg, False)
+    time.sleep(wait)
+    if not ok:
+        print('  FAIL  抽屉没能关闭（遮罩还在屏上，背景判据失去前提）')
+
+def settle(pg, timeout=25):
+    """把屏幕放到**真的静止**再拍照：星野的显影要淡净（raf 归零）、弹簧要停机。
+    park() 落在 (6,6) 本身会把那一角的星点亮起来 —— 不等它淡完就拍，
+    两张照片抓到的是不同衰减相位，"切回来必须同一张帧"会量到 232 级假红（实测）。"""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if pg.ev('ST.raf') == 0 and (pg.ev(EV('return __probe.live()')) or 0) == 0:
+            return True
+        time.sleep(0.4)
+    return False
+
+
 def park(pg, x=6, y=6, wait=0.35):
     """把指针停到没有任何 hover 的角落。划水那步用的是 CDP 可信鼠标，
     停在哪就点亮哪张卡的 :hover（实测把卡片抬 1px ⇒ 文字逐通道差 209）——
@@ -293,8 +349,10 @@ def main():
 
     # 等首屏渲染完：apiState 是异步的，不等就是拿空 DOM 断言
     for _ in range(60):
-        n = pg.ev(EV('return document.querySelectorAll(".step").length'))
-        c = pg.ev(EV('return (window.panelState&&panelState().stages||[]).length'))
+        n = pg.ev(EV('return document.querySelectorAll(".snode").length'))
+        # S 在首屏要等 /api/state 算完指纹才有 —— 轮询期间 panelState() 返回 null 是**预期**，
+        # 用可选链读，别让探针自己的表达式抛异常（那会被计入"页面有 JS 异常"）。
+        c = pg.ev(EV('return (window.panelState&&panelState()?.stages||[]).length'))
         if isinstance(n, int) and n >= 4 and c == 13:
             break
         time.sleep(0.5)
@@ -303,17 +361,63 @@ def main():
     stages, steps = S.get('stages', []), S.get('steps', {})
     live = [s['key'] for s in stages if s['tier'] == 'live']
 
+    print(chr(10) + '── 主屏：一次只暴露下一步（抽屉关着量） ───────────')
+    # 这一节必须在**抽屉关闭**时跑：主屏的全部意义就是"只回答一个问题"，
+    # 抽屉一开就被证据盖住了。
+    n_act = pg.ev(EV("return [...document.querySelectorAll('#cta button')]"
+                     ".filter(b=>b.classList.contains('pact')).length"))
+    n_pane = pg.ev(EV("return document.querySelectorAll('.now .pane').length"))
+    ask_tx = pg.ev(EV("return document.querySelector('.ask').textContent.trim()"))
+    chk('主屏只有一个实心行动（其余一律文字链）', n_act == 1, f'{n_act} 个主行动')
+    chk('主屏上没有任何面板（证据全在抽屉里）', n_pane == 0, f'{n_pane} 个 .pane')
+    chk('主屏有一句人话的现状', len(ask_tx) >= 6, f'「{ask_tx}」')
+    asks = []
+    for n in (1, 2, 3, 4):
+        pg.ev(EV(f'window.__probe.go({n}); return 1')); time.sleep(0.12)
+        asks.append(pg.ev(EV("return document.querySelector('.ask').textContent.trim()")))
+    chk('四步各有一句不同的现状（不是一句套话复用四次）',
+        len(set(asks)) == 4 and all(len(a) >= 6 for a in asks), ' | '.join(asks))
+    pg.ev(EV('window.__probe.go(1); return 1')); time.sleep(0.15)
+
+    # ★ 可读性不再靠"给文字蒙一层半透明纱"——实测 alpha .90 仍会被一颗星在字下面顶出
+    #   36 级差异。新做法是**星野在文字区主动避让**，所以判据也换成两条配对的：
+    #   划过之后总亮数必须 >0（证明真划了，不是"没反应所以 0"），且落在主句矩形内必须 ==0。
+    av = pg.ev(EV('return (ST.avoid||[]).length'))
+    chk('主屏文字区登记了避让矩形', av >= 3, f'{av} 个')
+    box = pg.ev(EV("""const r=document.querySelector('.ask').getBoundingClientRect();
+      return [Math.round(r.left),Math.round(r.top),Math.round(r.right),Math.round(r.bottom)]"""))
+    pg.ev(EV('ST.strokes=0; ST.lit=0; return 1'))
+    for i in range(16):
+        pg.move(box[0] + int((i % 8) * max(1, (box[2]-box[0])/8)) + 4,
+                box[1] + 8 + int((i // 8) * max(1, (box[3]-box[1])/2)))
+        time.sleep(0.03)
+    lit_all = pg.ev(EV('return ST.list.filter(t=>t.lit>0.02).length'))
+    lit_in = pg.ev(EV('let c=0;for(const t of ST.list) if(t.hx>=%d&&t.hx<=%d&&t.hy>=%d'
+                      '&&t.hy<=%d&&t.lit>0.02)c++;return c' % (box[0], box[2], box[1], box[3])))
+    strokes = pg.ev('ST.strokes') or 0
+    chk('横扫主句区域：远处星点亮了、但落在字底下的**一颗都没有**',
+        strokes > 0 and lit_all > 0 and lit_in == 0,
+        f'笔画 {strokes} · 亮着 {lit_all} 颗 · 字底下 {lit_in} 颗')
+    for _ in range(40):
+        if pg.ev('ST.raf') == 0: break
+        time.sleep(0.4)
+    settle(pg, timeout=12)
+    spr = pg.ev(EV('return __probe.live()'))
+    chk('弹簧会自己停机（静止后零个 rAF 循环在跑）', spr == 0, f'SPRG.raf={spr}')
+    pg.shot('main_step1')
+    open_detail(pg)      # 结构与 token 判据量的是抽屉里的卡片
     print('\n── 结构与可读性 ─────────────────────────────────')
+    pg.shot('detail_open')      # 抽屉展开态：留一张给人看「证据都长什么样」
     chk('阶段与步骤读全（13 / 4）', len(stages) == 13 and len(steps) == 4,
         f'{len(stages)} 阶段 / {len(steps)} 步')
     chk('每个阶段都写了「写到哪儿」', all(s.get('writes') for s in stages),
         '缺: ' + ','.join(s['key'] for s in stages if not s.get('writes')))
 
-    labels = pg.ev(EV('return [...document.querySelectorAll(".step b")].map(x=>x.textContent).join("/")'))
-    nstep = pg.ev(EV('return document.querySelectorAll(".step").length'))
+    labels = pg.ev(EV('return [...document.querySelectorAll(".snode label")].map(x=>x.textContent).join("/")'))
+    nstep = pg.ev(EV('return document.querySelectorAll(".snode").length'))
     chk('左轨恰好四步、没有未归组冒出来', nstep == 4, f'{nstep} 个：{labels}')
 
-    ndot = pg.ev(EV("return document.querySelectorAll('.step .dot').length"))
+    ndot = pg.ev(EV("return document.querySelectorAll('.snode .dot').length"))
     chk('13 个阶段在四步里全覆盖（一个都没被折叠掉）', ndot == 13, f'{ndot} 个状态点')
 
     total = 0
@@ -372,18 +476,19 @@ def main():
             if lay and lay != 'none' and 'inset' not in lay.split():
                 out.append(lay)
         return out
-    bad_sh = {s: outer_layers(s) for s in ('.pane', '.stage', 'header', 'button.go')}
+    bad_sh = {s: outer_layers(s) for s in ('.pane', '.stage', 'header', '.pact')}
     bad_sh = {k: v for k, v in bad_sh.items() if v}
     chk('chrome 一律**零外投影**（纵深只靠色阶与描边，投影是"AI 生成界面"的指纹）',
         not bad_sh, str(bad_sh))
     caps = pg.ev(EV("""return [...document.querySelectorAll('.ph,.runs th')].
         map(e=>getComputedStyle(e).textTransform).filter(v=>v==='uppercase').length"""))
     chk('小标签不再全大写 + 宽字距（那是"设计感"最廉价的一种）', caps == 0, f'{caps} 个 uppercase')
-    grads = pg.ev(EV("""return [...document.querySelectorAll('.pane,.stage,header,button.go,#railmark')]
+    grads = pg.ev(EV("""return [...document.querySelectorAll('.pane,.stage,header,.pact,#stepfill,.ask')]
       .filter(e=>{const b=getComputedStyle(e).backgroundImage;
         return b&&b!=='none'&&/gradient/.test(b)}).map(e=>e.className)""")) or []
     chk('chrome 上不许有渐变填充（大气渐变是参照物明文禁止项）', not grads, f'带渐变: {grads}')
 
+    close_detail(pg)
     print('\n── 星野画法：精灵图集 + 幂律亮度 ──────────────────')
     kinds = ('dust', 'star', 'hero', 'cloud')
     baked = pg.ev(EV("""const o={};
@@ -425,11 +530,13 @@ def main():
     print('\n── V 键：新旧版面必须一眼看得出不同（正向对照） ────')
     quiesce(pg)
     park(pg)
+    chk('V 节前屏幕已静止（星野淡净 + 弹簧停机）', settle(pg))
     pg.ev(EV('__probe.pin(); return 1'))      # 换版面不该重建节点，下面拿它验"切换无副作用"
     new_shot = pg.shot('layout_new')
     pg.ev(EV('__probe.legacy(true); return 1'))
     time.sleep(0.5)
     park(pg)
+    settle(pg)
     old_shot = pg.shot('layout_old')
     dmax, dmean, _ = diff_png(new_shot, old_shot)
     chk('V 切到旧版面：整屏必须**明显**变化（防"改了等于没改"）',
@@ -437,6 +544,7 @@ def main():
     pg.ev(EV('__probe.legacy(false); return 1'))
     time.sleep(0.5)
     park(pg)
+    chk('切回新版面后确实静止（不然下面的像素比对量的是衰减相位）', settle(pg))
     back_shot = pg.shot('layout_back')
     bmax, _, _ = diff_png(new_shot, back_shot)
     nbig = _count_above(new_shot, back_shot, 8)
@@ -452,7 +560,7 @@ def main():
     cls = pg.ev(EV("return [document.body.classList.contains('legacy'),"
                    "document.body.classList.contains('calm'),"
                    "document.body.classList.contains('plain')]"))
-    pininfo = pg.ev(EV("""const p=window.__pin||[], now=[...document.querySelectorAll('.step,.stage')];
+    pininfo = pg.ev(EV("""const p=window.__pin||[], now=[...document.querySelectorAll('.snode,.stage')];
       return {pinned:p.length, now:now.length,
               same:now.length>0 && p.length===now.length && p.every(e=>now.includes(e))}"""))
     chk('V 切回来不留痕：类名回位 + 星位残留 0 + 显影场清零 + 节点未被重建',
@@ -477,7 +585,7 @@ def main():
     nanim = pg.ev(EV('return __probe.anims()'))
     chk('跨一次轮询整屏逐像素相同（旧版这里必闪）', pmax == 0,
         f'整屏最大差 {pmax} 均值 {pmean:.2f}')
-    chk('轮询没有重建 .step/.stage 节点（动画无从重播）',
+    chk('轮询没有重建 .snode/.stage 节点（动画无从重播）',
         bool(pg.ev(EV('return __probe.pinned()'))))
     chk('静止时零个动画在跑（轮询开着，含背景那层）', nanim == 0, f'getAnimations={nanim}')
 
@@ -489,7 +597,7 @@ def main():
              " return 1"))
     time.sleep(0.4)
     fx_base = pg.shot('fx_base')
-    tgt = pg.ev(EV("""const r=document.querySelector('.step.on').getBoundingClientRect();
+    tgt = pg.ev(EV("""const r=document.querySelector('.snode.on').getBoundingClientRect();
       return [Math.round(r.left+r.width*0.3), Math.round(r.top+r.height*0.5)]"""))
     pg.move(tgt[0], tgt[1])
     time.sleep(0.12)
@@ -515,13 +623,13 @@ def main():
     pg.move(tgt[0] + 60, tgt[1])
     time.sleep(0.06)
     # 主按钮与阶段卡各补一张：光在控件上的落点只有截图能判，别只信类名与 display
-    btn = pg.ev(EV("""const r=document.querySelector('#cta button.go').getBoundingClientRect();
+    btn = pg.ev(EV("""const r=document.querySelector('#cta .pact').getBoundingClientRect();
       return [Math.round(r.left+r.width*0.5), Math.round(r.top+r.height*0.82)]"""))
     pg.move(btn[0], btn[1])
     time.sleep(0.10)
     fb = pg.ev(EV('return __probe.fx()'))
-    chk('主按钮悬停：柔光挂上且落在 .go 上', bool(fb['pool'] and fb['cur'] and 'go' in fb['cur']),
-        str(fb))
+    chk('主按钮悬停：柔光挂上且落在主行动上',
+        bool(fb['pool'] and fb['cur'] and 'pact' in fb['cur']), str(fb))
     pg.shot('fx_btn')
 
     def bar_scale():
@@ -532,12 +640,20 @@ def main():
         return pg.ev(EV("""const s=document.querySelector('.stage');
           return getComputedStyle(s,'::before').transformOrigin"""))
     pg.move(6, 6)
+    open_detail(pg)      # 阶段卡在抽屉里，量它得先开
     time.sleep(0.5)
     rest_scale, rest_org0 = bar_scale(), bar_org()
     cd = pg.ev(EV("""const r=document.querySelector('.stage').getBoundingClientRect();
       return [Math.round(r.left+r.width*0.4), Math.round(r.top+r.height*0.78)]"""))
     pg.move(cd[0], cd[1])
-    time.sleep(0.55)
+    # ⚠️ 不能固定 sleep 就读值：光条是 .38s 的 CSS 过渡，抽屉开着 + 背景画布在跑时
+    #    无头里起步会晚得多，实测 sleep(0.55) 只走到 scaleY 0.886 —— 那是采样太早，
+    #    不是产品没展开（技能第 11 条同一条规矩，我自己新加的判据先犯了）。
+    t0 = time.time(); hot_scale = rest_scale
+    while time.time() - t0 < 3.0:
+        hot_scale = bar_scale()
+        if hot_scale > 0.995: break
+        time.sleep(0.15)
     hot_scale = bar_scale()
     chk('阶段卡左光条从进入高度**展开**（静止 34% → 悬停 100%）',
         rest_scale < 0.5 and hot_scale > 0.95, f'静止 {rest_scale} → 悬停 {hot_scale}')
@@ -549,6 +665,7 @@ def main():
     # 全部落在卡片左边缘的同一列上。只量 scaleY 回没回 0.34 是抓不到这条的。
     # 断言拿"进入前"当基线，不写死字面值：计算样式会把 `50% 50%` 解析成 `1px 67.32px`。
     org_back, sc_back = bar_org(), bar_scale()
+    close_detail(pg)
     chk('指针离开卡片后光条收回原位（不留展开态、也不留收缩原点）',
         sc_back < 0.5 and org_back == rest_org0,
         f'scale={sc_back} origin={org_back} 进入前={rest_org0}')
@@ -576,7 +693,7 @@ def main():
     pg.move(6, 6)
     chk('M 键关掉整层光效：浮层 display:none 且悬停不再触发',
         bool(pg.ev(EV("""__probe.calm(true);
-          const r=document.querySelector('.step.on').getBoundingClientRect();
+          const r=document.querySelector('.snode.on').getBoundingClientRect();
           return getComputedStyle(document.querySelector('#fxbeam')).display==='none'
               && getComputedStyle(document.querySelector('#fxpool')).display==='none'"""))))
     pg.move(tgt[0], tgt[1])
@@ -585,10 +702,12 @@ def main():
         not pg.ev(EV('return __probe.fx()'))['beam'], str(pg.ev(EV('return __probe.fx()'))))
     pg.move(6, 6)
     pg.ev(EV('__probe.calm(false); return 1'))
-    rm = pg.ev(EV("""__probe.go(3);
-      const on=document.querySelector('.step.on'), mk=document.querySelector('#railmark');
-      return {ok: mk.style.opacity==='1' && mk.style.top===(on.offsetTop+9)+'px',
-              top:mk.style.top, want:(on.offsetTop+9)+'px'}"""))
+    rm = pg.ev(EV("""const on=document.querySelector('.snode.on'), mk=document.querySelector('#stepfill');
+      const br=document.querySelector('#stepsbar').getBoundingClientRect();
+      const r=on.getBoundingClientRect();
+      const want=Math.round(r.left+r.width/2-br.left);
+      return {ok: Math.abs(parseFloat(mk.style.width)-(want))<=2.5,
+              got:mk.style.width, want:want+'px'}"""))
     chk('当前步指示条仍在且跟着换步落位（那是信息，不是被一起关掉的装饰）', rm['ok'], str(rm))
     cm = pg.ev(EV("""document.querySelector('.chip[data-f=bad]').click();
       const on=document.querySelector('.chip.on'), mk=document.querySelector('#chipmark');
@@ -607,6 +726,19 @@ def main():
     quiesce(pg)
 
     print('\n── 背景层：静止 / 起浪 / 不遮挡 ──────────────────')
+    # 量背景之前先确认**屏幕上没有那层全屏遮罩**：它 position:fixed;inset:0 且带背景色，
+    # 一旦还在，「背景可见区」会被算成 0 像素，region_diff 只能拿 999 判红 ——
+    # 那看起来像「掩码写错了」，实际是上一节的抽屉没关严（本轮实测踩过）。
+    veil = pg.ev(EV('''
+      const v=document.querySelector('#detail .veil'); if(!v) return 0;
+      let n=v, vis=true;
+      while(n){ const c=getComputedStyle(n);
+        if(c.display==='none'||c.visibility==='hidden'||parseFloat(c.opacity)<0.02){vis=false;break;}
+        n=n.parentElement; }
+      if(!vis) return 0;
+      const r=v.getBoundingClientRect(); return Math.round(r.width*r.height)'''))
+    chk('量背景前没有全屏遮罩（遮罩会让背景可见区退化成 0 像素的空判据）',
+        (veil or 0) < 5000, f'遮罩面积 {veil}')
     chk('星野够密（>1200 颗）', (pg.ev('ST.list.length') or 0) > 1200,
         f"{pg.ev('ST.list.length')} 颗星")
     # 「静止」两条必须先**落到静止**再量。上一节的光效判据要求用 CDP 可信鼠标真划过页面，
@@ -675,7 +807,7 @@ def main():
 
     opaque = pg.ev(EV("""
       const bad=[];
-      document.querySelectorAll('header,.pane,.stage,pre,.sheets a,.sheets img,.meter,.step')
+      document.querySelectorAll('header,.pane,.stage,pre,.sheets a,.sheets img,.meter,.snode,.pact,.dhead,#detail .body')
         .forEach(e=>{ const c=getComputedStyle(e).backgroundColor;
           const m=c.match(/[\d.]+\s*[,\/]\s*([\d.]+)\)?$/);
           const a=c.startsWith('rgba')?(m?parseFloat(m[1]):0):1;
@@ -683,6 +815,7 @@ def main():
       return bad.slice(0,6)
     """))
     chk('数据面底色全部不透明（alpha=1）', not opaque, '漏: ' + str(opaque))
+    open_detail(pg)      # 几何包含判据量的是抽屉里的面板与卡片
     quiesce(pg)
     boxes = card_boxes(pg)
     pg.shot('stars_on')
@@ -709,7 +842,8 @@ def main():
         .forEach(e=>{
           const r=e.getBoundingClientRect();
           if(r.width<2||r.height<2) return;
-          const p=e.closest('.pane,header');
+          // 抽屉的 .body 本身就是不透明表面（--deep），量「在不在面板里」必须算它
+          const p=e.closest('.pane,header,#detail .body');
           if(!p){ out.push((e.className||e.tagName)+':不在任何面板里'); return; }
           const q=p.getBoundingClientRect();
           if(r.left<q.left-0.5||r.top<q.top-0.5||r.right>q.right+0.5||r.bottom>q.bottom+0.5)
@@ -741,6 +875,7 @@ def main():
         notes.append('盘上还没有对照表，跳过「对照图底不透明」那条——没有可量的对象，不算通过也不算失败')
     pg.ev(EV("document.querySelector('#bSea').click(); return 1"))
 
+    close_detail(pg)
     print('\n── 任务生命周期（轮询不许把子进程杀掉）───────────')
     # Windows 上 `os.kill(pid, 0)` 不是探活，是 TerminateProcess —— 面板只要轮一次状态
     # 就会把正在跑的流水线当场杀了。这条判据用"日志必须跑到自然收尾"来证它没被掐死。
@@ -778,7 +913,7 @@ def main():
     pg.cmd('Emulation.setEmulatedMedia',
            {'features': [{'name': 'prefers-reduced-motion', 'value': 'reduce'}]})
     time.sleep(0.3)
-    an = pg.ev(EV("return getComputedStyle(document.querySelector('.step')).animationName"))
+    an = pg.ev(EV("return getComputedStyle(document.querySelector('.snode')).animationName"))
     tr = pg.ev(EV("return getComputedStyle(document.querySelector('.stage')).transitionDuration"))
     chk("系统「减少动效」时全部退化", an == 'none' and str(tr).startswith('0s'),
         f'animation={an} transition={tr}')
@@ -791,6 +926,7 @@ def main():
 
     # ── 交互：键位 / 日志筛选 / 签字点亮 / 卡与左轨联动 ────────────────
     print()
+    open_detail(pg)
     print('── 交互（键盘 / 筛选 / 联动）─────────────────────')
     pg.ev(EV('window.__probe.go(1); return 1'))
     quiesce(pg)
@@ -798,7 +934,7 @@ def main():
     time.sleep(0.35)
     chk('键盘 3 直接跳到第③步', pg.ev(EV('return step')) == 3,
         'step=%s 标题=%s' % (pg.ev(EV('return step')),
-                             pg.ev(EV('return document.getElementById("sTitle").textContent'))))
+                             pg.ev(EV('return document.getElementById("eyebrowTx").textContent'))))
     key(pg, 'h', 'KeyH', 72)
     time.sleep(0.3)
     opened = pg.ev(EV("return document.querySelector('#help').classList.contains('on')"))
