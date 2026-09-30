@@ -13,10 +13,14 @@
   · 静止：隔 1.3s 两帧**逐像素完全相同**（背景自己在动就过不了这条）
   · 显影 → 淡净：静止时几乎不画星（只有经过才亮）；真实划动后亮着的星 >150 颗，
     且**只有指针经过的那一片亮**（远处必须仍是 0 颗），淡净后回到**同一个**静止态
-外加本界面特有的三条：
+外加本界面特有的六条：
   · 颜色语义唯一：档位徽标不得与任何状态色同色（并反向断言状态色确实在用，防空判据）
   · 背景不渗进内容：卡片内部区域开/关背景两态逐像素一致
   · 每个阶段都要有「写到哪儿」——没有它，用户无法判断点下去会不会动正式产物
+  · **静止不闪**：带着 8 秒轮询跨一次 tick 比整屏，必须逐像素相同、节点不被重建、
+    `getAnimations()==0`（这一条**不许**先 stop() 再比 —— 上一版就是那样把闪屏验没的）
+  · **光效可收摊**：悬停时边框光束真的在跑，离开后动画归零且回到同一张帧
+  · **装饰不进数据面**：指针停在日志上时不得挂柔光；对照图只吃边框光
 """
 import argparse
 import base64
@@ -330,15 +334,153 @@ def main():
     pg.ev(EV("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'})); return 1"))
     chk('抽屉能关（Esc）', pg.ev(EV("return !document.querySelector('#help').classList.contains('on')")))
 
+    print('\n── 静止不闪：轮询**开着**跨一次 8 秒 tick ─────────')
+    # 这一节必须带着轮询跑。上一版是靠 `__probe.stop()` 把轮询停掉才比得出静止帧，
+    # 于是"验收全绿"和"用户屏幕上每 8 秒整屏淡入一次"并存了三天 ——
+    # 绕开真实入口的验证等于没验证（根因：入场动画写在 .step/.stage 基础类上，
+    # 而 render() 是 innerHTML 整片重建 ⇒ 每次轮询都从头播）。
+    pg.ev(EV('__probe.poll(true); return 1'))
+    park(pg)
+    pg.ev(EV('__probe.pin(); return 1'))
+    a_tick = pg.shot('poll_a')
+    time.sleep(9.6)                              # 覆盖一次 8s tick，留首屏指纹计算余量
+    b_tick = pg.shot('poll_b')
+    pmax, pmean, _ = diff_png(a_tick, b_tick)
+    nanim = pg.ev(EV('return __probe.anims()'))
+    chk('跨一次轮询整屏逐像素相同（旧版这里必闪）', pmax == 0,
+        f'整屏最大差 {pmax} 均值 {pmean:.2f}')
+    chk('轮询没有重建 .step/.stage 节点（动画无从重播）',
+        bool(pg.ev(EV('return __probe.pinned()'))))
+    chk('静止时零个动画在跑（轮询开着，含背景那层）', nanim == 0, f'getAnimations={nanim}')
+
+    print('\n── 光效：指针驱动、离开即收净、不进数据面 ─────────')
+    # 这一段**先把星野关掉**再量：真鼠标划过页面会把星点亮起来并持续衰减，
+    # 于是"两帧之间变了"会被星点衰减白送 —— 判据就成了假绿灯（见 §67 二）。
+    # 关掉之后，本段所有像素差都只能来自光效本身。
+    pg.ev(EV("if(!document.body.classList.contains('plain')) document.querySelector('#bSea').click();"
+             " return 1"))
+    time.sleep(0.4)
+    fx_base = pg.shot('fx_base')
+    tgt = pg.ev(EV("""const r=document.querySelector('.step.on').getBoundingClientRect();
+      return [Math.round(r.left+r.width*0.3), Math.round(r.top+r.height*0.5)]"""))
+    pg.move(tgt[0], tgt[1])
+    time.sleep(0.12)
+    f1 = pg.ev(EV('return __probe.fx()'))
+    hot1 = pg.shot('fx_hot1')          # 光束跑到约 1/6 圈：留一张给人看光在哪
+    chk('悬停控件 → 边框光束**真的在跑** + 柔光挂上',
+        bool(f1['beamAnim'] and f1['pool']), str(f1))
+    time.sleep(0.26)
+    hot2 = pg.shot('fx_hot2')          # 约半圈：与 hot1 不同才证明"光在走"而不是"亮了个框"
+    moved, _, _ = diff_png(hot1, hot2)
+    chk('光束是在**走**的（两帧之间边框光位置变了）', moved > 0, f'两帧最大差 {moved}')
+    pg.move(tgt[0] + 60, tgt[1])
+    time.sleep(0.06)
+    # 主按钮与阶段卡各补一张：光在控件上的落点只有截图能判，别只信类名与 display
+    btn = pg.ev(EV("""const r=document.querySelector('#cta button.go').getBoundingClientRect();
+      return [Math.round(r.left+r.width*0.5), Math.round(r.top+r.height*0.82)]"""))
+    pg.move(btn[0], btn[1])
+    time.sleep(0.10)
+    fb = pg.ev(EV('return __probe.fx()'))
+    chk('主按钮悬停：柔光挂上且落在 .go 上', bool(fb['pool'] and fb['cur'] and 'go' in fb['cur']),
+        str(fb))
+    pg.shot('fx_btn')
+
+    def bar_scale():
+        return pg.ev(EV("""const s=document.querySelector('.stage');
+          const t=getComputedStyle(s,'::before').transform; const m=t&&t.match(/matrix\\(([^)]+)\\)/);
+          return m?parseFloat(m[1].split(',')[3]):1"""))
+    def bar_org():
+        return pg.ev(EV("""const s=document.querySelector('.stage');
+          return getComputedStyle(s,'::before').transformOrigin"""))
+    pg.move(6, 6)
+    time.sleep(0.5)
+    rest_scale, rest_org0 = bar_scale(), bar_org()
+    cd = pg.ev(EV("""const r=document.querySelector('.stage').getBoundingClientRect();
+      return [Math.round(r.left+r.width*0.4), Math.round(r.top+r.height*0.78)]"""))
+    pg.move(cd[0], cd[1])
+    time.sleep(0.55)
+    hot_scale = bar_scale()
+    chk('阶段卡左光条从进入高度**展开**（静止 34% → 悬停 100%）',
+        rest_scale < 0.5 and hot_scale > 0.95, f'静止 {rest_scale} → 悬停 {hot_scale}')
+    pg.shot('fx_card')
+    pg.move(6, 6)
+    time.sleep(0.5)
+    # ⚠️ 必须连**收缩原点**一起复位：光条静止时是 scaleY(34%)，`transform-origin` 若还停在
+    # 指针进入的高度，那 2px 的条就永久偏在那个位置 —— 实测留下 104 个差异像素（最大差 22），
+    # 全部落在卡片左边缘的同一列上。只量 scaleY 回没回 0.34 是抓不到这条的。
+    # 断言拿"进入前"当基线，不写死字面值：计算样式会把 `50% 50%` 解析成 `1px 67.32px`。
+    org_back, sc_back = bar_org(), bar_scale()
+    chk('指针离开卡片后光条收回原位（不留展开态、也不留收缩原点）',
+        sc_back < 0.5 and org_back == rest_org0,
+        f'scale={sc_back} origin={org_back} 进入前={rest_org0}')
+
+    pg.move(tgt[0], tgt[1])
+    time.sleep(0.06)
+    pg.move(6, 6)                                # 离开控件
+    for _ in range(60):                          # 等星野也淡净（划过会把星点亮起来）
+        if pg.ev('ST.raf') == 0:
+            break
+        time.sleep(0.5)
+    time.sleep(0.9)                              # 光束 0.78s 播完
+    f2 = pg.ev(EV('return __probe.fx()'))
+    chk('指针离开后光效自己收干净（不留残影、不留挂着的动画）',
+        not f2['beam'] and not f2['beamAnim'] and not f2['pool'], str(f2))
+    fxmax, _, _ = diff_png(fx_base, pg.shot('fx_after'))
+    chk('划过一圈再离开 → 回到同一张帧（光效不许留痕）', fxmax == 0, f'整屏最大差 {fxmax}')
+    lg = pg.ev(EV("""const r=document.querySelector('pre').getBoundingClientRect();
+      return [Math.round(r.left+r.width/2), Math.round(r.top+r.height/2)]"""))
+    pg.move(lg[0], lg[1])
+    time.sleep(0.15)
+    f3 = pg.ev(EV('return __probe.fx()'))
+    chk('日志面上方不挂柔光（装饰不进数据面）',
+        not f3['pool'] and f3['cur'] is None, str(f3))
+    pg.move(6, 6)
+    chk('M 键关掉整层光效：浮层 display:none 且悬停不再触发',
+        bool(pg.ev(EV("""__probe.calm(true);
+          const r=document.querySelector('.step.on').getBoundingClientRect();
+          return getComputedStyle(document.querySelector('#fxbeam')).display==='none'
+              && getComputedStyle(document.querySelector('#fxpool')).display==='none'"""))))
+    pg.move(tgt[0], tgt[1])
+    time.sleep(0.15)
+    chk('从简模式下悬停：光束与柔光都不出现',
+        not pg.ev(EV('return __probe.fx()'))['beam'], str(pg.ev(EV('return __probe.fx()'))))
+    pg.move(6, 6)
+    pg.ev(EV('__probe.calm(false); return 1'))
+    rm = pg.ev(EV("""__probe.go(3);
+      const on=document.querySelector('.step.on'), mk=document.querySelector('#railmark');
+      return {ok: mk.style.opacity==='1' && mk.style.top===(on.offsetTop+9)+'px',
+              top:mk.style.top, want:(on.offsetTop+9)+'px'}"""))
+    chk('当前步指示条仍在且跟着换步落位（那是信息，不是被一起关掉的装饰）', rm['ok'], str(rm))
+    cm = pg.ev(EV("""document.querySelector('.chip[data-f=bad]').click();
+      const on=document.querySelector('.chip.on'), mk=document.querySelector('#chipmark');
+      return {ok: mk.style.opacity==='1' && mk.style.left===on.offsetLeft+'px'
+                  && mk.style.width===on.offsetWidth+'px',
+              got:mk.style.left+'/'+mk.style.width, want:on.offsetLeft+'/'+on.offsetWidth}"""))
+    chk('日志筛选片：指示条滑到当前项', cm['ok'], str(cm))
+    pg.ev(EV("""document.querySelector('.chip[data-f=all]').click();
+      __probe.go(2); return 1"""))
+    # 交还星野：下一节"划过才显影"必须在背景开着的时候量
+    pg.ev(EV("if(document.body.classList.contains('plain')) document.querySelector('#bSea').click();"
+             " return 1"))
+    time.sleep(0.4)
+    chk('光效段跑完已把星野交还给下一节（防上一段的关背景状态漏出去）',
+        not pg.ev(EV("return document.body.classList.contains('plain')")))
+    quiesce(pg)
+
     print('\n── 背景层：静止 / 起浪 / 不遮挡 ──────────────────')
     chk('星野够密（>1200 颗）', (pg.ev('ST.list.length') or 0) > 1200,
         f"{pg.ev('ST.list.length')} 颗星")
+    # 「静止」两条必须先**落到静止**再量。上一节的光效判据要求用 CDP 可信鼠标真划过页面，
+    # 于是显影场还在衰减、循环还在排帧（实测不 park 就量到假红：亮着 30 颗 / raf=16）。
+    park(pg)
+    for _ in range(60):
+        if pg.ev('ST.raf') == 0:
+            break
+        time.sleep(0.5)
+    quiesce(pg)
     lit0 = pg.ev(EV('return ST.list.filter(t=>t.lit>0.05).length'))
     chk('静止时显影场是空的（只有经过才显示）', lit0 == 0, f'静止时亮着 {lit0} 颗')
     chk('静止时不排帧（循环自己停了）', pg.ev('ST.raf') == 0, f"raf={pg.ev('ST.raf')}")
-    # 量背景之前：停轮询 + 等入场动画收敛（两条都是假红来源，见 quiesce 的注释）
-    quiesce(pg)
-    park(pg)
     rects = paint_rects(pg)
     size = Image.open(io.BytesIO(pg.shot('size'))).size
     time.sleep(1.4)

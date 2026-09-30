@@ -435,18 +435,47 @@ button.help{background:transparent;border-color:rgba(180,137,255,.55);color:#e4d
 button.help:hover{background:rgba(180,137,255,.14);border-color:#b489ff}
 button.mini{font-size:11.5px;padding:3px 9px;border-radius:7px}
 
-/* ══ 大气区（hero / seaband）与数据区的分工 ═════════════════════════════
-   规矩只有一条：**能读数据、能看图的位置一律不透明**，主题只出现在没有数据的带里。
-   hero 放当前步的标题与一句说明；skyband 是底部那条夜空带，划过星点散开、停下必聚回。
-   两处都只许放标题级短文（带 text-shadow 压住任何星点亮度），
+/* ══ 光效层：指针携光 —— 全站唯一一条动效语言 ══════════════════════════
+   隐喻只有一句：**光由指针携带**。指针进入 → 一道光沿控件边框从进入点绕一圈；
+   控件内部跟着一团柔光；按下 → 光从落点泄进背景星野（背景那层本来就吃这个冲量）。
+   三条纪律，一条都不能破：
+     · 全部**指针驱动**，没有一条常驻循环 ⇒ 静止时与初始帧逐像素相同（和背景同一条要求，
+       也是 8 秒轮询不再闪的前提）。
+     · 只上**控件**（按钮 / 步骤块 / 筛选片 / 签字框）和卡片左光条；
+       日志 `pre`、对照图、指标 pill 这些**数据面一个都不放过光**。
+     · `body.calm`（M 键）整层停用，用来当场对比"这层到底值不值"。 */
+@property --ang{syntax:'<angle>';inherits:false;initial-value:0deg}
+#fxbeam,#fxpool{position:fixed;z-index:70;pointer-events:none;display:none;opacity:0}
+#fxbeam{padding:1.5px;
+  background:conic-gradient(from var(--ang),transparent 0 52%,var(--bc,#ff3d7f) 72%,
+    #fff 81%,var(--bc,#ff3d7f) 90%,transparent 98%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude}
+#fxpool{background:radial-gradient(circle at var(--px,50%) var(--py,50%),
+    var(--pc,rgba(226,214,255,.20)),transparent 60%);mix-blend-mode:screen}
+body:not(.calm) #fxbeam.go,body:not(.calm) #fxpool.on{display:block}
+#fxbeam.go{animation:beam .78s var(--ez)}
+/* 不用 fill：播完 opacity 自己回到 0 ⇒ "光走了不留痕"是可断言的，而不是靠 JS 记时清类 */
+@keyframes beam{0%{opacity:0;--ang:var(--a0,0deg)}14%{opacity:1}84%{opacity:1}
+  100%{opacity:0;--ang:calc(var(--a0,0deg) + 360deg)}}
+/* 左轨当前步的那道标记：不再每张卡各画一根，而是**一根从旧步走到新步** */
+#railwrap{position:relative}
+#railmark{position:absolute;left:-1px;width:2px;border-radius:2px;top:0;height:0;opacity:0;
+  background:linear-gradient(180deg,#a06bff,#ff3d7f);box-shadow:0 0 12px rgba(255,61,127,.7);
+  transition:top .42s var(--ez),height .42s var(--ez),opacity .3s var(--ez);pointer-events:none}
+#chipmark{position:absolute;bottom:-1px;height:2px;border-radius:2px;left:0;width:0;
+  background:linear-gradient(90deg,#a06bff,#ff3d7f);opacity:0;pointer-events:none;
+  transition:left .34s var(--ez),width .34s var(--ez),opacity .2s var(--ez)}
+#chips{position:relative}
+/* 磁吸：只有主操作与左轨会朝指针让出 2px，普通按钮不让（它们挨得太近会晃）。
+   写全 transition 列表而不是只写 transform —— 简写会连带抹掉底色/描边的过渡。 */
+.mag{transition:transform .55s var(--ez),background .16s var(--ez),
+  border-color .16s var(--ez),box-shadow .2s var(--ez),opacity .16s}
+
+/* ══ 大气区与数据区的分工 ═══════════════════════════════════════════════
+   规矩只有一条：**能读数据、能看图的位置一律不透明**。
+   hero 是全局唯一让正文"坐在星野上"的地方，只放标题级短文（带 text-shadow 压亮度），
    阶段卡、日志、对照图、指标 pill 一个都不许放进去。 */
-.skyband{flex:0 0 auto;height:176px;display:flex;flex-direction:column;align-items:center;
-  justify-content:flex-start;gap:5px;text-align:center;position:relative;z-index:1;
-  padding-top:16px;border-top:1px solid rgba(206,186,255,.10)}
-.skyband .hl{font:600 11px/1 var(--fd);letter-spacing:.26em;text-transform:uppercase;
-  color:rgba(214,204,236,.72);text-shadow:0 1px 10px rgba(3,12,20,.95)}
-.skyband p{margin:0;font-size:11.5px;line-height:1.7;color:rgba(190,180,214,.72);
-  max-width:76ch;text-shadow:0 1px 8px rgba(3,12,20,.95)}
 .wrap{flex:1 1 auto;min-height:0;display:grid;gap:16px;padding:14px 26px 6px;
   grid-template-columns:262px minmax(520px,1fr) minmax(360px,.66fr);max-width:1760px;
   margin:0 auto;width:100%;align-items:stretch}
@@ -475,13 +504,10 @@ button.mini{font-size:11.5px;padding:3px 9px;border-radius:7px}
 /* ══ 步骤导航 ═════════════════════════════════════════════════════════ */
 .step{position:relative;display:grid;grid-template-columns:26px 1fr auto;gap:10px;align-items:start;
   width:100%;text-align:left;padding:9px 10px;border-radius:12px;background:transparent;
-  border:1px solid transparent;animation:rise .46s var(--ez) backwards}
+  border:1px solid transparent}
 .step:hover{background:#102c44;border-color:var(--line)}
 .step.on{background:linear-gradient(180deg,#2a2145,#191329);
   border-color:rgba(160,107,255,.5);box-shadow:0 14px 30px -20px rgba(0,0,0,.9)}
-.step.on::after{content:'';position:absolute;left:-1px;top:9px;bottom:9px;width:2px;
-  border-radius:2px;background:linear-gradient(180deg,#a06bff,#ff3d7f);
-  box-shadow:0 0 12px rgba(255,61,127,.7)}
 .step .num{font:600 19px/1.35 var(--fd);letter-spacing:-.02em;color:var(--dim);
   text-align:center;border:1px solid var(--line);border-radius:9px;background:#0d0a18}
 .step.on .num{color:var(--brand);border-color:rgba(47,208,255,.5)}
@@ -497,7 +523,6 @@ button.mini{font-size:11.5px;padding:3px 9px;border-radius:7px}
 .legend{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--dim)}
 .legend .lrow{display:flex;gap:14px}
 .legend .lrow span{display:flex;align-items:center;gap:6px}
-.legend .lnote{margin:7px 0 0;font-size:11px;line-height:1.65;color:var(--dim2)}
 .legend .sw{width:9px;height:9px;border-radius:3px;flex:0 0 auto}
 @keyframes rise{from{opacity:0;transform:translateY(7px)}}
 @keyframes pulse{50%{opacity:.25}}
@@ -518,15 +543,23 @@ button.mini{font-size:11.5px;padding:3px 9px;border-radius:7px}
 .scopenote.on{display:block}
 
 .g{display:flex;flex-direction:column;gap:9px}
+/* 入场动画挂在 `.in` 上，**只有首次挂载才加**（见 render 里的 mounted 集合）。
+   写在基础类上 = 每次数据刷新重建节点就重播一次，那就是"每 8 秒整屏闪一下"的根因。 */
+.step.in,.stage.in{animation:rise .44s var(--ez) backwards}
 .stage{position:relative;border:1px solid var(--line);border-radius:12px;padding:11px 13px;
-  background:var(--card);animation:rise .4s var(--ez) backwards;
+  background:var(--card);
   transition:border-color .16s var(--ez),transform .16s var(--ez),box-shadow .18s var(--ez)}
-.stage::before{content:'';position:absolute;left:0;top:12px;bottom:12px;width:2px;
-  border-radius:2px;background:var(--line2);opacity:.35;
-  transition:opacity .18s var(--ez),background .18s var(--ez)}
+/* 卡片左光条：从指针进入的那个高度向上下**点燃**，离开时收回原位；静止时只留 34% 的一截 */
+.stage::before{content:'';position:absolute;left:0;top:12px;height:calc(100% - 24px);width:2px;
+  border-radius:2px;background:var(--line2);opacity:.35;transform:scaleY(.34);
+  transform-origin:50% var(--oy,50%);
+  transition:opacity .18s var(--ez),background .18s var(--ez),transform .38s var(--ez),
+    box-shadow .3s var(--ez)}
 .stage:hover{border-color:var(--line2);transform:translateY(-1px);
   box-shadow:0 16px 30px -24px rgba(0,0,0,.9)}
-.stage:hover::before{opacity:1;background:linear-gradient(180deg,#a06bff,#ff3d7f)}
+.stage:hover::before{opacity:1;transform:scaleY(1);
+  background:linear-gradient(180deg,#a06bff,#ff3d7f);
+  box-shadow:0 0 16px -2px rgba(255,61,127,.8)}
 .stage.hot::before{background:#ff3d7f;opacity:1}
 .stage.fail{border-left:3px solid var(--fail)}
 .stage.await{border-left:3px solid var(--await)}
@@ -555,10 +588,15 @@ button.mini{font-size:11.5px;padding:3px 9px;border-radius:7px}
 .sact{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
 .signbox{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#f7d9a2;
   padding:3px 9px 3px 7px;border-radius:8px;border:1px solid rgba(242,189,114,.32);
-  background:rgba(58,42,20,.30)}
+  background:rgba(58,42,20,.30);position:relative;overflow:hidden}
 .signbox input{accent-color:var(--await);width:14px;height:14px;margin:0;cursor:pointer}
 .signbox.on{background:rgba(242,189,114,.20);border-color:var(--await);color:#ffe3b8;
   box-shadow:0 0 16px -6px rgba(242,189,114,.75)}
+/* 勾上签字 = 一团暖光从方框泄开，一次性，播完自己消失（静止时不留痕） */
+.signbox.on::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(circle at 14px 50%,rgba(242,189,114,.6),transparent 68%);
+  animation:bloom .62s var(--ez) both}
+@keyframes bloom{from{opacity:1;transform:scale(.55)}to{opacity:0;transform:scale(1.7)}}
 .spacer{margin-left:auto}
 .dim{color:var(--dim2)}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
@@ -625,6 +663,13 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
   align-items:center;justify-content:center;cursor:zoom-out}
 #lightbox.on{display:flex}
 #lightbox img{max-width:96vw;max-height:96vh;object-fit:contain}
+/* ── M 键「动效从简」：整层光效停用，但**状态指示一个都不跟着没** ──────────
+   #railmark 表达的是"当前在哪一步"，那是信息不是装饰 ⇒ 只掐它的位移，不掐它本身。 */
+body.calm #fxbeam,body.calm #fxpool{display:none!important}
+body.calm #railmark,body.calm #chipmark{transition:none}
+body.calm .mag{transition:none}
+body.calm .stage::before{transform:none!important}
+body.calm .signbox.on::after{display:none}
 @media (max-width:1240px){.wrap{grid-template-columns:230px minmax(400px,1fr)}
   .col.side{grid-column:1/-1}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -651,14 +696,14 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
     <div><h1>资产更新控制台</h1><p>拉包 · 重导 · 看图 · 换入</p></div>
   </div>
   <div class="meters">
-    <span class="meter"><b>输入指纹</b><span id="fp">首屏在算（要扫 9 万个源包）</span></span>
+    <span class="meter"><b>输入指纹</b><span id="fp">计算中</span></span>
     <span class="meter"><b>本次范围</b><span id="scope">…</span></span>
     <span class="meter"><b>阶段</b><span id="prog">…</span></span>
     <span class="meter" id="mjob"><b>任务</b><span id="jobstat">空闲</span></span>
   </div>
   <div class="act">
-    <button id="bSea" class="ghost" title="关掉就把星野整层停用（背景不该挡正事）">星辰 · 开</button>
-    <span class="kbd" title="键盘直接操作：1-4 切步骤，R 跑，P 只看计划，H 帮助，S 星辰开关">
+    <button id="bSea" class="ghost" title="S：星野背景 开/关">星辰 · 开</button>
+    <span class="kbd" title="1-4 步骤 · R 跑 · P 只看计划 · H 帮助 · S 背景 · M 动效从简">
       <b>1-4</b> 步骤 · <b>R</b> 跑 · <b>H</b> 帮助</span>
     <button id="bPlan" class="ghost">只看计划</button>
     <button id="bHelp" class="help">怎么用</button>
@@ -670,7 +715,7 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
   <div class="col">
     <div class="pane">
       <div class="ph">主线</div>
-      <div id="rail"></div>
+      <div id="railwrap"><div id="rail"></div><i id="railmark"></i></div>
     </div>
     <div class="pane">
       <div class="ph">状态是什么意思</div>
@@ -684,10 +729,6 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
           <span><i class="sw" style="background:var(--await)"></i>等你签字</span>
           <span><i class="sw" style="background:var(--fail)"></i>判红</span>
         </div>
-        <p class="lnote">判绿 = 按它自己写的判据过了；判红 = 停在这里不往下跑。<br>
-          档位是文字不是颜色：<span class="tier">ⓘ 只读</span>
-          <span class="tier s">▣ 暂存</span> <span class="tier l">⚑ 写正式</span>。
-          <u>红色永远只等于「判红」</u>。</p>
       </div>
     </div>
   </div>
@@ -702,14 +743,12 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
       <p class="scopenote" id="scopeNote"></p>
     </div>
     <div class="pane">
-      <div class="ph">这一轮的阶段 <span id="sCount" class="dim" style="font-size:11px"></span></div>
+      <div class="ph">阶段 <span id="sCount" class="dim" style="font-size:11px"></span></div>
       <div class="g" id="cards"></div>
     </div>
     <div class="pane">
-      <div class="ph">待确认：改前 | 改后 对照表</div>
+      <div class="ph">改前 | 改后 对照表</div>
       <div id="sheets" class="sheets"></div>
-      <p class="dim" style="font-size:11.5px;margin:9px 0 0">
-        「看图对比」跑完后出现在这里；点开可放大。图放在不透明的底上，背景不会渗进来影响你看边缘。</p>
     </div>
   </div>
 
@@ -724,9 +763,8 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
         <button class="chip on" data-f="all">全部</button>
         <button class="chip" data-f="bad">只看红</button>
         <button class="chip" data-f="await">等你签字</button>
-        <button class="chip" data-f="stage">只看阶段行</button></div>
-      <pre id="log">（还没有任务。左边选一步，再点中间那个蓝色主按钮。
-看不懂某个词，就点右上角「怎么用」。）</pre>
+        <button class="chip" data-f="stage">只看阶段行</button><i id="chipmark"></i></div>
+      <pre id="log">等待任务</pre>
       <div style="display:flex;gap:8px;margin-top:9px;align-items:center">
         <button id="bForce" class="mini ghost">缓存：按指纹复用</button>
         <span class="dim" id="jobinfo" style="font-size:11.5px">—</span></div>
@@ -738,13 +776,9 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
     </div>
   </div>
 </div>
+</div>
 
-<div class="skyband">
-  <span class="hl">夜空</span>
-  <p>静止时这片天是黑的：鼠标经过哪里，哪里的星点才亮起来，约半秒后淡掉、不留痕。
-     没人划时它一帧都不动；阶段卡、日志、对照图全在不透明面板里，星点渗不进去。</p>
-</div>
-</div>
+<i id="fxbeam"></i><i id="fxpool"></i>
 
 <div id="help"><div class="veil" data-close></div><div class="panel">
   <button class="close ghost" data-close>关闭 ✕</button>
@@ -755,6 +789,21 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
   （<code>mumu_sync</code> / <code>compose_paintings_v2</code> / <code>extract_spine_v2</code> /
   <code>reconstruct_live2d</code> / <code>build_gallery_index</code> …，全部原样调用）。
   所以「界面上看到的」和「命令行跑的」永远是同一套代码，不存在两份逻辑各自漂移。</p>
+
+  <h3>颜色与档位怎么读</h3>
+  <p>一个颜色只表示一件事，<b>颜色全部留给状态</b>：
+  <span class="stt idle">未跑</span> <span class="stt pass">判绿</span>
+  <span class="stt run">在跑</span> <span class="stt await">等你签字</span>
+  <span class="stt fail">判红</span>。</p>
+  <ul>
+    <li><b>判绿</b> = 按这张卡上「判据」那行自己写的规则过了，不等于"结果一定对"——
+      看图那一步永远是人工。</li>
+    <li><b>判红</b> = 它停在这里不往下跑。<u>红色永远只等于判红</u>，
+      不表示"这个会写正式产物"。</li>
+    <li><b>档位是文字不是颜色</b>：<span class="tier">ⓘ 只读</span>
+      <span class="tier s">▣ 暂存</span> <span class="tier l">⚑ 写正式</span>，
+      三枚一律中性色，靠图标与字重分级。</li>
+  </ul>
 
   <h3>动手之前</h3>
   <ul>
@@ -818,17 +867,17 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
 
   <h3>键位（摸熟比找按钮快）</h3>
   <p><code>1</code>…<code>4</code> 切步骤 · <code>R</code> 跑当前步的主动作 ·
-  <code>P</code> 只看计划 · <code>H</code> 开关本抽屉 · <code>S</code> 开关星辰背景 ·
-  <code>Esc</code> 关掉弹层。日志区上方还能按「只看红 / 等你签字 / 只看阶段行」筛。</p>
+  <code>P</code> 只看计划 · <code>H</code> 开关本抽屉 · <code>Esc</code> 关掉弹层 ·
+  <code>S</code> 开关星野背景 · <code>M</code> 开关「动效从简」（关掉光沿边框走一圈、
+  指针柔光、磁吸这些，只留状态本身）。</p>
 
-  <h3>背景那层是什么</h3>
-  <p>东京夜的星野，<b>显影式</b>的：底上是三团不动的城市光晕（钠灯橙 / 霓虹品红 / 高架青），
-  星点约 1800 颗画在一张画布上，但<b>静止时它们全灭</b>——你划过哪里，哪里的星才亮起来，
-  亮的范围随划速变大（慢挪约 9px、快扫约 130px），约半秒淡干净、不留痕，
-  亮着的星之间还会临时连出星座线。</p>
-  <p>收摊时程序会把每颗星的亮度写回 0、位置写回原位再画一帧，所以"亮过又淡掉"的终点
-  和最初那张<b>逐像素相同</b>——静止时一帧都不动，这是被验证过不挡正事的做法。
-  觉得干扰就点顶栏「星辰 · 关」，整层直接停用并记住你的选择。
+  <h3>背景与光效</h3>
+  <p>东京夜的星野，<b>显影式</b>：底上是三团不动的城市光晕（钠灯橙 / 霓虹品红 / 高架青），
+  约 2000 颗星画在一张画布上，<b>静止时全灭</b>——划过哪里哪里才亮，亮的范围随划速变大
+  （慢挪约 9px、快扫约 130px），约半秒淡干净，亮着的星之间临时连出星座线。
+  收摊时程序把每颗星的亮度与位置写回原位再画一帧，所以"亮过又淡掉"的终点和最初那张
+  <b>逐像素相同</b>；控件上的光效同一条规矩：全部由指针驱动，没有一条常驻循环。</p>
+  <p>觉得干扰：<code>S</code> 关整片星野，<code>M</code> 只关控件光效，两个选择都会记住。
   想让它常驻一点微光（不划也能看见几颗），改 <code>ST.AMB</code> 这一个数就行。</p>
 
   <h3>出问题自己先查的三行</h3>
@@ -1051,21 +1100,140 @@ function seaApply(){
 }
 $('#bSea').onclick=()=>{ SEA=!SEA; localStorage.setItem('panel.sea',SEA?'1':'0'); seaApply(); };
 
+/* ── 光效引擎：光由指针携带 ────────────────────────────────────────────
+   三个动作，一套语言：
+     ① 进入 —— 一道光沿控件**边框**从指针进入的那一点起跑，绕一圈回到它，然后消失；
+     ② 停留 —— 控件内部一团柔光跟着指针走（`mix-blend-mode:screen`，只提亮不压暗，
+                所以永远不会把字"糊掉"）；主操作与左轨额外朝指针让出 2px（磁吸）；
+     ③ 按下 —— 光从落点泄进背景星野：往星野里打一圈**该控件自己的颜色**的涟漪，
+                于是"点界面"和"那片天"是同一套物理，而不是两层各演各的。
+   实现上是**两个全局单例浮层**（#fxbeam / #fxpool）搬到目标控件的矩形上，
+   不给每个控件加子节点 —— 控件全是 render() 重建出来的，往节点里塞东西就会跟着抖。
+   ⚠️ 数据面（`pre` 日志、对照图里的立绘）不吃柔光：screen 混合会改变画面像素值，
+      而这张界面第一用途是**验资产正确性**。对照图只吃边框光（光在框上，不进图里）。 */
+let CALM = localStorage.getItem('panel.calm')==='1';
+const FX={beam:$('#fxbeam'),pool:$('#fxpool'),cur:null,last:null,down:false,pt:{}};
+const FXSEL='button,.step,.signbox,.sheets a';
+function fxTone(el){
+  const c=el.classList;
+  if(c.contains('go')) return ['#ff3d7f','rgba(255,61,127,.26)'];
+  if(c.contains('sign')||c.contains('signbox')) return ['#f2bd72','rgba(242,189,114,.24)'];
+  if(c.contains('help')) return ['#b489ff','rgba(180,137,255,.22)'];
+  if(c.contains('step')) return ['#a06bff','rgba(160,107,255,.20)'];
+  if(c.contains('chip')) return ['#a06bff','rgba(160,107,255,.16)'];
+  return ['rgba(206,186,255,.85)','rgba(226,214,255,.16)'];
+}
+function fxOff(){ FX.pool&&(FX.pool.classList.remove('on')); FX.beam&&FX.beam.classList.remove('go');
+                 if(FX.cur){ FX.cur.el.style.transform=''; FX.cur=null; } }
+function fxEnter(el,e){
+  if(CALM||!FX.beam) return;
+  const r=el.getBoundingClientRect();
+  if(r.width<10||r.height<10||r.bottom<0||r.top>innerHeight) return;
+  const img=el.matches('.sheets a');                          // 图：只上边框光，不上柔光
+  const [bc,pc]=fxTone(el), br=getComputedStyle(el).borderRadius||'9px';
+  const b=FX.beam;
+  b.style.left=(r.left-1.5)+'px'; b.style.top=(r.top-1.5)+'px';
+  b.style.width=(r.width+3)+'px'; b.style.height=(r.height+3)+'px';
+  b.style.borderRadius=br; b.style.setProperty('--bc',bc);
+  // 让白色那段核心正好落在指针进入点上（conic 的 0deg 在 12 点，atan2 的 0 在 3 点）
+  const th=Math.atan2(e.clientY-(r.top+r.height/2), e.clientX-(r.left+r.width/2))*180/Math.PI;
+  b.style.setProperty('--a0',(((th+90-292)%360+360)%360)+'deg');
+  b.classList.remove('go'); void b.offsetWidth; b.classList.add('go');
+  b.onanimationend=()=>b.classList.remove('go');
+  if(img){ FX.cur={el,r,img:true}; return; }
+  const p=FX.pool;
+  p.style.left=r.left+'px'; p.style.top=r.top+'px';
+  p.style.width=r.width+'px'; p.style.height=r.height+'px';
+  p.style.borderRadius=br; p.style.setProperty('--pc',pc);
+  p.classList.add('on');
+  FX.cur={el,r,img:false}; fxMove(e);
+}
+function fxMove(e){
+  if(e&&e.clientX!=null) FX.pt=e;
+  if(!FX.cur||CALM) return;
+  const {el,r,img}=FX.cur, p=FX.pt;
+  if(!r||img||p.clientX==null) return;
+  FX.pool.style.setProperty('--px',(p.clientX-r.left)+'px');
+  FX.pool.style.setProperty('--py',(p.clientY-r.top)+'px');
+  if(el.classList.contains('mag')){
+    const dx=(p.clientX-(r.left+r.width/2))/(r.width/2);
+    const dy=(p.clientY-(r.top+r.height/2))/(r.height/2);
+    el.style.transform='translate('+(dx*2.6).toFixed(2)+'px,'+(dy*2.0).toFixed(2)+'px)'+
+                       (FX.down?' scale(.978)':'');
+  }
+}
+document.addEventListener('pointerover',e=>{
+  const el=e.target.closest?e.target.closest(FXSEL):null;
+  if(el&&el!==FX.last){ FX.last=el; fxEnter(el,e); }
+  const card=e.target.closest?e.target.closest('.stage'):null;
+  if(card){ const cr=card.getBoundingClientRect();          // 光条从进入的高度点燃
+    card.style.setProperty('--oy',
+      Math.max(0,Math.min(1,(e.clientY-cr.top)/cr.height)*100).toFixed(1)+'%'); }
+},{passive:true});
+document.addEventListener('pointerout',e=>{
+  const card=e.target.closest?e.target.closest('.stage'):null;
+  if(card&&!card.contains(e.relatedTarget)) card.style.removeProperty('--oy');
+  const el=e.target.closest?e.target.closest(FXSEL):null;
+  if(!el||el!==FX.last) return;
+  if(e.relatedTarget&&el.contains(e.relatedTarget)) return;
+  FX.last=null; fxOff();
+},{passive:true});
+document.addEventListener('pointermove',e=>{ if(FX.cur) fxMove(e); },{passive:true});
+document.addEventListener('pointerdown',e=>{
+  FX.down=true; fxMove(e);
+  const el=e.target.closest?e.target.closest(FXSEL):null;
+  if(!el||CALM||!SEA) return;                 // 按下 = 把光泄进背景星野，颜色跟着控件走
+  ST.rings.push({x:e.clientX,y:e.clientY,r:4,v:780,a:.7,c:fxTone(el)[0]});
+  ST.bursts++; starsStart();
+},{passive:true});
+document.addEventListener('pointerup',()=>{ FX.down=false; fxMove(); },{passive:true});
+addEventListener('scroll',()=>{ FX.last=null; fxOff(); },true);
+function railMark(){
+  const on=$('.step.on'), mk=$('#railmark'); if(!on||!mk) return;
+  mk.style.top=(on.offsetTop+9)+'px'; mk.style.height=Math.max(8,on.offsetHeight-18)+'px';
+  mk.style.opacity='1';
+}
+function chipMark(){
+  const on=$('.chip.on'), mk=$('#chipmark'); if(!on||!mk) return;
+  mk.style.left=on.offsetLeft+'px'; mk.style.width=on.offsetWidth+'px'; mk.style.opacity='1';
+}
+function calmApply(){
+  document.body.classList.toggle('calm',CALM);
+  if(CALM) fxOff();
+}
+
 /* ── 数据 ─────────────────────────────────────────────────────────── */
-async function apiState(){
-  // 首屏要等 /api/state 算完输入指纹（扫 9 万个源包），那之前 S 是 null ——
-  // render() 必须扛得住空态，否则整页停在"只有图例、中间全空"的样子，看着像坏了。
+/* 8 秒轮询曾经让整屏"闪"一下：render() 是 innerHTML 整片重建，而入场动画写在
+   .step/.stage 的基础类上 ⇒ 每次重建都从头播。两道修：
+     ① payload 签名没变就根本不 render()；
+     ② 动画只挂在 `.in` 上，而 `.in` 只在**该 key 首次挂载**时加（切步骤时清空重来）。
+   ② 才是根因修复 —— 就算状态真的变了，也不该有整屏淡入。 */
+let SIG='', RENDERED=false, LASTSTEP=-1;
+const mounted=new Set();
+function sigOf(j){
+  try{ return JSON.stringify([j.fingerprint,j.scope,j.state,j.running,j.sheets,j.runs,
+                              j.stages,j.steps,j.error]); }
+  catch(e){ return String(Math.random()); }
+}
+async function apiState(force){
   let j=null;
   try{ j=await (await fetch('/api/state')).json(); }
-  catch(e){ LOADERR=String(e); setTimeout(apiState,2500); return; }
-  S=j; S.state=S.state||{}; LOADED=true;
-  render();
+  catch(e){ LOADERR=String(e); render(); setTimeout(apiState,2500); return; }
+  LOADERR=''; LOADED=true; S=j; S.state=S.state||{};
+  const ns=sigOf(j);
+  if(!force && RENDERED && ns===SIG){          // 内容一个字节没变 ⇒ 一个节点都不碰
+    if(S.running && !curJob) tail(S.running.id);
+    return;
+  }
+  SIG=ns; render();
   if(S.running && !curJob) tail(S.running.id);
 }
 function stagesOf(n){ return (S.stages||[]).filter(s=>(s.step||0)===n); }
 let LOADED=false, LOADERR='';
 function render(){
+  RENDERED=true;
   if(!S) return;
+  if(LASTSTEP!==step){ mounted.clear(); LASTSTEP=step; }   // 切步骤 = 这批卡的首次出现
   $('#fp').textContent=S.fingerprint||'—';
   $('#scope').textContent = S.scope==null ? '未 detect（先跑 ①）' : '增量 '+S.scope+' 个 stem';
   const all=S.stages||[];
@@ -1086,7 +1254,9 @@ function render(){
       .reduce((a,b)=>['fail','run','await','pass','idle'].indexOf(a)<=['fail','run','await','pass','idle'].indexOf(b)?a:b,'idle');
     const doneN=list.filter(s=>statusOf(s.key)==='pass').length;
     const b=document.createElement('button');
-    b.className='step'+(n===step?' on':''); b.style.animationDelay=(n*55)+'ms';
+    const fresh='s'+n; const first=!mounted.has(fresh); mounted.add(fresh);
+    b.className='step mag'+(n===step?' on':'')+(first?' in':'');
+    if(first) b.style.animationDelay=(n*55)+'ms';
     // 左轨不放步骤说明：那句话在中间 hero 里已经占了一整行，重复一遍会把图例挤到折叠线以下
     b.innerHTML='<span class="num">'+n+'</span><span><b>'+esc(steps[k][0])+'</b><span class="dots">'+
       list.map(s=>'<i class="dot '+statusOf(s.key)+'" title="'+esc(s.key)+'"></i>').join('')+
@@ -1097,11 +1267,12 @@ function render(){
     b.onclick=()=>{ step=n; render(); };
     rail.appendChild(b);
   });
+  railMark();
   const ungrouped=all.filter(s=>!steps[s.step||0]);
   if(ungrouped.length){
     const b=document.createElement('div'); b.className='step';
     b.innerHTML='<span class="num">?</span><span><b>未归组</b>'+
-      '<span class="cnt">新加了阶段但没写 step：'+ungrouped.map(s=>s.key).join(', ')+'</span></span>'+
+      '<span class="cnt">缺 step：'+ungrouped.map(s=>s.key).join(', ')+'</span></span>'+
       '<span class="stt fail">红</span>';
     rail.appendChild(b);
   }
@@ -1116,11 +1287,10 @@ function render(){
   const liveUnapproved=list.filter(s=>s.tier==='live'&&statusOf(s.key)==='await');
   const sn=$('#scopeNote');
   if(step===2&&liveUnapproved.length){
-    sn.textContent='这一步里 '+liveUnapproved.map(s=>s.key).join(' / ')+
-      ' 标了「写正式」：不签字它们只算差异、不落正式区（详见每张卡上的「写到」）。';
+    sn.textContent='未签字：'+liveUnapproved.map(s=>s.key).join(' / ')+' 只算差异，不写正式区';
     sn.classList.add('on');
   } else if(S.scope==null&&step>=2){
-    sn.textContent='还没做过增量 detect：现在跑会把范围当成「未定」，先回第 ① 步跑一次差异。';
+    sn.textContent='未做增量 detect · 先跑 ① 看差异';
     sn.classList.add('on');
   } else sn.classList.remove('on');
 
@@ -1128,8 +1298,10 @@ function render(){
   list.forEach((s,i)=>{
     const st=statusOf(s.key), r=(S.state||{})[s.key]||{}, T=TIER[s.tier]||['?','r'];
     const d=document.createElement('div');
-    d.className='stage '+(st==='fail'?'fail':st==='await'?'await':'');
-    d.style.animationDelay=(60+i*26)+'ms';
+    const first=!mounted.has(s.key); mounted.add(s.key);
+    d.className='stage'+(first?' in':'')+
+      (st==='fail'?' fail':st==='await'?' await':'');
+    if(first) d.style.animationDelay=(60+i*26)+'ms';
     d.innerHTML='<div class="srow"><span class="skey">'+esc(s.key)+'</span>'+
       '<span class="tier '+T[1]+'">'+T[0]+'</span>'+
       '<span class="stt '+st+'">'+STT[st]+'</span></div>'+
@@ -1141,15 +1313,15 @@ function render(){
       '</dl>'+
       '<div class="sact">'+
       (s.tier==='live'?'<label class="signbox"><input type="checkbox" class="appr" data-k="'+
-        s.key+'"> 我签字：放行它写正式区</label>':'')+
-      '<button class="mini" data-run="'+esc(s.key)+'">单独跑这一步</button>'+
+        s.key+'"> 签字放行</label>':'')+
+      '<button class="mini" data-run="'+esc(s.key)+'">单独跑</button>'+
       '<span class="spacer"></span></div>';
     cards.appendChild(d);
   });
 
   const sh=$('#sheets');
   if(!(S.sheets||[]).length) sh.innerHTML='<p class="dim" style="font-size:12px;margin:0">'+
-    '（还没有对照表 —— 跑一次「看图对比」后出现在这里）</p>';
+    '还没有对照表 · 先跑 ③</p>';
   else sh.innerHTML=S.sheets.map(x=>'<a target="_blank" href="/file?path='+encodeURIComponent(x.name)+
     '"><img loading="lazy" src="/file?path='+encodeURIComponent(x.name)+'" alt="'+esc(x.name)+
     '"><div class="cap"><span>'+esc(x.name)+'</span><span>'+x.kb+'KB '+esc(x.mt)+'</span></div></a>').join('');
@@ -1179,20 +1351,19 @@ function render(){
     post({stages:[k],approve:ap?[k]:[],force:force},null); });
 }
 function ctaFor(n){
-  if(n===1) return [{a:'diff',c:'go',t:'▶ 跑 preflight + 看差异（不下载）'},
-                   {a:'pull',c:'sign',t:'⚑ 签字：从模拟器拉包进 files/'}];
-  if(n===2) return [{a:'tocheck',c:'go',t:'▶ 跑到「待确认」（正式区不动）'},
-                   {a:'staged',c:'',t:'只重跑导出三件'}];
-  if(n===3) return [{a:'review',c:'go',t:'▶ 出对照表'}];
-  return [{a:'swap',c:'sign',t:'⇩ 签字换入正式产物'},{a:'regress',c:'',t:'只跑回归'}];
+  if(n===1) return [{a:'diff',c:'go mag',t:'▶ 预检 + 看差异'},
+                   {a:'pull',c:'sign mag',t:'⚑ 拉包进 files/'}];
+  if(n===2) return [{a:'tocheck',c:'go mag',t:'▶ 跑到待确认'},
+                   {a:'staged',c:'',t:'只重跑导出'}];
+  if(n===3) return [{a:'review',c:'go mag',t:'▶ 出对照表'}];
+  return [{a:'swap',c:'sign mag',t:'⚑ 换入正式区'},{a:'regress',c:'',t:'只跑回归'}];
 }
 function ctaRun(a){
   const live4=(S.stages||[]).filter(s=>s.step===4&&s.tier==='live').map(s=>s.key);
-  const all4=(S.stages||[]).filter(s=>s.step===4).map(s=>s.key);
   if(a==='diff') return post({stages:['preflight','pull'],force:force});
   if(a==='pull') return sign(['pull'],'① 从模拟器拉包',
-    '它会 adb pull 新包写进 files/AssetBundles（本地那 30GB 源目录，只补缺的和变了的）。'+
-    '源包一旦覆盖，旧版本本地就没了——这正是它被划成「写正式」的原因。');
+    'adb pull 写进 files/AssetBundles（只补缺的和变了的）。'+
+    '源包一旦覆盖，旧版本本地就没了 —— 所以它是「写正式」。');
   if(a==='tocheck') return post({stages:[],force:force});
   if(a==='staged') return post({stages:['paintings','spine','live2d'],force:force});
   if(a==='review') return post({stages:['review'],force:force});
@@ -1242,11 +1413,12 @@ async function pump(){
   $('#jobinfo').textContent='任务 '+curJob+(j.state?(' · '+j.state):'');
   if(j.state!=='running'){ clearInterval(timer); timer=null; curJob=null; await apiState(); }
 }
-$('#bFollow').onclick=e=>{ follow=!follow; e.target.textContent=follow?'跟随最新':'已暂停跟随'; };
+$('#bFollow').onclick=e=>{ follow=!follow; e.target.textContent=follow?'跟随最新':'暂停跟随'; };
 $('#bClear').onclick=()=>{ LINES=[]; $('#log').textContent=''; };
 $('#chips').onclick=e=>{ const b=e.target.closest('.chip'); if(!b) return;
-  FILT=b.dataset.f; $$('#chips .chip').forEach(x=>x.classList.toggle('on',x===b)); renderLog(); };
-$('#bForce').onclick=e=>{ force=!force; e.target.textContent=force?'缓存：已绕过（重跑暂存档）':'缓存：按指纹复用';
+  FILT=b.dataset.f; $$('#chips .chip').forEach(x=>x.classList.toggle('on',x===b));
+  chipMark(); renderLog(); };
+$('#bForce').onclick=e=>{ force=!force; e.target.textContent=force?'缓存：已绕过':'缓存：按指纹复用';
   e.target.style.borderColor=force?'var(--await)':''; };
 $('#bHelp').onclick=()=>$('#help').classList.add('on');
 /* 键位：这类界面要反复切步骤、反复跑同一件事，摸熟键盘比找按钮快。
@@ -1263,6 +1435,7 @@ document.addEventListener('keydown',e=>{
     step=Number(k); render(); e.preventDefault(); return; }
   if(k==='h'){ $('#help').classList.toggle('on'); }
   else if(k==='s'){ $('#bSea').click(); }
+  else if(k==='m'){ CALM=!CALM; localStorage.setItem('panel.calm',CALM?'1':'0'); calmApply(); }
   else if(k==='p'){ if(!S||S.running) return; post({plan:true}); }
   else if(k==='r'){ if(!S||S.running) return; ctaRun(step===1?'diff':step===3?'review'
                     :step===4?'swap':'tocheck'); }
@@ -1272,13 +1445,36 @@ $$('#help [data-close]').forEach(el=>el.onclick=()=>$('#help').classList.remove(
 document.addEventListener('click',e=>{ if(e.target.matches('.sheets img')){
   $('#lightbox img').src=e.target.src; $('#lightbox').classList.add('on'); e.preventDefault(); } });
 $('#lightbox').onclick=e=>e.currentTarget.classList.remove('on');
-seaApply(); apiState();
+seaApply(); calmApply(); apiState();
+addEventListener('resize',()=>{ railMark(); chipMark(); });
+chipMark();
 let pollT=setInterval(()=>{ if(!timer) apiState(); },8000);
-/* 验收钩子：逐像素比对期间必须能停掉 8 秒轮询——轮询里的 render() 会重建阶段卡，
-   卡片带着入场动画（opacity 0→1 + 上移），两张照片之间一旦插进一次轮询，
-   比的就不是"背景渗没渗进来"而是"卡片淡入到哪一帧了"（实测假红 75）。 */
+/* 验收钩子。`stop()` 是上一版留下的绕道：那时轮询会重播卡片入场动画，
+   比对期间必须停掉轮询才拿得到可比的帧（实测假红 75）。
+   现在入场动画只在首次挂载播、且 payload 没变根本不 render()，
+   ⇒ 这个钩子**不再决定结论**：探针会带着轮询开着跑一遍静止比对，只有那一遍也绿才算修好了。 */
 window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
-                go(n){ step=n; render(); }, state(){ return S; }};
+                poll(on){ if(on&&!pollT) pollT=setInterval(()=>{ if(!timer) apiState(); },8000);
+                          if(!on&&pollT){ clearInterval(pollT); pollT=null; } },
+                pin(){ window.__pin=[...document.querySelectorAll('.step,.stage')]; return 1; },
+                pinned(){ const now=[...document.querySelectorAll('.step,.stage')];
+                          const p=window.__pin||[];
+                          return p.length>0 && p.length===now.length && p.every(e=>now.includes(e)); },
+                anims(){ return document.getAnimations().length; },
+                go(n){ step=n; render(); }, state(){ return S; },
+                calm(on){ CALM=!!on; localStorage.setItem('panel.calm',CALM?'1':'0');
+                          calmApply(); return CALM; },
+                fx(){ return {calm:CALM, beam:!!(FX.beam&&FX.beam.classList.contains('go')),
+                              beamAnim:!!(FX.beam&&FX.beam.getAnimations().length),
+                              pool:!!(FX.pool&&FX.pool.classList.contains('on')),
+                              poolShown:!!(FX.pool&&getComputedStyle(FX.pool).display!=='none'),
+                              cur:FX.cur?String(FX.cur.el.className):null}; },
+                hover(sel){ const el=$(sel); if(!el) return null;
+                  const r=el.getBoundingClientRect();
+                  return {x:r.left+r.width*0.3,y:r.top+r.height*0.5}; },
+                marks(){ const a=$('#railmark'), b=$('#chipmark');
+                  return {rail:a?a.style.opacity+'|'+a.style.top+'|'+a.style.height:null,
+                          chip:b?b.style.opacity+'|'+b.style.left+'|'+b.style.width:null}; }};
 window.ST=ST; window.panelState=()=>S;
 </script></body></html>
 '''

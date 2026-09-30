@@ -107,10 +107,10 @@ class Stage:
 # 面板曾经打算自己抄一份分组表，抄了就会有「加了新阶段、界面把它藏起来」这种漂移。
 # step=0 的阶段会被界面显式标成「未归组」并判红，不静默丢弃。
 STEPS = {
-    1: ('接模拟器', '只读地看你设备上多了什么；真把包拉下来要签字'),
-    2: ('重新导出', '从源包重算产物。默认全进暂存区，你能先看再决定'),
-    3: ('看图对比', '出「改前 | 改后」总表。这一步不写任何正式产物'),
-    4: ('签字换入', '把暂存区覆盖进 Output/，随后重建索引并跑回归'),
+    1: ('接模拟器', '只读比对设备包 · 拉包需签字'),
+    2: ('重新导出', '源包重算 · 默认进暂存区'),
+    3: ('看图对比', '出改前|改后总表 · 不写正式区'),
+    4: ('签字换入', '暂存区 → Output/ · 重建索引 + 回归'),
 }
 
 
@@ -161,11 +161,11 @@ def st_pull(approved):
                     'at': time.strftime('%Y-%m-%d %H:%M:%S'),
                     'new': new, 'changed': diff_n}, ensure_ascii=False))
     if 'pull' not in approved:
-        return verdict('pull', True, f'只读到 diff（新增 {new}/变更 {diff_n}）。'
-                                     f'**拉包写 files/ 是 live 档**，要放行请 --approve pull')
+        return verdict('pull', True, f'只读到 diff（新增 {new}/变更 {diff_n}）'
+                                     f'· 未签字，请 --approve pull')
     rc, so2, _ = run([PY, 'scripts/mumu_sync.py', 'sync', '--apply'], timeout=7200,
                      echo=['完成', '失败', '合计'])
-    return verdict('pull', rc == 0, f'sync --apply rc={rc}（该脚本的退出码可信：fail>0 即 1）')
+    return verdict('pull', rc == 0, f'sync --apply rc={rc}')
 
 
 # ---------------------------------------------------------- 3 deps
@@ -181,10 +181,10 @@ def st_deps(approved):
     lost = [k for k in old if k not in new]
     log(f'  依赖表 旧 {len(old)} 条 → 新 {len(new)} 条，丢失 {len(lost)} 条')
     if lost:
-        return verdict('deps', False, f'新表**丢了 {len(lost)} 个旧包**（不该发生）——拒绝换入，先查源包')
+        return verdict('deps', False, f'新表丢了 {len(lost)} 个旧包，拒绝换入，先查源包')
     if not ('deps' in approved):
-        return verdict('deps', True, f'新表已就绪（+{len(new) - len(old)} 条）在临时区。'
-                                     f'写 Output/ 是 live 档，请 --approve deps')
+        return verdict('deps', True, f'新表已就绪（+{len(new) - len(old)} 条）在临时区'
+                                     f'· 未签字，请 --approve deps')
     shutil.copy2(os.path.join(OUT, 'dependency_manifest.json'),
                  os.path.join(WORK, 'dependency_manifest.prev.json'))
     shutil.copy2(tmp, os.path.join(OUT, 'dependency_manifest.json'))
@@ -203,9 +203,8 @@ def st_meta(approved):
     if rc or not os.path.isfile(os.path.join(tmpdir, 'ship_meta.json')):
         return verdict('meta', False, f'--write --out 失败 rc={rc}')
     if not ('meta' in approved):
-        return verdict('meta', True, f'新 ship_meta 已产到临时区。'
-                                     f'⚠️ 索引读的是写死的 Output/ship_meta.json（无 argv/env 通道），'
-                                     f'所以"用新元数据预览索引"必须先换入 —— 请 --approve meta')
+        return verdict('meta', True, '新 ship_meta 已产到临时区'
+                                     '· 未签字，请 --approve meta')
     bak = os.path.join(WORK, 'ship_meta.prev.json')
     if os.path.isfile(os.path.join(OUT, 'ship_meta.json')):
         shutil.copy2(os.path.join(OUT, 'ship_meta.json'), bak)
@@ -373,8 +372,7 @@ def st_review():
 # ---------------------------------------------------------- 7 换入（live，必须签字）
 def st_swapin(approved):
     if 'swap-in' not in approved:
-        return verdict('swap-in', True, '未签字 ⇒ 跳过。要换入请 --approve swap-in '
-                                        '（会先备份到 Output/_OLD_bak/<主题>_<日期>/）')
+        return verdict('swap-in', True, '未签字 ⇒ 跳过，请 --approve swap-in')
     lst = os.path.join(WORK, 'changed_paintings.txt')
     if not os.path.isfile(lst) or not open(lst, encoding='utf-8').read().strip():
         return verdict('swap-in', True, '没有待换入的立绘（清单为空）')
@@ -385,13 +383,13 @@ def st_swapin(approved):
     if hl:
         argv.append('--break-hardlink')
     rc, so, _ = run(argv, timeout=3600, echo=['换入', '备份', 'nlink', '拒绝'])
-    return verdict('swap-in', rc == 0, f'painting_swap_in rc={rc}（它自带四道硬检查，退出码可信）'
-                                       f'；备份 {bak}；本次{"已" if hl else "无需"}断硬链')
+    return verdict('swap-in', rc == 0, f'painting_swap_in rc={rc}；备份 {bak}；'
+                                       f'本次{"已" if hl else "无需"}断硬链')
 
 
 def st_derive(approved):
     if 'derive' not in approved:
-        return verdict('derive', True, '未签字 ⇒ 跳过缩略图/索引/部署。要跑请 --approve derive')
+        return verdict('derive', True, '未签字 ⇒ 跳过，请 --approve derive')
     chg = [l.strip() for l in open(os.path.join(WORK, 'changed_paintings.txt'), encoding='utf-8')
            if l.strip()] if os.path.isfile(os.path.join(WORK, 'changed_paintings.txt')) else []
     old_idx = os.path.join(WORK, 'index.prev.json')
@@ -423,44 +421,44 @@ def st_regress(approved):
 # ---------------------------------------------------------------- 驱动
 STAGES = [
     Stage('preflight', '权威输入 / vendor / 依赖表在位性', 'read', lambda a, f: st_preflight(),
-          'check_inputs×2 + fetch_gallery_vendor --check 退出码（这三个可信）',
-          step=1, writes='不写任何东西'),
+          'check_inputs×2 + fetch_gallery_vendor --check 退出码',
+          step=1, writes='不写'),
     Stage('pull', '模拟器拉新包', 'live', lambda a, f: st_pull(a),
-          'diff 只读；sync --apply 写 files/ 26GB ⇒ live',
-          step=1, writes='未签字：只写差异清单 · 签字：files/AssetBundles（约 30GB 源目录）'),
+          'diff 只读；sync --apply 写 files/',
+          step=1, writes='未签字只写清单 · 签字 files/AssetBundles'),
     Stage('deps', '重生成官方依赖表', 'live', lambda a, f: st_deps(a),
-          '新表必须是旧表超集（丢包即拒），换入前留 prev 副本',
-          step=2, writes='未签字：暂存区 · 签字：Output/dependency_manifest.json'),
+          '新表须为旧表超集，丢包即拒',
+          step=2, writes='未签字暂存 · 签字 Output/dependency_manifest.json'),
     Stage('meta', '重建 ship_meta 元数据', 'live', lambda a, f: st_meta(a),
-          'ship_meta_authority_diff 绿；⚠️ 索引读死路径，预览必须先换入',
-          step=2, writes='未签字：暂存区 · 签字：Output/ship_meta.json'),
+          'ship_meta_authority_diff 绿 · ⚠️ 预览须先换入',
+          step=2, writes='未签字暂存 · 签字 Output/ship_meta.json'),
     Stage('paintings', '静态立绘合成 → 临时区', 'staged', lambda a, f: st_paintings(f, a),
-          '数 ✗ 行（该脚本失败仍 exit 0）',
+          '数 ✗ 行（失败仍 exit 0）',
           step=2, writes='.diag/pipeline/Paintings_v2'),
     Stage('spine', 'Spine 提取 + parts.json → 临时区', 'staged', lambda a, f: st_spine(f, a),
           '每个目录都要有 parts.json',
           step=2, writes='.diag/pipeline/Spine_v2'),
     Stage('live2d', 'Live2D 还原 + motion → 临时区', 'staged', lambda a, f: st_live2d(f, a),
-          '[SUMMARY] 收尾行 + texorder/tex_completeness 两道真闸门',
+          '[SUMMARY] 收尾行 + texorder/tex_completeness 闸门',
           step=2, writes='.diag/pipeline/Live2D'),
     Stage('audio', 'CV 语音包解码 + 台词表', 'live', lambda a, f: st_audio(a),
-          'l2d_voice_inventory 退出码（另两个恒 0 只作参考）',
-          step=2, writes='Output/Audio（该脚本没有暂存通道，直接写正式区）'),
+          'l2d_voice_inventory 退出码',
+          step=2, writes='Output/Audio（无暂存通道）'),
     Stage('cg', 'Spine 全屏 CG 导出', 'live', lambda a, f: st_cg(f, a),
           '必须读到「完成N 跳过N 失败N」且失败=0',
-          step=2, writes='Output/CG_v2（同上，无暂存通道）'),
+          step=2, writes='Output/CG_v2（无暂存通道）'),
     Stage('review', '出改前|改后总表 + 硬链扫描', 'read', lambda a, f: st_review(),
-          '人工看图，机器只负责把表做出来',
+          '只出表；看图是人工',
           step=3, writes='.diag/pipeline/*.png 对照表 + 两份清单'),
     Stage('swap-in', '备份换入 Paintings_v2', 'live', lambda a, f: st_swapin(a),
-          'painting_swap_in 自带四道硬检查，退出码可信',
+          'painting_swap_in 四道硬检查退出码',
           step=4, writes='Output/Paintings_v2（先备份到 Output/_OLD_bak/pipeline_<日期>/）'),
     Stage('derive', '缩略图 / 索引 / 部署', 'live', lambda a, f: st_derive(a),
           'gallery_index_diff_check 绿 + deploy --check 4/4 同 inode',
-          step=4, writes='Output/gallery_v2（索引有零回退闸门把着）'),
+          step=4, writes='Output/gallery_v2'),
     Stage('regress', 'WF-16 回归（跳全库 hit_verify）', 'staged', lambda a, f: st_regress(a),
           '串行 runner 退出码',
-          step=4, writes='只读跑回归，不改产物'),
+          step=4, writes='不改产物'),
 ]
 
 
