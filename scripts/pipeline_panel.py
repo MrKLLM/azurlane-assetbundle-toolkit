@@ -340,100 +340,152 @@ PAGE = r'''
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 /* ══ token ══════════════════════════════════════════════════════════════
-   一条铁律贯穿到底：**一个颜色只表示一件事**。颜色只属于「状态」
-   （未跑/判绿/判红/等你签字/在跑），阶段档位一律用文字+图标（只读/暂存/写正式）。
-   上一版把 read=蓝 / staged=绿 / live=红 拿来标档位，于是"红色"同时意味着
-   「写正式产物」和「出错了」，用户看到一片红就不敢点——那是看不懂的主因之一。 */
+   两条铁律：
+   ① **一个颜色只表示一件事**。颜色只属于「状态」（未跑/判绿/判红/等你签字/在跑），
+      阶段档位一律用文字+图标。
+   ② **版面照深色仪表盘的正经做法：中性阶梯 + 发丝线 + 零投影。**
+      参照物是两个公开设计系统的实测 token（Linear / Raycast），它们的规则里
+      逐条点到了上一版的病：
+        · "Don't use lavender as a section background or card fill" ⇒ 上一版
+          `--pane:#12101f / --card:#181527 / --deep:#150d1f` 全是薰衣草底；
+        · "The brand resists drop shadows almost entirely, leaning on tonal lifts
+          and subtle top-edge highlights" ⇒ 上一版每个面板挂 `0 22px 46px -32px`；
+        · "Don't introduce a second chromatic accent / Don't add atmospheric
+          gradients" ⇒ 上一版紫+品红+青三彩并用，还在每块面板顶边画了一道
+          紫→品红的渐变"灯管"。
+      ⇒ 现在：中性五档表面阶梯（只留一丝冷调，不偏紫）、1px 实色发丝线、
+      投影全部换成 `inset` 顶边微高光、**唯一的 chrome 强调色 = 品牌紫**，
+      氛围全部交给背景那片星野（他要的"东京夜"留在这儿，不留在面板上）。
+      五个状态色 idle/pass/fail/await/run **一个都不动**——那是语义不是配色。
+   所有可视量都走变量，于是旧版面整体挂在 `body.legacy` 上，`V` 键当场对照。 */
 :root{
-  /* 东京夜：偏紫的黑底 + 钠灯暖橙 + 霓虹品红/青。
-     ⚠️ 五个**状态色一个都没动**（idle/pass/fail/await/run）—— 换主题不许顺手改语义色，
-     否则"这个红是报错还是配色"又分不清了。 */
-  --abyss:#06040e; --deep:#150d1f;
-  --line:rgba(178,166,214,.18); --line2:rgba(178,166,214,.36);
-  --txt:#efe9f7; --dim:#9b90b4; --dim2:#6f6686;
+  /* 表面阶梯（Linear 是 #010102→#0f1011→#141516→#18191a；这里同构、偏冷不偏紫） */
+  --abyss:#07080b; --deep:#0b0c10; --pane:#101116; --card:#15161b; --raise:#1b1d23;
+  --head:#0c0d11;
+  /* 发丝线：实色、1px、三档，不用 rgba 紫 */
+  --line:#24262c; --line2:#33363e; --line3:#454954;
+  /* 文字坡：中性冷灰，不用薰衣草白 */
+  --txt:#f1f2f4; --txt2:#c9cdd4; --dim:#9096a0; --dim2:#666b75;
   --idle:#3f5a6e; --pass:#4fd6a8; --fail:#ff6f6f; --await:#f2bd72; --run:#5fd0e8;
-  --brand:#a06bff; --pop:#ff3d7f;   /* 装饰专用两色：都不是状态色（见顶部纪律） */
-  /* 星点色：只有背景那层读，组件一个都不碰 */
-  --s-1:#f6e7d3; --s-2:#cfe6ff; --s-3:#ffd6a5; --s-4:#ff9ecb;
-  --s-link:#a06bff;   /* 星座连线：紫，不是任何一个状态色 */
+  --brand:#8b8cf5;          /* 唯一的 chrome 强调色（Linear 的 #5e6ad2 同位） */
+  --brand-hi:#a5a6ff;       /* 它的 hover，不算第二种彩 */
+  --pop:var(--brand);       /* 兼容旧引用：品红退役，一律回落到品牌紫 */
+  /* 星点色：按**色温**排（蓝白→白→淡金），不再有糖果粉 */
+  --s-1:#eef4ff; --s-2:#dbe6f7; --s-3:#fff2df; --s-4:#ffd9ae;
+  --s-link:#9aa4c8;         /* 星座连线：中性冷灰蓝，压到近不可见 */
   --fd:'Bahnschrift','DIN Alternate','Microsoft YaHei UI',system-ui,sans-serif;
   --fb:'Microsoft YaHei UI','Microsoft YaHei',system-ui,sans-serif;
   --fm:'Cascadia Mono','Consolas',ui-monospace,monospace;
   --ez:cubic-bezier(.22,.61,.36,1);
-  /* 内容面一律**不透明**：上一版 .pane 用 alpha .90，星点会渗进卡片文字区（实测最大 36）。
-     主题只留在**没有正文**的地方：页面底、栏间空隙、hero 带、底部那条夜空带。
-   换主题时**五个状态色一个都不许动**——那是语义，不是配色。 */
-  --pane:#12101f; --card:#181527;
+  /* 刻度（Linear/Raycast 都是 4 的倍数栅格 + 分档圆角） */
+  --r-tag:4px; --r-chip:6px; --r-ctl:8px; --r-card:12px; --r-pill:999px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
+  --pad-pane:var(--s3) var(--s4);
+  --elev:0 0 0 0 transparent;                 /* 投影一律归零 */
+  --edge:inset 0 1px 0 rgba(255,255,255,.045);/* 换成顶边微高光 */
+  --tt:none; --ph-ls:.2px;                    /* 小标签不再全大写 + .18em 宽字距 */
+  --glow:.26;                                 /* 背景那三团光的强度 */
+  --hero-fs:20px; --hero-ls:-.2px;
+}
+body.legacy{
+  --abyss:#06040e; --deep:#150d1f; --pane:#12101f; --card:#181527; --raise:#241d3a;
+  --head:#100d1d;
+  --line:rgba(178,166,214,.18); --line2:rgba(178,166,214,.36); --line3:rgba(178,166,214,.5);
+  --txt:#efe9f7; --txt2:#d6cde8; --dim:#9b90b4; --dim2:#6f6686;
+  --brand:#a06bff; --brand-hi:#b489ff; --pop:#ff3d7f;
+  --s-1:#f6e7d3; --s-2:#cfe6ff; --s-3:#ffd6a5; --s-4:#ff9ecb; --s-link:#a06bff;
+  --r-tag:6px; --r-chip:999px; --r-ctl:9px; --r-card:14px;
+  --pad-pane:13px 15px;
+  --elev:0 22px 46px -32px rgba(0,0,0,.92);
+  --edge:inset 0 1px 0 rgba(214,200,255,.07);
+  --tt:uppercase; --ph-ls:.18em;
+  --glow:.55; --hero-fs:17px; --hero-ls:.04em;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;font:14px/1.65 var(--fb);color:var(--txt);overflow:hidden;
-  background:linear-gradient(180deg,var(--abyss) 0%,#0b0716 46%,var(--deep) 100%)}
+body{margin:0;font:13px/1.55 var(--fb);color:var(--txt);overflow:hidden;
+  background:linear-gradient(180deg,var(--abyss) 0%,var(--deep) 62%,var(--deep) 100%)}
 ::-webkit-scrollbar{width:9px;height:9px}
-::-webkit-scrollbar-thumb{background:rgba(178,166,214,.22);border-radius:6px}
-::-webkit-scrollbar-thumb:hover{background:rgba(178,166,214,.38)}
+::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px}
+::-webkit-scrollbar-thumb:hover{background:var(--line3)}
 ::-webkit-scrollbar-track{background:transparent}
 
-/* ══ 背景层：东京夜的星野 ═══════════════════════════════════════════════
-   三团不动的城市光晕（钠灯橙 / 霓虹品红 / 高架青）当底，星点画在一张 2D 画布上：
-   鼠标划过 ⇒ 星点被推开；停手 ⇒ 弹簧把它们拉回原位，能量归零后**写回 home 再画一帧**。
-   最后那一句是关键：它保证"散过又聚回"的终点和初始帧**逐像素相同**——
-   画廊那版背景被否三轮换来的就是这条（背景自己在动 = 一张装饰壁纸）。 */
+/* ══ 背景层：东京夜的星野（氛围只留在这里，面板上一个都不给）═══════════
+   三团不动的城市光晕当底（强度走 `--glow`，新版面压到 .26），星点画在一张 2D 画布上：
+   鼠标划过 ⇒ 星点显影；停手 ⇒ 能量归零后**写回 home 再画一帧**。
+   最后那一句是关键：它保证"亮过又淡掉"的终点和初始帧**逐像素相同**。 */
 #bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
 #bgfx .bfield{position:absolute;inset:-10%}
-#bgfx .glow{position:absolute;width:74vmax;height:74vmax;border-radius:50%;opacity:.55}
-#bgfx .g1{left:-26vmax;bottom:-34vmax;width:80vmax;height:80vmax;
-  background:radial-gradient(closest-side,rgba(255,146,58,.62) 0%,rgba(255,146,58,.20) 42%,
+#bgfx .glow{position:absolute;border-radius:50%;opacity:var(--glow);
+  transition:opacity .3s var(--ez)}
+#bgfx .g1{left:-30vmax;bottom:-40vmax;width:86vmax;height:86vmax;
+  background:radial-gradient(closest-side,rgba(255,150,66,.55) 0%,rgba(255,150,66,.16) 44%,
     transparent 100%)}
-#bgfx .g2{right:-24vmax;bottom:-30vmax;width:70vmax;height:70vmax;
-  background:radial-gradient(closest-side,rgba(255,61,127,.52) 0%,rgba(255,61,127,.16) 42%,
+#bgfx .g2{right:-28vmax;bottom:-34vmax;width:76vmax;height:76vmax;
+  background:radial-gradient(closest-side,rgba(139,140,245,.46) 0%,rgba(139,140,245,.13) 44%,
     transparent 100%)}
-#bgfx .g3{right:0vmax;top:-28vmax;width:56vmax;height:56vmax;
-  background:radial-gradient(closest-side,rgba(47,208,255,.44) 0%,rgba(47,208,255,.14) 42%,
+#bgfx .g3{right:-6vmax;top:-34vmax;width:62vmax;height:62vmax;
+  background:radial-gradient(closest-side,rgba(47,208,255,.34) 0%,rgba(47,208,255,.10) 44%,
     transparent 100%)}
 #bgfx canvas{position:absolute;inset:0;width:100%;height:100%}
-body.plain #bgfx .glow{display:none}
+/* 星云单独一张**永不重绘**的画布：它整幅是静态的，跟着星点画布每帧 clearRect 再 blit
+   一次等于白拷 6MB/帧（SwiftShader 上实测拖慢截图到 2s+），而且每帧重合成还会带来
+   dither 抖动。分开之后静止帧天然逐像素相同。 */
+body.plain #bgfx .glow,body.plain #bgfx #nebula{display:none}
 
 /* ══ 骨架：三个独立滚动的区，页面本身不滚 ═══════════════════════════════ */
 .app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh}
-header{position:relative;z-index:10;flex:0 0 auto;display:flex;align-items:center;gap:20px;
-  padding:13px 22px;background:#100d1d;
-  border-bottom:1px solid rgba(206,186,255,.28);
+/* 顶栏：一道发丝线收口，不挂投影、不挂那道品红斜切。 */
+header{position:relative;z-index:10;flex:0 0 auto;display:flex;align-items:center;gap:var(--s5);
+  padding:var(--s3) var(--s5);background:var(--head);
+  border-bottom:1px solid var(--line);box-shadow:var(--edge)}
+body.legacy header{border-bottom-color:rgba(206,186,255,.28);
   box-shadow:inset 0 1px 0 rgba(226,210,255,.24),0 1px 0 rgba(6,4,14,.6),0 16px 34px -26px #000}
 header::after{content:'';position:absolute;inset:0;pointer-events:none;
   background:linear-gradient(104deg,rgba(255,142,192,.10) 0 14%,transparent 14%)}
+body:not(.legacy) header::after{display:none}
 .brand{display:flex;align-items:center;gap:11px;flex:0 0 auto}
 .brand svg{display:block}
-.brand h1{margin:0;font:600 19px/1.15 var(--fd);letter-spacing:.06em}
-.brand p{margin:2px 0 0;font-size:11.5px;color:var(--dim2);letter-spacing:.04em}
-.meters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:1 1 auto;min-width:0}
-.meter{font:11px/1 var(--fm);padding:5px 9px;border-radius:8px;background:#1b1730;
-  border:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand h1{margin:0;font:600 16px/1.2 var(--fd);letter-spacing:-.1px;color:var(--txt)}
+.brand p{margin:1px 0 0;font-size:11px;color:var(--dim2);letter-spacing:.2px}
+.meters{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center;flex:1 1 auto;min-width:0}
+.meter{font:11px/1 var(--fm);padding:5px var(--s2);border-radius:var(--r-chip);
+  background:var(--card);border:1px solid var(--line);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;color:var(--txt2)}
 .meter b{color:var(--dim);font-weight:400;margin-right:6px}
 .meter.ok b,.meter.ok span{color:var(--pass)}
-.act{display:flex;gap:8px;flex:0 0 auto}
+.act{display:flex;gap:var(--s2);flex:0 0 auto}
 
-button{font:inherit;font-size:13px;padding:7px 14px;border-radius:9px;border:1px solid var(--line);
+/* 控件：8px 圆角、1px 发丝线、hover 走"抬一档表面"而不是描边发光（Linear 的
+   "shift toward lighter backgrounds or higher surface tiers when hovered"）。 */
+button{font:500 12.5px/1.2 var(--fb);letter-spacing:.1px;padding:7px var(--s4);
+  border-radius:var(--r-ctl);border:1px solid var(--line);
   background:var(--card);color:var(--txt);cursor:pointer;
-  transition:background .16s var(--ez),border-color .16s var(--ez),transform .12s var(--ez),opacity .16s}
-button:hover{border-color:var(--line2);background:#241d3a}
+  transition:background .16s var(--ez),border-color .16s var(--ez),
+    transform .12s var(--ez),color .16s var(--ez),opacity .16s}
+button:hover{border-color:var(--line2);background:var(--raise);color:var(--txt)}
 button:active{transform:translateY(1px)}
-button:disabled{opacity:.38;cursor:not-allowed;transform:none}
-button:disabled:hover{border-color:var(--line);background:var(--card)}
-button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
-button.go{background:linear-gradient(180deg,#b32b62,#7c1c46);border-color:#ff3d7f;
-  color:#ffe9f2;font-weight:600;
-  box-shadow:0 12px 26px -16px rgba(255,61,127,.85),inset 0 1px 0 rgba(255,190,215,.32)}
-button.go:hover{background:linear-gradient(180deg,#cb3a72,#8e2350)}
-button.sign{border-color:rgba(242,189,114,.55);color:#ffd9a2;background:rgba(58,42,20,.42)}
-button.sign:hover{background:rgba(74,54,26,.62);border-color:var(--await)}
-button.ghost{background:transparent;font-size:12.5px;padding:6px 11px}
-/* 「怎么用」不是动作按钮，不能和"当前步的主动作"共用同一块品红实心——
-   实心品红在这个界面里只有一个含义：这一步的主操作。 */
-button.help{background:transparent;border-color:rgba(180,137,255,.55);color:#e4d7ff;
-  font-weight:600}
-button.help:hover{background:rgba(180,137,255,.14);border-color:#b489ff}
-button.mini{font-size:11.5px;padding:3px 9px;border-radius:7px}
+button:disabled{opacity:.35;cursor:not-allowed;transform:none}
+button:disabled:hover{border-color:var(--line);background:var(--card);color:var(--txt)}
+button:focus-visible{outline:2px solid rgba(139,140,245,.5);outline-offset:2px}
+/* 主动作 = 唯一的 chrome 强调色，**实心平涂、无渐变、无外发光**。
+   旧版面那道品红渐变 + 光晕正是"AI 生成界面"的典型指纹。 */
+button.go{background:var(--brand);border-color:var(--brand);color:#0b0c12;font-weight:600}
+button.go:hover{background:var(--brand-hi);border-color:var(--brand-hi)}
+button.go:disabled{background:var(--brand);color:#0b0c12}
+body.legacy button.go{background:linear-gradient(180deg,#b32b62,#7c1c46);border-color:#ff3d7f;
+  color:#ffe9f2;box-shadow:0 12px 26px -16px rgba(255,61,127,.85),
+    inset 0 1px 0 rgba(255,190,215,.32)}
+body.legacy button.go:hover{background:linear-gradient(180deg,#cb3a72,#8e2350)}
+/* 签字 = 借用「等你签字」那个状态色，语义自洽（它本来就是 await 的动宾形态） */
+button.sign{border-color:rgba(242,189,114,.5);color:var(--await);
+  background:rgba(242,189,114,.10)}
+button.sign:hover{background:rgba(242,189,114,.18);border-color:var(--await)}
+button.ghost{background:transparent;font-size:12px;padding:6px 11px;color:var(--dim)}
+button.ghost:hover{color:var(--txt);background:var(--card)}
+button.help{background:transparent;border-color:var(--line2);color:var(--txt2)}
+button.help:hover{background:var(--card);border-color:var(--line3)}
+button.mini{font-size:11.5px;padding:var(--s1) var(--s2);border-radius:var(--r-tag)}
 
 /* ══ 光效层：指针携光 —— 全站唯一一条动效语言 ══════════════════════════
    隐喻只有一句：**光由指针携带**。指针进入 → 一道光沿控件边框从进入点绕一圈；
@@ -447,26 +499,29 @@ button.mini{font-size:11.5px;padding:3px 9px;border-radius:7px}
 @property --ang{syntax:'<angle>';inherits:false;initial-value:0deg}
 #fxbeam,#fxpool{position:fixed;z-index:70;pointer-events:none;display:none;opacity:0}
 #fxbeam{padding:1.5px;
-  background:conic-gradient(from var(--ang),transparent 0 52%,var(--bc,#ff3d7f) 72%,
-    #fff 81%,var(--bc,#ff3d7f) 90%,transparent 98%);
+  background:conic-gradient(from var(--ang),transparent 0 52%,var(--bc,var(--brand)) 72%,
+    #fff 81%,var(--bc,var(--brand)) 90%,transparent 98%);
   -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
   -webkit-mask-composite:xor;mask-composite:exclude}
 #fxpool{background:radial-gradient(circle at var(--px,50%) var(--py,50%),
-    var(--pc,rgba(226,214,255,.20)),transparent 60%);mix-blend-mode:screen}
+    var(--pc,rgba(210,216,235,.16)),transparent 60%);mix-blend-mode:screen}
 body:not(.calm) #fxbeam.go,body:not(.calm) #fxpool.on{display:block}
 #fxbeam.go{animation:beam .78s var(--ez)}
 /* 不用 fill：播完 opacity 自己回到 0 ⇒ "光走了不留痕"是可断言的，而不是靠 JS 记时清类 */
 @keyframes beam{0%{opacity:0;--ang:var(--a0,0deg)}14%{opacity:1}84%{opacity:1}
   100%{opacity:0;--ang:calc(var(--a0,0deg) + 360deg)}}
-/* 左轨当前步的那道标记：不再每张卡各画一根，而是**一根从旧步走到新步** */
+/* 左轨当前步的那道标记：不再每张卡各画一根，而是**一根从旧步走到新步**。
+   新版面是实色 2px 紫条、不挂光晕（Linear 的当前项标记就是纯色一条）。 */
 #railwrap{position:relative}
 #railmark{position:absolute;left:-1px;width:2px;border-radius:2px;top:0;height:0;opacity:0;
-  background:linear-gradient(180deg,#a06bff,#ff3d7f);box-shadow:0 0 12px rgba(255,61,127,.7);
+  background:var(--brand);
   transition:top .42s var(--ez),height .42s var(--ez),opacity .3s var(--ez);pointer-events:none}
 #chipmark{position:absolute;bottom:-1px;height:2px;border-radius:2px;left:0;width:0;
-  background:linear-gradient(90deg,#a06bff,#ff3d7f);opacity:0;pointer-events:none;
+  background:var(--brand);opacity:0;pointer-events:none;
   transition:left .34s var(--ez),width .34s var(--ez),opacity .2s var(--ez)}
 #chips{position:relative}
+body.legacy #railmark,body.legacy #chipmark{
+  background:linear-gradient(180deg,#a06bff,#ff3d7f);box-shadow:0 0 12px rgba(255,61,127,.7)}
 /* 磁吸：只有主操作与左轨会朝指针让出 2px，普通按钮不让（它们挨得太近会晃）。
    写全 transition 列表而不是只写 transform —— 简写会连带抹掉底色/描边的过渡。 */
 .mag{transition:transform .55s var(--ez),background .16s var(--ez),
@@ -476,42 +531,50 @@ body:not(.calm) #fxbeam.go,body:not(.calm) #fxpool.on{display:block}
    规矩只有一条：**能读数据、能看图的位置一律不透明**。
    hero 是全局唯一让正文"坐在星野上"的地方，只放标题级短文（带 text-shadow 压亮度），
    阶段卡、日志、对照图、指标 pill 一个都不许放进去。 */
-.wrap{flex:1 1 auto;min-height:0;display:grid;gap:16px;padding:14px 26px 6px;
-  grid-template-columns:262px minmax(520px,1fr) minmax(360px,.66fr);max-width:1760px;
+.wrap{flex:1 1 auto;min-height:0;display:grid;gap:var(--s4);
+  padding:var(--s4) var(--s5) var(--s5);
+  grid-template-columns:264px minmax(520px,1fr) minmax(360px,.66fr);max-width:1760px;
   margin:0 auto;width:100%;align-items:stretch}
 /* 列是 flex 容器：面板必须 flex-shrink:0，否则"内容比列高"时**每个面板都被压扁**，
    再叠上 overflow:hidden 就是把卡片和日志的下沿直接切掉（实测第二张卡被切 45px、
    日志被切 81px）。要滚的是列本身，不是把内容塞进固定高度的盒子里。 */
-.col{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding-right:2px}
+.col{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:var(--s3);padding-right:2px}
 .col>.pane{flex:0 0 auto}
 /* 日志格给**确定的视口高度**，不要用 flex:1 去"填满剩余"：
    在 grid + overflow:auto 这套组合下它实测会塌成 28px（只剩标题条），
    把 pre 顶出面板外 170px。可预测比聪明重要。 */
 .col>.logpane{flex:0 0 auto}
+/* 面板层级 = **底色抬一档 + 一道发丝线 + 顶边 1px 微高光**，不挂投影。
+   （Linear："Zero drop shadows… vertical depth relies exclusively on the
+    background ladder and consistent boundary strokes."） */
 .pane{position:relative;background:var(--pane);border:1px solid var(--line);
-  border-radius:14px;padding:13px 15px;
-  box-shadow:0 22px 46px -32px rgba(0,0,0,.92),inset 0 1px 0 rgba(214,200,255,.07)}
-/* 东京夜招牌的那根灯管：面板顶边一条 1px 紫→品红亮线，静止时半亮、指针过来才全亮。
-   它是**静态渐变**（没有 animation）——背景可见区与内容区都要求"静止两帧逐像素相同"。 */
+  border-radius:var(--r-card);padding:var(--pad-pane);box-shadow:var(--edge)}
+/* 旧版面那根"紫→品红灯管"是大气渐变的典型指纹，新版面整条撤掉；
+   挂在 legacy 下保留，`V` 键能当场比出差别。 */
+body.legacy .pane{box-shadow:0 22px 46px -32px rgba(0,0,0,.92),
+  inset 0 1px 0 rgba(214,200,255,.07)}
 .pane::before{content:'';position:absolute;left:14px;right:14px;top:0;height:1px;
   background:linear-gradient(90deg,transparent,rgba(160,107,255,.62) 16%,
     rgba(255,61,127,.58) 58%,transparent);
-  opacity:.42;transition:opacity .22s var(--ez)}
-.pane:hover::before{opacity:1}
-.ph{font:600 11px/1 var(--fd);letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
-  margin:0 0 11px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  opacity:.42;transition:opacity .22s var(--ez);display:none}
+body.legacy .pane::before{display:block}
+body.legacy .pane:hover::before{opacity:1}
+.ph{font:500 12px/1 var(--fb);letter-spacing:var(--ph-ls);text-transform:var(--tt);
+  color:var(--dim);
+  margin:0 0 var(--s3);display:flex;align-items:center;justify-content:space-between;gap:var(--s2)}
 
 /* ══ 步骤导航 ═════════════════════════════════════════════════════════ */
-.step{position:relative;display:grid;grid-template-columns:26px 1fr auto;gap:10px;align-items:start;
-  width:100%;text-align:left;padding:9px 10px;border-radius:12px;background:transparent;
-  border:1px solid transparent}
-.step:hover{background:#102c44;border-color:var(--line)}
-.step.on{background:linear-gradient(180deg,#2a2145,#191329);
-  border-color:rgba(160,107,255,.5);box-shadow:0 14px 30px -20px rgba(0,0,0,.9)}
-.step .num{font:600 19px/1.35 var(--fd);letter-spacing:-.02em;color:var(--dim);
-  text-align:center;border:1px solid var(--line);border-radius:9px;background:#0d0a18}
-.step.on .num{color:var(--brand);border-color:rgba(47,208,255,.5)}
-.step b{display:block;font-size:13.5px;font-weight:600;letter-spacing:.02em}
+.step{position:relative;display:grid;grid-template-columns:26px 1fr auto;gap:10px;
+  align-items:start;width:100%;text-align:left;padding:var(--s2) 10px;
+  border-radius:var(--r-ctl);background:transparent;border:1px solid transparent;
+  color:var(--txt)}
+.step:hover{background:var(--card);border-color:var(--line)}
+.step.on{background:var(--card);border-color:var(--line2)}
+.step .num{font:600 17px/1.45 var(--fd);letter-spacing:-.3px;color:var(--dim);
+  text-align:center;border:1px solid var(--line);border-radius:var(--r-ctl);
+  background:var(--pane)}
+.step.on .num{color:var(--brand-hi);border-color:rgba(139,140,245,.55)}
+.step b{display:block;font-size:13px;font-weight:600;letter-spacing:-.05px}
 .step em{display:block;font:400 11px/1.45 var(--fb);color:var(--dim);font-style:normal;
   margin-top:1px}
 .step .cnt{font:11px/1 var(--fm);color:var(--dim2);margin-top:5px;display:block}
@@ -519,7 +582,7 @@ body:not(.calm) #fxbeam.go,body:not(.calm) #fxpool.on{display:block}
 .dot{width:7px;height:7px;border-radius:2px;background:var(--idle)}
 .dot.pass{background:var(--pass)}.dot.fail{background:var(--fail)}
 .dot.await{background:var(--await)}.dot.run{background:var(--run);animation:pulse 1.1s infinite}
-.dot.hot{outline:2px solid #ff3d7f;outline-offset:2px}
+.dot.hot{outline:2px solid var(--brand-hi);outline-offset:2px}
 .legend{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--dim)}
 .legend .lrow{display:flex;gap:14px}
 .legend .lrow span{display:flex;align-items:center;gap:6px}
@@ -528,70 +591,76 @@ body:not(.calm) #fxbeam.go,body:not(.calm) #fxpool.on{display:block}
 @keyframes pulse{50%{opacity:.25}}
 
 /* ══ 工作区 ═══════════════════════════════════════════════════════════ */
-/* 主题带：整个界面里唯一让正文"坐在海面上"的地方，只有一句标题 + 一句说明 + 按钮。
-   卡片、日志、对照图全是不透明面 ⇒ 需要读字和看图的位置，背景一点都渗不进来。
-   这一层自带极淡的暗色纱，保证标题在任何星点亮度下都压得住。 */
-.hero{padding:15px 17px 14px;border-radius:16px;border:1px solid rgba(178,166,214,.14);
+/* 页头**不再是一个盒子**：正经仪表盘里"当前在哪一步"就是一行标题 + 一行副标题，
+   不需要再套一道描边和一块底色（那正是"卡片套卡片"的 AI 味来源）。
+   只留 text-shadow 压住任何星点亮度；卡片、日志、对照图全在不透明面板里。 */
+.hero{padding:2px 4px 6px}
+body.legacy .hero{padding:15px 17px 14px;border-radius:16px;
+  border:1px solid rgba(178,166,214,.14);
   background:linear-gradient(180deg,rgba(8,6,18,.20),rgba(6,4,14,.06))}
 .whead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
-.whead h2{margin:0;font:600 17px/1.3 var(--fd);letter-spacing:.04em;
-  text-shadow:0 1px 12px rgba(3,12,20,.9),0 0 2px rgba(3,12,20,.75)}
-.whead p{margin:4px 0 0;color:#c2b7da;font-size:12.5px;max-width:64ch;
-  text-shadow:0 1px 8px rgba(3,12,20,.9)}
-.cta{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 2px}
+.whead h2{margin:0;font:500 var(--hero-fs)/1.25 var(--fb);letter-spacing:var(--hero-ls);
+  color:var(--txt);text-shadow:0 1px 12px rgba(3,4,10,.95),0 0 2px rgba(3,4,10,.8)}
+.whead p{margin:3px 0 0;color:var(--dim);font-size:12.5px;max-width:70ch;
+  text-shadow:0 1px 8px rgba(3,4,10,.95)}
+.cta{display:flex;gap:var(--s2);flex-wrap:wrap;margin:var(--s3) 0 2px}
 .scopenote{font-size:11.5px;color:var(--await);margin:6px 0 0;display:none}
 .scopenote.on{display:block}
 
-.g{display:flex;flex-direction:column;gap:9px}
+.g{display:flex;flex-direction:column;gap:var(--s2)}
 /* 入场动画挂在 `.in` 上，**只有首次挂载才加**（见 render 里的 mounted 集合）。
    写在基础类上 = 每次数据刷新重建节点就重播一次，那就是"每 8 秒整屏闪一下"的根因。 */
 .step.in,.stage.in{animation:rise .44s var(--ez) backwards}
-.stage{position:relative;border:1px solid var(--line);border-radius:12px;padding:11px 13px;
-  background:var(--card);
-  transition:border-color .16s var(--ez),transform .16s var(--ez),box-shadow .18s var(--ez)}
+/* 卡片层级 = 底色比面板抬一档 + 发丝线；hover 再抬一档，**不投影、不上浮**。
+   （Linear：hover 是"shift toward lighter backgrounds or higher surface tiers"。） */
+.stage{position:relative;border:1px solid var(--line);border-radius:var(--r-card);
+  padding:var(--s3) var(--s4);background:var(--card);
+  transition:border-color .16s var(--ez),background .16s var(--ez)}
+.stage:hover{border-color:var(--line2);background:var(--raise)}
+body.legacy .stage:hover{transform:translateY(-1px);
+  box-shadow:0 16px 30px -24px rgba(0,0,0,.9)}
 /* 卡片左光条：从指针进入的那个高度向上下**点燃**，离开时收回原位；静止时只留 34% 的一截 */
 .stage::before{content:'';position:absolute;left:0;top:12px;height:calc(100% - 24px);width:2px;
   border-radius:2px;background:var(--line2);opacity:.35;transform:scaleY(.34);
   transform-origin:50% var(--oy,50%);
-  transition:opacity .18s var(--ez),background .18s var(--ez),transform .38s var(--ez),
-    box-shadow .3s var(--ez)}
-.stage:hover{border-color:var(--line2);transform:translateY(-1px);
-  box-shadow:0 16px 30px -24px rgba(0,0,0,.9)}
-.stage:hover::before{opacity:1;transform:scaleY(1);
-  background:linear-gradient(180deg,#a06bff,#ff3d7f);
-  box-shadow:0 0 16px -2px rgba(255,61,127,.8)}
-.stage.hot::before{background:#ff3d7f;opacity:1}
+  transition:opacity .18s var(--ez),background .18s var(--ez),transform .38s var(--ez)}
+.stage:hover::before{opacity:1;transform:scaleY(1);background:var(--brand)}
+body.legacy .stage:hover::before{box-shadow:0 0 16px -2px rgba(255,61,127,.8);
+  background:linear-gradient(180deg,#a06bff,#ff3d7f)}
+.stage.hot::before{background:var(--brand-hi);opacity:1;transform:scaleY(1)}
 .stage.fail{border-left:3px solid var(--fail)}
 .stage.await{border-left:3px solid var(--await)}
 .srow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-.skey{font:600 13.5px/1 var(--fm);letter-spacing:.02em}
+.skey{font:600 13px/1.3 var(--fm);letter-spacing:0;color:var(--txt)}
 /* 档位三枚一律中性色：只靠图标 + 字重 + 边框样式分级。
-   上一版把「写正式」标成琥珀，而琥珀正好又是"等你签字"的颜色 —— 同一个 hue 负两件语义，
-   用户就分不清"这行到底是我该动手，还是它出事了"。颜色这条资源整体留给状态。 */
-.tier{font:10.5px/1 var(--fb);padding:3px 7px;border-radius:6px;border:1px solid var(--line);
-  color:var(--dim);white-space:nowrap;background:rgba(178,166,214,.06)}
-.tier.s{border-style:dashed;border-color:rgba(178,166,214,.32);color:#bfb4d6}
-.tier.l{border-color:rgba(178,166,214,.50);color:#ded4f0;font-weight:600}
-.stt{margin-left:auto;font:11.5px/1 var(--fb);padding:4px 9px;border-radius:999px;
+   ⚠️ 这里的中性灰**不许撞上五个状态色**（探针逐条比计算色值），
+   否则又回到"一个 hue 负两件事"。 */
+.tier{font:10.5px/1 var(--fb);padding:3px 7px;border-radius:var(--r-tag);
+  border:1px solid var(--line);color:var(--dim);white-space:nowrap;
+  background:rgba(255,255,255,.025)}
+.tier.s{border-style:dashed;border-color:var(--line2);color:#b9bec7}
+.tier.l{border-color:var(--line3);color:#d6dae1;font-weight:600}
+.stt{margin-left:auto;font:11.5px/1 var(--fb);padding:4px 9px;border-radius:var(--r-pill);
   display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .stt::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
-.stt.idle{background:rgba(63,90,110,.30);color:#a99fc0}
+.stt.idle{background:rgba(63,90,110,.30);color:#a2a8b2}
 .stt.pass{background:rgba(79,214,168,.14);color:var(--pass)}
 .stt.fail{background:rgba(255,111,111,.16);color:var(--fail)}
 .stt.await{background:rgba(242,189,114,.15);color:var(--await)}
 .stt.run{background:rgba(95,208,232,.16);color:var(--run);animation:pulse 1.1s infinite}
-.stitle{font-size:13px;color:var(--txt);margin:7px 0 0}
-.kv{display:grid;grid-template-columns:44px 1fr;gap:4px 9px;margin:8px 0 0;font-size:11.8px;
-  color:var(--dim)}
-.kv dt{color:var(--dim2);letter-spacing:.06em}
-.kv dd{margin:0;font-family:var(--fm);font-size:11.5px;word-break:break-all;line-height:1.55}
-.sact{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
-.signbox{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#f7d9a2;
-  padding:3px 9px 3px 7px;border-radius:8px;border:1px solid rgba(242,189,114,.32);
-  background:rgba(58,42,20,.30);position:relative;overflow:hidden}
+.stitle{font-size:12.5px;color:var(--txt2);margin:6px 0 0}
+.kv{display:grid;grid-template-columns:44px 1fr;gap:var(--s1) 9px;margin:var(--s2) 0 0;
+  font-size:11.5px;color:var(--dim)}
+.kv dt{color:var(--dim2);letter-spacing:.2px}
+.kv dd{margin:0;font-family:var(--fm);font-size:11.5px;word-break:break-all;line-height:1.5;
+  color:var(--txt2)}
+.sact{display:flex;gap:var(--s2);align-items:center;margin-top:10px;flex-wrap:wrap}
+.signbox{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--await);
+  padding:3px 9px 3px 7px;border-radius:var(--r-ctl);border:1px solid rgba(242,189,114,.32);
+  background:rgba(242,189,114,.07);position:relative;overflow:hidden}
 .signbox input{accent-color:var(--await);width:14px;height:14px;margin:0;cursor:pointer}
-.signbox.on{background:rgba(242,189,114,.20);border-color:var(--await);color:#ffe3b8;
-  box-shadow:0 0 16px -6px rgba(242,189,114,.75)}
+.signbox.on{background:rgba(242,189,114,.16);border-color:var(--await);color:#ffe3b8}
+body.legacy .signbox.on{box-shadow:0 0 16px -6px rgba(242,189,114,.75)}
 /* 勾上签字 = 一团暖光从方框泄开，一次性，播完自己消失（静止时不留痕） */
 .signbox.on::after{content:'';position:absolute;inset:0;pointer-events:none;
   background:radial-gradient(circle at 14px 50%,rgba(242,189,114,.6),transparent 68%);
@@ -599,36 +668,41 @@ body:not(.calm) #fxbeam.go,body:not(.calm) #fxpool.on{display:block}
 @keyframes bloom{from{opacity:1;transform:scale(.55)}to{opacity:0;transform:scale(1.7)}}
 .spacer{margin-left:auto}
 .dim{color:var(--dim2)}
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
-.chip{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);
-  background:transparent;color:var(--dim)}
-.chip.on{border-color:rgba(160,107,255,.6);color:#e4d7ff;background:rgba(160,107,255,.14)}
-.kbd{font:10.5px/1 var(--fm);padding:3px 7px;border-radius:6px;border:1px solid var(--line);
-  color:var(--dim);background:#0d0a18}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 var(--s2)}
+.chip{font-size:11px;padding:var(--s1) var(--s2);border-radius:var(--r-chip);
+  border:1px solid var(--line);background:transparent;color:var(--dim)}
+.chip:hover{color:var(--txt);border-color:var(--line2)}
+.chip.on{border-color:rgba(139,140,245,.5);color:var(--txt);background:rgba(139,140,245,.13)}
+.kbd{font:10.5px/1 var(--fm);padding:3px 7px;border-radius:var(--r-tag);
+  border:1px solid var(--line);color:var(--dim);background:var(--pane)}
 .kbd b{color:#e4d7ff;font-weight:600}
 
 /* ══ 对照图：必须坐在完全不透明的底上 ═════════════════════════════════ */
 .sheets{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px,1fr));gap:10px}
-.sheets a{display:block;border:1px solid var(--line);border-radius:10px;overflow:hidden;
-  background:#0d0a18;text-decoration:none;color:inherit;
-  transition:border-color .16s var(--ez),transform .16s var(--ez)}
-.sheets a:hover{border-color:var(--line2);transform:translateY(-2px)}
-.sheets img{display:block;width:100%;height:196px;object-fit:contain;background:#171328;
+.sheets a{display:block;border:1px solid var(--line);border-radius:var(--r-ctl);overflow:hidden;
+  background:var(--abyss);text-decoration:none;color:inherit;
+  transition:border-color .16s var(--ez),background .16s var(--ez)}
+.sheets a:hover{border-color:var(--line2);background:var(--raise)}
+body.legacy .sheets a:hover{transform:translateY(-2px)}
+/* 图的衬底用**中性**深色，不用薰衣草底（它会给改前/改后的白平衡带偏判断） */
+.sheets img{display:block;width:100%;height:196px;object-fit:contain;background:#0e0f13;
   cursor:zoom-in}
-.sheets .cap{font-size:11px;color:var(--dim);padding:6px 9px;display:flex;
-  justify-content:space-between;gap:8px;border-top:1px solid var(--line)}
+.sheets .cap{font-size:11px;color:var(--dim);padding:6px var(--s2);display:flex;
+  justify-content:space-between;gap:var(--s2);border-top:1px solid var(--line)}
 
 /* ══ 日志 / 任务 ══════════════════════════════════════════════════════ */
-pre{margin:0;font:11.8px/1.6 var(--fm);white-space:pre-wrap;word-break:break-all;
-  background:#0c0918;border:1px solid var(--line);border-radius:10px;padding:10px 12px;
-  overflow:auto;color:#d6cde8;height:40vh;min-height:170px}
+pre{margin:0;font:11.5px/1.6 var(--fm);white-space:pre-wrap;word-break:break-all;
+  background:var(--abyss);border:1px solid var(--line);border-radius:var(--r-ctl);
+  padding:10px var(--s3);overflow:auto;color:var(--txt2);height:40vh;min-height:170px}
 pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
 .runs{width:100%;border-collapse:collapse;font-size:12px}
-.runs th{font:600 10.5px/1 var(--fd);letter-spacing:.12em;text-transform:uppercase;
-  color:var(--dim2);text-align:left;padding:0 6px 7px;border-bottom:1px solid var(--line)}
-.runs td{padding:7px 6px;border-bottom:1px solid rgba(178,166,214,.09);vertical-align:top}
+.runs th{font:500 11px/1 var(--fb);letter-spacing:var(--ph-ls);text-transform:var(--tt);
+  color:var(--dim);text-align:left;padding:0 6px 7px;border-bottom:1px solid var(--line)}
+body.legacy .runs th{font-weight:600;font-family:var(--fd)}
+/* 表格行分隔 = 1px 底描边（Linear 的 data row 就是这个做法） */
+.runs td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
 .runs tr:last-child td{border-bottom:none}
-.tag{font:10.5px/1 var(--fb);padding:3px 7px;border-radius:6px;white-space:nowrap}
+.tag{font:10.5px/1 var(--fb);padding:3px 7px;border-radius:var(--r-tag);white-space:nowrap}
 .tag.done{background:rgba(79,214,168,.13);color:var(--pass)}
 .tag.running{background:rgba(95,208,232,.14);color:var(--run);animation:pulse 1.1s infinite}
 .tag.gone,.tag.donedirty{background:rgba(255,111,111,.14);color:var(--fail)}
@@ -636,14 +710,18 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
 /* ══ 使用说明抽屉 ══════════════════════════════════════════════════════ */
 #help{position:fixed;inset:0;z-index:60;display:none}
 #help.on{display:block}
-#help .veil{position:absolute;inset:0;background:rgba(2,9,15,.72);backdrop-filter:blur(3px)}
+#help .veil{position:absolute;inset:0;background:rgba(3,4,8,.7);backdrop-filter:blur(3px)}
+/* 抽屉是**最高一档表面**：靠比页面更亮的底色 + 一道描边分层，不靠大投影 */
 #help .panel{position:absolute;right:0;top:0;bottom:0;width:min(660px,94vw);overflow:auto;
-  background:linear-gradient(180deg,#141024,#0c0817);border-left:1px solid var(--line2);
-  box-shadow:-30px 0 70px -30px #000;padding:22px 26px 40px;animation:slide .32s var(--ez)}
+  background:var(--pane);border-left:1px solid var(--line2);
+  padding:22px var(--s5) 40px;animation:slide .32s var(--ez)}
+body.legacy #help .panel{background:linear-gradient(180deg,#141024,#0c0817);
+  box-shadow:-30px 0 70px -30px #000}
 @keyframes slide{from{transform:translateX(28px);opacity:.6}}
-#help h3{font:600 15px/1.3 var(--fd);margin:22px 0 8px;letter-spacing:.04em;color:var(--brand)}
+#help h3{font:500 14px/1.3 var(--fb);margin:var(--s5) 0 var(--s2);letter-spacing:-.1px;
+  color:var(--brand-hi)}
 #help h3:first-of-type{margin-top:4px}
-#help p,#help li{font-size:13px;color:#d6cde8}
+#help p,#help li{font-size:13px;color:var(--txt2)}
 #help ul{margin:6px 0;padding-left:20px}
 #help li{margin:4px 0}
 #help table{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0;
@@ -652,11 +730,13 @@ pre .good{color:var(--pass)}pre .bad{color:var(--fail)}
 #help table td:nth-child(2){width:42%}
 #help th,#help td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;
   vertical-align:top}
-#help th{font:600 10.5px/1 var(--fd);letter-spacing:.1em;text-transform:uppercase;color:var(--dim2)}
-#help code{font:11.8px/1.5 var(--fm);background:rgba(47,208,255,.10);padding:1px 6px;
-  border-radius:5px;color:#9fe4ff}
+#help th{font:500 11px/1 var(--fb);letter-spacing:var(--ph-ls);text-transform:var(--tt);
+  color:var(--dim)}
+#help code{font:11.5px/1.5 var(--fm);background:rgba(139,140,245,.12);padding:1px 6px;
+  border-radius:var(--r-tag);color:#b9bdf5}
 #help .close{position:sticky;top:0;float:right}
-.warn{background:rgba(255,111,111,.10);border:1px solid rgba(255,111,111,.34);border-radius:10px;
+.warn{background:rgba(255,111,111,.10);border:1px solid rgba(255,111,111,.34);
+  border-radius:var(--r-ctl);
   padding:9px 12px;font-size:12.5px;color:#ffc2c2;margin-bottom:11px;display:none}
 .warn.on{display:block}
 #lightbox{position:fixed;inset:0;background:rgba(2,7,12,.95);display:none;z-index:99;
@@ -677,21 +757,21 @@ body.calm .signbox.on::after{display:none}
 
 <div id="bgfx" aria-hidden="true"><div class="bfield">
   <i class="glow g1"></i><i class="glow g2"></i><i class="glow g3"></i></div>
-  <canvas id="stars"></canvas></div>
+  <canvas id="nebula"></canvas><canvas id="stars"></canvas></div>
 
 <div class="app">
 <header>
   <div class="brand">
-    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+    <svg width="24" height="24" viewBox="0 0 26 26" fill="none" aria-hidden="true">
       <path d="M17.4 2.6l1.5 4.3 4.3 1.5-4.3 1.5-1.5 4.3-1.5-4.3L11.6 8.4l4.3-1.5z"
-            fill="#2fd0ff"/>
-      <circle cx="5.4" cy="6.6" r="1.1" fill="#ff9ecb"/>
-      <circle cx="10.2" cy="12.4" r=".8" fill="#ffd6a5" opacity=".9"/>
-      <circle cx="3.6" cy="14.2" r=".7" fill="#cfe6ff" opacity=".7"/>
+            fill="#8b8cf5"/>
+      <circle cx="5.4" cy="6.6" r="1.1" fill="#eef4ff"/>
+      <circle cx="10.2" cy="12.4" r=".8" fill="#fff2df" opacity=".9"/>
+      <circle cx="3.6" cy="14.2" r=".7" fill="#dbe6f7" opacity=".7"/>
       <path d="M1 21.4c2.2 0 2.2-2 4.4-2s2.2 2 4.4 2 2.2-2 4.4-2 2.2 2 4.4 2 2.2-2 4.4-2"
-            stroke="#ff3d7f" stroke-width="1.2" stroke-linecap="round" fill="none" opacity=".55"/>
-      <path d="M1 25.2c2.2 0 2.2-1.6 4.4-1.6s2.2 1.6 4.4 1.6" stroke="#2fd0ff"
-            stroke-width="1" stroke-linecap="round" fill="none" opacity=".35"/>
+            stroke="#f2bd72" stroke-width="1.2" stroke-linecap="round" fill="none" opacity=".5"/>
+      <path d="M1 25.2c2.2 0 2.2-1.6 4.4-1.6s2.2 1.6 4.4 1.6" stroke="#8b8cf5"
+            stroke-width="1" stroke-linecap="round" fill="none" opacity=".45"/>
     </svg>
     <div><h1>资产更新控制台</h1><p>拉包 · 重导 · 看图 · 换入</p></div>
   </div>
@@ -703,7 +783,7 @@ body.calm .signbox.on::after{display:none}
   </div>
   <div class="act">
     <button id="bSea" class="ghost" title="S：星野背景 开/关">星辰 · 开</button>
-    <span class="kbd" title="1-4 步骤 · R 跑 · P 只看计划 · H 帮助 · S 背景 · M 动效从简">
+    <span class="kbd" title="1-4 步骤 · R 跑 · P 只看计划 · H 帮助 · S 背景 · M 动效从简 · V 新旧版面对照">
       <b>1-4</b> 步骤 · <b>R</b> 跑 · <b>H</b> 帮助</span>
     <button id="bPlan" class="ghost">只看计划</button>
     <button id="bHelp" class="help">怎么用</button>
@@ -869,15 +949,29 @@ body.calm .signbox.on::after{display:none}
   <p><code>1</code>…<code>4</code> 切步骤 · <code>R</code> 跑当前步的主动作 ·
   <code>P</code> 只看计划 · <code>H</code> 开关本抽屉 · <code>Esc</code> 关掉弹层 ·
   <code>S</code> 开关星野背景 · <code>M</code> 开关「动效从简」（关掉光沿边框走一圈、
-  指针柔光、磁吸这些，只留状态本身）。</p>
+  指针柔光、磁吸这些，只留状态本身）· <code>V</code> 开关「新旧版面对照」
+  （新版面=中性阶梯+发丝线+零投影，旧版=薰衣草底+渐变灯管+投影），两个选择都会记住。</p>
+
+  <h3>版面为什么长这样</h3>
+  <p>深色仪表盘的正经分层法只有一条：<b>底色抬档 + 1px 发丝线 + 顶边一道微高光，不用投影</b>。
+  参照的是两个公开设计系统的实测 token，它们的规则里逐条点到上一版的病：
+  「别拿薰衣草色当分区底色或卡片填充」「几乎不用 drop shadow，纵向层级全靠色阶与描边」
+  「别引入第二种强调色」「别加氛围渐变」。</p>
+  <p>所以：五档中性表面（只留一丝冷调，不偏紫）、发丝线三档实色、
+  圆角按 4/6/8/12 分档、间距走 4 的倍数栅格、小标签不再全大写加宽字距、
+  chrome 强调色<b>只有一个</b>品牌紫（主动作用它，签字按钮借用「等你签字」那个琥珀，
+  语义自洽）。氛围全部交给背景那片星野，面板上一分都不给。
+  <b>五个状态色一个都没动</b>——那是语义不是配色。</p>
 
   <h3>背景与光效</h3>
-  <p>东京夜的星野，<b>显影式</b>：底上是三团不动的城市光晕（钠灯橙 / 霓虹品红 / 高架青），
-  约 2000 颗星画在一张画布上，<b>静止时全灭</b>——划过哪里哪里才亮，亮的范围随划速变大
-  （慢挪约 9px、快扫约 130px），约半秒淡干净，亮着的星之间临时连出星座线。
-  收摊时程序把每颗星的亮度与位置写回原位再画一帧，所以"亮过又淡掉"的终点和最初那张
+  <p>东京夜的星野，<b>显影式</b>：底上是三团不动的城市光晕（强度已压到旧版一半以下），
+  星点画在一张画布上，<b>静止时全灭</b>——划过哪里哪里才亮。每颗星是<b>预渲染的精灵</b>：
+  高斯核 + 按星随机旋转的锥形衍射芒，亮星六芒带淡色晕，暗星只是软边微点；
+  亮度按幂律分布（亮星不到 1%），颜色按<b>色温</b>（蓝白→白→淡金）而不是糖果色。
+  收摊时把每颗星的亮度与位置写回原位再画一帧，所以"亮过又淡掉"的终点和最初那张
   <b>逐像素相同</b>；控件上的光效同一条规矩：全部由指针驱动，没有一条常驻循环。</p>
-  <p>觉得干扰：<code>S</code> 关整片星野，<code>M</code> 只关控件光效，两个选择都会记住。
+  <p>觉得干扰：<code>S</code> 关整片星野，<code>M</code> 只关控件光效，
+  <code>V</code> 换回旧版面对照，三个都会记住。
   想让它常驻一点微光（不划也能看见几颗），改 <code>ST.AMB</code> 这一个数就行。</p>
 
   <h3>出问题自己先查的三行</h3>
@@ -910,56 +1004,134 @@ function statusOf(k){
 }
 
 /* ── 背景：东京夜的星野 —— 静止时全黑，指针经过才显影、约 520ms 淡净 ──────
-   口径照 https://mimo.xiaomi.com/coder 那页：它不是"把东西推开"，是**擦除式显影** ——
-   一个遮罩被光标擦出洞来，洞随笔画速度从约 8px 长到约 128px，亮点不残留、约 520ms 内淡完。
-   所以这里每颗星只有一个 `lit`(0..1)：光标经过就充到 1，之后按秒指数衰减；
+   显影口径借自 https://mimo.xiaomi.com/coder（量过那页才写准）：它**不是星野**，
+   是"擦除式显影"——一层遮罩被光标擦出洞，洞随划速从 8px 长到 128px，
+   亮点约 520ms 内二次衰减淡完、不残留，而且**故意用不规则软边 + 正弦抖动**
+   去躲开"几何均一"。上一版我只借了"经过才亮"，星体本身却画成了正圆 + 一个手绘
+   "+" 字形 —— 那就是用户说的"敷衍"。本轮把星体本身重做，见下面 SPR。
+
+   每颗星只有一个 `lit`(0..1)：光标经过就充到 1，之后按秒指数衰减；
    **只有 lit 够亮的星才画** ⇒ 静止时整片天空是空的，划过才出现一条星带。
 
    三条硬约束仍然一条不丢：
      · 静止时逐像素完全相同：能量归零时把所有 lit 强制写回 0、位置写回 home 再画一帧
        ⇒ 显影过又淡掉的终点与初始帧是同一张图（探针逐像素比这个）。
+       ⚠️ 所以"闪烁"只能调制 `lit` 那一项：`vis = amb + f(lit)`，amb 项绝不吃时间，
+       否则常驻星点会让静止两帧自己就不相同。
      · 衰减与弹簧都按**秒**积分（乘 dt），不按帧 —— 按帧写在低帧率下会"永远淡不干净"。
      · 指针「瞬移」不算划过，且**按速度判**（>4200px/s 或距上一拍 >250ms），
        不能按固定像素：正常快扫一步就 48~58px，按像素判会把整层背景判成"对鼠标没反应"。
-   没有 WebGL、没有噪声函数：一张 2D 画布 + 每颗星一个 home/位移/速度/亮度。 */
+   仍然没有 WebGL、没有噪声函数：一张 2D 画布 + 一张预渲染精灵图集。 */
 function mul32(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
   t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
-const ST={cv:null,g:null,w:0,h:0,list:[],pairs:[],raf:0,t0:0,frames:0,
-          peak:0,lit:0,strokes:0,bursts:0,rings:[],C:[],LC:'#b489ff',
+const ST={cv:null,g:null,w:0,h:0,list:[],pairs:[],neb:null,raf:0,t0:0,frames:0,
+          peak:0,lit:0,strokes:0,bursts:0,rings:[],C:[],LC:'#9aa4c8',
           AMB:0.10,          // 常驻星点占比的亮度；想要"完全只有经过才亮"就把它设成 0
-          RMIN:9,RMAX:130,   // 显影半径：随笔画速度从 9px 长到 130px（参考页 8→128）
+          RMIN:9,RMAX:130,   // 显影半径：随笔画速度从 9px 长到 130px
           DECAY:4.6,         // 亮度衰减 /秒 ⇒ 520ms 后只剩 9%
           SPRING:34,DAMP:4.2,EPS:0.12,LIT_EPS:0.012,
+          LINK_A:0.16,        // 星座连线的 alpha 上限（旧版 0.52 太像连点图）
           last:null,lastT:0,pend:null};
+function rgbOf(h){
+  h=(h||'#ffffff').trim();
+  if(h[0]==='#'){ const s=h.length===4? h.slice(1).split('').map(c=>c+c).join('') : h.slice(1);
+    const v=parseInt(s,16); return [(v>>16)&255,(v>>8)&255,v&255]; }
+  const m=h.match(/[\d.]+/g); return m?[+m[0],+m[1],+m[2]]:[255,255,255];
+}
+/* 精灵图集：把"一颗星长什么样"预先画到离屏画布，每帧只做 drawImage(+旋转)。
+   为什么不能继续 `arc()`+`fill()`：
+     · 半径 0.3px 的正圆会被抗锯齿成一个亮度失控的小方块 —— 暗星整片发灰；
+     · 亮星挂一个 moveTo/lineTo 画的十字，那是个 **「+」字形**，不是衍射芒：
+       真芒是从高斯核向外**锥形衰减**的，而且**每颗星的芒角不一样**（支架角/视差角）。
+   ⇒ 每种星型 × 每档色温烘一张：高斯核（sigma 收紧到 2~3px 半宽）+ 软外晕 +
+     锥形芒（star 四芒 / hero 六芒带淡外环），dust 只有核，cloud 是一团极平的高斯
+     用来铺银河带的星云。 */
+const SPR={dust:[],star:[],hero:[],cloud:[],dpr:1};
+const SPR_SP={dust:16, star:64, hero:128, cloud:64};
+function gaussSprite(SP,rgb,kind){
+  const dpr=SPR.dpr, c=document.createElement('canvas');
+  c.width=c.height=Math.max(2,Math.round(SP*dpr));
+  const g=c.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  const m=SP/2, col=a=>`rgba(${rgb[0]},${rgb[1]},${rgb[2]},${Math.max(0,Math.min(1,a)).toFixed(4)})`;
+  /* ⚠️ 每个精灵的外层渐变**必须在画布边缘精确归零**：radial gradient 超出 r1 之后
+     会一直沿用最后一个色标，而高斯在 t=1 处还剩 5~19% —— 于是每颗星外面套一圈
+     **看得见的正方形**（旋转之后变成菱形，比"敷衍"更难看）。
+     ⇒ 一律乘 `(1-t²)` 窗口，让 t=1 处严格为 0。 */
+  const win=t=>Math.max(0,1-t*t);
+  const stop=(gr,s,t)=>gr.addColorStop(t, col(Math.exp(-(t*t)/s)*win(t)));
+  if(kind==='cloud'){                       // 星云：一层摊到边缘的高斯，没有核
+    const gr=g.createRadialGradient(m,m,0,m,m,m);
+    for(let i=0;i<=16;i++) stop(gr,0.18,i/16);
+    g.fillStyle=gr; g.fillRect(0,0,SP,SP); return c;
+  }
+  if(kind!=='dust'){                        // 软外晕
+    const gr=g.createRadialGradient(m,m,0,m,m,m);
+    for(let i=0;i<=16;i++) stop(gr,0.055,i/16);
+    g.fillStyle=gr; g.fillRect(0,0,SP,SP);
+  }
+  const R0=kind==='dust'? m : SP*0.22, s2=kind==='dust'? 0.05 : 0.02;
+  const core=g.createRadialGradient(m,m,0,m,m,R0);
+  for(let i=0;i<=16;i++) stop(core,s2,i/16);
+  g.fillStyle=core; g.fillRect(0,0,SP,SP);
+  if(kind==='dust') return c;
+  const n=kind==='hero'?6:4, L=m*0.95, w=SP*(kind==='hero'?0.024:0.032);
+  for(let k=0;k<n;k++){
+    const long=(kind==='hero'&&k%3!==0)?0.46:1;
+    g.save(); g.translate(m,m); g.rotate(k*Math.PI*2/n+(kind==='hero'?0.26:0));
+    const lg=g.createLinearGradient(0,0,L*long,0);
+    lg.addColorStop(0,col(0)); lg.addColorStop(.05,col(.9));
+    lg.addColorStop(.42,col(.22)); lg.addColorStop(1,col(0));
+    g.fillStyle=lg;
+    g.beginPath(); g.moveTo(0,-w); g.lineTo(L*long,0); g.lineTo(0,w); g.closePath(); g.fill();
+    g.restore();
+  }
+  if(kind==='hero'){                        // 亮星常见的极淡外环
+    g.strokeStyle=col(.10); g.lineWidth=SP*0.010;
+    g.beginPath(); g.arc(m,m,m*0.60,0,6.2832); g.stroke();
+  }
+  return c;
+}
+function spriteBake(){
+  SPR.dpr=Math.min(2,window.devicePixelRatio||1);
+  for(const k of Object.keys(SPR_SP))
+    SPR[k]=ST.C.map(c=>gaussSprite(SPR_SP[k],rgbOf(c),k));
+}
 function starColors(){
   const cs=getComputedStyle(document.documentElement);
   const g=n=>(cs.getPropertyValue(n)||'').trim();
-  ST.C=[g('--s-1')||'#f6e7d3',g('--s-2')||'#cfe6ff',g('--s-3')||'#ffd6a5',g('--s-4')||'#ff9ecb'];
-  ST.LC=g('--s-link')||'#b489ff';
+  // 四档**色温**（蓝白→冷白→淡金→暖金），不是糖果色；旧版面那套粉橙留在 legacy 变量里
+  ST.C=[g('--s-1')||'#eef4ff',g('--s-2')||'#dbe6f7',g('--s-3')||'#fff2df',g('--s-4')||'#ffd9ae'];
+  ST.LC=g('--s-link')||'#9aa4c8';
+  spriteBake();
 }
 function starsBuild(){
-  const R=mul32(20260929);                    // 同种子 ⇒ 刷新后星位不变，不会"每次进来换一片天"
+  const R=mul32(20260930);                   // 同种子 ⇒ 刷新后星位不变，不会"每次进来换一片天"
   const w=ST.w, h=ST.h;
-  const n=Math.round(Math.min(2800,Math.max(900,w*h/620)));   // 密：1440×900 下约 2100 颗
+  const n=Math.round(Math.min(3200,Math.max(1100,w*h/520)));
   ST.list=[];
   const gx=w*0.04, gy=h*1.08, dx=w*0.96, dy=-h*0.84;          // 一条斜着的银河带
   for(let i=0;i<n;i++){
     let x,y;
-    if(i<n*0.66){ const t=R(), o=(R()-0.5)*w*0.26;
-      x=gx+dx*t+o; y=gy+dy*t+(R()-0.5)*w*0.15; }
+    if(i<n*0.62){ const t=R(), o=(R()-0.5)*w*0.24;
+      x=gx+dx*t+o; y=gy+dy*t+(R()-0.5)*w*0.13; }
     else { x=R()*w; y=R()*h; }
+    /* 亮度按**幂律**分：真实天区里暗星是绝对多数。上一版 `big` 有 ~5%，
+       于是满屏都是带十字的"亮星"，看着像撒了一把图钉。现在 hero <0.5%、star ~9%。 */
+    const u=R();
+    const kind = u>0.995 ? 'hero' : u>0.905 ? 'star' : 'dust';
     const z=0.34+R()*0.66;
-    const big=R()<0.045+z*0.05;
-    ST.list.push({hx:x,hy:y,x:x,y:y,vx:0,vy:0,z:z,big:big,lit:0,
-      amb:(i%41===0? ST.AMB*(0.5+R()*0.5) : 0),   // 极少数几颗常驻，免得整页像坏了
-      r:(big?1.0:0.28)+R()*(big?1.5:0.9)*(0.6+z*0.7),
-      a:Math.min(1,(big?0.80:0.42)+R()*(big?0.20:0.45)*(0.6+z*0.6)),
-      c:ST.C[(R()*ST.C.length)|0]});
+    const sz = kind==='hero' ? 46+R()*40 : kind==='star' ? 16+R()*18 : 3.0+R()*3.2;
+    const a  = kind==='hero' ? 0.74+R()*0.26 : kind==='star' ? 0.30+R()*0.32 : 0.10+R()*0.24;
+    // 色温与亮度相关：暗尘偏蓝白，只有亮星才允许走到暖端
+    const ci = kind==='dust' ? (R()<0.80?0:1) : kind==='star' ? (R()*3|0) : (R()*4|0);
+    ST.list.push({hx:x,hy:y,x:x,y:y,vx:0,vy:0,z:z,kind:kind,lit:0,
+      amb:(i%47===0 && kind!=='hero' ? ST.AMB*(0.4+R()*0.6) : 0),
+      sz:sz, a:a, c:ci, rot:R()*6.2832, ph:R()*6.2832});
   }
-  /* 星座连线只算一次（建表时），每帧按当前亮度画：两端都亮才连线 ⇒
-     划过时会"连出"一片星座，走开就整条一起淡掉。 */
+  /* 星座连线只算一次（建表时），每帧按当前亮度画：两端都亮才连线。
+     新版把上限压到 0.16 alpha、线宽 0.6 —— 上一版 0.52 的紫线是"连点图"观感的主因。 */
   ST.pairs=[];
-  const far=ST.list.filter(t=>t.z>0.72), lim=Math.min(150,w*0.10);
+  const far=ST.list.filter(t=>t.kind!=='dust'&&t.z>0.70), lim=Math.min(150,w*0.10);
   for(let i=0;i<far.length;i++){
     const a=far[i], cand=[];
     for(let j=0;j<far.length;j++){
@@ -970,34 +1142,57 @@ function starsBuild(){
     cand.sort((p,q)=>p[0]-q[0]);
     for(const [d,b] of cand.slice(0,2)) if(d>16) ST.pairs.push([a,b,d]);
   }
+  nebBake(R);
 }
-function vis(st){ return Math.max(st.lit, st.amb); }
+/* 银河带不是"点更密"就完事，得有**星云**：摊开的高斯团叠在带轴上，alpha 只有 2~5%。
+   烘成一张静态位图，每帧一次 drawImage，所以它不吃"静止帧必须相同"这条。 */
+function nebBake(R){
+  if(!SPR.cloud||!SPR.cloud.length) return;
+  const dpr=SPR.dpr, w=ST.w, h=ST.h;
+  const c=ST.neb||(ST.neb=document.querySelector('#nebula'));
+  if(!c) return;
+  c.style.position='absolute'; c.style.inset='0';
+  c.width=Math.max(2,Math.round(w*dpr)); c.height=Math.max(2,Math.round(h*dpr));
+  const g=c.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,w,h);
+  const gx=w*0.04, gy=h*1.08, dx=w*0.96, dy=-h*0.84;
+  for(let i=0;i<30;i++){
+    const t=R(), o=(R()-0.5)*w*0.20;
+    const s=180+R()*340, al=0.018+R()*0.030;
+    g.globalAlpha=al;
+    g.drawImage(SPR.cloud[R()<0.72?0:1], gx+dx*t+o-s/2, gy+dy*t+(R()-0.5)*w*0.11-s/2, s, s);
+  }
+  g.globalAlpha=1;
+}
+/* 闪烁只调制 `lit` 那一项：lit=0 时返回值与时间无关 ⇒ 静止帧仍然逐像素相同。 */
+function vis(st,t){
+  return st.amb + (st.lit>0.0005
+    ? st.lit*(0.84+0.16*Math.sin((t||0)*2.3+st.ph)) : 0);
+}
 function starsDraw(){
   const g=ST.g; if(!g) return;
-  g.clearRect(0,0,ST.w,ST.h);
-  g.lineWidth=0.75; g.strokeStyle=ST.LC;
+  const t=performance.now()/1000;
+  g.clearRect(0,0,ST.w,ST.h);      // 星云在另一张画布上，这里只画会动的部分
+  g.lineWidth=0.6; g.strokeStyle=ST.LC;
   for(const [a,b,rest] of ST.pairs){
-    const v=Math.min(vis(a),vis(b));
-    if(v<0.30) continue;                       // 两端都亮才连：显影区里才出现星座
+    const v=Math.min(vis(a,t),vis(b,t));
+    if(v<0.55) continue;                       // 两端都够亮才连：显影区中心才出现星座
     const d=Math.hypot(b.x-a.x,b.y-a.y), over=Math.abs(d-rest)/Math.max(1,rest);
-    const al=Math.max(0,0.40-over*0.75)*v*2.2;
-    if(al<0.012) continue;
-    g.globalAlpha=Math.min(0.52,al);
+    const al=Math.max(0,ST.LINK_A-over*0.30)*v;
+    if(al<0.006) continue;
+    g.globalAlpha=Math.min(ST.LINK_A,al);
     g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke();
   }
   for(const st of ST.list){
-    const v=vis(st);
-    if(v<0.014) continue;                      // 静止时几乎一颗都不画 —— 这就是"只有经过才显示"
-    g.globalAlpha=st.a*v; g.fillStyle=st.c;
-    g.beginPath(); g.arc(st.x,st.y,st.r,0,6.2832); g.fill();
-    if(st.big&&v>0.25){
-      g.globalAlpha=st.a*v*0.16;
-      g.beginPath(); g.arc(st.x,st.y,st.r*3.6,0,6.2832); g.fill();
-      g.globalAlpha=st.a*v*0.5; g.strokeStyle=st.c; g.lineWidth=0.65;
-      g.beginPath(); g.moveTo(st.x-st.r*4.2,st.y); g.lineTo(st.x+st.r*4.2,st.y);
-      g.moveTo(st.x,st.y-st.r*4.2); g.lineTo(st.x,st.y+st.r*4.2); g.stroke();
-      g.lineWidth=0.75; g.strokeStyle=ST.LC;
-    }
+    const v=vis(st,t);
+    if(v<0.014) continue;                      // 静止时一颗都不画 —— "只有经过才显示"
+    const al=st.a*v; if(al<0.008) continue;
+    const spr=SPR[st.kind] && SPR[st.kind][st.c]; if(!spr) continue;
+    const s=st.sz;
+    g.globalAlpha=Math.min(1,al);
+    if(st.kind==='dust') g.drawImage(spr,st.x-s/2,st.y-s/2,s,s);
+    else { g.save(); g.translate(st.x,st.y); g.rotate(st.rot);
+           g.drawImage(spr,-s/2,-s/2,s,s); g.restore(); }
   }
   for(const r of ST.rings){
     g.globalAlpha=Math.max(0,r.a); g.strokeStyle=r.c; g.lineWidth=1.4;
@@ -1112,16 +1307,25 @@ $('#bSea').onclick=()=>{ SEA=!SEA; localStorage.setItem('panel.sea',SEA?'1':'0')
    ⚠️ 数据面（`pre` 日志、对照图里的立绘）不吃柔光：screen 混合会改变画面像素值，
       而这张界面第一用途是**验资产正确性**。对照图只吃边框光（光在框上，不进图里）。 */
 let CALM = localStorage.getItem('panel.calm')==='1';
+/* V 键：新版面（中性阶梯、零投影）↔ 旧版面（薰衣草底 + 渐变灯管 + 投影）当场对照。
+   两条都留在 CSS 里，靠 `body.legacy` 切换 —— 他判"丑不丑"要能立刻比，
+   静态对比图不如这个（同一台服务器、同一个进程、同一个鼠标位置）。 */
+let LEGACY = localStorage.getItem('panel.legacy')==='1';
+function legacyApply(){
+  document.body.classList.toggle('legacy',LEGACY);
+  if(ST.g){ starColors(); starsResize(); }        // 星点色板跟着版面走
+  else starColors();
+}
 const FX={beam:$('#fxbeam'),pool:$('#fxpool'),cur:null,last:null,down:false,pt:{}};
 const FXSEL='button,.step,.signbox,.sheets a';
 function fxTone(el){
   const c=el.classList;
-  if(c.contains('go')) return ['#ff3d7f','rgba(255,61,127,.26)'];
-  if(c.contains('sign')||c.contains('signbox')) return ['#f2bd72','rgba(242,189,114,.24)'];
-  if(c.contains('help')) return ['#b489ff','rgba(180,137,255,.22)'];
-  if(c.contains('step')) return ['#a06bff','rgba(160,107,255,.20)'];
-  if(c.contains('chip')) return ['#a06bff','rgba(160,107,255,.16)'];
-  return ['rgba(206,186,255,.85)','rgba(226,214,255,.16)'];
+  // 边框光/柔光的颜色跟着**语义**走：主动作=品牌紫，签字=等你签字的琥珀，其余中性。
+  if(c.contains('go')) return ['#a5a6ff','rgba(139,140,245,.26)'];
+  if(c.contains('sign')||c.contains('signbox')) return ['#f2bd72','rgba(242,189,114,.22)'];
+  if(c.contains('step')) return ['#8b8cf5','rgba(139,140,245,.16)'];
+  if(c.contains('chip')) return ['#8b8cf5','rgba(139,140,245,.13)'];
+  return ['rgba(206,212,228,.75)','rgba(220,225,240,.13)'];
 }
 function fxOff(){ FX.pool&&(FX.pool.classList.remove('on')); FX.beam&&FX.beam.classList.remove('go');
                  if(FX.cur){ FX.cur.el.style.transform=''; FX.cur=null; } }
@@ -1436,6 +1640,8 @@ document.addEventListener('keydown',e=>{
   if(k==='h'){ $('#help').classList.toggle('on'); }
   else if(k==='s'){ $('#bSea').click(); }
   else if(k==='m'){ CALM=!CALM; localStorage.setItem('panel.calm',CALM?'1':'0'); calmApply(); }
+  else if(k==='v'){ LEGACY=!LEGACY; localStorage.setItem('panel.legacy',LEGACY?'1':'0');
+                    legacyApply(); fxOff(); FX.last=null; }
   else if(k==='p'){ if(!S||S.running) return; post({plan:true}); }
   else if(k==='r'){ if(!S||S.running) return; ctaRun(step===1?'diff':step===3?'review'
                     :step===4?'swap':'tocheck'); }
@@ -1445,7 +1651,7 @@ $$('#help [data-close]').forEach(el=>el.onclick=()=>$('#help').classList.remove(
 document.addEventListener('click',e=>{ if(e.target.matches('.sheets img')){
   $('#lightbox img').src=e.target.src; $('#lightbox').classList.add('on'); e.preventDefault(); } });
 $('#lightbox').onclick=e=>e.currentTarget.classList.remove('on');
-seaApply(); calmApply(); apiState();
+legacyApply(); seaApply(); calmApply(); apiState();
 addEventListener('resize',()=>{ railMark(); chipMark(); });
 chipMark();
 let pollT=setInterval(()=>{ if(!timer) apiState(); },8000);
@@ -1464,6 +1670,8 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                 go(n){ step=n; render(); }, state(){ return S; },
                 calm(on){ CALM=!!on; localStorage.setItem('panel.calm',CALM?'1':'0');
                           calmApply(); return CALM; },
+                legacy(on){ LEGACY=!!on; localStorage.setItem('panel.legacy',LEGACY?'1':'0');
+                            legacyApply(); fxOff(); FX.last=null; return LEGACY; },
                 fx(){ return {calm:CALM, beam:!!(FX.beam&&FX.beam.classList.contains('go')),
                               beamAnim:!!(FX.beam&&FX.beam.getAnimations().length),
                               pool:!!(FX.pool&&FX.pool.classList.contains('on')),
@@ -1475,7 +1683,7 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                 marks(){ const a=$('#railmark'), b=$('#chipmark');
                   return {rail:a?a.style.opacity+'|'+a.style.top+'|'+a.style.height:null,
                           chip:b?b.style.opacity+'|'+b.style.left+'|'+b.style.width:null}; }};
-window.ST=ST; window.panelState=()=>S;
+window.ST=ST; window.SPR=SPR; window.panelState=()=>S;
 </script></body></html>
 '''
 

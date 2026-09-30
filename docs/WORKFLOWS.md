@@ -1642,3 +1642,63 @@ py -3 scripts/update_pipeline.py --only spine --force   # 只重跑某阶段，�
 **涉及文件**：`scripts/pipeline_panel.py`（PAGE 的 CSS/HTML/JS 三层 + 光效引擎 + 签名守卫）、
 `scripts/update_pipeline.py`（`STEPS` 与 `Stage.title|judge_desc|writes`、未签字 verdict 文案）、
 `scripts/diag/panel_ui_probe.py`。踩坑与判据教训见 **§68**。
+
+---
+
+#### WF-23 追加（2026-09-30 第二轮）：拿公开设计系统的禁止清单当版面判据 + 星体重做
+
+用户仍判「还是太丑了，你借鉴一下大厂的优秀 UI，星星画得有点敷衍」。
+**流程上唯一的新东西是：不再自己猜下一版**（§6 待办第 5 条），而是把公开设计系统的
+成文 token 取回来，**把其中的"禁止项"直接翻译成判据**。
+
+**取参照物的手法**（可复用到任何"要像大厂"的需求）：
+`VoltAgent/awesome-design-md` 仓库按 `design-md/<slug>/DESIGN.md` 收了 70+ 家品牌的
+成文 token（`linear.app` / `raycast` / `sentry` / `posthog` / `cursor` 都在）。
+raw 域名在本机不通，走 WebFetch 取；先取目录列表拿准 slug，再取正文。
+要问的是**具体数值与禁止清单**，不是"给我点灵感"。
+
+**借来的那套值**（落到 `:root`，旧版面整套挂在 `body.legacy` 上，`V` 键当场对照）：
+
+| 维度 | 借来的规则 | 落地 |
+|---|---|---|
+| 分层 | 零 drop shadow，纵深只靠色阶 + 描边 + 顶边微高光 | `--elev` 归零，`--edge:inset 0 1px 0 rgba(255,255,255,.045)` |
+| 表面 | 五档阶梯，**别拿薰衣草色当分区/卡片填充** | `#07080b→#0b0c10→#101116→#15161b→#1b1d23`（通道极差 ≤8） |
+| 描边 | 1px 实色三档 | `#24262c / #33363e / #454954` |
+| 文字 | 中性冷灰坡 | `#f1f2f4 / #c9cdd4 / #9096a0 / #666b75` |
+| 强调 | **不许有第二种 chrome 强调色**、不许大气渐变 | 只留 `--brand:#8b8cf5`；签字按钮借用 await 琥珀（语义自洽）；撤掉面板顶边那道渐变灯管 |
+| 圆角 | chip 4 / tag 6 / control 8 / card 12 | `--r-tag/--r-chip/--r-ctl/--r-card` |
+| 间距 | 4 的倍数栅格 | `--s1..--s6 = 4/8/12/16/24/32` |
+| 小标签 | caption 12px、字距 ~0，**不全大写** | `--tt:none`、`--ph-ls:.2px`（旧版是 `uppercase + .18em`） |
+
+⚠️ **五个状态色一个都不动**——换版面不许顺手改语义色，这是上一轮就立的纪律。
+
+**四条翻译成会红的判据**（不写成判据，下一轮换配色就会把病带回来）：
+面板/卡片底色通道极差 ≤8 且卡片比面板高一档；`.pane/.stage/header/button.go` 的
+**外投影层数必须为 0**（`inset` 不算）；`.ph/.runs th` 的 `textTransform` 不得为 `uppercase`；
+chrome 元素 `backgroundImage` 不得含 `gradient`。
+
+**星体重做**（"敷衍"的真身见 §69 二）：
+`arc()` + 手绘十字 → **预渲染精灵图集**（`dust/star/hero/cloud` × 4 档色温 = 16 张离屏画布），
+每帧只 `drawImage`（星/亮星额外 `rotate` 一个每颗随机的旋向）。
+- 核 = 收紧的高斯（`exp(-t²/0.02)`），芒 = 从核向外**锥形衰减**的三角形渐变，
+  hero 六芒 + 极淡外环；`cloud` 是摊到边缘的纯高斯，用来铺银河带的**星云**。
+- ⚠️ 每个外层渐变必须乘 `(1-t²)` 窗口让 t=1 严格归零 —— 否则 radial gradient
+  超出 r1 后沿用最后色标，**每颗星外面套一圈看得见的正方形**。
+  判据：读精灵位图，**四角 + 四边中点 alpha ≤8**。
+- 亮度按**幂律**：hero 0.47% / star 9.4% / dust 90.2%（旧版亮星 ~5% ⇒ 像撒图钉）。
+- 颜色按**色温**（蓝白→冷白→淡金），暗星偏蓝白，只有亮星走暖端。
+- 星座连线 alpha 上限 `ST.LINK_A=0.16`（旧版 0.52 是"连点图"观感主因）。
+- 闪烁只调制 `lit` 那一项（`vis = amb + f(lit)`），常驻项绝不吃时间 ⇒ 静止帧仍逐像素相同。
+- 星云单独一张**永不重绘**的 `<canvas id="nebula">`：跟着星点画布每帧 blit 等于每帧拷 6MB，
+  在无头里把一次截图拖到 2.16s，还每帧重合成带 dither。
+
+**验收（`panel_ui_probe.py`，判据 52 → 66 条，退出码即结论）**，新增三节：
+版面 token（5）/ 星野画法（5，含"精灵边缘必须透明"与"幂律占比"）/
+V 键正向对照（3：切旧版面整屏必须明显变化 >24 级，切回来靠**结构断言**判无副作用）。
+⚠️ 本轮三条假红灯全部出在测量通道（截图耗时 vs 动画时长、`inset` 序列化在末尾、
+自造哨兵串），产品一处没错 —— 见 §69 四。**判"动画在动"必须用 WAAPI 钉 `currentTime`，
+不能靠 `sleep`。**
+
+**涉及文件**：`scripts/pipeline_panel.py`（`:root` + `body.legacy` 对照层 + `gaussSprite`/
+`spriteBake`/`nebBake` + `#nebula`）、`scripts/diag/panel_ui_probe.py`。
+踩坑见 **§69**。

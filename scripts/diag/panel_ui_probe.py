@@ -27,6 +27,7 @@ import base64
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -139,6 +140,17 @@ def diff_png(a_bytes, b_bytes, box=None):
     if d.size == 0:
         return 0, 0.0, ia.size
     return int(d.max()), float(d.mean()), ia.size
+
+
+def _count_above(a_bytes, b_bytes, thr):
+    """逐通道差 > thr 的**像素个数**。用于把"合成器 dither 的 ±1~2"和"真的留痕"分开判，
+    而不是把最大差阈值一路放宽到失去意义。"""
+    import numpy as np
+    ia = np.asarray(Image.open(io.BytesIO(a_bytes)).convert('RGB'), dtype=np.int16)
+    ib = np.asarray(Image.open(io.BytesIO(b_bytes)).convert('RGB'), dtype=np.int16)
+    if ia.shape != ib.shape:
+        return -1
+    return int((np.abs(ia - ib).max(axis=2) > thr).sum())
 
 
 def card_boxes(pg):
@@ -334,6 +346,122 @@ def main():
     pg.ev(EV("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'})); return 1"))
     chk('抽屉能关（Esc）', pg.ev(EV("return !document.querySelector('#help').classList.contains('on')")))
 
+    print('\n── 版面 token：照参照物立的那几条能不能验 ─────────')
+    # 这四条全部来自公开设计系统的**成文规则**（Linear / Raycast），不是审美偏好：
+    # 每条都写成"旧版面会红"的形式，否则换一版配色照样全绿 = 空判据。
+    def chan_spread(rgb):
+        v = [int(x) for x in re.findall(r'\d+', rgb or '')][:3]
+        return (max(v) - min(v)) if len(v) == 3 else 99
+    pane_bg = pg.ev(EV("return getComputedStyle(document.querySelector('.pane')).backgroundColor"))
+    chk('面板底色必须**中性**（通道极差 ≤8，不拿薰衣草色当卡片填充）',
+        chan_spread(pane_bg) <= 8, f'.pane 底色 {pane_bg} 极差 {chan_spread(pane_bg)}')
+    card_bg = pg.ev(EV("return getComputedStyle(document.querySelector('.stage')).backgroundColor"))
+    chk('卡片底色中性，且比面板**抬高一档**（层级靠色阶不靠投影）',
+        chan_spread(card_bg) <= 8 and
+        sum(int(x) for x in re.findall(r'\d+', card_bg)[:3]) >
+        sum(int(x) for x in re.findall(r'\d+', pane_bg)[:3]),
+        f'面板 {pane_bg} → 卡片 {card_bg}')
+
+    def outer_layers(sel):
+        raw = pg.ev(EV(f"return getComputedStyle(document.querySelector('{sel}')).boxShadow")) or ''
+        out = []
+        for lay in re.sub(r'rgba?\([^)]*\)', 'C', raw).split(','):
+            lay = lay.strip()
+            # ⚠️ Chrome 把 inset 序列化在**末尾**（`rgba(...) 0px 1px 0px 0px inset`），
+            # 只判 startswith('inset') 会把内阴影误判成外投影，得到假红灯。
+            if lay and lay != 'none' and 'inset' not in lay.split():
+                out.append(lay)
+        return out
+    bad_sh = {s: outer_layers(s) for s in ('.pane', '.stage', 'header', 'button.go')}
+    bad_sh = {k: v for k, v in bad_sh.items() if v}
+    chk('chrome 一律**零外投影**（纵深只靠色阶与描边，投影是"AI 生成界面"的指纹）',
+        not bad_sh, str(bad_sh))
+    caps = pg.ev(EV("""return [...document.querySelectorAll('.ph,.runs th')].
+        map(e=>getComputedStyle(e).textTransform).filter(v=>v==='uppercase').length"""))
+    chk('小标签不再全大写 + 宽字距（那是"设计感"最廉价的一种）', caps == 0, f'{caps} 个 uppercase')
+    grads = pg.ev(EV("""return [...document.querySelectorAll('.pane,.stage,header,button.go,#railmark')]
+      .filter(e=>{const b=getComputedStyle(e).backgroundImage;
+        return b&&b!=='none'&&/gradient/.test(b)}).map(e=>e.className)""")) or []
+    chk('chrome 上不许有渐变填充（大气渐变是参照物明文禁止项）', not grads, f'带渐变: {grads}')
+
+    print('\n── 星野画法：精灵图集 + 幂律亮度 ──────────────────')
+    kinds = ('dust', 'star', 'hero', 'cloud')
+    baked = pg.ev(EV("""const o={};
+      for(const k of ['dust','star','hero','cloud'])
+        o[k]=(window.SPR&&SPR[k]||[]).filter(c=>c&&c.width>4).length;
+      return o"""))
+    chk('四种星型精灵全部烘出（每型 4 档色温）',
+        all(baked.get(k) == 4 for k in kinds), str(baked))
+    # radial gradient 超出 r1 之后会**一直沿用最后一个色标**，而高斯在 t=1 处还剩 5~19%
+    # ⇒ 精灵四边不透明 = 每颗星外面套一圈看得见的正方形（旋转后变菱形），比"敷衍"更难看。
+    # 这条实测抓到过一次：外晕写成 `(i/14)*0.30` 时四角 alpha 高达 48。
+    edge = pg.ev(EV("""const out={};
+      for(const k of ['dust','star','hero','cloud']){
+        let worst=0;
+        for(const c of (SPR[k]||[])){
+          const g=c.getContext('2d'), n=c.width, e=g.getImageData(0,0,n,n).data;
+          const h=n>>1;
+          for(const p of [[0,0],[n-1,0],[0,n-1],[n-1,n-1],[h,0],[0,h],[n-1,h],[h,n-1]])
+            worst=Math.max(worst, e[(p[1]*n+p[0])*4+3]);
+        }
+        out[k]=worst;
+      }
+      return out""")) or {}
+    chk('精灵四角与四边中点必须透明（不透明就会画出方框）',
+        len(edge) == 4 and all(v <= 8 for v in edge.values()), f'边缘最大 alpha {edge}')
+    dist = pg.ev(EV("""const L=ST.list, n=L.length||1;
+      const c=k=>L.filter(t=>t.kind===k).length;
+      return {n:n,hero:c('hero')/n,star:c('star')/n,dust:c('dust')/n}"""))
+    chk('亮度按**幂律**分（hero <1.5%、star 5~18%，不是撒一把带十字的图钉）',
+        0 < dist['hero'] < 0.015 and 0.05 < dist['star'] < 0.18,
+        f"{dist['n']} 颗：hero {dist['hero']*100:.2f}% · star {dist['star']*100:.1f}% "
+        f"· dust {dist['dust']*100:.1f}%")
+    chk('银河带有**星云**层（静态位图，不吃"静止帧相同"那条）',
+        bool(pg.ev(EV('return !!(ST.neb && ST.neb.width>100)'))))
+    link_a = pg.ev('ST.LINK_A')
+    chk('星座连线压到近不可见（上限 alpha ≤0.18；旧版 0.52 是"连点图"观感主因）',
+        isinstance(link_a, (int, float)) and 0 < link_a <= 0.18, f'LINK_A={link_a}')
+
+    print('\n── V 键：新旧版面必须一眼看得出不同（正向对照） ────')
+    quiesce(pg)
+    park(pg)
+    pg.ev(EV('__probe.pin(); return 1'))      # 换版面不该重建节点，下面拿它验"切换无副作用"
+    new_shot = pg.shot('layout_new')
+    pg.ev(EV('__probe.legacy(true); return 1'))
+    time.sleep(0.5)
+    park(pg)
+    old_shot = pg.shot('layout_old')
+    dmax, dmean, _ = diff_png(new_shot, old_shot)
+    chk('V 切到旧版面：整屏必须**明显**变化（防"改了等于没改"）',
+        dmax > 24 and dmean > 1.0, f'最大差 {dmax} 均值 {dmean:.2f}')
+    pg.ev(EV('__probe.legacy(false); return 1'))
+    time.sleep(0.5)
+    park(pg)
+    back_shot = pg.shot('layout_back')
+    bmax, _, _ = diff_png(new_shot, back_shot)
+    nbig = _count_above(new_shot, back_shot, 8)
+    # 整页底是 linear-gradient，切 body 类会让 Chrome 重新合成 ⇒ 渐变 dither 会差 ±1~2
+    # （§67 三记过这条地板）。所以"不留痕"不能拿"像素 == 0"当判据——那会把测量通道的抖动
+    # 算成产品缺陷；但也不能只把数字放宽了事，真正会留痕的东西用**结构**断言钉死：
+    # 类名回位、星位残留位移 0、显影场清零、节点没被重建。这四条任何一条红都是真留痕。
+    resid = pg.ev(EV('let m=0;for(const t of ST.list){const d=Math.abs(t.x-t.hx)+'
+                     'Math.abs(t.y-t.hy);if(d>m)m=d;}return m'))
+    lit_end = pg.ev(EV('return ST.list.filter(t=>t.lit>0.05).length'))
+    # 判"切回来了"要落在**语义**上（不再带 legacy 类），不要拿 className 的字面串比：
+    # 上一版写 `cls in ('','none')` 却去比 JS 侧自造的哨兵串 `'(none)'`，自己把自己判红了。
+    cls = pg.ev(EV("return [document.body.classList.contains('legacy'),"
+                   "document.body.classList.contains('calm'),"
+                   "document.body.classList.contains('plain')]"))
+    pininfo = pg.ev(EV("""const p=window.__pin||[], now=[...document.querySelectorAll('.step,.stage')];
+      return {pinned:p.length, now:now.length,
+              same:now.length>0 && p.length===now.length && p.every(e=>now.includes(e))}"""))
+    chk('V 切回来不留痕：类名回位 + 星位残留 0 + 显影场清零 + 节点未被重建',
+        cls[0] is False and resid == 0 and lit_end == 0 and pininfo['same'],
+        f'class="{cls}" 残留位移 {resid:.2e}px 仍亮 {lit_end} 颗 节点 {pininfo}')
+    chk('V 切回来像素只允许 dither 地板级差异（>8 级的像素必须为 0）',
+        bmax <= 3 and nbig == 0, f'最大差 {bmax} · >8 级的像素 {nbig} 个')
+    quiesce(pg)
+
     print('\n── 静止不闪：轮询**开着**跨一次 8 秒 tick ─────────')
     # 这一节必须带着轮询跑。上一版是靠 `__probe.stop()` 把轮询停掉才比得出静止帧，
     # 于是"验收全绿"和"用户屏幕上每 8 秒整屏淡入一次"并存了三天 ——
@@ -366,13 +494,24 @@ def main():
     pg.move(tgt[0], tgt[1])
     time.sleep(0.12)
     f1 = pg.ev(EV('return __probe.fx()'))
-    hot1 = pg.shot('fx_hot1')          # 光束跑到约 1/6 圈：留一张给人看光在哪
     chk('悬停控件 → 边框光束**真的在跑** + 柔光挂上',
         bool(f1['beamAnim'] and f1['pool']), str(f1))
-    time.sleep(0.26)
-    hot2 = pg.shot('fx_hot2')          # 约半圈：与 hot1 不同才证明"光在走"而不是"亮了个框"
+    # ⚠️ 这台机器上无头一次 Page.captureScreenshot 要 **2.16s**，而光束全长只有 0.78s ⇒
+    # 靠 sleep 抓"动画进行中的两帧"，两张必然都落在动画结束之后，量到 0 差（实测假红灯）。
+    # 正确做法：用 WAAPI 把动画**钉在两个确定时刻**再各拍一张，与截图耗时无关。
+    pinned = pg.ev(EV("""const a=document.querySelector('#fxbeam').getAnimations()[0];
+      if(!a) return 0; a.pause(); a.currentTime=120; return 1"""))
+    chk('能把光束钉到指定时刻（钉不住就说明动画早结束了，下面的比对无意义）', bool(pinned))
+    time.sleep(0.30)
+    hot1 = pg.shot('fx_hot1')          # 120ms：光在边框的一小段上
+    pg.ev(EV("document.querySelector('#fxbeam').getAnimations()[0].currentTime=520; return 1"))
+    time.sleep(0.30)
+    hot2 = pg.shot('fx_hot2')          # 520ms：同一束光绕到另一侧
     moved, _, _ = diff_png(hot1, hot2)
-    chk('光束是在**走**的（两帧之间边框光位置变了）', moved > 0, f'两帧最大差 {moved}')
+    chk('光束是在**走**的（钉在 120ms 与 520ms 两帧，边框光位置不同）',
+        moved > 0, f'两帧最大差 {moved}')
+    pg.ev(EV("""document.querySelector('#fxbeam').getAnimations()
+      .forEach(a=>{try{a.finish()}catch(e){}}); return 1"""))
     pg.move(tgt[0] + 60, tgt[1])
     time.sleep(0.06)
     # 主按钮与阶段卡各补一张：光在控件上的落点只有截图能判，别只信类名与 display

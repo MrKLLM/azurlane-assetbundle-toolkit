@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。
-version: 1.6.3
+version: 1.6.4
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -112,6 +112,17 @@ version: 1.6.3
     "不要发光" → 非 `inset` 的 box-shadow 层里出现第 4 个长度值（spread）就红；
     "不要整块填色" → 选中项的 `background-image` 含 gradient、或底色 alpha >0.30 就红。
     每条都要配**阳性对照**（旧版本确实会被判红），否则判据可能是空的。
+    ⭐ **更好的做法是别自己翻译**：用户说「还是太丑了，借鉴一下大厂的优秀 UI」时，
+    去取**公开设计系统的成文 token** 当判据来源，而不是我凭审美再猜一版。
+    `VoltAgent/awesome-design-md` 按 `design-md/<slug>/DESIGN.md` 收了 70+ 家品牌的成文值
+    （`linear.app` / `raycast` / `sentry` / `cursor` 等；raw 域名不通就走 WebFetch，
+    先取目录列表拿准 slug）。**要问的是具体数值和禁止清单**，不是「给我点灵感」。
+    这类需求最值钱的是禁止项——它们能逐字翻译成会红的判据，例如
+    「别拿薰衣草色当卡片填充」→ 面板底色 RGB **通道极差 ≤8**；
+    「几乎不用 drop shadow」→ 非 `inset` 的 box-shadow **层数必须为 0**；
+    「别加氛围渐变」→ chrome 元素 `backgroundImage` 不得含 gradient；
+    「小标签别全大写」→ `textTransform !== 'uppercase'`。
+    好处是判据**不依赖我的口味**，下一轮换配色也不会把这些病带回来。
 17. **"整屏逐像素相同"在密集仪表盘上必然假红，要先把屏幕分区**。第 12 条那招（挑一条
     永远没有内容元素的条带来比）在画廊能用，因为画廊底部天然有一条空带；仪表盘没有。
     实测连红三次，三次都不是产品问题：
@@ -156,6 +167,15 @@ version: 1.6.3
     ⚠️ 动手前先把参照物的机制量清楚：同一个"划过有反应"，
     "把已有物体推开"与"把已有物体点亮"是两套实现，猜错方向要整层重写。
 
+23. **canvas 精灵图集：`createRadialGradient` 超出 r1 之后会一直沿用最后一个色标**，
+    而高斯 `exp(-t²/σ²)` 在 t=1 处还剩 5~19% ⇒ **预渲染的星体/光斑四边不透明，
+    画出来每颗都套着一个看得见的正方形**（再经 `rotate()` 变成菱形，比「画得糙」更难看）。
+    ⇒ 每个外层渐变一律乘一个到边归零的窗口 `*(1-t*t)`；
+    判据不要靠看图，直接读位图：`getImageData` 取**四角 + 四边中点**，alpha 必须 ≤8。
+    顺带两条同类：① 静态的大面幅精灵（星云 / 背景晕）**单独一张永不重绘的 canvas**，
+    跟着会动的画布每帧 `drawImage` 等于每帧白拷几 MB，在无头 SwiftShader 上能把一次截图
+    拖到 2s+，还每帧重合成带 dither；② 想画「衍射芒」别用 `moveTo/lineTo` 画十字
+    （那是个「+」字形），要用从核向外锥形衰减的三角形渐变，并给每颗一个随机旋向。
 19. **界面"看起来坏了"常常是首屏在算贵东西**。控制台的 `/api/state` 要算输入指纹
     （`os.walk` 9 万个源包，几秒），前端 8 秒轮一次 ⇒ 每 8 秒白扫一遍盘，
     而**打开后的前十几秒页面只有图例渲染出来**，中间全空 —— 探针如果只 `sleep(2)`
@@ -179,11 +199,24 @@ version: 1.6.3
     断言前把 `[...document.querySelectorAll('.step,.stage')]` pin 住，刷新后比
     `pinned()`（同一批对象 + 长度不变）；再配一条 `document.getAnimations()===0`。
     像素比会被子像素重排干扰，节点身份与动画计数不会说谎。
+    ⚠️ **判「动画进行中的两帧不同」绝不能靠 `sleep`**：这台机器上一次
+    `Page.captureScreenshot` 要 **2.16s**，而被测动画全长只有 0.78s ⇒ 两张都落在动画结束之后，
+    量到 0 差（实测假红灯，差点去改本来正确的产品代码）。
+    ⇒ 用 WAAPI 把动画**钉在确定时刻**再各拍一张：
+    `const a=el.getAnimations()[0]; a.pause(); a.currentTime=120;` → shot → `=520` → shot。
+    与截图耗时、帧率、后台节流全部无关。
 22. **计算样式断言不要写死字面串**：`transform-origin:50% 50%` 会被序列化成
     `1px 67.3203px`（百分比按盒子尺寸解析），`matrix()` 里的 scaleY 是第 4 个数。
     拿 `'50% 50%'` 去比会得到**假红灯**，然后你会去改本来正确的产品代码。
     ⇒ 一律跟"进入前的基线值"比（同一条表达式在动作前后各取一次），而不是跟字面量比。
     ⚠️ 与第 11 条是两回事：那条讲**时机**（要轮询到过渡落位），这条讲**取值形态**。
+    同一类坑的另外两个形态（同一天各踩一次）：
+    ① **`box-shadow` 的 `inset` 关键字被序列化在末尾**
+    （`rgba(...) 0px 1px 0px 0px inset`），`startswith('inset')` 会把内阴影误判成外投影；
+    判「有没有外投影」要用 `'inset' in layer.split()`，且先把 `rgba(...)` 里的逗号屏蔽掉再分层。
+    ② **别拿自己造的哨兵串去比**：JS 侧写 `className||'(none)'`、Python 侧比
+    `cls in ('','none')` ⇒ 永远红。判「状态回位」要落在**语义**上
+    （`classList.contains('legacy')===false`），不是字面串。
 9. **`/json` 必须按 URL 过滤 target**：`--headless=new` 启动后 `/json` 里可能有多个带
    `webSocketDebuggerUrl` 的条目（新标签页、扩展页、iframe），抓第一个会连到**错的调试目标**，
    症状是 `Runtime.evaluate` 直接超时或拿到空结果，看起来像"页面没加载完"。
