@@ -3806,3 +3806,41 @@ POSIX 的 `SO_REUSEADDR` 只放行 `TIME_WAIT`；**Windows 的语义是"随便�
 `state` 读 done/verdict 时按 `scope` 章过滤、`scope_stamp_safe()`）、
 `scripts/update_pipeline.py`（`scope_stamp()`、`done`/`verdict` 两处盖章、跳过缓存严格化）、
 `scripts/diag/panel_ui_probe.py`（+2 条）。相关：§74、WF-15、WF-23。
+
+---
+
+## §76. 「我已经点了签字放行了呀」：主按钮根本不读那些勾选框（2026-10-01 晚）
+
+**现象（用户直接反馈）**: 界面上勾了「签字放行」，按「重跑到待确认」，日志里却是
+`== pull —— [⚠️ live 需签字]` ⇒ 签字没生效。附带一条：`pull` 因模拟器没开判红，整条线停在第 2 档。
+
+**根因（一句话）**: 主按钮走的分支是 `post({stages:[], force})` —— **它从来没读过那些复选框**。
+全页面只有卡片上那颗「单独跑」会 `querySelector('.appr').checked`。所以勾选框在主按钮路径上
+是纯装饰。这不是竞态、不是渲染丢状态，是**接线缺失**：控件有 UI、没有消费者。
+
+**修法三件**：
+1. 勾选状态搬到 `const SIGNED=new Set()`（DOM 上的 `checked` 每 8 秒重绘就会丢，不能当唯一真源）；
+   卡片重绘时按 `SIGNED` 回填 `checked` 与 `.on`。
+2. 主按钮带上 `approve:[...SIGNED]`，并且**先弹一次确认**列出会写哪几个正式区目录。
+3. 勾了就在主屏那行小字上显示「已勾签字：swap-in、derive —— 下一轮就会直接写正式区」。
+   勾是瞬时的、写正式区是不可逆的，一个藏在抽屉里的小方框不算"看得见"。
+
+**判据（两条，第二条是自我纠正）**: `panel_ui_probe.py` 90→**93 条**。
+① 勾上两个阶段后触发主按钮，**截获 `/api/run` 的请求体**，断 `approve` 里就是那两个；
+② ⚠️ 我第一版把 `fetch` 打桩成"记录后仍转发"——那等于**在验收里真起一轮带签字的换入**，
+直接写正式区。判据要的是"发出去的东西长什么样"，不是"真的发了"，所以桩必须**只截不发**，
+并配一条断言证明它没真的发起任务（`stages==[]` 且只截到一条）。同类第三条：
+`test_pipeline_gating.py` 里我写了 `'sync' not in str(getattr(up,'_calls',''))` ——
+`up._calls` 根本不存在，那条判据**永远为真**（空判据）。换成真记录器 +
+断"`--apply` 不在任何一次调用里"（原来用 `'sync' in cmd` 会误伤 `mumu_sync.py` 本身）。
+
+**顺带修的第二条**（同一个日志里暴露的）: 设备不可达时 `pull` 一律判红，会把已经同步完的人
+卡在第 1 档 —— 而这时候包在本地、范围清单有效，本轮根本不需要拉包。
+⇒ `pull` 在"设备不可达 + 清单有效"时判绿并写明"沿用清单继续，本轮不需要拉包"；
+清单不可用时才判红，并把 diff 的**真错误行**（原来是 `ls 顶层失败: no devices`）带进结论，
+不再只说"模拟器没开？adb 不在 PATH？"。判据 `[10]` 三条（含反向：清单不可用必须仍判红）。
+
+**涉及文件**: `scripts/pipeline_panel.py`（`SIGNED`/`signedLive()`、卡片回填、主按钮带 approve + 确认、
+主屏"已勾签字"、`#cards .appr` 的 change 处理）、`scripts/update_pipeline.py`（`st_pull` 的
+设备不可达分支）、`scripts/diag/panel_ui_probe.py`（+3 条）、`scripts/diag/test_pipeline_gating.py`
+（`[10]` +3 条，52→56）。相关：§74、§75、WF-23。

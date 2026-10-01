@@ -394,6 +394,31 @@ def main():
             f"ask=「{a4['ask'][:30]}」 why=「{a4['why'][:46]}」")
     else:
         chk('13 档全有结论时第 4 步才允许宣布换完', '换完了' in (a4 or {}).get('ask', ''), str(a4))
+    # ★ 勾选的签字必须真的能到达流水线：2026-10-01 用户勾完按主按钮，发出去的 approve 是空的
+    #   （主按钮以前根本不读那些框）。这条判据直接看**请求体**，不看界面像不像。
+    signpost = pg.ev(EV("""
+        const sent=[]; const of=window.fetch;
+        // ⚠️ 只**截获**请求体，绝不转发：转发就等于在验收里真起一轮带签字的换入，
+        // 那会直接写正式区。判据要的是"发出去的东西长什么样"，不是"真的发了"。
+        window.fetch=(u,o)=>{ if((''+u)==='/api/run'){ sent.push(JSON.parse(o.body));
+            return Promise.resolve({ok:true, json:async()=>({id:'stub'})}); } return of(u,o); };
+        const cf=window.confirm; window.confirm=()=>true;
+        SIGNED.add('swap-in'); SIGNED.add('derive');
+        ctaRun('tocheck');
+        return new Promise(r=>setTimeout(()=>{ window.fetch=of; window.confirm=cf;
+          SIGNED.delete('swap-in'); SIGNED.delete('derive'); r(sent); }, 350));"""))
+    got = (signpost or [{}])[-1] if isinstance(signpost, list) and signpost else {}
+    chk('勾了签字再按主按钮，请求里必须带上 approve（不是只有卡片「单独跑」认）',
+        sorted(got.get('approve') or []) == ['derive', 'swap-in'],
+        f'approve={got.get("approve")} stages={got.get("stages")}')
+    chk('这条判据没真的发起任务（只截不发，否则就是在验收里写正式区）',
+        got.get('stages') == [] and len((signpost or [])) == 1, str(signpost)[:70])
+    foot_tx = pg.ev(EV("""SIGNED.add('deps'); render();
+        const t=document.querySelector('#scopeNote').textContent;
+        SIGNED.delete('deps'); render(); return t;"""))
+    chk('勾了签字要在主屏上看得见（勾是瞬时的，写正式区不可逆）',
+        '已勾签字' in (foot_tx or '') and 'deps' in (foot_tx or ''), str(foot_tx)[:60])
+
     pg.ev(EV('window.__probe.go(1); return 1')); time.sleep(0.15)
 
     # ★ 可读性不再靠"给文字蒙一层半透明纱"——实测 alpha .90 仍会被一颗星在字下面顶出

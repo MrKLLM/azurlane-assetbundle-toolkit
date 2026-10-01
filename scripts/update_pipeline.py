@@ -272,7 +272,20 @@ def st_pull(approved):
     rc, so, se = run([PY, 'scripts/mumu_sync.py', 'diff', '--list-out', lst],
                      timeout=1800, echo=['新增', '大小不一致', '本地独有', '合计', '写出'])
     if rc != 0:
-        return verdict('pull', False, f'mumu_sync diff 失败 rc={rc}（模拟器没开？adb 不在 PATH？）')
+        txt0 = (so + se).strip()
+        why = txt0.splitlines()[-1][:120] if txt0 else f'rc={rc}'
+        dev = any(k in txt0 for k in ('连不上模拟器', 'ls 顶层失败', 'adb', 'offline', 'device'))
+        # 设备不可达 ≠ 这轮不能跑：包已经在本地、范围清单还有效时，硬卡在第 1 步
+        # 只会让人以为整条线坏了（2026-10-01 实测：用户同步完之后关掉了模拟器）。
+        mode, payload = scope_state(False)
+        if dev and mode == 'ok':
+            n_stem = len(affected_stems(False) or [])
+            return verdict('pull', True, f'设备不可达（{why}）· 但源包已在本地、范围清单仍有效'
+                                         f'（{len(payload)} 个源包 → {n_stem} 个皮肤 stem）'
+                                         f' ⇒ 沿用清单继续，本轮不需要拉包')
+        return verdict('pull', False, f'mumu_sync diff 失败：{why}'
+                                      f' ⇒ 要拉新包就得先开模拟器；源包若已在本地，'
+                                      f'这份范围清单不可用（{payload}），需要一次能连上设备的 diff')
     txt = so + se
     m_new = re.search(r'新增[^\d]*(\d+)', txt)
     m_dir = re.search(r'大小不一致[^\d]*(\d+)', txt)

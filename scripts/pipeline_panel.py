@@ -2002,6 +2002,12 @@ function avoidRefresh(){
    13 个阶段各自的「写到哪儿 / 判据 / 上次结论」是**证据**，全在「细节」抽屉里；
    主屏只留决策：一句现状 + 一个动作 + 一行"点下去会发生什么"。 */
 const STEPNAME={1:'接模拟器',2:'重新导出',3:'看图对比',4:'签字换入'};
+/* 勾选的"签字放行"必须**存在这里**，不能只存在 DOM 上：
+   ① 卡片每 8 秒可能被重绘，勾就丢了；② 更要紧的是主按钮「重跑到待确认」以前
+   **根本不读这些框**（只有卡片上的「单独跑」读），用户勾完按主按钮，发出去的
+   `approve` 永远是空的 —— 2026-10-01 用户就是在这儿卡住的（"我已经点了签字放行了呀"）。 */
+const SIGNED=new Set();
+function signedLive(){ return [...SIGNED].filter(k=>(S&&S.stages||[]).some(s=>s.key===k&&s.tier==='live')); }
 function askOf(n){
   const all=S.stages||[], list=n===0?all:stagesOf(n), stn=k=>statusOf(k);
   const st=S.state||{}, eb='第 '+n+' 步 · '+STEPNAME[n]+' · 共 4 步';
@@ -2165,6 +2171,14 @@ function render(){
     foot.textContent='有 '+(ungrouped.map(s=>s.key).join(', '))+' 没归到任何一步，先补 step';
     foot.classList.add('on');
   }
+  /* 勾了字就必须**在主屏上看得见**——勾是瞬时的、写正式区是不可逆的，
+     一句"已勾签字：…"比一个藏在抽屉里的小方框靠谱。 */
+  const apSign=signedLive();
+  if(apSign.length){
+    foot.textContent=(foot.textContent?foot.textContent+' ':'')+
+      '已勾签字：'+apSign.join('、')+' —— 下一轮就会直接写正式区（换入前整批备份）。';
+    foot.classList.add('on');
+  }
 
   /* ── 抽屉里的证据（结构与旧版一致，判据一条都不放松） ───────────────── */
   const list=step===0?all:stagesOf(step);
@@ -2187,8 +2201,9 @@ function render(){
       (r.detail?'<dt>上次</dt><dd>'+esc(r.detail)+(r.at?'　<span class="dim">'+esc(r.at)+'</span>':'')+'</dd>':'')+
       '</dl>'+
       '<div class="sact">'+
-      (s.tier==='live'?'<label class="signbox"><input type="checkbox" class="appr" data-k="'+
-        s.key+'"> 签字放行</label>':'')+
+      (s.tier==='live'?'<label class="signbox'+(SIGNED.has(s.key)?' on':'')+
+        '"><input type="checkbox" class="appr" data-k="'+s.key+'"'+
+        (SIGNED.has(s.key)?' checked':'')+'> 签字放行</label>':'')+
       '<button class="mini" data-run="'+esc(s.key)+'">单独跑</button>'+
       '<span class="spacer"></span></div>';
     cards.appendChild(d);
@@ -2210,8 +2225,12 @@ function render(){
   $$('#runs tr').forEach((tr,i)=>{ const rr=(S.runs||[])[i]; if(!rr) return;
     tr.style.cursor='pointer'; tr.onclick=()=>{ tail(rr.id); openDetail(); }; });
   $$('#cta button').forEach(b=>b.onclick=()=>ctaRun(b.dataset.a));
-  $$('#cards .appr').forEach(cb=>cb.onchange=e=>
-    e.target.closest('.signbox').classList.toggle('on', e.target.checked));
+  $$('#cards .appr').forEach(cb=>cb.onchange=e=>{
+    const k=e.target.dataset.k, box=e.target.closest('.signbox');
+    if(e.target.checked) SIGNED.add(k); else SIGNED.delete(k);
+    box.classList.toggle('on', e.target.checked);
+    render();                       // 勾了就要在主屏上看得见（下面那句"已勾签字"）
+  });
   $$('#cards .stage').forEach(el=>{
     el.addEventListener('mouseenter',()=>{ const k=el.querySelector('.skey').textContent;
       const d=document.querySelector('.snode .dot[title="'+k+'"]'); if(d) d.classList.add('hot'); });
@@ -2248,7 +2267,13 @@ function ctaRun(a){
   if(a==='pull') return sign(['pull'],'第 1 步：从模拟器拉包',
     'adb pull 写进 files/AssetBundles（只补缺的和变了的）。'+
     '源包一旦覆盖，旧版本本地就没了 —— 所以它要你签字。');
-  if(a==='tocheck') return post({stages:[],force:force});
+  if(a==='tocheck'){
+    /* 主按钮以前不读勾选 ⇒ 勾了等于没勾。现在把 SIGNED 带上，并且**说清它会写哪儿**。 */
+    const ap=signedLive();
+    if(ap.length && !confirm('这一轮会直接写正式区：'+ap.join('、')+
+        '\n（换入前整批备份到 Output/_OLD_bak/pipeline_<日期>/）\n\n确认？')) return;
+    return post({stages:[],approve:ap,force:force});
+  }
   if(a==='staged') return post({stages:['paintings','spine','live2d'],force:force});
   if(a==='review') return post({stages:['review'],force:force});
   if(a==='regress') return post({stages:['regress'],force:force});

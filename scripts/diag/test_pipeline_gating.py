@@ -323,6 +323,47 @@ def t_freshness_key():
     tmp_work(body)
 
 
+def t_device_down():
+    print('\n[10] 模拟器没开：包已在本地时不许把整条线卡在第 1 步')
+    def body(d):
+        real = up.fingerprint
+        up.fingerprint = lambda: 'bundles=1 deps=test'
+        rec = Rec()
+
+        def fail_run(argv, **kw):
+            rec.calls.append([str(a) for a in argv])
+            return 1, '✗ 连不上模拟器（已扫端口 16384-16499）\n' \
+                      '    raise RuntimeError("ls 顶层失败: no devices")', ''
+        try:
+            up.write_scope(['AssetBundles/painting/2b'], 1, 0)
+            old, up.run = up.run, fail_run
+            try:
+                ok = up.st_pull(set())
+            finally:
+                up.run = old
+            v = up.RESULTS['pull']
+            ck('设备不可达 + 清单有效 → 判绿（沿用清单继续，不卡线）', ok is True, str(v))
+            ck('结论说清"设备不可达"与"沿用清单"两件事',
+               '设备不可达' in v['detail'] and '沿用清单' in v['detail'], v['detail'])
+            ck('没试图跑 sync --apply（设备没开时绝不能去写 files/）',
+               not [c for c in rec.calls if '--apply' in c],
+               str(rec.calls))
+
+            os.remove(os.path.join(d, 'affected.txt'))
+            os.remove(os.path.join(d, 'affected.meta'))
+            old, up.run = up.run, fail_run
+            try:
+                ok2 = up.st_pull(set())
+            finally:
+                up.run = old
+            v2 = up.RESULTS['pull']
+            ck('设备不可达且清单也不可用 → 判红（这时确实没法知道范围）',
+               ok2 is False and '不可用' in v2['detail'], str(v2))
+        finally:
+            up.fingerprint = real
+    tmp_work(body)
+
+
 def main():
     t_stems()
     t_no_scope()
@@ -333,6 +374,7 @@ def main():
     t_clean_diff()
     t_deps_gate()
     t_freshness_key()
+    t_device_down()
     print('\n' + ('[FAIL] ' + '；'.join(FAIL) if FAIL else '[PASS] 签字门与增量范围闸门全绿'))
     return 1 if FAIL else 0
 
