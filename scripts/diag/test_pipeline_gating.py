@@ -239,6 +239,64 @@ def t_timeout_tree():
     ck('超时后子进程树没留下睡 120 秒的孤儿', out in ('0', ''), f'残留={out}')
 
 
+def t_clean_diff():
+    print('\n[7] diff 报"0 新增 0 变更"：是合法状态，不许判红、更不许把已有清单冲空')
+    def body(d):
+        real = up.fingerprint
+        up.fingerprint = lambda: 'bundles=1 deps=test'
+        try:
+            up.write_scope(['AssetBundles/painting/2b'], 1, 0)      # 先放一份有效清单
+            before = open(os.path.join(d, 'affected.txt'), encoding='utf-8').read()
+
+            def empty_diff(argv, **kw):                              # 模拟"已拉完，再查一次没变化"
+                open(os.path.join(d, 'diff_paths.txt'), 'w', encoding='utf-8').close()
+                return 0, '== 新增（模拟器有，本地没有）: 0 个 ==\n== 本地独有: 0 个 ==', ''
+            old, up.run = up.run, empty_diff
+            try:
+                ok = up.st_pull(set())
+            finally:
+                up.run = old
+            v = up.RESULTS['pull']
+            ck('0 变更 → 判绿（不是红）', ok is True, str(v))
+            ck('0 变更 → 沿用上次清单而不是报"范围不可用"', '沿用上次 detect 的范围清单' in v['detail'],
+               v['detail'])
+            ck('0 变更 → affected.txt 内容一字未改（没被空清单冲掉）',
+               open(os.path.join(d, 'affected.txt'), encoding='utf-8').read() == before)
+
+            os.remove(os.path.join(d, 'affected.txt'))
+            os.remove(os.path.join(d, 'affected.meta'))
+            old, up.run = up.run, empty_diff
+            try:
+                ok2 = up.st_pull(set())
+            finally:
+                up.run = old
+            v2 = up.RESULTS['pull']
+            ck('0 变更且本来就没清单 → 仍判绿并说"没有要重算的东西"',
+               ok2 is True and '没有要重算的东西' in v2['detail'], str(v2))
+        finally:
+            up.fingerprint = real
+    tmp_work(body)
+
+
+def t_deps_gate():
+    print('\n[8] 依赖表超集闸门：只对本管线消费的丢失判红')
+    old = {'painting/2b': {'file': '../AssetBundles/painting/2b'},
+           'spinepainting/x': {'file': '../AssetBundles/spinepainting/x'},
+           'iconframe/10001_skeletondata': {'file': '../AssetBundles/android/iconframe/10001_skeletondata'},
+           'ui/whatever': {'file': '../AssetBundles/ui/whatever'}}
+    # 丢 1 条 painting（消费）+ 1 条 ui（不消费）；iconframe 那条留着当阴性对照
+    new = {k: v for k, v in old.items() if k not in ('painting/2b', 'ui/whatever')}
+    fatal, benign = up.deps_classify(old, new)
+    ck('消费目录（painting）丢了 → fatal', fatal == ['painting/2b'], str(fatal))
+    ck('不消费的条目丢了 → benign，不判红', benign == ['ui/whatever'], str(benign))
+    f0, b0 = up.deps_classify(old, {k: v for k, v in old.items()
+                                    if k != 'iconframe/10001_skeletondata'})
+    ck('只丢 iconframe 时既不判红也不声张成 fatal（2026-10-01 真跑撞到的那 4 条）',
+       not f0 and b0 == ['iconframe/10001_skeletondata'], f'{f0} {b0}')
+    f2, b2 = up.deps_classify(old, old)
+    ck('一条没丢时两边都空', not f2 and not b2, f'{f2} {b2}')
+
+
 def main():
     t_stems()
     t_no_scope()
@@ -246,6 +304,8 @@ def main():
     t_gates()
     t_stream()
     t_timeout_tree()
+    t_clean_diff()
+    t_deps_gate()
     print('\n' + ('[FAIL] ' + '；'.join(FAIL) if FAIL else '[PASS] 签字门与增量范围闸门全绿'))
     return 1 if FAIL else 0
 

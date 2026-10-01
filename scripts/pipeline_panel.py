@@ -92,7 +92,10 @@ def stage_keys():
     import importlib
     importlib.reload(up)          # 改了流水线脚本后不用重启面板
     return [{'key': s.key, 'title': s.title, 'tier': s.tier, 'judge': s.judge_desc,
-             'step': s.step, 'writes': s.writes} for s in up.STAGES], dict(up.STEPS)
+             'step': s.step, 'writes': s.writes,
+             # 预计耗时的两个来源都跟着阶段走（没量过的都是 0 ⇒ 进度台显示"未知"而不是猜）
+             'est': getattr(s, 'est', 0.0), 'rate': getattr(s, 'rate', 0.0),
+             'unit': getattr(s, 'unit', '')} for s in up.STAGES], dict(up.STEPS)
 
 
 # ------------------------------------------------------------------ 运行记录
@@ -220,6 +223,26 @@ def _stage_means():
     return {k: sum(v) / len(v) for k, v in acc.items()}
 
 
+def _scope_units():
+    """本次增量里每个"按项数线性耗时"的阶段要处理多少项（给速率估算用）。
+
+    ⚠️ 历史均值在**第一次跑**时必然是空的（本项目 13 个阶段里 9 个从没真跑过），
+    只认均值的话进度台的「剩余」永远显示未知 —— 那正是用户抱怨"不知道进行到什么程度"。
+    """
+    def calc():
+        sys.path.insert(0, HERE)
+        try:
+            import update_pipeline as up
+            importlib.reload(up)
+            return {s.key: up.stage_units(s, False) for s in up.STAGES
+                    if getattr(s, 'rate', 0.0)}
+        except Exception as e:
+            print(f'[警告] 读各阶段本次项数失败：{e}')
+            return None
+    return _cached('units', 30.0, calc) or {}
+
+
+
 def _progress_from_log(path):
     """当前日志 → (在跑的阶段key, 它的起点秒, 已判完的 key 集合, 已跳过的 key 集合)。"""
     started, done, skipped = [], set(), set()
@@ -333,27 +356,45 @@ def gauge_safe(run, stages):
     scope = _scope_keys(run.get('argv') or [], stages)
     mem_mb, nproc = _tree_mem_mb(run.get('pid') or 0)
 
-    eta, missing, known = None, 0, 0
+    eta, missing, known, srcs = None, 0, 0, {}
     means = _cached('means', 60.0, _stage_means) or {}
-    if means and scope:
+    units = _scope_units()
+    bykey = {s['key']: s for s in stages}
+
+    def est_sec(k):
+        """一个阶段的预计秒数 + 它是**怎么来的**（历史均值 / 实测速率×项数 / 实测常量）。"""
+        if k in means:
+            return means[k], 'hist'
+        s = bykey.get(k) or {}
+        if s.get('rate') and units.get(k):
+            return s['rate'] * units[k], 'rate'
+        if s.get('est'):
+            return s['est'], 'est'
+        return None, None
+
+    if scope:
         first_t = next((t for _, t, _ in _stage_spans(log)), None)
         cur_el = 0.0
         if cur and cur_t is not None and first_t is not None and elapsed is not None:
             cur_el = max(0.0, elapsed - (cur_t - first_t))
         rest = [k for k in scope if k not in done and k not in skipped and k != cur]
-        total_s, missing = 0.0, 0
+        total_s = 0.0
         for k in rest:
-            if k in means:
-                total_s += means[k]
-                known += 1
-            else:
+            e, src = est_sec(k)
+            if e is None:
                 missing += 1
+            else:
+                total_s += e
+                known += 1
+                srcs[src] = srcs.get(src, 0) + 1
         if cur:
-            if cur in means:
-                total_s += max(0.0, means[cur] - cur_el)
-                known += 1
-            else:
+            e, src = est_sec(cur)
+            if e is None:
                 missing += 1
+            else:
+                total_s += max(0.0, e - cur_el)
+                known += 1
+                srcs[src] = srcs.get(src, 0) + 1
         if known:
             eta = total_s
 
@@ -362,7 +403,8 @@ def gauge_safe(run, stages):
             'stage': cur, 'stage_title': title, 'done': len(done | skipped),
             'total': len(scope), 'skipped': len(skipped),
             'eta': None if eta is None else round(eta), 'eta_missing': missing,
-            'eta_n': known, 'samples': len(means)}
+            'eta_n': known, 'eta_src': srcs, 'samples': len(means)}
+
 
 
 # ------------------------------------------------------------------ HTTP
@@ -496,7 +538,7 @@ def glob_sheets():
 
 # 输入指纹要 os.walk 整个 files/AssetBundles（91,643 个文件，实测数秒）。
 # 前端每 8s 轮询一次 /api/state，不缓存的话每次轮询都白扫一遍盘，首屏还会空着十几秒像死掉。
-_CACHE = {'fp': [None, 0.0], 'scope': [None, 0.0], 'means': [None, 0.0]}
+_CACHE = {'fp': [None, 0.0], 'scope': [None, 0.0], 'means': [None, 0.0], 'units': [None, 0.0]}
 
 
 def _cached(slot, ttl, fn):
@@ -1723,6 +1765,18 @@ function fmtMem(mb){
   if(mb==null) return '—';
   return mb>=1024 ? (mb/1024).toFixed(2)+' GB' : Math.round(mb)+' MB';
 }
+function gaugeSrc(g){
+  /* 「剩余」是怎么来的必须说出口：历史均值最可信，实测速率×本次项数次之，
+     固定常量再次；三者都没有的阶段计入"未知"，前端就只报 ≥ 而不是 ~。 */
+  const s=g.eta_src||{}, bits=[];
+  if(s.hist) bits.push(s.hist+' 段历史均值');
+  if(s.rate) bits.push(s.rate+' 段按实测速率×项数');
+  if(s.est)  bits.push(s.est+' 段按实测常量');
+  if(g.eta_missing) bits.push('另有 '+g.eta_missing+' 段没量过');
+  /* 服务端没报来源（老版本，或探针注入的假 gauge）时，`eta_n` 只可能来自历史均值
+     —— 这句措辞是界面判据在守的，别一丢了。 */
+  return bits.length?bits.join(' · '):(g.eta_n?'按 '+g.eta_n+' 段历史均值':'估算');
+}
 function gaugeTick(){
   if(!G||!G.t0) return;
   const now=Date.now()/1000, e=$('#gEl'), m=$('#gMem'), t=$('#gEta');
@@ -1748,7 +1802,7 @@ function gaugeSet(g){
     '<span>已用 <b id="gEl">—</b></span>'+
     '<span>内存 <b id="gMem">—</b></span>'+
     '<span>剩余 <b id="gEta">—</b></span>'+
-    (g.eta_n?'<span class="gnote">按 '+g.eta_n+' 段历史均值</span>':'')+
+    (g.eta_n?'<span class="gnote">'+gaugeSrc(g)+'</span>':'')+
     '<span class="gbar"><i id="gFill"></i></span>';
   el.classList.add('on');
   const f=$('#gFill'); if(f) f.style.width=pct+'%';

@@ -99,16 +99,24 @@ def run(argv, cwd=ROOT, timeout=None, echo=None, beat=2.5):
     out, err, done = [], [], 0
     t0 = time.time()
     drop, last = 0, 0.0
+    beat_at = t0
     timed_out = False
     while done < 2:
         try:
             name, ln = q.get(timeout=0.4)
         except queue.Empty:
-            if timeout is not None and time.time() - t0 > timeout:
+            now = time.time()
+            if timeout is not None and now - t0 > timeout:
                 timed_out = True
                 kill_tree(p.pid, f'{argv[-3:]} 超时 {timeout}s')
                 log(f'  ⏱ 超时 {timeout}s ⇒ 已 taskkill 整棵进程树 pid={p.pid}')
                 break
+            # **静默心跳**：有些被调脚本从头到尾只打一行（或干脆不打），
+            # 那 43 分钟里前台就会看着像死掉。没转发行也要定期报"还在跑"。
+            if now - beat_at >= 25:
+                beat_at = now
+                log(f'    · …pid={p.pid} 已 {int(now - t0)} 秒无新输出，仍在跑'
+                    f'（{" ".join(str(a) for a in argv[1:3])}）')
             continue
         if ln is None:
             done += 1
@@ -122,6 +130,7 @@ def run(argv, cwd=ROOT, timeout=None, echo=None, beat=2.5):
                 drop = 0
             log(('    | ' if hit else '    · ') + ln[:180])
             last = now
+            beat_at = now
         else:
             drop += 1
     if drop:
@@ -163,14 +172,27 @@ def scan_hardlinks(paths):
 # ---------------------------------------------------------------- 阶段定义
 class Stage:
     def __init__(self, key, title, tier, fn, judge_desc, produces=None, needs=None,
-                 step=0, writes=''):
+                 step=0, writes='', rate=0.0, unit='', est=0.0):
         self.key, self.title, self.tier, self.fn = key, title, tier, fn
         self.judge_desc, self.produces, self.needs = judge_desc, produces or [], needs or []
         self.step, self.writes = step, writes
+        # 预计耗时的两种来源，**只允许填量过的数**（没量过就留 0，界面会显示"未知"）：
+        #   rate/unit —— 按本次范围线性估算（秒/单位），范围越大越久的那类阶段
+        #   est       —— 与范围基本无关的固定耗时（实测秒数）
+        self.rate, self.unit, self.est = rate, unit, est
 
     @property
     def live(self):
         return self.tier == 'live'
+
+    def eta(self, n):
+        """→ (秒, 说明) 或 (None, 为什么未知)。"""
+        if self.rate and n:
+            return self.rate * n, f'按实测 {self.rate:g} 秒/{self.unit} × {n} {self.unit}'
+        if self.est:
+            return self.est, f'实测约 {self.est:g} 秒'
+        return None, '这一步没量过，不猜'
+
 
 
 # 阶段属于哪一步、写到哪里，是**流水线自身的事实**，所以定义在这里而不是面板里：
@@ -246,8 +268,17 @@ def st_pull(approved):
     open(os.path.join(WORK, 'sync_diff.txt'), 'w', encoding='utf-8').write(txt)
     paths = [x for x in open(lst, encoding='utf-8')] if os.path.isfile(lst) else []
     if not paths:
-        return verdict('pull', False, f'diff 跑完了但没拿到路径清单（diff_paths.txt '
-                                      f'为空/缺）⇒ 后面所有导出阶段都会因为"范围不可用"判红')
+        # **0 变更是合法状态，不是错误**：本地已经和设备一致（典型场景就是刚拉完包再点一次检查）。
+        # 上一版把它判红 ⇒ 整条线钉死在第 1 步，而且第 1 步刚才是绿的（diff rc=0），红得毫无道理。
+        mode, payload = scope_state(False)
+        if mode == 'ok':
+            n_stem = len(affected_stems(False) or [])
+            return verdict('pull', True,
+                           f'设备与本地一致（新增 0/变更 0）· 沿用上次 detect 的范围清单：'
+                           f'{len(payload)} 个源包 → {n_stem} 个皮肤 stem')
+        write_scope([], 0, 0)
+        return verdict('pull', True, '设备与本地完全一致（新增 0/变更 0）⇒ 本轮没有要重算的东西；'
+                                     '要整库重算请命令行 --full')
     n_scope = write_scope(paths, new, diff_n)
     np_ = len(affected_stems(False) or [])
     if 'pull' not in approved:
@@ -265,6 +296,26 @@ def st_pull(approved):
 
 
 # ---------------------------------------------------------- 3 deps
+# 本管线**真正消费**依赖表的目录。判"丢了要不要命"只能按这个来：
+# 整表要求"一条都不能少"看着严格，实际会把游戏自己删掉的 4 个 iconframe 条目
+# 变成一条永远过不去的红（2026-10-01 首次真跑就撞上），而它跟我们的产物毫无关系。
+CONSUMED_TOPS = ('painting', 'paintingface', 'spinepainting', 'live2d', 'cue', 'dependencies')
+
+
+def deps_classify(old, new):
+    """新表 vs 旧表 → (fatal, benign)：丢了**消费范围内**的条目才叫回退。"""
+    def tops(k, rec):
+        f = str((rec or {}).get('file', '')).replace('\\', '/')
+        parts = [x for x in (k.split('/') + f.split('/')) if x and x != '..']
+        return {p for p in parts if p in CONSUMED_TOPS}
+
+    fatal, benign = [], []
+    for k in old:
+        if k not in new:
+            (fatal if tops(k, old[k]) else benign).append(k)
+    return fatal, benign
+
+
 def st_deps(approved):
     """重生成官方依赖表。WF-15 第 3 步：最容易漏的一步，漏了新包 PPtr 解析不到。"""
     tmp = os.path.join(WORK, 'dependency_manifest.json')
@@ -274,10 +325,18 @@ def st_deps(approved):
     old = json.load(open(os.path.join(OUT, 'dependency_manifest.json'), encoding='utf-8')) \
         if os.path.isfile(os.path.join(OUT, 'dependency_manifest.json')) else {}
     new = json.load(open(tmp, encoding='utf-8'))
-    lost = [k for k in old if k not in new]
-    log(f'  依赖表 旧 {len(old)} 条 → 新 {len(new)} 条，丢失 {len(lost)} 条')
-    if lost:
-        return verdict('deps', False, f'新表丢了 {len(lost)} 个旧包，拒绝换入，先查源包')
+    fatal, benign = deps_classify(old, new)
+    lost = fatal + benign
+    log(f'  依赖表 旧 {len(old)} 条 → 新 {len(new)} 条，丢失 {len(lost)} 条'
+        f'（其中本管线消费的 {len(fatal)} 条、不消费的 {len(benign)} 条）')
+    if fatal:
+        sample = '; '.join(f'{k}→{(old[k] or {}).get("file", "?")}' for k in fatal[:6])
+        return verdict('deps', False, f'新表丢了 {len(fatal)} 个**本管线要消费的**旧包，拒绝换入。'
+                                      f'丢了这些（最多列 6 个）：{sample}'
+                                      f' ⇒ 先确认是本地源包被误删（那要先补包）还是游戏真删了')
+    if benign:
+        log(f'  · 忽略的丢失条目（本管线不消费）：{", ".join(benign[:6])}'
+            + ('…' if len(benign) > 6 else ''))
     if not ('deps' in approved):
         return verdict('deps', True, f'新表已就绪（+{len(new) - len(old)} 条）在临时区'
                                      f'· 未签字，请 --approve deps')
@@ -669,22 +728,22 @@ def st_regress(approved):
 STAGES = [
     Stage('preflight', '权威输入 / vendor / 依赖表在位性', 'read', lambda a, f: st_preflight(),
           'check_inputs×2 + fetch_gallery_vendor --check 退出码',
-          step=1, writes='不写'),
+          step=1, writes='不写', est=2),
     Stage('pull', '模拟器拉新包', 'live', lambda a, f: st_pull(a),
           'diff 只读；sync --apply 写 files/',
-          step=1, writes='未签字只写清单 · 签字 files/AssetBundles'),
+          step=1, writes='未签字只写清单 · 签字 files/AssetBundles', est=45),
     Stage('deps', '重生成官方依赖表', 'live', lambda a, f: st_deps(a),
           '新表须为旧表超集，丢包即拒',
-          step=2, writes='未签字暂存 · 签字 Output/dependency_manifest.json'),
+          step=2, writes='未签字暂存 · 签字 Output/dependency_manifest.json', est=3),
     Stage('meta', '重建 ship_meta 元数据', 'live', lambda a, f: st_meta(a),
           'ship_meta_authority_diff 绿 · ⚠️ 预览须先换入',
           step=2, writes='未签字暂存 · 签字 Output/ship_meta.json'),
     Stage('paintings', '静态立绘合成 → 临时区', 'staged', lambda a, f: st_paintings(f, a),
           '数 ✗ 行（失败仍 exit 0）',
-          step=2, writes='.diag/pipeline/Paintings_v2'),
+          step=2, writes='.diag/pipeline/Paintings_v2', rate=1.25, unit='张'),
     Stage('spine', 'Spine 提取 + parts.json → 临时区', 'staged', lambda a, f: st_spine(f, a),
           '每个目录都要有 parts.json',
-          step=2, writes='.diag/pipeline/Spine_v2'),
+          step=2, writes='.diag/pipeline/Spine_v2', rate=1.7, unit='个皮肤'),
     Stage('live2d', 'Live2D 还原 + motion → 临时区', 'staged', lambda a, f: st_live2d(f, a),
           '[SUMMARY] 收尾行 + texorder/tex_completeness 闸门',
           step=2, writes='.diag/pipeline/Live2D'),
@@ -693,7 +752,7 @@ STAGES = [
           step=2, writes='Output/Audio（无暂存通道）'),
     Stage('cg', 'Spine 全屏 CG 导出', 'live', lambda a, f: st_cg(f, a),
           '必须读到「完成N 跳过N 失败N」且失败=0',
-          step=2, writes='Output/CG_v2（无暂存通道）'),
+          step=2, writes='Output/CG_v2（无暂存通道）', rate=1.3, unit='张'),
     Stage('review', '出改前|改后总表 + 硬链扫描', 'read', lambda a, f: st_review(),
           '只出表；看图是人工',
           step=3, writes='.diag/pipeline/*.png 对照表 + 两份清单'),
@@ -743,6 +802,32 @@ def cmd_plan(full):
     return 0
 
 
+def fmt_dur(sec):
+    sec = int(round(sec or 0))
+    if sec < 60:
+        return f'{sec} 秒'
+    m, s = divmod(sec, 60)
+    if m < 60:
+        return f'{m} 分 {s:02d} 秒'
+    return f'{m // 60} 小时 {m % 60} 分'
+
+
+# 各阶段"本次要处理多少个单位"从哪来（给预计耗时用）：key → (源包顶层目录, 只要主皮肤)
+SCOPE_UNIT = {'paintings': ('painting', True), 'spine': ('spinepainting', False),
+              'cg': ('spinepainting', False), 'live2d': ('live2d', False)}
+
+
+def stage_units(s, full):
+    """→ 本次范围里这一步要处理多少个单位；None = 全量或这一步不吃范围。"""
+    top = SCOPE_UNIT.get(s.key)
+    if not top:
+        return None
+    mode, payload = scope_state(full)
+    if mode != 'ok':
+        return None
+    return len(stems_for(top[0], payload, main_only=top[1]))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--plan', action='store_true', help='只读：打印阶段表与影响面，不跑任何东西')
@@ -772,9 +857,9 @@ def main():
         st = {'fingerprint': fp, 'done': {}}
     st.setdefault('done', {})
 
-    for s in STAGES:
-        if want and s.key not in want:
-            continue
+    plan = [x for x in STAGES if not want or x.key in want]
+    T0 = time.time()
+    for i, s in enumerate(plan, 1):
         # read 档**永不缓存**：preflight / review 这类安全检查缓存下来 = 从此不再检查，
         # 正是本项目最怕的静默失效。要重跑 staged 档用 --force。
         cacheable = s.tier == 'staged' and 'force' not in flags
@@ -783,11 +868,19 @@ def main():
                 f'要重跑请加 --force')
             RESULTS[s.key] = st['done'][s.key]
             continue
-        log(f'== {s.key} —— {s.title} [{"⚠️ live 需签字" if s.live and s.key not in a.approve else s.tier}]')
+        # ⚠️ `== {key}` 的先后顺序不能动：面板进度台按 `== (\S+)` 认"现在在跑哪个阶段"。
+        units = stage_units(s, a.full)
+        sec, why = s.eta(units)
+        gate = '⚠️ live 需签字' if s.live and s.key not in a.approve else s.tier
+        log(f'== {s.key} —— {s.title} [{i}/{len(plan)}] [{gate}]  '
+            + (f'范围 {units} 项 · ' if units is not None else '')
+            + (f'预计 ~{fmt_dur(sec)}（{why}）' if sec else f'预计耗时：{why}'))
+        t1 = time.time()
         try:
             s.fn(set(a.approve), a.full)
         except Exception as e:
             verdict(s.key, False, f'阶段自身抛异常 {type(e).__name__}: {e}')
+        log(f'  ⏱ {s.key} 实际用了 {fmt_dur(time.time() - t1)}，整轮已用 {fmt_dur(time.time() - T0)}')
         # ⚠️ 只缓存**判绿**的暂存阶段当"已完成"：把失败也记成已完成，下次跑到这里会被直接跳过，
         #    等于一条永远不再复查的流水线 —— 正是本项目最怕的那类静默失效。
         if RESULTS[s.key]['ok'] and s.tier == 'staged':
@@ -804,6 +897,7 @@ def main():
             break
 
     print('\n===== 汇总 =====')
+    print(f'  整轮用时 {fmt_dur(time.time() - T0)}')
     for s in STAGES:
         r = RESULTS.get(s.key)
         mark = '—' if not r else ('✅' if r['ok'] else '❌')

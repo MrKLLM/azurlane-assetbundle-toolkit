@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。
-version: 1.6.7
+version: 1.6.8
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -311,6 +311,17 @@ version: 1.6.7
     ② 自绘光标（内联 SVG data-URI）若只画亮线，落在近白底的主按钮上**整根看不见**；
     修法是**先用深色描一道底**再叠亮线。另：光标 hotspot 一律写死成十字交点，写 `0 0` 会让指针与判定点错位一格。
     ⇒ 判据用 `getComputedStyle` 读 hover 前后的 `color`/`backgroundColor` 算对比度，不要靠看图。
+
+31. **探针注入的合成数据，取值域不得与真实数据重叠**（2026-10-01 实测，白查一轮）。
+    进度台的单测是"注入一个假 gauge 对象再断言渲染文本"，假数据写成
+    `stage:'export_cue_audio', done:3, total:11, elapsed:1:02:05` —— 而**产品里根本没有这些取值**
+    （阶段 key 是 `audio`、阶段总数是 13）。探针报红时那串文本进了我的眼睛，
+    第一反应是「有别的会话在并发跑真更新，而且跑了一小时」，于是去查 `runs.json`、进程表、端口占用，
+    白烧一轮。⇒ 三条：① 合成值要一眼假（用 `__FAKE__`/`stage:'zz_stage'` 这类不可能出现的字面），
+    或干脆在红消息里标 `（注入样本）`；② 判据的 FAIL detail 要带**来源**（真跑 vs 注入）；
+    ③ 反过来，凡是"界面显示的数字"被断言，也要有一条**真跑**的采样（本项目：起测试面板、
+    POST 一次真任务、20 秒后读 `/api/state` 断言 `stage/done/total/eta/eta_src` 非空且合理），
+    只有注入样本的判据证明的是渲染，不是数据通路。
 
 
 ## 验证
