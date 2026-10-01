@@ -5,9 +5,16 @@
 import sys, os, json, time, subprocess, urllib.request, threading
 sys.stdout.reconfigure(encoding='utf-8')
 import websocket
+import sys as _p_sys, os as _p_os
+_p_sys.path.insert(0, _p_os.path.join(_p_os.path.dirname(_p_os.path.dirname(_p_os.path.abspath(__file__))), "scripts"))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
+
+
+def _chrome_fallback():
+    raise SystemExit("找不到 Chrome：设环境变量 AL_CHROME 指向 chrome.exe 再跑")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
+CHROME = P.CHROME.replace(os.sep, "/") or _chrome_fallback()
 PORT = 9333
 DEBUG_DIR = os.path.join(ROOT, '.diag', 'chrome_cg_export')
 

@@ -34,6 +34,9 @@ import argparse
 import struct
 from pathlib import Path
 from datetime import datetime
+import sys as _p_sys, os as _p_os
+_p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 
 try:
     import UnityPy
@@ -52,9 +55,9 @@ except ImportError:
 # 配置
 # ============================================================
 
-LIVE2D_DIR = r"D:\Azur Lane Assets\files\AssetBundles\live2d"
-OUTPUT_DIR = r"D:\Azur Lane Assets\Output\Live2D"
-ERROR_LOG = r"D:\Azur Lane Assets\ERRORS.log"
+LIVE2D_DIR = P.LIVE2D_SRC
+OUTPUT_DIR = P.LIVE2D_OUT
+ERROR_LOG = os.path.join(P.ROOT, "ERRORS.log")   # 这份历史上就在仓库根，别挪
 
 # moc3 数据在 MonoBehaviour raw_data 中的起始偏移
 MOC3_HEADER_SIZE = 44  # Unity 对象头 + CubismMoc 字段

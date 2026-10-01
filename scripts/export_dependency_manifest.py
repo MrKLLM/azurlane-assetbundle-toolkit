@@ -14,11 +14,14 @@ import os
 
 import UnityPy
 from UnityPy import config
+import sys as _p_sys, os as _p_os
+_p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 
 config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
 
-DEP_BUNDLE = r"D:\Azur Lane Assets\files\AssetBundles\dependencies"
-DEFAULT_OUT = r"D:\Azur Lane Assets\Output\dependency_manifest.json"
+DEP_BUNDLE = P.DEP_BUNDLE
+DEFAULT_OUT = P.MANIFEST_PATH
 
 
 def main():

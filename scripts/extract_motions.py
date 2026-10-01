@@ -32,6 +32,9 @@ import struct
 import binascii
 import argparse
 from datetime import datetime
+import sys as _p_sys, os as _p_os
+_p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 
 try:
     import UnityPy
@@ -41,9 +44,9 @@ except ImportError:
     print("[ERROR] 需要安装 UnityPy: pip install UnityPy")
     sys.exit(2)
 
-LIVE2D_DIR = r"D:\Azur Lane Assets\files\AssetBundles\live2d"
-OUTPUT_DIR = os.environ.get("L2D_OUT_DIR") or r"D:\Azur Lane Assets\Output\Live2D"
-ERROR_LOG = r"D:\Azur Lane Assets\docs\ERRORS.log"
+LIVE2D_DIR = P.LIVE2D_SRC
+OUTPUT_DIR = os.environ.get("L2D_OUT_DIR") or P.LIVE2D_OUT
+ERROR_LOG = P.ERRORS_LOG
 
 USE_LINEAR = bool(os.environ.get("L2D_MOTION_LINEAR"))
 # 贝塞尔控制点裁剪阈值（历史护栏，2026-09-23 定性：**它是在掩盖下面的格式错误，不是优化**）
@@ -472,7 +475,7 @@ def main():
                   "        正规流程是先 --out .diag/<临时目录> → 审计 → apply_live2d_motions.py --yes 换入。\n"
                   "        确实要直接写正式目录时再加 --into-production。")
             return 2
-        globals()["OUTPUT_DIR"] = r"D:\Azur Lane Assets\Output\Live2D"
+        globals()["OUTPUT_DIR"] = P.LIVE2D_OUT
 
     if not os.path.isdir(LIVE2D_DIR):
         print(f"[ERROR] Live2D 目录不存在: {LIVE2D_DIR}")

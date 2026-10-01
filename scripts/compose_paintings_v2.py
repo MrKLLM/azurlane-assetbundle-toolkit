@@ -29,12 +29,15 @@ from PIL import Image
 from UnityPy import config
 from UnityPy.export.Texture2DConverter import get_image_from_texture2d
 from UnityPy.helpers.MeshHelper import MeshHandler
+import sys as _p_sys, os as _p_os
+_p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 
 config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
 
-AB_ROOT = r"D:\Azur Lane Assets\files\AssetBundles"
-MANIFEST_PATH = r"D:\Azur Lane Assets\Output\dependency_manifest.json"
-DEFAULT_OUT = r"D:\Azur Lane Assets\Output\Paintings_v2"
+AB_ROOT = P.AB
+MANIFEST_PATH = P.MANIFEST_PATH
+DEFAULT_OUT = P.PAINT_OUT
 
 _manifest = None
 _env_cache = {}      # bundle_name -> env / False

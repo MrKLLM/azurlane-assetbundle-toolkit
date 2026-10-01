@@ -21,19 +21,19 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
+import sys as _p_sys, os as _p_os
+_p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 
 # 中国版 MuMu 12 装在 Netease\MuMu，旧版 / 国际版装在 Netease\MuMuPlayer。
 # 两个都列出来，谁存在就用谁，避免升级后路径失效。
-ADB_CANDIDATES = [
-    r"C:\Program Files\Netease\MuMu\nx_main\adb.exe",
-    r"C:\Program Files\Netease\MuMuPlayer\nx_main\adb.exe",
-]
-ADB = next((p for p in ADB_CANDIDATES if os.path.exists(p)), ADB_CANDIDATES[0])
+# 路径出口在 paths.py：AL_ADB 优先 → PATH → 两个已知安装位置。
+ADB_CANDIDATES = [x for x in [P.MUMU_ADB] + P.MUMU_ADB_CANDIDATES if x]
+ADB = P.MUMU_ADB or next((p for p in ADB_CANDIDATES if os.path.exists(p)),
+                         ADB_CANDIDATES[0] if ADB_CANDIDATES else "")
 
-MUMU_MANAGER_CANDIDATES = [
-    p.replace("adb.exe", "MuMuManager.exe") for p in ADB_CANDIDATES
-]
-MUMU_MANAGER = next(
+MUMU_MANAGER_CANDIDATES = [p.replace("adb.exe", "MuMuManager.exe") for p in ADB_CANDIDATES]
+MUMU_MANAGER = P.MUMU_MANAGER or next(
     (p for p in MUMU_MANAGER_CANDIDATES if os.path.exists(p)), None)
 
 # MuMu 12 的 adb 端口是动态分配的：同一个模拟器重启后会变（实测 index 0
@@ -43,7 +43,7 @@ MUMU_MANAGER = next(
 ADB_PORT_RANGE = range(16384, 16500)
 HOST = None
 REMOTE_ROOT = "/sdcard/Android/data/com.bilibili.azurlane/files"
-LOCAL_ROOT = r"D:\Azur Lane Assets\files"
+LOCAL_ROOT = P.FILES
 
 # 只同步这些顶层子目录；留空表示全部
 ONLY_TOP = ["AssetBundles", "hashes", "version"]
@@ -233,12 +233,34 @@ def local_files(root):
     return sizes
 
 
+ONLY_SUB = []           # --only 归一化后的前缀，如 ['AssetBundles/painting/', ...]
+
+
 def wanted(rel, only_top):
     """判断该文件是否在关注范围内。"""
     if not only_top:
         return True
     top = rel.split("/")[0]
-    return any(top.startswith(t) for t in only_top)
+    if not any(top.startswith(t) for t in only_top):
+        return False
+    if ONLY_SUB:
+        return any(rel.startswith(p) for p in ONLY_SUB)
+    return True
+
+
+def set_only(spec):
+    """`--only painting,cue,AssetBundles/live2d` → 前缀表。空串=不过滤。"""
+    global ONLY_SUB
+    out = []
+    for it in (spec or '').replace(' ', '').split(','):
+        if not it:
+            continue
+        p = it if it.startswith('AssetBundles/') else 'AssetBundles/' + it.strip('/')
+        out.append(p if p.endswith('/') else p + '/')
+    ONLY_SUB = sorted(set(out))
+    if ONLY_SUB:
+        print('只处理这些类型: ' + ', '.join(x.split('/')[1] for x in ONLY_SUB))
+    return ONLY_SUB
 
 
 def stat_remote(rel):
@@ -287,6 +309,8 @@ def cmd_diff(args):
         by_top_diff[f.split("/")[0]] += 1
 
     print(f"\n== 新增（模拟器有，本地没有）: {len(added)} 个 ==")
+    if ONLY_SUB:
+        print("  ⚠️ 这是**带类型过滤**的部分比对：没列出的类型本次没看，不代表它们没变。")
     for top, n in sorted(by_top.items(), key=lambda x: -x[1]):
         print(f"  {top:<20} {n}")
 
@@ -394,17 +418,33 @@ def main():
     # 只给按目录聚合的计数，名字拿不到。
     dp.add_argument("--list-out", default="", dest="list_out",
                     help="把 新增+大小不一致 的相对路径逐行写到这里（不写=只打印）")
+    dp.add_argument("--only", default="",
+                    help="只比对这些类型（逗号分隔，如 painting,cue,spinepainting；"
+                         "不带 = 全部）。**与 --list-out 互斥**：带过滤的比对不能当重跑范围")
     dp.set_defaults(func=cmd_diff)
 
     sp = sub.add_parser("sync", help="同步新增文件")
     sp.add_argument("--apply", action="store_true", help="实际下载（默认 dry-run）")
     sp.add_argument("--limit", type=int, default=0, help="只处理前 N 个，0=全部")
+    sp.add_argument("--only", default="",
+                    help="只拉这些类型（逗号分隔，如 painting,cue）；不带 = 全部")
     sp.set_defaults(func=cmd_sync)
 
     args = p.parse_args()
     REMOTE_ROOT = args.remote
     LOCAL_ROOT = args.local
+    if getattr(args, "only", ""):
+        set_only(args.only)
+    # 带类型过滤的 diff 是**部分**比对，拿它当范围清单会让流水线以为"别处都没变"
+    # ⇒ 直接拒绝，而不是加个警告让人忽略（这条判据在 gating 里也有对应断言）。
+    if args.func is cmd_diff and getattr(args, "only", "") and getattr(args, "list_out", ""):
+        print("✗ --only 与 --list-out 不能同时用：范围清单必须来自一次**完整**比对。")
+        print("  要按类型只拉一部分：去掉 --list-out（清单交给 update_pipeline 的 pull 阶段写）；")
+        print("  要生成范围清单：去掉 --only 做一次全量比对。")
+        sys.exit(2)
+
     sys.exit(args.func(args) or 0)
+
 
 
 if __name__ == "__main__":

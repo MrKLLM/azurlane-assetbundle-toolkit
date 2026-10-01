@@ -761,6 +761,16 @@
   只断言"有没有 spawn 那个会覆写正式区的子进程"，因为提示文字会改、会不会去写盘不会说谎。
   ⚠️ 别用 `py … | tail` 判它的退出码（`$?` 量的是 tail）：先 `>log 2>&1; E=$?`。
 
+#### 换机器 / 换用户名（2026-10-01 起路径可迁移，见 §77）
+- 仓库根由 `scripts/paths.py` 统一推导；不在默认位置时**只需设一个环境变量**：
+  `set AL_ASSETS_ROOT=D:\新位置\Azur Lane Assets`（.bat 里 set 或系统环境变量都行）。推导不出会直接抛错，不会猜。
+- 外部工具各有一个 env：`AL_VGMSTREAM` / `AL_FFMPEG` / `AL_CHROME` / `AL_ADB`；不设则走 PATH 再走已知安装位置。
+- 数据不在 git 里，换机器要单独拷：`files/AssetBundles`（源包 28.9GB，**diff 的唯一本地依据**）、
+  `Output/`（产物约 45GB，可再生但要 4~6 小时）、`inputs/azdata`+`inputs/gamecfg`（**不可复原，见上面的白名单**）。
+- 收尾必跑：`py -3 scripts/diag/check_paths.py`（调用链上不许再有写死的绝对路径）。
+- 只想拉某几类包：`py -3 scripts/mumu_sync.py diff --only painting,cue`（**带 `--only` 的比对不能生成范围清单**，
+  与 `--list-out` 硬互斥——范围清单必须来自一次完整比对，否则"0 差异"会被下游读成"别处都没变"）。
+
 #### 关键决策
 - **增量而非全量**：全量重跑 4486 张立绘会打乱已人工确认正确的结果，且无法逐张复核。
 - **对比图必须人工过目**：机器指标（不透明率/差异像素）会误判——`leiniya_wjz` 就是指标说"有问题"但目视才确认是回退（见 TROUBLESHOOTING §14）。

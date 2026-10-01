@@ -43,11 +43,13 @@ import time
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import paths as P            # 仓库根的唯一出口；AL_ASSETS_ROOT 可整体换机器
+ROOT = P.ROOT
 PY = sys.executable
-AB = os.path.join(ROOT, 'files', 'AssetBundles')
-OUT = os.path.join(ROOT, 'Output')
-WORK = os.path.join(ROOT, '.diag', 'pipeline')          # 本工具唯一的落盘区
+AB = P.AB
+OUT = P.OUT
+WORK = P.WORK                # 本工具唯一的落盘区
 STATE = os.path.join(WORK, 'pipeline_state.json')
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1')
 

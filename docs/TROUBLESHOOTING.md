@@ -3844,3 +3844,44 @@ POSIX 的 `SO_REUSEADDR` 只放行 `TIME_WAIT`；**Windows 的语义是"随便�
 主屏"已勾签字"、`#cards .appr` 的 change 处理）、`scripts/update_pipeline.py`（`st_pull` 的
 设备不可达分支）、`scripts/diag/panel_ui_probe.py`（+3 条）、`scripts/diag/test_pipeline_gating.py`
 （`[10]` +3 条，52→56）。相关：§74、§75、WF-23。
+
+---
+
+## §77. 路径可迁移落地：`scripts/paths.py` 一个出口 + 按类型拉取（2026-10-01 晚）
+
+**为什么现在做**: 用户连着两次问「换电脑怎么办」。此前 21 个脚本把 `D:\Azur Lane Assets` /
+`C:\Users\KLLM\...` 写死在源码里，**13 阶段调用链上 9 个**——换盘符或换用户名不是"迁移困难"，
+是必炸：`mumu_sync` 会把包拉到错目录，diff 会拿错根（然后把 9 万个包全报成"新增"，白下一遍 28.9GB）。
+
+**做法**：
+- `scripts/paths.py` 是唯一出口。优先级 `AL_ASSETS_ROOT` → 由 `__file__` 推导 → **推导不出就抛错**。
+  刻意**不留旧默认值**：猜错根的后果是把资产写进别的目录，比"跑不起来"严重得多。
+  派生量都在那里（`AB/OUT/WORK/DEP_BUNDLE/MANIFEST_PATH/*_OUT/ERRORS_LOG/LIVE2D_SRC`），
+  外部工具走 `tool()`：`AL_VGMSTREAM`/`AL_FFMPEG`/`AL_CHROME`/`AL_ADB` → PATH → 已知安装位置。
+- 12 个文件改接 `paths`（9 个链路脚本 + `update_pipeline` + `apply_live2d_motions` + `diag/run_cg_export`）。
+  `extract_motions`/`fix_model3` 的 `L2D_OUT_DIR` env 优先级**保持不变**（那是编排器注入暂存区的通道）。
+- `mumu_sync` 加 `--only painting,cue,spinepainting`（`wanted()` 多一层前缀过滤）。
+  ⚠️ **`--only` 与 `--list-out` 互斥，且是硬拒**：范围清单必须来自一次**完整**比对，
+  否则带过滤的"0 新增"会被下游读成"别处都没变"，那又是一类静默少跑。
+  过滤后的 diff 还会在输出里明写"这是部分比对"。
+
+**闸门（这条的关键，不是改完就算）**：`py -3 scripts/diag/check_paths.py`
+扫 `scripts/` 下全部 `.py`，看还有谁写死绝对路径。它**分两档**：
+调用链上的算硬失败（现在 0 个），一次性诊断脚本（43 个，绝大多数只是同一行 `CHROME = ...`）
+只报数不判红，`--strict` 才一起算。
+⇒ 理由和本项目对"永远红的检查"的态度一致（§71）：一次扫出 46 个全判红，这个闸门当天就会被绕过；
+分档之后它是绿的、拦得住新增的写死路径，同时把欠账数量摆在明面上。
+**它当场抓出我漏改的 3 处**（`extract_motions`/`reconstruct_live2d` 的源包 `live2d` 目录、
+`mumu_sync` 的 adb 候选）——都是"改了这个文件的其他行、漏了这行"的典型。
+
+**验证**：`paths.py` 打印解析结果；`AL_ASSETS_ROOT` 指到假根 ⇒ 生效、指到不存在的目录 ⇒ 明确抛错；
+`export_dependency_manifest`（87242 条）、`compose_paintings_v2 2b_2`、`extract_spine_v2 adaerbote_4`、
+`reconstruct_live2d --list` 全部真跑通过；`--only` 前缀过滤 7/7 用例；互斥那条**真实退出码 2**
+（第一次量成 0 又是 `| tail` 遮蔽退出码，改成先 `>log; echo $?`）；`check_paths` PASS、
+`test_pipeline_gating` 56 条仍全绿。
+
+**涉及文件**: `scripts/paths.py`（新）、`scripts/diag/check_paths.py`（新）、
+`scripts/update_pipeline.py`、`scripts/mumu_sync.py`、`scripts/compose_paintings_v2.py`、
+`scripts/extract_spine_v2.py`、`scripts/reconstruct_live2d.py`、`scripts/extract_motions.py`、
+`scripts/fix_model3.py`、`scripts/extract_cv_voice.py`、`scripts/export_dependency_manifest.py`、
+`scripts/apply_live2d_motions.py`、`scripts/diag/run_cg_export.py`。相关：WF-15、§71、§76。

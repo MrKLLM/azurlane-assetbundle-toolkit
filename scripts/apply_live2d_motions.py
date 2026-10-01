@@ -15,10 +15,13 @@
   L2D_SRC_DIR=<源目录> py -3 scripts/apply_live2d_motions.py --yes
 """
 import os, sys, shutil, argparse, datetime, json
+import sys as _p_sys, os as _p_os
+_p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-ROOT = r"D:\Azur Lane Assets"
+ROOT = P.ROOT
 SRC = os.environ.get("L2D_SRC_DIR") or os.environ.get("L2D_OUT_DIR")
 DST = os.path.join(ROOT, "Output", "Live2D")
 

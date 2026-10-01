@@ -24,6 +24,9 @@ cue 名切分必须走「最长已知类别前缀」，不能直接剥尾部数�
 """
 import os, sys, re, json, glob, shutil, tempfile, argparse, subprocess, collections
 from concurrent.futures import ThreadPoolExecutor
+import sys as _p_sys, os as _p_os
+_p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 
 sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -37,8 +40,8 @@ DIAG = os.path.join(ROOT, '.diag')
 DEF_AUDIO = os.path.join(ROOT, 'Output', 'Audio', 'CV2')
 DEF_MAP = os.path.join(ROOT, 'Output', 'gallery_v2', 'skin_voice.json')
 
-VGMSTREAM = r'C:\Users\KLLM\AppData\Local\vgmstream\vgmstream-cli.exe'
-FFMPEG = shutil.which('ffmpeg') or r'C:\Users\KLLM\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe'
+VGMSTREAM = P.VGMSTREAM
+FFMPEG = P.FFMPEG
 OPUS_BITRATE = '48k'
 
 # 皮肤目录名里的「后处理变体」：同一皮肤的另一张画法，语音与皮肤序号都不受影响。

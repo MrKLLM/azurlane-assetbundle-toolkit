@@ -7,8 +7,11 @@
 import os
 import re
 import json
+import sys as _p_sys, os as _p_os
+_p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 
-OUTPUT_DIR = os.environ.get("L2D_OUT_DIR") or r"D:\Azur Lane Assets\Output\Live2D"
+OUTPUT_DIR = os.environ.get("L2D_OUT_DIR") or P.LIVE2D_OUT
 
 
 def _tex_key(f):
