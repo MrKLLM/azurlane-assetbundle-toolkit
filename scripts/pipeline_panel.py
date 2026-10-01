@@ -223,7 +223,7 @@ def _stage_means():
     return {k: sum(v) / len(v) for k, v in acc.items()}
 
 
-def _scope_units():
+def _scope_units(fp=None):
     """本次增量里每个"按项数线性耗时"的阶段要处理多少项（给速率估算用）。
 
     ⚠️ 历史均值在**第一次跑**时必然是空的（本项目 13 个阶段里 9 个从没真跑过），
@@ -234,7 +234,7 @@ def _scope_units():
         try:
             import update_pipeline as up
             importlib.reload(up)
-            return {s.key: up.stage_units(s, False) for s in up.STAGES
+            return {s.key: up.stage_units(s, False, fp) for s in up.STAGES
                     if getattr(s, 'rate', 0.0)}
         except Exception as e:
             print(f'[警告] 读各阶段本次项数失败：{e}')
@@ -341,8 +341,60 @@ def _tree_mem_mb(root):
     return total / 1048576.0, len(pids)
 
 
-def gauge_safe(run, stages):
-    """在跑 → 进度台的数据；没在跑 → None。"""
+def _log_secs(path):
+    """一份日志的首末时间戳差（秒）= 这一轮到底跑了多久。跨零点按 +86400 修一次。"""
+    first = last = None
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for ln in f:
+                m = _TS.match(ln)
+                if not m:
+                    continue
+                t = _secs(*m.groups())
+                if first is None:
+                    first = t
+                elif t < last:
+                    t += 86400
+                last = t
+    except OSError:
+        return None
+    return max(0, last - first) if first is not None and last is not None else None
+
+
+def _unit_progress(path):
+    """日志里**最后一条**「a/b」形态的阶段内进度 → (done, total, 原文)。
+
+    流水线侧统一打了这几种：`批次进度 25/269`、`live2d 进度 3/4`、`进度 12/40 成功=…`、
+    被调脚本自己的 `处理 1200/4488`。没有命中就返回 None ⇒ 界面只报阶段级进度，
+    **不拿"上一次的值"假装还在动**。
+    """
+    hit = None
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for ln in f:
+                if '进度' not in ln:
+                    continue
+                m = re.search(r'(\d+)\s*/\s*(\d+)', ln)
+                if m and int(m.group(2)) > 0:
+                    hit = (int(m.group(1)), int(m.group(2)), ln.strip()[-64:])
+    except OSError:
+        return None
+    return hit
+
+
+def _last_run():
+    """最近一次**已结束**的任务 → {id, label, secs, red}。没在跑、也没跑过 ⇒ None。"""
+    for r in reversed(load_runs()):
+        if r.get('state') == 'running':
+            continue
+        return {'id': r.get('id'), 'label': r.get('label'),
+                'secs': _log_secs(r.get('log') or ''),
+                'clean': bool(r.get('clean'))}
+    return None
+
+
+def gauge_safe(run, stages, fp=None):
+    """在跑 → 进度台的数据；刚跑完 → 一条**静态收尾条**；没跑过 → None。"""
     if not run:
         return None
     try:
@@ -358,7 +410,7 @@ def gauge_safe(run, stages):
 
     eta, missing, known, srcs = None, 0, 0, {}
     means = _cached('means', 60.0, _stage_means) or {}
-    units = _scope_units()
+    units = _scope_units(fp)
     bykey = {s['key']: s for s in stages}
 
     def est_sec(k):
@@ -399,11 +451,20 @@ def gauge_safe(run, stages):
             eta = total_s
 
     title = next((s['title'] for s in stages if s['key'] == cur), '')
+    up_ = _unit_progress(log) if log else None
     return {'t0': t0, 'elapsed': elapsed, 'mem_mb': round(mem_mb, 1), 'nproc': nproc,
             'stage': cur, 'stage_title': title, 'done': len(done | skipped),
             'total': len(scope), 'skipped': len(skipped),
             'eta': None if eta is None else round(eta), 'eta_missing': missing,
-            'eta_n': known, 'eta_src': srcs, 'samples': len(means)}
+            'eta_n': known, 'eta_src': srcs, 'samples': len(means),
+            # 阶段内进度：日志里没有 a/b 就返回 None，界面只报阶段级，不拿旧值假装在动。
+            'unit_done': (up_ or (None, None, ''))[0], 'unit_total': (up_ or (None, None, ''))[1],
+            'unit_src': (up_ or (None, None, ''))[2], 'scope_keys': scope,
+            # 分段条要按"哪几段已完成/已跳过"上色，光给个计数画不出真状态
+            'done_keys': sorted(done), 'skipped_keys': sorted(skipped),
+            # 本轮用时：跑完之后进度台按契约收起（静止帧判据在守），
+            # 所以"这轮跑了多久"改由主屏那句话带出来，数据源是同一条日志的首末时间戳。
+            'secs': _log_secs(log)}
 
 
 
@@ -457,9 +518,14 @@ class H(BaseHTTPRequestHandler):
                 'stages': stages, 'steps': steps, 'state': state,
                 'runs': load_runs()[-12:][::-1],
                 'running': run, 'error': err, 'sheets': sheets,
-                'fingerprint': fingerprint_safe(),
-                'scope': scope_safe(),
-                'gauge': gauge_safe(run, stages),
+                # 最近一次**已结束**的任务用了多久：进度台按契约跑完就收起（静止帧判据），
+                # 所以"这轮跑了多久 / 停在哪"要由主屏那句话带出来。
+                'last': _last_run(),
+                # 一次 /api/state 只算**一遍**输入指纹（walk 9 万多个源包），往下传。
+                # 以前各处各算，实测冷缓存那一拍要 5.8 秒 —— 前端轮询超时，看着就是进度不动。
+                'fingerprint': (fp := fingerprint_safe()),
+                'scope': scope_safe(fp),
+                'gauge': gauge_safe(run, stages, fp),
             })
         if u.path == '/api/log':
             # 必须在这里也刷一次状态：前端追日志期间停掉了 8s 一次的 /api/state 轮询，
@@ -564,12 +630,12 @@ def fingerprint_safe():
     return _cached('fp', 30.0, calc) or '(读不到：源包目录打不开？)'
 
 
-def scope_safe():
+def scope_safe(fp=None):
     def calc():
         sys.path.insert(0, HERE)
         try:
             import update_pipeline as up
-            t = up.affected_stems(False)
+            t = up.affected_stems(False, fp)
             return None if t is None else len(t)
         except Exception as e:
             print(f'[警告] 读增量范围失败：{e}')
@@ -1036,22 +1102,29 @@ body.calm .signbox.on::after{display:none}
    四个量都是**服务端算出来的事实**（见 gauge_safe）：已用 / 内存 / 阶段 N/M / 剩余。
    「剩余」按各阶段**历史均值**算；有阶段没样本时报「≥」下限，不拿百分比糊一个数。
    放在最后是有意的：下面这些规则要压过基础层 `button{cursor:pointer}` 一类。 */
-.gauge{display:none;align-self:flex-start;max-width:fit-content;margin:0 0 var(--s4);
-  align-items:center;gap:var(--s4);padding:8px 14px;border-radius:var(--r-ctl);
-  border:1px solid var(--line);background:var(--pane);
+.gauge{display:none;align-self:stretch;max-width:fit-content;margin:0 0 var(--s4);width:100%;
+  flex-direction:column;align-items:stretch;gap:9px;padding:10px 14px 12px;
+  border-radius:var(--r-ctl);border:1px solid var(--line);background:var(--pane);
   font:11.5px/1 var(--fm);color:var(--dim);font-variant-numeric:tabular-nums}
 .gauge.on{display:flex}
+.gauge .grow{display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap}
 .gauge b{color:var(--txt);font-weight:600}
 .gauge .gdot{width:6px;height:6px;border-radius:50%;background:var(--run);
   animation:pulse 1.1s infinite;flex:0 0 auto}
 .gauge .gsep{width:1px;height:12px;background:var(--line2);flex:0 0 auto}
-.gauge .gst{color:var(--txt2);max-width:18ch;overflow:hidden;text-overflow:ellipsis;
+.gauge .gst{color:var(--txt2);max-width:26ch;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
 .gauge .gnote{color:var(--dim2)}
-.gauge .gbar{position:relative;width:96px;height:3px;border-radius:2px;flex:0 0 auto;
-  background:var(--line);overflow:hidden}
+/* 条要**够宽够高**才叫进度条：96×3 的细线实测被用户判成"看不出在动"（2026-10-01）。
+   现在整幅宽 + 9px 高 + 每阶段一道刻度，填充按「已完成 + 本阶段内比例」走。 */
+.gauge .gbar{position:relative;height:9px;border-radius:3px;width:100%;
+  background:var(--deep);border:1px solid var(--line);overflow:hidden}
 .gauge .gbar i{position:absolute;top:0;bottom:0;left:0;width:0;background:var(--run);
   transition:width .4s var(--ez)}
+.gauge .gbar u{position:absolute;inset:0;display:flex;pointer-events:none}
+.gauge .gbar u s{flex:1 1 0;border-right:1px solid var(--pane);text-decoration:none}
+.gauge .gbar u s:last-child{border-right:0}
+.gauge .gun{color:var(--txt2)}
 
 /* ══ 指针：三态自定义光标（默认 / 可点 / 主行动）═══════════════════════
    和星野同一套语言：细十字 + 中心亮点，色温取 --brand（蓝白）。三条纪律：
@@ -1753,7 +1826,7 @@ let LOADED=false, LOADERR='';
    并把「已用」按本地时钟往下走 —— 8 秒一次轮询中间那几秒不动会看着像卡死。
    ⚠️ 它**不挂在 render() 里**：render() 会重建 13 张卡，每 8 秒重建一次会让探针的
    pin 判据当场红（"轮询没有重建 .stage 节点"）。所以单独走 gaugeSet()。 */
-let GT=null, G=null;
+let GT=null, G=null, GKEY='';
 function fmtDur(s){
   if(s==null) return '—';
   s=Math.max(0,Math.round(s));
@@ -1779,11 +1852,19 @@ function gaugeSrc(g){
 }
 function gaugeTick(){
   if(!G||!G.t0) return;
-  const now=Date.now()/1000, e=$('#gEl'), m=$('#gMem'), t=$('#gEta');
+  const now=Date.now()/1000, e=$('#gEl'), m=$('#gMem'), t=$('#gEta'),
+        f=$('#gFill'), u=$('#gUn');
   if(e) e.textContent=fmtDur(now-G.t0);
   if(m) m.textContent=fmtMem(G.mem_mb);
   if(t) t.textContent = (G.eta==null) ? '样本不足'
     : (G.eta_missing?'≥':'~')+fmtDur(Math.max(0, G.eta-(now-(G.at||now))));
+  /* 条子的分子允许带上**本阶段内**的比例：立绘跑到 1200/4488 时它在动，
+     用户就知道没卡死。该阶段不打 a/b 就退回阶段级 —— 绝不拿上一次的值假装在动。 */
+  const has = G.unit_total>0 && G.unit_done!=null,
+        frac = has ? Math.min(1, Math.max(0, G.unit_done/G.unit_total)) : 0;
+  if(u) u.textContent = has ? ('本阶段 '+G.unit_done+' / '+G.unit_total)
+                            : (G.stage ? '本阶段无项级进度（该脚本不打 a/b）' : '');
+  if(f) f.style.width = (G.total ? Math.min(100, (G.done+frac)/G.total*100) : 0).toFixed(1)+'%';
 }
 function gaugeSet(g){
   const el=$('#gauge'); if(!el) return;
@@ -1791,21 +1872,31 @@ function gaugeSet(g){
   // 等于 now、减数恒为 0 ⇒ 两次 8 秒轮询之间「剩余」是**死的**（「已用」走本地时钟，不受影响）。
   if(g&&g.at==null) g.at=Date.now()/1000;
   G=g;
-  if(!g){ el.classList.remove('on'); el.innerHTML='';
+  if(!g){ el.classList.remove('on'); el.innerHTML=''; GKEY='';
           if(GT){ clearInterval(GT); GT=null; } return; }
-  const pct=g.total?Math.round(g.done/g.total*100):0;
-  el.innerHTML='<i class="gdot"></i>'+
-    '<span>阶段 <b>'+g.done+'/'+(g.total||'—')+'</b>'+
-      (g.skipped?' <span class="gnote">跳过 '+g.skipped+'</span>':'')+'</span>'+
-    (g.stage?'<span class="gst">'+esc(g.stage)+(g.stage_title?' · '+esc(g.stage_title):'')+'</span>':'')+
-    '<span class="gsep"></span>'+
-    '<span>已用 <b id="gEl">—</b></span>'+
-    '<span>内存 <b id="gMem">—</b></span>'+
-    '<span>剩余 <b id="gEta">—</b></span>'+
-    (g.eta_n?'<span class="gnote">'+gaugeSrc(g)+'</span>':'')+
-    '<span class="gbar"><i id="gFill"></i></span>';
+  /* 骨架只在"结构变了"时重建：每 8 秒 innerHTML 一次会让脉冲重启、条宽从 0 重跑 transition，
+     看着就是在闪。数字与宽度交给 gaugeTick 原地改。 */
+  const key=(g.total||0)+'|'+(g.stage||'')+'|'+(g.eta_n?1:0)+'|'+(g.unit_total?1:0);
+  if(key!==GKEY){
+    GKEY=key;
+    let ticks='';
+    for(let i=0;i<Math.max(1,g.total||0);i++) ticks+='<s></s>';
+    el.innerHTML=
+      '<div class="grow"><i class="gdot"></i>'+
+        '<span>阶段 <b>'+g.done+'/'+(g.total||'—')+'</b>'+
+          (g.skipped?' <span class="gnote">跳过 '+g.skipped+'</span>':'')+'</span>'+
+        '<span class="gst" id="gSt">'+esc(g.stage||'')+
+          (g.stage_title?' · '+esc(g.stage_title):'')+'</span>'+
+        '<span class="gsep"></span>'+
+        '<span>已用 <b id="gEl">—</b></span>'+
+        '<span>内存 <b id="gMem">—</b></span>'+
+        '<span>剩余 <b id="gEta">—</b></span>'+
+        (g.eta_n?'<span class="gnote" id="gSrc">'+gaugeSrc(g)+'</span>':'')+
+      '</div>'+
+      '<div class="grow"><span class="gbar"><i id="gFill"></i><u>'+ticks+'</u></span>'+
+        '<span class="gun" id="gUn">—</span></div>';
+  }
   el.classList.add('on');
-  const f=$('#gFill'); if(f) f.style.width=pct+'%';
   gaugeTick();
   if(!GT) GT=setInterval(gaugeTick,1000);
 }
@@ -2004,6 +2095,15 @@ function render(){
 
   /* ── 主屏 ─────────────────────────────────────────────────────────── */
   const A=askOf(step);
+  /* 跨步的红不许被"本步挺好"盖掉：一次只暴露下一步是对的，但"另有 N 步判红"必须说一句 ——
+     2026-10-01 用户就是在这里迷路的：regress 红着（真因是画廊服务器没起），
+     大字却写「重导好了 7/7 项」，看起来像一切就绪。 */
+  const redAll=(S.stages||[]).filter(s=>statusOf(s.key)==='fail');
+  const outSteps=[...new Set(redAll.map(s=>s.step))].filter(n=>n!==step);
+  if(redAll.length && outSteps.length)
+    A.why += ' 另有 '+redAll.length+' 步判红（第 '+outSteps.join('、')+' 步），「细节」里能看到原因。';
+  if(!S.running && S.last && S.last.secs)
+    A.why += ' 上一轮用了 '+fmtDur(S.last.secs)+'。';
   const eb=$('#eyebrowTx'), ask=$('#ask'), why=$('#why'), foot=$('#scopeNote');
   eb.textContent = S.running ? ('正在跑 · '+S.running.label) : A.eb;
   $('#eyebrow').classList.toggle('red', !!A.red);

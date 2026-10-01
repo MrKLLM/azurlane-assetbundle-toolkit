@@ -240,16 +240,30 @@ def write_scope(paths, new, changed):
 
     两份文件必须一起写、一次写 —— 上一版只写了 affected.meta、从没写过 affected.txt，
     于是读侧永远拿到"没有清单"，而下游把那理解成全量（见 scope_state 的注释）。
+
+    ⚠️ **空清单不得覆盖非空清单**。2026-10-01 15:53 用户那次运行就是这么把 1154 条真范围
+    冲成 0 条的：包已经拉完 ⇒ diff 报 0 变更，同时依赖表刚换入 ⇒ 整条指纹变了 ⇒ 旧清单被判过期
+    ⇒ 走进"写空"分支。之后所有导出阶段都以为"增量里没有东西"，14 张新立绘静默消失。
+    现在：旧的先留 `affected.prev.txt`，空结果一律沿用旧清单，只重盖指纹戳。
     """
     os.makedirs(WORK, exist_ok=True)
     ps = sorted(set(x.strip() for x in paths if x.strip()))
-    with open(os.path.join(WORK, 'affected.txt'), 'w', encoding='utf-8', newline='\n') as f:
+    cur = os.path.join(WORK, 'affected.txt')
+    had = [x.strip() for x in open(cur, encoding='utf-8') if x.strip()] if os.path.isfile(cur) else []
+    kept = False
+    if not ps and had:
+        ps, kept = had, True
+    elif had and had != ps:
+        shutil.copy2(cur, os.path.join(WORK, 'affected.prev.txt'))
+    with open(cur, 'w', encoding='utf-8', newline='\n') as f:
         f.write('\n'.join(ps) + ('\n' if ps else ''))
     with open(os.path.join(WORK, 'affected.meta'), 'w', encoding='utf-8') as f:
         json.dump({'fingerprint': fingerprint(),          # 拉完包要重算：bundles= 变了
                    'at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                   'paths': len(ps), 'new': new, 'changed': changed}, f, ensure_ascii=False)
+                   'paths': len(ps), 'new': new, 'changed': changed,
+                   'kept_from_prev': kept}, f, ensure_ascii=False)
     return len(ps)
+
 
 
 def st_pull(approved):
@@ -271,12 +285,12 @@ def st_pull(approved):
         # **0 变更是合法状态，不是错误**：本地已经和设备一致（典型场景就是刚拉完包再点一次检查）。
         # 上一版把它判红 ⇒ 整条线钉死在第 1 步，而且第 1 步刚才是绿的（diff rc=0），红得毫无道理。
         mode, payload = scope_state(False)
-        if mode == 'ok':
-            n_stem = len(affected_stems(False) or [])
+        n_stem = len(affected_stems(False) or [])
+        if mode == 'ok' and n_stem:
             return verdict('pull', True,
                            f'设备与本地一致（新增 0/变更 0）· 沿用上次 detect 的范围清单：'
                            f'{len(payload)} 个源包 → {n_stem} 个皮肤 stem')
-        write_scope([], 0, 0)
+        write_scope([], 0, 0)          # 非空的旧清单不会被它冲掉，见 write_scope 的注释
         return verdict('pull', True, '设备与本地完全一致（新增 0/变更 0）⇒ 本轮没有要重算的东西；'
                                      '要整库重算请命令行 --full')
     n_scope = write_scope(paths, new, diff_n)
@@ -385,18 +399,32 @@ def is_main_painting(fn):
     return not any(fn.endswith(s) for s in PART_SUFFIX)
 
 
-def scope_state(full):
+def bundles_of(fp):
+    """从输入指纹里取出**源包状态**那半（`bundles=92679`）。
+
+    范围清单的新鲜度只能看这一半。原因（2026-10-01 真跑撞出来的）：正常顺序是
+    「拉包 → 换入依赖表 → 跑导出」，而 `deps=` 那半会在换入依赖表的那一刻变掉
+    ⇒ 拿整条指纹判过期，等于**每次正常运行都把刚写好的范围清单打成废纸**，
+    于是所有导出阶段看到"增量里没有东西"，静默跳过 —— 14 张新立绘就这么没了。
+    """
+    return (fp or '').split(' ')[0]
+
+
+def scope_state(full, fp=None):
     """这次更新的范围 → (mode, payload)：
 
       'full'    —— 显式 --full，payload=None
       'ok'      —— payload = 变更源包的相对路径清单（`AssetBundles/<top>/<file>`）
       'missing' —— 从没跑过 detect（或清单没有配套的指纹戳）
-      'stale'   —— 清单属于另一批输入
+      'stale'   —— 清单属于**另一批源包**（只比 `bundles=`，见 `bundles_of` 的注释）
 
     ⚠️ 这里**绝不把 missing/stale 当成"全量"**。上一版就是这个问题：`affected.txt` 从来
     没有人生成（st_pull 只写了 affected.meta），这个函数一路返回 None，而 None 在下游的
     含义恰好是"全量" ⇒ 所谓增量静默变成全库重跑，`--plan` 还印着"增量：尚未 detect"
     让人以为范围是收窄的。宁可判红停下，也不许偷偷扩大写入面。
+
+    `fp` 让调用方把**已经算好的**输入指纹传进来：算一次要 walk 9 万多个源包，面板一次
+    `/api/state` 里以前各处各算 4~6 遍，实测那一拍 5.8 秒 ⇒ 前端轮询超时，看着就是进度不动。
     """
     if full:
         return 'full', None
@@ -412,10 +440,10 @@ def scope_state(full):
         meta = json.load(open(mp, encoding='utf-8'))
     except Exception as e:
         return 'missing', f'affected.meta 读不出来（{type(e).__name__}）'
-    fp = fingerprint()
-    if meta.get('fingerprint') != fp:
-        return 'stale', (f'清单产于 {meta.get("at", "?")}，指纹 '
-                         f'{str(meta.get("fingerprint"))[:26]} ≠ 当前 {fp[:26]}')
+    fp = fp or fingerprint()
+    if bundles_of(meta.get('fingerprint')) != bundles_of(fp):
+        return 'stale', (f'清单产于 {meta.get("at", "?")}，源包数 '
+                         f'{bundles_of(meta.get("fingerprint"))} ≠ 当前 {bundles_of(fp)}')
     return 'ok', [x.strip() for x in open(p, encoding='utf-8') if x.strip()]
 
 
@@ -451,13 +479,13 @@ def stems_for(top, paths, main_only=False):
 
 
 
-def affected_stems(full):
+def affected_stems(full, fp=None):
     """**面板在读这个函数名**（pipeline_panel.scope_safe），别改名。
 
     返回本次增量涉及的 stem 列表（各阶段去重后的并集）；None = 范围不可用
     （显式 --full，或 detect 没跑 / 已过期）⇒ 面板显示"未算"。
     """
-    mode, payload = scope_state(full)
+    mode, payload = scope_state(full, fp)
     if mode != 'ok':
         return None
     u = set(stems_for('painting', payload, main_only=True)) | set(stems_for('spinepainting', payload))
@@ -719,9 +747,22 @@ def st_derive(approved):
 
 
 def st_regress(approved):
-    rc, so, _ = run([PY, 'scripts/diag/wf16_regression.py', '--skip', 'hit_verify'],
-                    timeout=7200, echo=['退出码', '汇总', '通过', '未通过'])
-    return verdict('regress', rc == 0, f'WF-16 五件（跳过 25 分钟全库 hit_verify）{"全绿" if rc == 0 else "有红"}')
+    rc, so, se = run([PY, 'scripts/diag/wf16_regression.py', '--skip', 'hit_verify'],
+                     timeout=7200, echo=['退出码', '汇总', '通过', '未通过', '不可达', '先起'])
+    txt = so + se
+    # 只报"有红"等于没报（2026-10-01 用户就是被这条卡住的：红的真因是 8777 画廊服务器没起，
+    # 属于**前置环境缺失**，不是产物回归——两者的下一步完全不同）。
+    env = [l.strip()[:120] for l in txt.splitlines()
+           if any(k in l for k in ('不可达', '先起服务器', '连不上', '拒绝'))]
+    bad = [l.strip()[:120] for l in txt.splitlines()
+           if any(k in l for k in ('未通过', 'FAIL', '✗', '红'))]
+    if rc and env:
+        return verdict('regress', False, '前置环境没满足，不是产物回归：' + env[0]
+                                       + ' ⇒ 先起画廊服务器（8777）再跑这一步')
+    return verdict('regress', rc == 0,
+                   'WF-16 五件（跳过 25 分钟全库 hit_verify）'
+                   + ('全绿' if rc == 0 else '有红：' + ('；'.join(bad[:3]) or '见日志末尾')))
+
 
 
 # ---------------------------------------------------------------- 驱动
@@ -817,12 +858,12 @@ SCOPE_UNIT = {'paintings': ('painting', True), 'spine': ('spinepainting', False)
               'cg': ('spinepainting', False), 'live2d': ('live2d', False)}
 
 
-def stage_units(s, full):
+def stage_units(s, full, fp=None):
     """→ 本次范围里这一步要处理多少个单位；None = 全量或这一步不吃范围。"""
     top = SCOPE_UNIT.get(s.key)
     if not top:
         return None
-    mode, payload = scope_state(full)
+    mode, payload = scope_state(full, fp)
     if mode != 'ok':
         return None
     return len(stems_for(top[0], payload, main_only=top[1]))

@@ -297,6 +297,32 @@ def t_deps_gate():
     ck('一条没丢时两边都空', not f2 and not b2, f'{f2} {b2}')
 
 
+def t_freshness_key():
+    print('\n[9] 范围清单的新鲜度只能看源包数，不许看派生产物')
+    def body(d):
+        real = up.fingerprint
+        up.fingerprint = lambda: 'bundles=92679 deps=OLDHASH'
+        up.write_scope(['AssetBundles/painting/2b'], 1, 0)
+        # 正常顺序：拉完包 → 换入依赖表（deps 哈希变）→ 跑导出。
+        # 拿整条指纹判过期 = 每次正常运行都把刚写好的清单打成废纸（2026-10-01 真事故）。
+        up.fingerprint = lambda: 'bundles=92679 deps=NEWHASH'
+        mode, payload = up.scope_state(False)
+        ck('源包没变、只换了依赖表 ⇒ 清单仍算 ok（不是 stale）', mode == 'ok', f'{mode} {payload}')
+        ck('清单内容一条没丢', up.affected_stems(False) == ['2b'], str(up.affected_stems(False)))
+        # 源包真的变了才算过期
+        up.fingerprint = lambda: 'bundles=99999 deps=NEWHASH'
+        mode2, why2 = up.scope_state(False)
+        ck('源包数变了才算 stale，并说清两边 bundles=', mode2 == 'stale' and 'bundles=' in why2,
+           f'{mode2} {why2}')
+        # 过期 + 零变更 ⇒ 绝不允许把非空清单冲掉
+        up.fingerprint = lambda: 'bundles=92679 deps=NEWHASH'
+        up.write_scope([], 0, 0)
+        left = [x.strip() for x in open(os.path.join(d, 'affected.txt'), encoding='utf-8') if x.strip()]
+        ck('空结果不得覆盖非空清单（旧内容原样保住）', left == ['AssetBundles/painting/2b'], str(left))
+        up.fingerprint = real
+    tmp_work(body)
+
+
 def main():
     t_stems()
     t_no_scope()
@@ -306,6 +332,7 @@ def main():
     t_timeout_tree()
     t_clean_diff()
     t_deps_gate()
+    t_freshness_key()
     print('\n' + ('[FAIL] ' + '；'.join(FAIL) if FAIL else '[PASS] 签字门与增量范围闸门全绿'))
     return 1 if FAIL else 0
 
