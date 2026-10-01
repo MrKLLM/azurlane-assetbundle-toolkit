@@ -32,10 +32,12 @@ import glob
 import hashlib
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -55,15 +57,83 @@ def log(m):
 
 
 # ---------------------------------------------------------------- 基础设施
-def run(argv, cwd=ROOT, timeout=None, echo=None):
-    """跑一个子命令，返回 (退出码, stdout, stderr)。"""
-    r = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                       encoding='utf-8', errors='replace', env=ENV, timeout=timeout)
-    if echo and r.stdout:
-        for ln in r.stdout.splitlines():
-            if any(k in ln for k in echo):
-                log('    | ' + ln[:160])
-    return r.returncode, r.stdout or '', r.stderr or ''
+PROG_RE = re.compile(r'(进度|\d+\s*/\s*\d+|完成|失败|合计|SUMMARY|✓|✗|\[\d+\s*/\s*\d+\])')
+
+
+def kill_tree(pid, why=''):
+    """杀**整棵**进程树。只杀直接子进程的话，起 Chrome 的那些脚本会漏一树 chrome
+    在机器上（§50：16 个进程把可用内存压到 1.1GB）。"""
+    try:
+        subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'],
+                       capture_output=True, timeout=60)
+    except Exception as e:
+        log(f'  ⚠️ taskkill pid={pid} 失败 {type(e).__name__}: {e}（{why}）')
+
+
+def run(argv, cwd=ROOT, timeout=None, echo=None, beat=2.5):
+    """跑一个子命令，返回 (退出码, stdout, stderr)，**并且边跑边把进度吐给自己的 stdout**。
+
+    两件事都是踩出来的，别再改回去：
+    ① 原先是 `subprocess.run(capture_output=True)` —— 子进程的输出要等它整个跑完才
+       一次性可见，而面板只看得到本进程的 stdout ⇒ 依赖表那 43 分钟里界面一个字都不
+       动，看着就是死掉。现在两条流各一个线程读，逐行决定"转出去 / 计入抑制"。
+    ② 原先超时由 `subprocess.run(timeout=)` 兜，它只杀直接子进程 ⇒ 起 Chrome 的脚本
+       超时会漏整棵树。现在超时走 kill_tree，并照旧抛 TimeoutExpired 让阶段判红。
+    """
+    p = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, encoding='utf-8',
+                         errors='replace', env=ENV, bufsize=1)
+    q = queue.Queue()
+
+    def pump(name, stream):
+        try:
+            for ln in stream:
+                q.put((name, ln.rstrip('\r\n')))
+        except Exception as e:                       # 流被杀时会抛，属正常收尾
+            q.put((name, f'!! 读 {name} 失败 {type(e).__name__}'))
+        finally:
+            q.put((name, None))
+
+    threading.Thread(target=pump, args=('o', p.stdout), daemon=True).start()
+    threading.Thread(target=pump, args=('e', p.stderr), daemon=True).start()
+    out, err, done = [], [], 0
+    t0 = time.time()
+    drop, last = 0, 0.0
+    timed_out = False
+    while done < 2:
+        try:
+            name, ln = q.get(timeout=0.4)
+        except queue.Empty:
+            if timeout is not None and time.time() - t0 > timeout:
+                timed_out = True
+                kill_tree(p.pid, f'{argv[-3:]} 超时 {timeout}s')
+                log(f'  ⏱ 超时 {timeout}s ⇒ 已 taskkill 整棵进程树 pid={p.pid}')
+                break
+            continue
+        if ln is None:
+            done += 1
+            continue
+        (out if name == 'o' else err).append(ln)
+        hit = bool(echo) and any(k in ln for k in echo)
+        now = time.time()
+        if hit or (PROG_RE.search(ln) and now - last >= beat):
+            if drop:
+                log(f'    …（以上抑制 {drop} 行）')
+                drop = 0
+            log(('    | ' if hit else '    · ') + ln[:180])
+            last = now
+        else:
+            drop += 1
+    if drop:
+        log(f'    …（抑制 {drop} 行）')
+    try:
+        rc = p.wait(timeout=120)
+    except Exception:
+        kill_tree(p.pid, '收尾等待超时')
+        rc = p.wait()
+    if timed_out:
+        raise subprocess.TimeoutExpired(argv, timeout)
+    return rc, '\n'.join(out), '\n'.join(err)
 
 
 def count(d, pat):
@@ -143,29 +213,55 @@ def st_preflight():
 
 
 # ---------------------------------------------------------- 2 pull（读档 + 可选换入）
+def write_scope(paths, new, changed):
+    """把"哪些源包变了"落成交付清单，并当场盖上**当前**输入指纹。
+
+    两份文件必须一起写、一次写 —— 上一版只写了 affected.meta、从没写过 affected.txt，
+    于是读侧永远拿到"没有清单"，而下游把那理解成全量（见 scope_state 的注释）。
+    """
+    os.makedirs(WORK, exist_ok=True)
+    ps = sorted(set(x.strip() for x in paths if x.strip()))
+    with open(os.path.join(WORK, 'affected.txt'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write('\n'.join(ps) + ('\n' if ps else ''))
+    with open(os.path.join(WORK, 'affected.meta'), 'w', encoding='utf-8') as f:
+        json.dump({'fingerprint': fingerprint(),          # 拉完包要重算：bundles= 变了
+                   'at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                   'paths': len(ps), 'new': new, 'changed': changed}, f, ensure_ascii=False)
+    return len(ps)
+
+
 def st_pull(approved):
-    rc, so, se = run([PY, 'scripts/mumu_sync.py', 'diff'], timeout=1800,
-                     echo=['新增', '大小不一致', '本地独有', '合计'])
+    os.makedirs(WORK, exist_ok=True)
+    lst = os.path.join(WORK, 'diff_paths.txt')
+    rc, so, se = run([PY, 'scripts/mumu_sync.py', 'diff', '--list-out', lst],
+                     timeout=1800, echo=['新增', '大小不一致', '本地独有', '合计', '写出'])
     if rc != 0:
         return verdict('pull', False, f'mumu_sync diff 失败 rc={rc}（模拟器没开？adb 不在 PATH？）')
     txt = so + se
-    new = int((re.search(r'新增[^\d]*(\d+)', txt) or [0, 0])[1]) if re.search(r'新增[^\d]*(\d+)', txt) else -1
-    diff_n = int(re.search(r'大小不一致[^\d]*(\d+)', txt).group(1)) if re.search(r'大小不一致[^\d]*(\d+)', txt) else -1
+    m_new = re.search(r'新增[^\d]*(\d+)', txt)
+    m_dir = re.search(r'大小不一致[^\d]*(\d+)', txt)
+    new = int(m_new.group(1)) if m_new else -1
+    diff_n = int(m_dir.group(1)) if m_dir else -1
     log(f'  diff: 新增 {new} / 大小不一致 {diff_n}')
-    os.makedirs(WORK, exist_ok=True)
     open(os.path.join(WORK, 'sync_diff.txt'), 'w', encoding='utf-8').write(txt)
-    # 范围清单必须盖上它所属的输入指纹 —— 否则一份过期的 affected.txt 会静默把
-    # 下次真更新的范围钉死在几个测试 stem 上（2026-09-29 首次自跑 --plan 就撞上这个）
-    open(os.path.join(WORK, 'affected.meta'), 'w', encoding='utf-8').write(
-        json.dumps({'fingerprint': fingerprint(),
-                    'at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'new': new, 'changed': diff_n}, ensure_ascii=False))
+    paths = [x for x in open(lst, encoding='utf-8')] if os.path.isfile(lst) else []
+    if not paths:
+        return verdict('pull', False, f'diff 跑完了但没拿到路径清单（diff_paths.txt '
+                                      f'为空/缺）⇒ 后面所有导出阶段都会因为"范围不可用"判红')
+    n_scope = write_scope(paths, new, diff_n)
+    np_ = len(affected_stems(False) or [])
     if 'pull' not in approved:
         return verdict('pull', True, f'只读到 diff（新增 {new}/变更 {diff_n}）'
+                                     f'· 范围清单 {n_scope} 个源包 → {np_} 个皮肤 stem 已落盘'
                                      f'· 未签字，请 --approve pull')
     rc, so2, _ = run([PY, 'scripts/mumu_sync.py', 'sync', '--apply'], timeout=7200,
-                     echo=['完成', '失败', '合计'])
-    return verdict('pull', rc == 0, f'sync --apply rc={rc}')
+                     echo=['完成', '失败', '合计', '进度'])
+    if rc == 0:
+        # 拉完包之后 bundles= 变了 ⇒ 同一份范围清单要重盖指纹，否则下一次跑会把它判成"过期"
+        write_scope(paths, new, diff_n)
+    return verdict('pull', rc == 0, f'sync --apply rc={rc}'
+                                    + (f'· 范围清单已按新指纹重盖（{np_} 个皮肤 stem）' if rc == 0 else ''))
+
 
 
 # ---------------------------------------------------------- 3 deps
@@ -216,90 +312,219 @@ def st_meta(approved):
 
 
 # ---------------------------------------------------------- 5 导出类（全部 staged 到临时区）
-def affected_stems(full):
-    """增量范围：detect 出来的新增/变更包 → 磁盘 stem 集合。
+# 部件/纹理/投影/表情差分包不是"一张立绘"，口径与 run_v2_full.is_main 保持一致
+PART_SUFFIX = ('_rw', '_bj', '_front', '_jz', '_bg', '_shadow', '_shophx', '_mat')
 
-    ⚠️ 必须校验它属于**当前**输入指纹。范围清单是文本文件、可以留很久，
-    不校验的话一份过期清单会静默把整条流水线钉死在几个旧 stem 上，
-    而且 --plan 会一脸正常地报"增量 N 个"（2026-09-29 首次自跑就撞上）。
+
+def is_main_painting(fn):
+    if fn.endswith('_tex') or fn.endswith('_res'):
+        return False
+    if '_dark_shadow' in fn or '_face' in fn:
+        return False
+    if fn == 'mat' or fn.startswith('mat_'):
+        return False
+    return not any(fn.endswith(s) for s in PART_SUFFIX)
+
+
+def scope_state(full):
+    """这次更新的范围 → (mode, payload)：
+
+      'full'    —— 显式 --full，payload=None
+      'ok'      —— payload = 变更源包的相对路径清单（`AssetBundles/<top>/<file>`）
+      'missing' —— 从没跑过 detect（或清单没有配套的指纹戳）
+      'stale'   —— 清单属于另一批输入
+
+    ⚠️ 这里**绝不把 missing/stale 当成"全量"**。上一版就是这个问题：`affected.txt` 从来
+    没有人生成（st_pull 只写了 affected.meta），这个函数一路返回 None，而 None 在下游的
+    含义恰好是"全量" ⇒ 所谓增量静默变成全库重跑，`--plan` 还印着"增量：尚未 detect"
+    让人以为范围是收窄的。宁可判红停下，也不许偷偷扩大写入面。
     """
     if full:
-        return None
+        return 'full', None
     p = os.path.join(WORK, 'affected.txt')
+    mp = os.path.join(WORK, 'affected.meta')
     if not os.path.isfile(p):
-        return None
-    meta_p = os.path.join(WORK, 'affected.meta')
-    if not os.path.isfile(meta_p):
-        log('  ⚠️ affected.txt 没有配套的 affected.meta（不知道它是哪次 detect 产的）'
-            '⇒ **不敢拿来定范围**。请重跑 pull 阶段，或用 --full。')
-        return None
+        # 只报文件名：别用 os.path.relpath(清单, ROOT)——WORK 落到别的盘符上会抛
+        # ValueError: path is on mount 'C:', start on mount 'D:'
+        return 'missing', '没有 affected.txt（第 1 步的 detect 还没跑过）'
+    if not os.path.isfile(mp):
+        return 'missing', 'affected.txt 没有配套的 affected.meta ⇒ 不知道它是哪次 detect 产的'
     try:
-        meta = json.load(open(meta_p, encoding='utf-8'))
-    except Exception:
-        meta = {}
-    if meta.get('fingerprint') != fingerprint():
-        log(f'  ⚠️ affected.txt 是**过期**的（{meta.get("at", "?")} 的指纹 '
-            f'{str(meta.get("fingerprint"))[:28]} ≠ 当前 {fingerprint()[:28]}）'
-            '⇒ 忽略它，重跑 pull 阶段重新 detect，或用 --full。')
+        meta = json.load(open(mp, encoding='utf-8'))
+    except Exception as e:
+        return 'missing', f'affected.meta 读不出来（{type(e).__name__}）'
+    fp = fingerprint()
+    if meta.get('fingerprint') != fp:
+        return 'stale', (f'清单产于 {meta.get("at", "?")}，指纹 '
+                         f'{str(meta.get("fingerprint"))[:26]} ≠ 当前 {fp[:26]}')
+    return 'ok', [x.strip() for x in open(p, encoding='utf-8') if x.strip()]
+
+
+def stems_for(top, paths, main_only=False):
+    """把路径清单映射成**某一个阶段**能吃的 stem 集合。
+
+    ⚠️ 必须按阶段过滤：立绘脚本收到不属于自己目录的名字会打 ✗，而它的判据正是
+    「✗ 行数为 0」⇒ 一份混合清单会让这一步每次判红、并把整条线停在它那里。
+
+    ⚠️ "是不是主皮肤"最终由**磁盘上有没有那个不带后缀的包**裁判，不靠后缀表：
+    `run_v2_full` 那份 PART_SUFFIX 漏掉了带编号的部件（实测 `a2_n_bj1_tex` 归并成
+    `a2_n_bj1` 后躲过了 `_bj` 检查，而 painting/ 下并没有 `a2_n_bj1` 这个主包 ⇒ 渲染
+    报 ✗ ⇒ 整条线判红停住）。后缀只能当快速预筛。
+    """
+    pre = 'AssetBundles/' + top + '/'
+    d = os.path.join(AB, top)
+    got = set()
+    for rel in paths or []:
+        r = rel.replace('\\', '/')
+        if not r.startswith(pre):
+            continue
+        fn = r[len(pre):]
+        if '/' in fn:                       # 再往下一层的不属于本阶段的枚举口径
+            continue
+        stem = fn[:-4] if fn.endswith(('_tex', '_res')) else fn
+        if main_only and not is_main_painting(stem):
+            continue
+        if os.path.isdir(d) and not (os.path.isfile(os.path.join(d, stem))
+                                     or os.path.isdir(os.path.join(d, stem))):
+            continue                        # 磁盘上没有这个主包 ⇒ 不是本阶段的活
+        got.add(stem)
+    return sorted(got)
+
+
+
+def affected_stems(full):
+    """**面板在读这个函数名**（pipeline_panel.scope_safe），别改名。
+
+    返回本次增量涉及的 stem 列表（各阶段去重后的并集）；None = 范围不可用
+    （显式 --full，或 detect 没跑 / 已过期）⇒ 面板显示"未算"。
+    """
+    mode, payload = scope_state(full)
+    if mode != 'ok':
         return None
-    return [x.strip() for x in open(p, encoding='utf-8') if x.strip()]
+    u = set(stems_for('painting', payload, main_only=True)) | set(stems_for('spinepainting', payload))
+    return sorted(u)
+
+
+def scope_or_stop(key, full, top, main_only=False):
+    """导出阶段的统一入口：范围不可用时**判红并停下**，可用时返回 stem 列表。
+
+    返回 (todo, None) 或 (None, 已落好的判红结论)。`todo=None` 表示 --full。
+    """
+    mode, payload = scope_state(full)
+    if mode in ('missing', 'stale'):
+        return None, verdict(key, False, f'增量范围不可用：{payload}'
+                                        f' ⇒ 拒绝按全量兜底。先看第 1 步的 diff，'
+                                        f'真要做全量请命令行 --full')
+    if mode == 'full':
+        return None, None
+    return stems_for(top, payload, main_only=main_only), None
+
+
+def stale_in(tgt, made, pat='*.png'):
+    """临时区里属于**上一批**的产物数 —— review/换入会把它们一起算进去，必须说出口。"""
+    n = count(tgt, pat)
+    return max(0, n - made) if n > 0 and made is not None else 0
+
+
 
 
 def st_paintings(full, approved):
-    todo = affected_stems(full)
+    todo, stop = scope_or_stop('paintings', full, 'painting', main_only=True)
+    if stop is not None:
+        return stop
     tgt = os.path.join(WORK, 'Paintings_v2')
+    if todo is not None and not todo:
+        return verdict('paintings', True, '本次增量没有立绘源包 ⇒ 跳过（临时区未动）')
     os.makedirs(tgt, exist_ok=True)
     if todo is None:
         log('  --full：以 painting/ 源包枚举主皮肤（沿用 run_v2_full 的 is_main 口径）')
         sys.path.insert(0, HERE)
         import run_v2_full as rv
         todo = rv.baseline_targets()
+        log(f'  主皮肤 {len(todo)} 个 stem')
     fail = 0
     for i in range(0, len(todo), 50):
         batch = todo[i:i + 50]
-        rc, so, _ = run([PY, 'scripts/compose_paintings_v2.py'] + batch + ['--out', tgt], timeout=3600)
+        rc, so, _ = run([PY, 'scripts/compose_paintings_v2.py'] + batch + ['--out', tgt],
+                        timeout=3600, echo=['完成', '✗'])
         fail += len([l for l in so.splitlines() if l.startswith('✗')])
-        if (i // 50) % 4 == 0:
-            log(f'  进度 {min(i + 50, len(todo))}/{len(todo)} 失败累计 {fail}')
+        log(f'  批次进度 {min(i + 50, len(todo))}/{len(todo)} 失败累计 {fail}')
     n = count(tgt, '*.png')
+    left = stale_in(tgt, len(todo))
     return verdict('paintings', n > 0 and fail == 0,
-                   f'临时区 {n} 张 / 渲染失败 {fail} 个'
-                   + ('（⚠️ 该脚本失败仍 exit 0，判据是数 ✗ 行不是退出码）' if True else ''))
+                   f'本次渲染 {len(todo)} 个 stem / 临时区共 {n} 张 / 渲染失败 {fail} 个'
+                   + (f' · ⚠️ 临时区还留着上一批的 {left} 张，第 3 步对照与第 4 步换入会把它们一起算进去'
+                      if left else '')
+                   + '（该脚本失败仍 exit 0，判据是数 ✗ 行不是退出码）')
 
 
 def st_spine(full, approved):
+    todo, stop = scope_or_stop('spine', full, 'spinepainting')
+    if stop is not None:
+        return stop
     tgt = os.path.join(WORK, 'Spine_v2')
-    os.makedirs(tgt, exist_ok=True)
-    todo = affected_stems(full)
     d = os.path.join(AB, 'spinepainting')
     allnames = sorted(f for f in os.listdir(d)
                       if os.path.isfile(os.path.join(d, f)) and not f.endswith('_res'))
     names = allnames if todo is None else [n for n in allnames if n in set(todo)]
+    if todo is not None and not names:
+        return verdict('spine', True, '本次增量没有 Spine 皮肤包 ⇒ 跳过（临时区未动）')
+    os.makedirs(tgt, exist_ok=True)
     fail = []
     for i in range(0, len(names), 25):
         b = names[i:i + 25]
-        rc, so, _ = run([PY, 'scripts/extract_spine_v2.py'] + b + ['--out', tgt], timeout=3600)
+        rc, so, _ = run([PY, 'scripts/extract_spine_v2.py'] + b + ['--out', tgt],
+                        timeout=3600, echo=['成功', '失败', '✗'])
         fail += [l.split(':')[0].lstrip('✗ ') for l in so.splitlines() if l.startswith('✗')]
+        log(f'  批次进度 {min(i + 25, len(names))}/{len(names)} 失败累计 {len(fail)}')
     rc, so, _ = run([PY, 'scripts/extract_spine_v2.py', '--parts-only']
-                    + names + ['--out', tgt], timeout=1800)
+                    + names + ['--out', tgt], timeout=1800, echo=['成功', '失败'])
     nparts = count(tgt, '*/parts.json')
+    left = stale_in(tgt, len(names), '*')
     return verdict('spine', len(fail) == 0 and nparts >= len(names) - 1,
-                   f'临时区 {count(tgt, "*")} 个目录 / parts.json {nparts} 份 / 失败 {len(fail)} {fail[:5]}')
+                   f'本次 {len(names)} 个皮肤 / 临时区 {count(tgt, "*")} 个目录 / '
+                   f'parts.json {nparts} 份 / 失败 {len(fail)} {fail[:5]}'
+                   + (f' · ⚠️ 临时区还留着上一批的 {left} 个目录' if left else ''))
+
 
 
 def st_live2d(full, approved):
-    """reconstruct → extract_motions → fix_model3 → 三道闸门。写向一律 --out 临时区。"""
+    """reconstruct → extract_motions → fix_model3 → 三道闸门。写向一律 --out 临时区。
+
+    ⚠️ 两个脚本的 `--out` 都不是可选的：**不带它默认写 `Output/Live2D` 正式区**
+    （`extract_motions` 只对 `--all` 做了强制，`--name` 没做）⇒ 这里任何调用都必须带 --out。
+    """
     tgt = os.path.join(WORK, 'Live2D')
+    todo, stop = scope_or_stop('live2d', full, 'live2d')
+    if stop is not None:
+        return stop
+    if todo is not None and not todo:
+        return verdict('live2d', True, '本次增量没有 Live2D 包 ⇒ 跳过（临时区未动）')
     os.makedirs(tgt, exist_ok=True)
-    rc, so, _ = run([PY, 'scripts/reconstruct_live2d.py', '--all', '--out', tgt],
-                    timeout=7200, echo=['完成', '失败', '进度'])
-    # ⚠️ extract_motions --all 必须带 --out，否则它自己就拒绝（§25 那次事故换来的约定）
-    rc2, so2, _ = run([PY, 'scripts/extract_motions.py', '--all', '--out', tgt],
-                      timeout=7200, echo=['[SUMMARY]', '失败'])
-    done = re.findall(r'\[SUMMARY\] 模型 (\d+)/(\d+) 处理完', so2)
-    if not done:
-        return verdict('live2d', False, 'extract_motions 没打出 [SUMMARY] 收尾行 ⇒ 判为未完成/被截断，'
-                                        '不能拿退出码当通过')
+    summ = []
+    if todo is None:
+        run([PY, 'scripts/reconstruct_live2d.py', '--all', '--out', tgt],
+            timeout=7200, echo=['完成', '失败', '进度'])
+        _, so2, _ = run([PY, 'scripts/extract_motions.py', '--all', '--out', tgt],
+                        timeout=7200, echo=['[SUMMARY]', '失败'])
+        summ = re.findall(r'\[SUMMARY\] 模型 (\d+)/(\d+) 处理完', so2)
+        want = 1
+        last = summ[-1] if summ else None
+        trunc = (not summ) or (last and last[0] != last[1])
+    else:
+        for i, m in enumerate(todo):
+            run([PY, 'scripts/reconstruct_live2d.py', '--name', m, '--out', tgt],
+                timeout=1800, echo=['完成', '失败'])
+            _, so2, _ = run([PY, 'scripts/extract_motions.py', '--name', m, '--out', tgt],
+                            timeout=1800, echo=['[SUMMARY]', '失败'])
+            summ += re.findall(r'\[SUMMARY\] 模型 (\d+)/(\d+) 处理完', so2)
+            log(f'  live2d 进度 {i + 1}/{len(todo)}：{m} 已收尾')
+        want = len(todo)
+        trunc = len(summ) < len(todo)
+    if trunc:
+        return verdict('live2d', False,
+                       f'extract_motions 收尾行 {len(summ)}/{want} 个 ⇒ 判为未完成或被截断'
+                       '（该脚本失败仍可能 exit 0，不能拿退出码当通过）')
     # fix_model3 只有 env 通道 —— 显式注入并**打出来**（设计第 2 条）
     os.environ['L2D_OUT_DIR'] = tgt
     ENV['L2D_OUT_DIR'] = tgt
@@ -313,16 +538,26 @@ def st_live2d(full, approved):
         gates[name] = rcg
     audit = json.load(open(os.path.join(ROOT, '.diag', 'l2d_motion_audit.json'), encoding='utf-8')) \
         if os.path.isfile(os.path.join(ROOT, '.diag', 'l2d_motion_audit.json')) else {}
-    return verdict('live2d', done[-1][0] == done[-1][1] and gates.get('texorder') == 0
-                   and gates.get('tex_completeness') == 0,
-                   f'motion {done[-1][0]}/{done[-1][1]} 模型；闸门 texorder={gates["texorder"]} '
-                   f'tex_completeness={gates["tex_completeness"]}（motion_audit 恒 exit 0，只作参考：'
-                   f'shell={audit.get("shell", "?")}）')
+    return verdict('live2d', gates.get('texorder') == 0 and gates.get('tex_completeness') == 0,
+                   f'motion 收尾 {len(summ)}/{want}'
+                   + (f'（本次增量 {len(todo)} 个模型）' if todo is not None else '（--all）')
+                   + f'；闸门 texorder={gates["texorder"]} '
+                     f'tex_completeness={gates["tex_completeness"]}（motion_audit 恒 exit 0，只作参考：'
+                     f'shell={audit.get("shell", "?")}）')
 
 
 def st_audio(approved):
+    # ⚠️ 这一步**没有暂存通道**：extract_cv_voice 直接写 Output/Audio 与 gallery_v2/skin_voice.json。
+    # 上一版收了 approved 参数却没检查它 ⇒ "签字放行"对这一步是空话，跑一次就覆写一次正式区。
+    if 'audio' not in approved:
+        rc2, so2, _ = run([PY, 'scripts/diag/voice_gap_audit.py'], timeout=1800,
+                          echo=['缺口', '合计'])
+        rc3, _, _ = run([PY, 'scripts/diag/l2d_voice_inventory.py'], timeout=600, echo=['合计'])
+        return verdict('audio', True,
+                       '只跑了两道只读语音审计，一个音频包都没解码 · Output/Audio 未动'
+                       f'（gap_audit rc={rc2} · inventory rc={rc3}）· 未签字，请 --approve audio')
     rc, so, _ = run([PY, 'scripts/extract_cv_voice.py', '--all', '--skip-done'],
-                    timeout=7200, echo=['包', '失败', '合计'])
+                    timeout=7200, echo=['包', '失败', '合计', '进度'])
     rc2, so2, _ = run([PY, 'scripts/diag/voice_gap_audit.py'], timeout=1800, echo=['缺口', '合计'])
     rc3, _, _ = run([PY, 'scripts/diag/l2d_voice_inventory.py'], timeout=600)
     return verdict('audio', rc3 == 0,
@@ -331,17 +566,29 @@ def st_audio(approved):
 
 
 def st_cg(full, approved):
-    todo = affected_stems(full)
-    only = '' if todo is None else ','.join(todo)
+    # 同上：CG 导出经画廊服务器**就地覆写 Output/CG_v2**，没有暂存区可退 ⇒ 未签字不许跑。
+    if 'cg' not in approved:
+        n_live = count(os.path.join(OUT, 'CG_v2'), '*.png')
+        return verdict('cg', True,
+                       f'正式区现有 {n_live} 张，本次一张都没重导（导出会直接覆写 Output/CG_v2，'
+                       f'无暂存通道）· 未签字，请 --approve cg')
+    todo, stop = scope_or_stop('cg', full, 'spinepainting')
+    if stop is not None:
+        return stop
+    if todo is not None and not todo:
+        return verdict('cg', True, '本次增量没有 Spine 皮肤包 ⇒ 跳过（Output/CG_v2 未动）')
     argv = [PY, 'scripts/diag/run_cg_export.py', '--size', '2400', '--extra', 'animFrame=1', '--redo']
-    if only:
-        argv += ['--only', only]
+    if todo is not None:
+        argv += ['--only', ','.join(todo)]
     rc, so, _ = run(argv, timeout=7200, echo=['全部结束', '完成', '失败'])
     m = re.search(r'完成(\d+) 跳过(\d+) 失败(\d+)', so)
     if not m:
         return verdict('cg', False, '没读到「完成N 跳过N 失败N」汇总行 ⇒ 不能判完成（该脚本超时也 exit 0）')
     ok, skip, bad = map(int, m.groups())
-    return verdict('cg', bad == 0 and ok > 0, f'CG 导出 完成{ok} 跳过{skip} 失败{bad}')
+    return verdict('cg', bad == 0 and ok > 0,
+                   f'CG 导出 完成{ok} 跳过{skip} 失败{bad}'
+                   + (f'（范围 {len(todo)} 个皮肤）' if todo is not None else '（--full 全量）'))
+
 
 
 # ---------------------------------------------------------- 6 review（出对照，不写正式）
@@ -464,9 +711,18 @@ STAGES = [
 
 def cmd_plan(full):
     print(f'\n输入指纹: {fingerprint()}')
-    todo = affected_stems(full)
-    scope = '**全量**（--full）' if full else (
-        f'增量 {len(todo)} 个 stem' if todo else '增量：尚未 detect，先跑 pull 阶段')
+    mode, payload = scope_state(full)
+    if mode == 'full':
+        scope = '**全量**（--full）——所有产物重算，Paintings/Spine/Live2D/CG/Audio 全部覆写'
+    elif mode == 'ok':
+        n_p = len(stems_for('painting', payload, main_only=True))
+        n_s = len(stems_for('spinepainting', payload))
+        n_l = len(stems_for('live2d', payload))
+        scope = (f'增量：{len(payload)} 个变更源包 → 立绘 {n_p} 张 / Spine {n_s} 个皮肤 / '
+                 f'Live2D {n_l} 个模型（没点到的不动）')
+    else:
+        scope = (f'⚠️ 范围不可用（{payload}）⇒ 第 2 步的导出阶段会**判红停下**，'
+                 f'不会偷偷按全量跑。要收窄范围先跑第 1 步的 diff；要全量请命令行 --full')
     print(f'重跑范围: {scope}')
     print(f'\n{"步骤":6s} {"阶段":11s} {"档":7s} 干什么 / 判据')
     print('-' * 100)

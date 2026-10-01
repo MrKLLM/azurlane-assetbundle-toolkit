@@ -3506,3 +3506,66 @@ POSIX 的 `SO_REUSEADDR` 只放行 `TIME_WAIT`；**Windows 的语义是"随便�
 `scripts/pipeline_panel.py`（主屏 + 底部步骤条 + `#detail` 抽屉 + `SPRG` 弹簧 + `avoid` 避让）、
 `scripts/diag/panel_ui_probe.py`（判据 66→76：主屏 7 条 + 遮罩前置 1 条 + `settle()`；
 并修掉探针自身三处假绿灯）。做法见 **WF-23 追加（2026-09-30 第三轮）**。
+
+---
+
+## §71. 「增量」从来不存在、签字门有两道是空的、前台进度被憋死——一次执行侧体检（2026-10-01）
+
+**起因（用户提问，不是报错）**: 「跑一次要多少 G 内存？每一次跑都要全覆盖写入？一次只能开一个大型任务，那我还要开 MuMu 打开碧蓝航线，这还怎么跑？」
+为了回答"多少 G"去量真实峰值，顺手把"每次都全覆盖写吗"拿去对着代码核 —— **五条全是真缺陷**，
+其中三条会让一轮真更新悄悄覆写整片正式区：
+
+1. **`affected.txt` 从来没有人写**（最严重）。`st_pull` 只写了配套的 `affected.meta`，清单本体
+   一次都没落过盘；读侧 `affected_stems()` 读不到就 `return None`，而 **None 在下游的含义恰好是
+   "全量"** ⇒ 所谓增量静默等于全库重跑，`--plan` 还印着「增量：尚未 detect」把人往安全方向骗。
+   根因不是漏写一行，是**用一个哨兵值同时表示"没范围"和"全范围"**——这两种语义的失效方向完全相反，
+   必须分成两个返回值（现在：`scope_state()` → `full/ok/missing/stale` 四态）。
+2. **退化出来的"全量"路径当场炸**：`run_v2_full.baseline_targets()` 无条件 `listdir`
+   `Output/Paintings_Synthesized`，而产物早在某次改名后叫 `Paintings_v2` ⇒ `FileNotFoundError`。
+   所以真实状态比"覆盖写"更糟：**默认跑到立绘那一步就判红停住，整条线根本跑不完**。
+   （判据面：一条"看起来在工作"的路径连续几天判红，没人去看它是炸在哪个目录上。）
+3. **`audio` / `cg` 两道 live 档的签字门是空的**：函数收了 `approved` 参数**却一行都没检查它**，
+   `st_cg` 还带 `--redo` ⇒ 单独点一次就把 231 张 CG 全量重导进 `Output/CG_v2`（无暂存通道）。
+   面板上"未签字只跑读半边"这句话对这两个阶段是假的。
+4. **前台看不到进度**：`run()` 用 `subprocess.run(capture_output=True)`，子进程输出要等它整个跑完
+   才一次性可见，而面板只看得到本进程的 stdout ⇒ 依赖表那 **43 分钟里界面一个字都不动**，
+   看着就是死掉（`PYTHONUNBUFFERED=1` 救不了——不是缓冲，是 `capture_output` 本来就要等结束）。
+5. **超时只杀直接子进程**：`subprocess.run(timeout=)` 到期杀的是 python，起 Chrome 的那些脚本
+   会漏整棵树（§50 那次把可用内存压到 1.1GB 的就是这个形状）。
+
+**修法**（全在 `update_pipeline.py` + `scripts/mumu_sync.py`，前端一行没动）:
+- `mumu_sync.py diff --list-out <path>`：把「新增+大小不一致」的**相对路径**落盘（屏幕输出只有
+  按顶层目录聚合的计数，名字拿不到 —— 这就是当初清单没法自动生成的直接原因）。
+- `write_scope()` 一次写 `affected.txt` + `affected.meta` 两份，**拉完包后重盖一次指纹**
+  （`bundles=` 变了，不重盖下一轮就把它判成过期）。
+- `scope_or_stop()`：范围 missing/stale ⇒ 阶段判红并写明「拒绝按全量兜底」，**一个子进程都不起**。
+- 导出阶段**按域过滤** stem（`stems_for(top, …)`），"是不是主皮肤"最终由
+  **磁盘上有没有那个不带后缀的主包**裁判，不靠后缀表。
+- `st_audio`/`st_cg` 补门：未签字只跑只读审计，结论保留 `未签字，请 --approve` 给前端 `statusOf()` 认。
+- `run()` 改两条流各一读者线程：边跑边转（`echo` 命中必转，其余按 2.5s 限速 + 抑制计数），
+  全文照旧返回给判据数行；超时走 `taskkill /T /F` 后照旧抛 `TimeoutExpired` 让阶段判红。
+
+**实测数据**（新工具 `scripts/diag/peak_mem.py`，按进程树采峰值 WorkingSet，先用 400MB 自测准头）:
+立绘 50 包一批 **0.63GB / 17s**、8 个真主皮肤 **0.64GB / 13s**（≈1.25 秒/张）、Spine 3 个 0.50GB / 5s；
+13 个阶段全串行、同一时刻只有 1 个子进程 ⇒ **这条线稳态约 0.7GB**，"跑一次几个 G"是错的担心，
+真正挤内存的是同时开着的 IDE/浏览器（15.4GB 的机器实测只剩 2~3.5GB）与 CG 那步的 Chrome 树。
+按 1.25 秒/张外推，全量立绘 4488 张 ≈ **1.5 小时** —— `WORKFLOWS.md` 白名单里那句
+「全量可再生，但耗时**数十小时**」是老 AssetStudio 时代的数，已就地改掉。
+
+**闸门自测抓到的两个自伤**（`scripts/diag/test_pipeline_gating.py`，40 条）:
+- 它先抓到**我自己的映射有洞**：`a2_n_bj1_tex` 归并成 `a2_n_bj1` 后躲过了 `_bj` 后缀检查
+  （真后缀是 `_bj1`），会被当成立绘去渲染 ⇒ 报 ✗ ⇒ 整条线判红停住。⇒ 后缀表只能当预筛，
+  最终裁判必须是磁盘上有没有那个主包。**这条是"测试比代码先对"的样本**。
+- fixture 用了编造的包名（`haitian_3` 之类），被正确的磁盘过滤器滤光 ⇒ 4 条假红。
+  **测"按盘上事实裁判"的逻辑，样本必须取自盘上真名**。
+- 还有一次 `GATE_EXIT=0` 的假绿：`py … | tail` 让 `$?` 量的是 tail 的退出码（同 §70 那类
+  "壳命令遮蔽退出码"）。⇒ 先 `>log 2>&1; E=$?`，再读 `E`。
+
+**判据（新增，别再退回原样）**: `py -3 scripts/diag/test_pipeline_gating.py` 必须 `[PASS]`。
+它不看文案看**行动**——只断言"有没有 spawn 那个会覆写 `Output/` 的子进程"，因为
+签字提示文字会改，会不会去写盘不会说谎。
+
+**涉及文件**: `scripts/update_pipeline.py`（`scope_state`/`stems_for`/`scope_or_stop`/`write_scope`/
+`kill_tree`/`run` 重写，`st_pull`/`st_paintings`/`st_spine`/`st_live2d`/`st_audio`/`st_cg`/`cmd_plan`）、
+`scripts/mumu_sync.py`（`diff --list-out`）、`scripts/run_v2_full.py`（`BASELINE_DIR` 可缺）、
+`scripts/diag/peak_mem.py` + `scripts/diag/test_pipeline_gating.py`（新）。相关：WF-15、WF-23、§25、§37、§50、§64。

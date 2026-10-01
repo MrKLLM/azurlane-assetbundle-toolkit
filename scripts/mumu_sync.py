@@ -271,6 +271,14 @@ def cmd_diff(args):
     )
     missing = sorted(x for x in l_files.keys() - r_files.keys() if wanted(x, ONLY_TOP))
 
+    lo = getattr(args, "list_out", "")
+    if lo:
+        if os.path.dirname(lo):
+            os.makedirs(os.path.dirname(lo), exist_ok=True)
+        with open(lo, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(added + size_diff) + ("\n" if added or size_diff else ""))
+        print(f"差异路径已写出: {lo}（新增 {len(added)} + 变更 {len(size_diff)}）")
+
     by_top = defaultdict(int)
     for f in added:
         by_top[f.split("/")[0]] += 1
@@ -381,7 +389,12 @@ def main():
     p.add_argument("--local", default=LOCAL_ROOT, help="本地目标目录")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("diff", help="只读对比").set_defaults(func=cmd_diff)
+    dp = sub.add_parser("diff", help="只读对比")
+    # 让 diff 把差异**路径**落盘：下游要按"哪些包变了"定重跑范围，而屏幕输出
+    # 只给按目录聚合的计数，名字拿不到。
+    dp.add_argument("--list-out", default="", dest="list_out",
+                    help="把 新增+大小不一致 的相对路径逐行写到这里（不写=只打印）")
+    dp.set_defaults(func=cmd_diff)
 
     sp = sub.add_parser("sync", help="同步新增文件")
     sp.add_argument("--apply", action="store_true", help="实际下载（默认 dry-run）")

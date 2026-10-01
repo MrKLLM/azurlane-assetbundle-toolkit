@@ -66,13 +66,17 @@ def baseline_targets():
             if is_main(fn):
                 names.add(fn)
     # 2) 旧基线并集（兜底，防源包命名差异导致遗漏）
-    for fn in os.listdir(BASELINE_DIR):
-        if not fn.endswith(".png"):
-            continue
-        base = fn[:-4]
-        if "_dark_shadow" in base or "_face" in base:
-            continue
-        names.add(base)
+    # ⚠️ 这个目录**可以不存在**：产物早从 Paintings_Synthesized 改名叫 Paintings_v2 了，
+    # 而这里一直无条件 listdir ⇒ --full（以及"增量清单缺失"那条路径）会直接
+    # FileNotFoundError 把整个立绘阶段炸掉。源包那半边已经枚举过，缺兜底只是少了并集。
+    if os.path.isdir(BASELINE_DIR):
+        for fn in os.listdir(BASELINE_DIR):
+            if not fn.endswith(".png"):
+                continue
+            base = fn[:-4]
+            if "_dark_shadow" in base or "_face" in base:
+                continue
+            names.add(base)
     return sorted(names)
 
 

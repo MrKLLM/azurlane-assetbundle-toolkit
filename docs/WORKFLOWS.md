@@ -681,7 +681,7 @@
 | `Output/dependency_manifest.json`（~15MB / 86k+ 条） | `compose_paintings_v2`、`extract_spine_v2`（PPtr→包 依赖表） | ✅ 可再生：`export_dependency_manifest.py` |
 | `Output/ship_meta.json` | `build_gallery_index`（元数据主源） | ✅ 可再生：`build_ship_meta.py --write` |
 | `Output/WikiData/ship_data.json` | `build_gallery_index` 兜底 | ✅ 可再生：`scrape_wiki_fast.py`（需外网） |
-| `Output/Paintings_v2`、`Spine_v2`、`Live2D`、`CG_v2`、`Audio`、`gallery_v2/` | 画廊 | ✅ 全量可再生，但**耗时数十小时**，故按 WF-15 增量而非全量 |
+| `Output/Paintings_v2`、`Spine_v2`、`Live2D`、`CG_v2`、`Audio`、`gallery_v2/` | 画廊 | ✅ 全量可再生。**耗时按 2026-10-01 实测外推：立绘 4488 张 ≈ 1.5 小时（1.25 秒/张）、Spine 269 个 ≈ 8 分钟、CG 231 张 ≈ 5 分钟、Live2D ≈ 30 分钟、音频全量 ≈ 75 分钟 ⇒ 一把梭全量 4~6 小时，共约 41GB 写入**（旧版这里写的"数十小时"是老 AssetStudio 时代的数，已纠正）。正因为它不再是"跑不起"，**才更要把范围收窄成增量**——见步骤 5 与 §71 |
 | `Output/gallery_v2/vendor/`（4 个第三方 JS，1.3MB） | 画廊 Live2D/Spine 标签的运行时 | ✅ 可再生（2026-09-26 起）：台账 `gallery_src/vendor/MANIFEST.json`（版本+字节+sha256+来源）+ `py -3 scripts/fetch_gallery_vendor.py`。**库本体不入库**（含 Live2D 专有许可的 Redistributable Code）。⚠️ 唯 `spine/spine-all.js`(3.8.75) 无可按哈希校验的下载源（本机这份与上游官方构建不同），只能从 `tools/spine-viewer/spine-runtime/` 取——**它也在 gitignore，别清** |
 | `gallery_src/` 4 个前端正本 ↔ `Output/gallery_v2/` 同名 4 文件 | 画廊前端 | ✅ 同一份数据两个路径名（硬链，2026-09-26 起 4/4）。断链探测器：`py -3 scripts/deploy_gallery.py --check` |
 
@@ -695,7 +695,15 @@
 2. **同步源包**：`mumu_sync.py sync`（或 `mumu_adb.py pull`）落到 `files/AssetBundles/`。
 3. **重生成官方依赖表**（**最容易漏的一步**）：`python scripts/export_dependency_manifest.py --out Output/dependency_manifest.json`。不重生成 → 新包的 PPtr/externals 解析不到 → 新皮肤合成失败或层级缺失。
 4. **Unity 版本伪装**：新包 header 可能仍伪装 `5.x.x`。若加载报错，更新脚本里的 `UnityPy.config.FALLBACK_UNITY_VERSION`（当前 `2022.3.62f3`）为游戏实际引擎版本。
-5. **定位受影响子集**（不要全量重跑）：按新增/变更包所在顶层目录（`painting` / `paintingface` / `spine` / `live2d` / `bg`…）映射到磁盘 stem 集合，写进 `.diag/affected.txt`。
+5. **定位受影响子集**（不要全量重跑）：2026-10-01 起这一步是**自动的**——`update_pipeline.py` 的
+   `pull` 阶段跑 `mumu_sync.py diff --list-out` 把「新增+大小不一致」的相对路径落成
+   `.diag/pipeline/affected.txt`，并盖上**当前输入指纹**（`affected.meta`，两份必须一起写）。
+   各导出阶段再按自己的域过滤成 stem（`stems_for(top,…)`，"是不是主皮肤"由**磁盘上有没有那个
+   不带后缀的主包**裁判，后缀表只当预筛——`_bj1` 躲得过 `_bj`，见 §71）。
+   ⚠️ **清单缺失/过期一律判红停下，不会退化成全量**：曾经 `None` 一个值同时表示"没范围"和
+   "全范围"，于是"增量"静默等于全库重跑。手动路径依然可用：自己写 `affected.txt` 时**必须同时**
+   写一份 `affected.meta`（`{"fingerprint": "<update_pipeline.fingerprint()>", "at": …}`），
+   只写清单没有配套指纹 = 会被判过期。
 6. **元数据是否也要跟新**：若社区 azdata 快照已更新到新版本 → 重跑 `build_ship_meta.py --write`；若没更新（如 385 时社区仍 381）→ 新皮肤的名字/阵营会缺，按 §6 待办 7 的决策处理（标「待补」，不要瞎猜）。
 7. **定向重跑到临时目录**：`python scripts/compose_paintings_v2.py <stems> --out .diag/rerun`（Spine 用 `extract_spine_v2.py`，Live2D 用 `reconstruct_live2d.py`+`extract_motions.py --out .diag/<临时目录>`，全屏 CG 用 `python scripts/diag/run_cg_export.py --only a,b,c`）。
    > ⚠️ **脱离宿主进程跑的长任务里，"写到哪"必须走 argv（`--out`），不能只靠环境变量**：`Start-Process` 下
@@ -722,6 +730,27 @@
 `name_via=npc_table:*` 的「皮肤标题→秘书舰实体名」，以及 **方向性判据 `base_fix`**——
 该组 stats 选行从「`skin_id` ≠ 组内基皮肤」换成「`skin_id` == 基皮肤」且新行 `name` 等于成品 `cn`
 （用来吃掉配置表里的脏行，见 §56；**反向改动仍判红**）；② 条目集合不得增减；③ 换档只允许落在白名单新档；④ 无源数等于期望。另附**第三方裁判**（只打印不判红）：改名条目拿 `Output/WikiData/ship_data.json` 的维基名表投票，看有没有"只有旧值命中"的反例。口径见 `TROUBLESHOOTING.md` §39。
+
+#### 资源占用 / 进度可见性 / 签字门（2026-10-01 实测，回答"跑一次要多少 G、要多久、前台看得到吗"）
+- **占用**：13 个阶段**全串行**，阶段内部也是 for 循环一批一批 spawn ⇒ 同一时刻只有 1 个子进程。
+  按进程树采峰值 WorkingSet（`py -3 scripts/diag/peak_mem.py --tag x -- <命令>`，
+  先用已知 400MB 分配自测过准头）：立绘 50 包一批 **0.63GB/17s**、8 个真主皮肤 **0.64GB/13s**、
+  Spine 3 个 **0.50GB/5s**、依赖表只是一份 91643 条的 dict（落盘 15.6MB）。
+  ⇒ **整条线稳态 ≈ 0.7GB**；这台机 15.4GB 里真正的大头是同时开着的 IDE/浏览器（实测只剩 2~3.5GB）
+  和 CG 那步的 headless Chrome 树。**"一次一个重活"防的是 jobs=3 并跑 + 漏 Chrome，不是防这条线+模拟器。**
+- **和 MuMu 共存**：只有第 1 步（diff / 拉包）要模拟器，且它是 adb 文件比对与拷贝（IO 型、几乎不吃内存）；
+  其余 12 个阶段全是本地文件活。⇒ 顺序是「开模拟器 → 跑 detect → 签字拉包 → **关模拟器** → 跑导出」，
+  不存在"必须同时开着"的冲突。
+- **进度**：`run()` 必须**边跑边把子进程输出转给自己的 stdout**（两条流各一线程读，`echo` 命中必转、
+  其余按 2.5s 限速并计"抑制 N 行"），否则面板在依赖表那 43 分钟里一个字都不动，看着就是死掉。
+  `PYTHONUNBUFFERED=1` 救不了这件事——不是缓冲，是 `capture_output=True` 本来就要等进程结束。
+- **超时**：走 `taskkill /T /F` 杀整棵树后再抛 `TimeoutExpired` 让阶段判红（§50 那个形状）。
+- **签字门**：`live` 档未签字时**不得起任何会写 `Output/` 的子进程**，只跑只读审计，并在结论里保留
+  `未签字，请 --approve`（前端 `statusOf()` 按这个正则认状态）。`audio`/`cg` 没有暂存通道，
+  所以它们的门比别的阶段更要紧。
+- **判据**：`py -3 scripts/diag/test_pipeline_gating.py` 必须 `[PASS]`（40 条）。它不看文案看**行动**——
+  只断言"有没有 spawn 那个会覆写正式区的子进程"，因为提示文字会改、会不会去写盘不会说谎。
+  ⚠️ 别用 `py … | tail` 判它的退出码（`$?` 量的是 tail）：先 `>log 2>&1; E=$?`。
 
 #### 关键决策
 - **增量而非全量**：全量重跑 4486 张立绘会打乱已人工确认正确的结果，且无法逐张复核。
