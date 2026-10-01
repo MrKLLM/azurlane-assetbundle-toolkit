@@ -476,6 +476,43 @@ def main():
     ndot = pg.ev(EV("return document.querySelectorAll('.snode .dot').length"))
     chk('13 个阶段在四步里全覆盖（一个都没被折叠掉）', ndot == 13, f'{ndot} 个状态点')
 
+    # ★ 「这次新增了什么」（用户："我怎么知道这次新增了什么、是否合格"）
+    #   判据落在"每行都给得出可核对的事实"上，不落在有没有一张表上。
+    nw = pg.ev(EV("""const t=document.querySelector('#newtbl');
+        const rows=[...document.querySelectorAll('#newtbl tbody tr')];
+        return {has:!!t, n:rows.length,
+                sum:(document.querySelector('#newsum')||{}).textContent||'',
+                head:rows.length?[...rows[0].cells].map(c=>c.textContent.trim()):[],
+                everyShip:rows.every(r=>r.cells.length>=5),
+                states:rows.map(r=>r.cells[4].textContent.trim()),
+                voice:rows.map(r=>r.cells[3].textContent.trim()),
+                ships:rows.map(r=>r.cells[1].textContent.trim()),
+                api:((window.__probe.state().news)||{}).rows?.length ?? null};"""))
+    srv = (S.get('news') or {}).get('rows') or []
+    chk('抽屉里有「这次新增了什么」，行数与服务端算出来的一致（不是前端自己数的）',
+        bool(nw and nw.get('has')) and nw.get('n') == len(srv) == nw.get('api'),
+        f'DOM {nw.get("n")} · 服务端 {len(srv)} · 回读 {nw.get("api")}')
+    if srv:
+        chk('汇总行报出 新增 / 已在正式区 / 待换入 三个数',
+            all(x in (nw.get('sum') or '') for x in ('新增', '已在正式区', '待换入')), nw.get('sum'))
+        chk('每行都有 皮肤 / 舰名·阵营 / 稀有度 / 语音 / 状态 五列',
+            nw.get('everyShip') and len(nw.get('head') or []) == 5, str(nw.get('head')))
+        chk('状态列只会是 已换入 / 待换入（不许出现"看起来成功"这类模糊词）',
+            set(nw.get('states') or []) <= {'已换入', '待换入'}, str(nw.get('states')[:6]))
+        chk('语音列给的是条数或明确的"无"（不是空格，空格会被读成"没查"）',
+            all(v and (v.endswith('条') or v == '无') for v in (nw.get('voice') or [])),
+            str(nw.get('voice')[:6]))
+        # 反向对照：**逐行**比服务端给的舰名与 DOM 里的舰名，防"表有行但内容是空的"
+        ships = nw.get('ships') or []
+        bad_rows = [(r['stem'], r.get('ship'), ships[i] if i < len(ships) else None)
+                    for i, r in enumerate(srv)
+                    if r.get('ship') and r['ship'] not in (ships[i] if i < len(ships) else '')]
+        chk('每一行的舰名都来自服务端 meta（逐行比对，不是"整坨里找得到"）',
+            not bad_rows, str(bad_rows[:3]))
+        chk('有 meta 的行数 = 服务端说有 meta 的行数（防前端把缺元数据的行糊成正常）',
+            sum(1 for x in ships if '元数据缺' in x) == sum(1 for r in srv if not r.get('meta')),
+            f'DOM 缺 {sum(1 for x in ships if "元数据缺" in x)} · 服务端缺 {sum(1 for r in srv if not r.get("meta"))}')
+
     total = 0
     for n in sorted(int(k) for k in steps):
         pg.ev(EV(f'step={n}; render(); return 1'))

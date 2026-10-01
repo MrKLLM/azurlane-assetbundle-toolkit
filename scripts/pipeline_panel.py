@@ -528,6 +528,7 @@ class H(BaseHTTPRequestHandler):
                 # 最近一次**已结束**的任务用了多久：进度台按契约跑完就收起（静止帧判据），
                 # 所以"这轮跑了多久 / 停在哪"要由主屏那句话带出来。
                 'last': _last_run(),
+                'news': newsafe(),
                 # 一次 /api/state 只算**一遍**输入指纹（walk 9 万多个源包），往下传。
                 # 以前各处各算，实测冷缓存那一拍要 5.8 秒 —— 前端轮询超时，看着就是进度不动。
                 'fingerprint': (fp := fingerprint_safe()),
@@ -604,6 +605,41 @@ class H(BaseHTTPRequestHandler):
         return self._send(200, {'id': rid})
 
 
+def newsafe():
+    """这次更新**新增**了哪些皮肤（正式区之前没有的）+ 它们现在在不在、有没有语音、叫什么名。
+
+    数据源是 review 落的 `new_paintings.txt` —— 没有"线上新增"这一档，就没有这个板块可言
+    （§79 的根因正是它曾被并进"与线上不同"里，结果永远是 0）。
+    """
+    def calc():
+        out = os.path.join(ROOT, 'Output')          # 面板侧没有 OUT，别照搬流水线那套名字
+        lst = os.path.join(WORK, 'new_paintings.txt')
+        if not os.path.isfile(lst):
+            return {'rows': [], 'note': '还没跑过第 3 步的对照表 —— 它才算得出"哪些是新增"'}
+        names = [x.strip() for x in open(lst, encoding='utf-8') if x.strip()]
+        try:
+            meta = json.load(open(os.path.join(out, 'ship_meta.json'), encoding='utf-8'))
+        except Exception:
+            meta = {}
+        try:
+            voice = json.load(open(os.path.join(out, 'gallery_v2', 'skin_voice.json'), encoding='utf-8'))
+        except Exception:
+            voice = {}
+        rows = []
+        for s in names:
+            m = meta.get(s) or {}
+            v = voice.get(s) or {}
+            rows.append({'stem': s, 'ship': m.get('cn') or '', 'skin': m.get('skin_name') or '',
+                         'faction': m.get('faction') or '', 'rarity': m.get('rarity') or '',
+                         'voice': len(v.get('lines') or []), 'meta': bool(m),
+                         'live': os.path.isfile(os.path.join(out, 'Paintings_v2', s + '.png'))})
+        return {'rows': rows,
+                'live_n': sum(1 for r in rows if r['live']),
+                'sheet': ('sheet_paintings.png'
+                          if os.path.isfile(os.path.join(WORK, 'sheet_paintings.png')) else '')}
+    return _cached('news', 45.0, calc)
+
+
 def glob_sheets():
     import glob
     return glob.glob(os.path.join(WORK, '*.png')) + glob.glob(os.path.join(WORK, '*.jpg'))
@@ -612,7 +648,7 @@ def glob_sheets():
 # 输入指纹要 os.walk 整个 files/AssetBundles（91,643 个文件，实测数秒）。
 # 前端每 8s 轮询一次 /api/state，不缓存的话每次轮询都白扫一遍盘，首屏还会空着十几秒像死掉。
 _CACHE = {'fp': [None, 0.0], 'scope': [None, 0.0], 'means': [None, 0.0], 'units': [None, 0.0],
-           'scopetag': [None, 0.0]}
+           'scopetag': [None, 0.0], 'news': [None, 0.0]}
 
 
 def _cached(slot, ttl, fn):
@@ -1059,6 +1095,15 @@ body.legacy .signbox.on{box-shadow:0 0 16px -6px rgba(242,189,114,.75)}
 .kbd b{color:var(--brand-hi);font-weight:600}
 
 /* ══ 对照图：必须坐在完全不透明的底上 ═════════════════════════════════ */
+/* 「这次新增了什么」那张表：数据密度优先，不挂装饰 */
+.newt{width:100%;border-collapse:collapse;font:12px/1.5 var(--fb)}
+.newt th{text-align:left;font:500 11px/1 var(--fb);letter-spacing:.02em;color:var(--dim);
+  text-transform:none;padding:0 8px 6px 0;border-bottom:1px solid var(--line)}
+.newt td{padding:5px 8px 5px 0;border-bottom:1px solid var(--line);color:var(--txt2);
+  vertical-align:top}
+.newt tr:last-child td{border-bottom:0}
+.newt code{font:11.5px/1 var(--fm);color:var(--txt)}
+.newt .warn{color:var(--await)}
 .sheets{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px,1fr));gap:10px}
 .sheets a{display:block;border:1px solid var(--line);border-radius:var(--r-ctl);overflow:hidden;
   background:var(--abyss);text-decoration:none;color:inherit;
@@ -1242,6 +1287,10 @@ input,textarea{cursor:text}
       <div class="pane">
         <div class="ph">阶段 <span id="sCount" class="dim" style="font-size:11px"></span></div>
         <div class="g" id="cards"></div>
+      </div>
+      <div class="pane" id="newpane">
+        <div class="ph">这次新增了什么 <span class="gnote" id="newsum"></span></div>
+        <div id="newtbl"></div>
       </div>
       <div class="pane">
         <div class="ph">改前 | 改后 对照表</div>
@@ -2261,6 +2310,28 @@ function render(){
   else sh.innerHTML=S.sheets.map(x=>'<a target="_blank" href="/file?path='+encodeURIComponent(x.name)+
     '"><img loading="lazy" src="/file?path='+encodeURIComponent(x.name)+'" alt="'+esc(x.name)+
     '"><div class="cap"><span>'+esc(x.name)+'</span><span>'+x.kb+'KB '+esc(x.mt)+'</span></div></a>').join('');
+
+  /* ── 这次新增了什么（用户："我怎么知道这次新增了什么、是否合格"）────────────
+     每行给"够不合格判断"的四件事：叫什么、属于哪艘船、有没有语音、进正式区了没。
+     图不重复贴 —— 点表头那个链接看对照总表（图片路由仍只从 .diag/pipeline 出）。 */
+  const nw=S.news||{rows:[]}, nt=$('#newtbl'), ns=$('#newsum');
+  if(ns) ns.textContent = nw.rows.length
+      ? ('新增 '+nw.rows.length+' 张 · 已在正式区 '+nw.live_n+' · 待换入 '+(nw.rows.length-nw.live_n))
+      : '';
+  if(!nt) { /* 节点没插进来就是接线断了，宁可哑掉也不留半截表 */ }
+  else if(!nw.rows.length) nt.innerHTML='<p class="dim" style="font-size:12px;margin:0">'+
+      esc(nw.note||'这次更新没有新增皮肤（或还没跑第 3 步的对照表）')+'</p>';
+  else nt.innerHTML='<table class="newt"><thead><tr><th>皮肤</th><th>舰名 / 阵营</th>'+
+      '<th>稀有度</th><th>语音</th><th>状态</th></tr></thead><tbody>'+nw.rows.map(r=>
+      '<tr><td><code>'+esc(r.stem)+'</code>'+(r.skin?'<span class="dim"> · '+esc(r.skin)+'</span>':'')+
+      '</td><td>'+(r.meta?esc(r.ship)+' <span class="dim">'+esc(r.faction)+'</span>'
+                         :'<span class="warn">元数据缺（舰名取不到）</span>')+
+      '</td><td>'+esc(r.rarity||'—')+'</td><td>'+(r.voice?r.voice+' 条':'<span class="warn">无</span>')+
+      '</td><td>'+(r.live?'<span class="tag pass">已换入</span>'
+                         :'<span class="tag await">待换入</span>')+'</td></tr>').join('')+
+      '</tbody></table>'+(nw.sheet?'<p class="dim" style="font-size:11.5px;margin:6px 0 0">'+
+      '<a class="link2" target="_blank" href="/file?path='+encodeURIComponent(nw.sheet)+
+      '">改前 | 改后 对照总表（新增的左侧标"线上没有这张"）</a></p>':'');
 
   $('#runs').innerHTML=(S.runs||[]).map(rr=>'<tr><td class="dim" style="white-space:nowrap">'+
     esc((rr.started||'').slice(11))+'</td><td>'+esc(rr.label||'')+

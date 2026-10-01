@@ -174,7 +174,7 @@ def scan_hardlinks(paths):
 # ---------------------------------------------------------------- 阶段定义
 class Stage:
     def __init__(self, key, title, tier, fn, judge_desc, produces=None, needs=None,
-                 step=0, writes='', rate=0.0, unit='', est=0.0):
+                 step=0, writes='', rate=0.0, unit='', est=0.0, check=False):
         self.key, self.title, self.tier, self.fn = key, title, tier, fn
         self.judge_desc, self.produces, self.needs = judge_desc, produces or [], needs or []
         self.step, self.writes = step, writes
@@ -182,6 +182,8 @@ class Stage:
         #   rate/unit —— 按本次范围线性估算（秒/单位），范围越大越久的那类阶段
         #   est       —— 与范围基本无关的固定耗时（实测秒数）
         self.rate, self.unit, self.est = rate, unit, est
+        # check=True ⇒ 这一步是**验收**，不是生产：结果一律不缓存
+        self.check = check
 
     @property
     def live(self):
@@ -858,7 +860,7 @@ STAGES = [
           step=4, writes='Output/gallery_v2'),
     Stage('regress', 'WF-16 回归（跳全库 hit_verify）', 'staged', lambda a, f: st_regress(a),
           '串行 runner 退出码',
-          step=4, writes='不改产物'),
+          step=4, writes='不改产物', check=True),
 ]
 
 
@@ -957,7 +959,10 @@ def main():
     for i, s in enumerate(plan, 1):
         # read 档**永不缓存**：preflight / review 这类安全检查缓存下来 = 从此不再检查，
         # 正是本项目最怕的静默失效。要重跑 staged 档用 --force。
-        cacheable = s.tier == 'staged' and 'force' not in flags
+        # 验收类阶段**永不缓存**：它缓存下来 = 换入之后不再复查，报的还是上一轮的绿。
+        # （2026-10-01 实测：swap-in 换入 12 张后 regress 被 `done` 缓存跳过，
+        #  范围章与指纹章都没变——变的是**正式区内容**，而那正是 regress 要验的东西。）
+        cacheable = s.tier == 'staged' and 'force' not in flags and not s.check
         # 跳过缓存也必须认**范围清单的身份**：清单换过（被冲空又复原也算），上一批记的
         # "paintings 已完成"就是假的 —— 那会让这一次真的跳过 179 张不重导。
         d0 = st['done'].get(s.key, {})

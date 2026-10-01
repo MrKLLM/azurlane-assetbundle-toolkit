@@ -54,7 +54,14 @@ def main():
     snap = {f: (os.stat(os.path.join(DIR, f)).st_mtime_ns, os.stat(os.path.join(DIR, f)).st_nlink)
             for f in allf}
 
-    hard = [n for n in names if os.stat(os.path.join(DIR, f'{n}.png')).st_nlink != 1]
+    # 「线上新增」的目标此刻**根本不存在** —— 早先对每个名字无条件 os.stat，
+    # 换入 12 张新皮肤时直接抛 FileNotFoundError（§79 那层根因往下露出来的第二层）
+    new_targets = [n for n in names if not os.path.isfile(os.path.join(DIR, f'{n}.png'))]
+    existing = [n for n in names if n not in new_targets]
+    hard = [n for n in existing if os.stat(os.path.join(DIR, f'{n}.png')).st_nlink != 1]
+    if new_targets:
+        print(f'· 其中线上新增 {len(new_targets)} 张（正式区原本没有，无需备份、没有硬链风险）')
+
     if hard and not a.break_hardlink:
         print(f'✗ 这些目标是硬链（nlink>1），拒绝覆盖: {hard}\n'
               f'  硬链是历史去重留下的（同内容共享 inode）。若本次重渲让它们**彼此不再相同**，\n'
@@ -89,13 +96,16 @@ def main():
         b = os.path.join(bak, f'{n}.png')
         if os.path.isfile(b):
             print(f'  ! 备份已存在，跳过备份步骤: {b}')
+        elif not os.path.isfile(d):
+            pass                       # 线上新增：没有旧文件可备份
         else:
             shutil.copy2(d, b)
             if md5(b) != md5(d):
                 bad.append((n, '备份 md5 不符'))
                 continue
-        if os.stat(d).st_nlink != 1:
+        if os.path.isfile(d) and os.stat(d).st_nlink != 1:
             os.remove(d)              # 断开这一个名字，别顺 inode 串改共享者
+
         shutil.copyfile(s, d)
         if md5(d) != md5(s):
             bad.append((n, '换入后 md5 不符'))
