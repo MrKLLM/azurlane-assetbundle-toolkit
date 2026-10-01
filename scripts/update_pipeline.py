@@ -709,23 +709,38 @@ def st_cg(full, approved):
 # ---------------------------------------------------------- 6 review（出对照，不写正式）
 def st_review():
     lines = []
-    chg = []
+    chg, new_only, todo = [], [], []
     p_new = os.path.join(WORK, 'Paintings_v2')
     live_p = os.path.join(OUT, 'Paintings_v2')
     if os.path.isdir(p_new) and os.path.isdir(live_p):
         news = [os.path.basename(x)[:-4] for x in glob.glob(os.path.join(p_new, '*.png'))]
-        chg = [s for s in news
-               if os.path.isfile(os.path.join(live_p, s + '.png'))
-               and hashlib.md5(open(os.path.join(p_new, s + '.png'), 'rb').read()).digest()
-               != hashlib.md5(open(os.path.join(live_p, s + '.png'), 'rb').read()).digest()]
+        same_n = 0
+        for s in news:
+            sp, lp = os.path.join(p_new, s + '.png'), os.path.join(live_p, s + '.png')
+            if not os.path.isfile(lp):
+                new_only.append(s)          # 线上根本没有 = 必须换入的新皮肤
+                continue
+            if hashlib.md5(open(sp, 'rb').read()).digest() != hashlib.md5(open(lp, 'rb').read()).digest():
+                chg.append(s)
+            else:
+                same_n += 1
+        # ⚠️ 换入清单以前只收"线上已有且内容不同"的 ⇒ 新增皮肤永远进不了清单：
+        # review 报「与线上不同 0 张」、swap-in 报「清单为空」，用户跑完更新却什么都没有。
+        todo = sorted(set(new_only) | set(chg))
         open(os.path.join(WORK, 'changed_paintings.txt'), 'w', encoding='utf-8') \
-            .write('\n'.join(chg))
-        lines.append(f'立绘：临时区 {len(news)} 张，其中与线上不同 {len(chg)} 张')
-        if chg:
+            .write('\n'.join(todo))
+        open(os.path.join(WORK, 'new_paintings.txt'), 'w', encoding='utf-8') \
+            .write('\n'.join(sorted(new_only)))
+        lines.append(f'立绘：临时区 {len(news)} 张 · 线上新增 {len(new_only)} · 内容有变 {len(chg)}'
+                     f' · 逐字节相同 {same_n}')
+        if todo:
             run([PY, 'scripts/diag/make_pair_sheet.py', '--old', live_p, '--new', p_new,
-                 '--names', ','.join(chg[:12]), '--out', os.path.join(WORK, 'sheet_paintings.png'),
-                 '--cell', '260'], timeout=1800)
-    hl = scan_hardlinks([os.path.join(live_p, s + '.png') for s in (chg if chg else [])])
+                 '--names', ','.join(todo[:12]), '--out', os.path.join(WORK, 'sheet_paintings.png'),
+                 '--cell', '260'], timeout=1800, echo=['成对', '已写出', '线上没有'])
+    else:
+        lines.append(f'立绘：暂存区/正式区缺一侧（暂存 {os.path.isdir(p_new)} · 正式 {os.path.isdir(live_p)}）'
+                     f'⇒ 先跑第 2 步的重导')
+    hl = scan_hardlinks([os.path.join(live_p, s + '.png') for s in todo])
     lines.append(f'⚠️ 硬链待断 {len(hl)} 个（不断则"写一个变两个"，见 §64）')
     open(os.path.join(WORK, 'hardlinks.txt'), 'w', encoding='utf-8').write('\n'.join(hl))
     return verdict('review', True, ' | '.join(lines))

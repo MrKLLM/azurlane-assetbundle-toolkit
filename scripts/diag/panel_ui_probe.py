@@ -329,7 +329,18 @@ def main():
                          '拿同一个端口既取 /json 又连 WS，结果永远 "no CDP tab"）')
     ap.add_argument('--win', default='1440,900')
     a = ap.parse_args()
+    # 先验页面 JS 能不能解析：一个 `continue` 写进 forEach 回调就会让**整页脚本不执行**，
+    # 那时本探针只会报一句看不懂的 `AttributeError: 'str' object has no attribute 'get'`
+    # （`pg.ev` 把 JS 错误当字符串返回）。宁可在这里就说清。
+    try:
+        import check_page_js
+        if check_page_js.main() != 0:
+            print('页面 JS 语法不过 —— 先修它，再跑探针（否则红的全是假象）')
+            return 2
+    except Exception as e:
+        print(f'[警告] 页面 JS 预检没跑成：{type(e).__name__}: {e}')
     cdp = a.cdp or a.port + 100
+
     win = [int(x) for x in a.win.split(',')]
     os.makedirs(OUT, exist_ok=True)
     url = f'http://127.0.0.1:{a.port}/'
@@ -393,7 +404,10 @@ def main():
             str(len(a4['idle'])) in a4['ask'] and any(k in a4['why'] for k in a4['idle']),
             f"ask=「{a4['ask'][:30]}」 why=「{a4['why'][:46]}」")
     else:
-        chk('13 档全有结论时第 4 步才允许宣布换完', '换完了' in (a4 or {}).get('ask', ''), str(a4))
+        # 13 档都有结论了：可以是「等你签字」也可以是「换完了」，但**不许**再报"根本没跑"
+        chk('13 档都有结论时不再报「有 N 项这轮根本没跑」',
+            '这轮根本没跑' not in (a4 or {}).get('ask', ''), str(a4)[:110])
+
     # ★ 勾选的签字必须真的能到达流水线：2026-10-01 用户勾完按主按钮，发出去的 approve 是空的
     #   （主按钮以前根本不读那些框）。这条判据直接看**请求体**，不看界面像不像。
     signpost = pg.ev(EV("""
@@ -1046,8 +1060,17 @@ def main():
             return _f(u,o); };
           try{ await __probe.api(); } finally { window.fetch=_f; }
           const g=document.querySelector('#gauge');
+          const rl=document.querySelector('#runline');
+          const nodes={};
+          document.querySelectorAll('.snode').forEach(nd=>{
+            const f=nd.querySelector('.sfill i');
+            nodes[nd.dataset.step]={run:nd.classList.contains('run'),
+                                    w:f?f.style.width:null,
+                                    done:nd.dataset.done,total:nd.dataset.total};});
           return {on:g.classList.contains('on'), disp:getComputedStyle(g).display,
                   txt:g.textContent,
+                  rl_on:rl.classList.contains('on'), rl_disp:getComputedStyle(rl).display,
+                  rl_tx:rl.textContent, nodes:nodes,
                   fill:(g.querySelector('#gFill')||{}).style?g.querySelector('#gFill').style.width:null,
                   stage:(g.querySelector('.gst')||{}).textContent||null,
                   el:(g.querySelector('#gEl')||{}).textContent||null,
@@ -1091,6 +1114,42 @@ def main():
     chk('收工后进度台收干净（不占位、不留文字）',
         bool(off2 and not off2.get('on') and off2['disp'] == 'none'
              and (off2.get('txt') or '').strip() == ''), str(off2))
+
+    # ★ 四步主页那条"运行中 + 每步自己的进度条"（用户："这四步主页不能加个运行中和进度条吗"）
+    #   必须用**真实存在的阶段名**驱动：注入假名字（export_cue_audio）时"在哪一步"根本对不上，
+    #   测的就不是产品那条路径。
+    rl = drive("{t0:Date.now()/1000-112, mem_mb:724.6, nproc:3,"
+               " stage:'paintings', stage_title:'静态立绘合成 → 临时区',"
+               " done:1, total:7, skipped:0, eta:260, eta_missing:0, eta_n:5, samples:5,"
+               " unit_done:100, unit_total:179}")
+    rl = rl or {}
+    chk('运行中那一行出现，带 阶段 N/M 与本阶段 a/b',
+        rl.get('rl_on') and 'paintings' in (rl.get('rl_tx') or '')
+        and '100/179' in (rl.get('rl_tx') or ''), str(rl)[:110])
+    n2 = (rl.get('nodes') or {}).get('2') or {}
+    chk('正在跑的那一步节点被标成 run（不能靠 verdict——它此刻还没有结论）',
+        n2.get('run') is True, str(rl.get('nodes'))[:110])
+    # 期望宽度 = (该步已完成 + 本阶段内比例)/该步总数；节点自己的 done/total 才是分母
+    try:
+        want = (int(n2.get('done') or 0) + 100.0 / 179) / int(n2.get('total') or 1) * 100
+        got_w = float(str(n2.get('w') or '0').rstrip('%'))
+        ok_w = abs(got_w - want) < 2.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        want = got_w = None
+        ok_w = False
+    chk('该步进度条按「已完成 + 本阶段内比例」推进', ok_w,
+        f'实得 {got_w}% 期望 {want:.1f}%（{n2}）')
+
+    n4 = (rl.get('nodes') or {}).get('4') or {}
+    chk('没在跑的步骤节点不被标 run，条子停在已完成数上',
+        n4.get('run') is False, str(n4))
+    pg.shot('runline_on')    # 留一张：四步主页的"运行中 + 每步进度条"真长什么样（对齐也靠它看）
+    drive("null")
+    off3 = pg.ev(EV("""const r=document.querySelector('#runline');
+        return {on:r.classList.contains('on'), disp:getComputedStyle(r).display,
+                txt:r.textContent.trim()};"""))
+    chk('跑完之后"运行中"那行收干净（静止帧不被它打扰）',
+        bool(off3) and not off3['on'] and off3['disp'] == 'none' and off3['txt'] == '', str(off3))
     pg.ev(EV('window.__probe.go(2); return 1')); quiesce(pg)
 
     chk('全程无 JS 异常', not pg.exc, ' | '.join(pg.exc[:3]))

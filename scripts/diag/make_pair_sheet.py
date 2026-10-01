@@ -66,11 +66,18 @@ def main():
     ident = []
     for n in names:
         po, pn = os.path.join(a.old, n + '.png'), os.path.join(a.new, n + '.png')
-        if not (os.path.isfile(po) and os.path.isfile(pn)):
-            print(f'  ! 缺文件，跳过 {n}')
+        if not os.path.isfile(pn):
+            print(f'  ! 新侧缺文件，跳过 {n}')
+            continue
+        if not os.path.isfile(po):
+            # 「线上新增」也要能出图：以前两侧任一缺失就跳过 ⇒ 新皮肤永远不出现在对照表里，
+            # 而它恰恰是最需要人看的那一类（2026-10-01 用户问"怎么知道新增了什么"的源头）
+            print(f'  · 线上没有这张（新增）: {n}')
+            rows.append((n, None, pn, False))
             continue
         same = os.path.getsize(po) == os.path.getsize(pn) and \
             open(po, 'rb').read() == open(pn, 'rb').read()
+
         if same:
             ident.append(n)
             if a.only_changed:
@@ -85,14 +92,21 @@ def main():
     d = ImageDraw.Draw(sheet)
     for i, (n, po, pn, same) in enumerate(rows):
         y = i * (cell + head)
-        io, inp = load(po, cell), load(pn, cell)
+        io, inp = (None if po is None else load(po, cell)), load(pn, cell)
         for j, im in enumerate((io, inp)):
             x = 8 + j * (cell + 8)
             d.rectangle([x, y + head - 2, x + cell, y + head - 2 + cell], fill=(255, 255, 255))
+            if im is None:      # 新增：左侧画一块明确的"线上没有"占位，不留白当渲染坏了
+                d.rectangle([x + 1, y + head - 1, x + cell - 1, y + head - 2 + cell - 1],
+                            fill=(236, 236, 238))
+                d.text((x + 12, y + head + cell // 2 - 8), '线上没有这张', fill=(90, 90, 96), font=Fs)
+                continue
             sheet.paste(im, (x + (cell - im.width) // 2, y + head + (cell - im.height) // 2), im)
-        pct = 0.0 if same else diff_pct(io, inp, cell)
-        d.text((10, y), f'{n}   {"逐字节相同" if same else f"差异像素≈{pct:.1f}%"}   旧 | 新',
-               fill=(20, 20, 20), font=F)
+        pct = 0.0 if same else (0.0 if io is None else diff_pct(io, inp, cell))
+        tag = ('线上新增' if io is None else
+               ('逐字节相同' if same else f'差异像素≈{pct:.1f}%'))
+        d.text((10, y), f'{n}   {tag}   旧 | 新', fill=(20, 20, 20), font=F)
+
     os.makedirs(os.path.dirname(os.path.abspath(a.out)) or '.', exist_ok=True)
     sheet.save(a.out)
     print(f'已写出 {a.out}  {W}x{H}')

@@ -914,6 +914,21 @@ body.calm #detail .body{transition:none}
 .snode.on label{color:var(--txt)}
 .snode .sdots{display:flex;gap:3px;align-items:center}
 .snode .cnt{font:10.5px/1 var(--fm);color:var(--dim2)}
+/* 每一步自己带一条**会长的进度条**（用户："这四步主页不能加个运行中和进度条吗"）。
+   静止时它是静态的（只有宽度，没有动画），跑起来才由 gaugeTick 推进。 */
+.snode .sfill{display:block;width:72px;height:3px;border-radius:2px;background:var(--line);
+  overflow:hidden;margin-top:3px}
+.snode .sfill i{display:block;height:100%;width:0;background:var(--dim2);border-radius:2px}
+.snode.run .sfill i{background:var(--run);transition:width .45s var(--ez)}
+.snode.done .sfill i{background:var(--pass);width:100%}
+.snode.fail .sfill i{background:var(--fail)}
+.runline{display:none;align-items:center;gap:var(--s3);margin:0 auto;max-width:1060px;
+  width:100%;padding:0 var(--s6);
+  font:11.5px/1 var(--fm);color:var(--dim);font-variant-numeric:tabular-nums}
+.runline.on{display:flex}
+.runline b{color:var(--run);font-weight:600}
+.runline .rl-stage{color:var(--txt2);max-width:30ch;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
 /* 旧版左轨那套（四张大块 + 图例面板）整体退役，只挂在 legacy 下给 V 键对照用 */
 /* ══ 细节抽屉：证据都在这儿 ═══════════════════════════════════════════
    抽屉里的东西**一律不透明**（延续那条用三轮换来的纪律），主屏才允许坐在夜面上。 */
@@ -1201,6 +1216,8 @@ input,textarea{cursor:text}
   <p class="foot" id="scopeNote"></p>
 </main>
 
+<!-- 运行中那一行：阶段 N/M + 现在在跑哪一档 + 已用/剩余（只在真在跑时出现） -->
+<p class="runline" id="runline"></p>
 <!-- 底部：一根会长过去的进度线 + 四个节点，节点上带该步全部阶段的状态方块 -->
 <nav class="steps" id="stepsbar" aria-label="四个步骤">
   <span class="track"><i class="fill" id="stepfill"></i></span>
@@ -1886,6 +1903,28 @@ function gaugeTick(){
   if(u) u.textContent = has ? ('本阶段 '+G.unit_done+' / '+G.unit_total)
                             : (G.stage ? '本阶段无项级进度（该脚本不打 a/b）' : '');
   if(f) f.style.width = (G.total ? Math.min(100, (G.done+frac)/G.total*100) : 0).toFixed(1)+'%';
+  /* 四步主页那条**每一步自己的进度条**：跑起来才推进（含本阶段内比例），
+     没在跑时整行 display:none —— 静止帧逐像素相同的判据不受影响。 */
+  const rl=$('#runline');
+  if(rl){
+    rl.classList.add('on');
+    rl.innerHTML='<b>运行中</b><span class="rl-stage">'+esc(G.stage||'')+
+      (G.stage_title?' · '+esc(G.stage_title):'')+'</span>'+
+      '<span>阶段 <b>'+(G.done||0)+'/'+(G.total||0)+'</b></span>'+
+      (has?'<span>本阶段 <b>'+G.unit_done+'/'+G.unit_total+'</b></span>':'')+
+      '<span>已用 <b>'+fmtDur(now-G.t0)+'</b></span>'+
+      '<span>剩余 <b>'+(G.eta==null?'未知':(G.eta_missing?'≥':'~')+fmtDur(Math.max(0,G.eta-(now-(G.at||now)))))+'</b></span>';
+  }
+  document.querySelectorAll('.snode').forEach(nd=>{
+    const tot=+nd.dataset.total||0, dn=+nd.dataset.done||0, el=nd.querySelector('.sfill i');
+    /* 「正在跑哪一步」不能靠 verdict —— 跑动中的阶段此刻**还没有结论**，
+       statusOf 会算成 idle ⇒ 节点不会是 .run ⇒ 进度条永远不推进。必须由 gauge 来标。 */
+    const here=(S.stages||[]).some(s=>s.key===G.stage && String(s.step)===nd.dataset.step);
+    nd.classList.toggle('run', !!here);
+    if(!el||!tot) return;          // forEach 回调里只能 return，continue 会让整页 JS 解析失败
+    if(here) el.style.width=Math.min(100,(dn+frac)/tot*100).toFixed(1)+'%';
+    else if(!nd.classList.contains('done')) el.style.width=(dn/tot*100).toFixed(1)+'%';
+  });
 }
 function gaugeSet(g){
   const el=$('#gauge'); if(!el) return;
@@ -1894,6 +1933,8 @@ function gaugeSet(g){
   if(g&&g.at==null) g.at=Date.now()/1000;
   G=g;
   if(!g){ el.classList.remove('on'); el.innerHTML=''; GKEY='';
+          const rl=$('#runline'); if(rl){ rl.classList.remove('on'); rl.innerHTML=''; }
+          document.querySelectorAll('.snode.run').forEach(nd=>nd.classList.remove('run'));
           if(GT){ clearInterval(GT); GT=null; } return; }
   /* 骨架只在"结构变了"时重建：每 8 秒 innerHTML 一次会让脉冲重启、条宽从 0 重跑 transition，
      看着就是在闪。数字与宽度交给 gaugeTick 原地改。 */
@@ -2131,13 +2172,18 @@ function render(){
       (worst==='fail'?' fail':worst==='await'?' await':worst==='run'?' run':
        doneN===list.length&&list.length?' done':'');
     if(first) b.style.animationDelay=(n*70)+'ms';
+    b.dataset.step=n; b.dataset.done=doneN; b.dataset.total=list.length;
     b.innerHTML='<span class="bead"></span><label>'+esc(steps[k][0])+'</label>'+
       '<span class="sdots">'+list.map(s=>'<i class="dot '+statusOf(s.key)+'" title="'+esc(s.key)+'"></i>').join('')+'</span>'+
-      '<span class="cnt">'+doneN+'/'+list.length+'</span>';
+      '<span class="cnt">'+doneN+'/'+list.length+'</span>'+
+      '<span class="sfill"><i style="width:'+(list.length?Math.round(doneN/list.length*100):0)+'%"></i></span>';
     b.onclick=()=>{ step=n; render(); };
     bar.appendChild(b);
   });
   stepFill();
+  /* 节点是刚重建出来的 —— "哪一步在跑"这个标记必须**重建之后再打一次**，
+     否则 8 秒轮询会把 gaugeTick 打上的 .run 冲掉（探针实测：进度条永远停在已完成数上）。 */
+  if(G) gaugeTick();
 
   /* ── 主屏 ─────────────────────────────────────────────────────────── */
   const A=askOf(step);

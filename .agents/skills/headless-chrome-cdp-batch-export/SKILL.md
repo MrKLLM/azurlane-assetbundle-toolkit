@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。
-version: 1.6.8
+version: 1.6.9
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -312,6 +312,14 @@ version: 1.6.8
     修法是**先用深色描一道底**再叠亮线。另：光标 hotspot 一律写死成十字交点，写 `0 0` 会让指针与判定点错位一格。
     ⇒ 判据用 `getComputedStyle` 读 hover 前后的 `color`/`backgroundColor` 算对比度，不要靠看图。
 
+32. **一个 `continue` 写进 `forEach` 回调 = 整页脚本不执行**（2026-10-01 实测）。
+    浏览器对语法错误是**整段不跑**：HTML 照常渲染、控件照常显示，但 `render()`/`panelState()`
+    全是 undefined，页面永远停在"正在读数据…"。探针撞上时只会报一句难懂的
+    `AttributeError: 'str' object has no attribute 'get'`（`ev()` 把 JS 错误当字符串返回了）。
+    ⇒ 语法检查要**在探针之前**跑：把内嵌 JS 抽出来 `node --check`（本项目是
+    `scripts/diag/check_page_js.py`，探针入口先调它；没有 node 就明确 SKIP 而不是静默跳过）。
+    同类：给 DOM 打"运行中"这类**瞬时状态标记**时，注意节点会随轮询重建 ⇒
+    重建之后必须重打一次，否则标记被冲掉、界面看着"永远不动"（而数据是对的）。
 31. **探针注入的合成数据，取值域不得与真实数据重叠**（2026-10-01 实测，白查一轮）。
     进度台的单测是"注入一个假 gauge 对象再断言渲染文本"，假数据写成
     `stage:'export_cue_audio', done:3, total:11, elapsed:1:02:05` —— 而**产品里根本没有这些取值**

@@ -3923,3 +3923,50 @@ prune 边界按保守方案。
 **涉及文件**: `scripts/asset_ledger.py`（新）、`scripts/diag/test_asset_ledger.py`（新）、
 `ledger/README.md`（新）、`.gitignore`、`scripts/mumu_sync.py`（`load_pruned`/`split_archived`）、
 `scripts/update_pipeline.py`（`st_swapin` 换入后记溯源）。相关：§74、§77、WF-15。
+
+---
+
+## §79. 「跑完了却什么都没有」的根因：换入清单不收"线上根本没有"的那批（2026-10-01 夜）
+
+**现象**: 用户反复跑第 4 步，每档都绿，但画廊里始终没有新皮肤；他自己问「我怎么知道这次新增了什么、
+是否合格」。重导 179 张之后 review 依旧报「与线上不同 0 张」、swap-in 依旧「清单为空」。
+
+**根因（一行代码）**：`st_review` 算换入清单时要求
+`os.path.isfile(live/<stem>.png)` **才**去比哈希 ⇒ **"线上根本没有"的皮肤被直接排除在清单之外**。
+新皮肤永远进不了 `changed_paintings.txt` ⇒ `swap-in` 永远无事可做 ⇒ 整条更新永远落不了地。
+所有闸门都绿，因为它们各自检查的东西都没错——错的是"要换什么"这个集合的定义。
+
+**修法**：增量比对必须显式分**三类**，而不是"不同 / 其他"两类：
+`线上新增`（正式区没有）· `内容有变`（两侧都有且哈希不同）· `逐字节相同`。
+换入清单 = 前两类之并集；同时另写一份 `new_paintings.txt` 给界面用。
+现在 review 报的是「立绘：临时区 179 张 · 线上新增 12 · 内容有变 0 · 逐字节相同 167」——
+**这次更新真正的新内容是 12 张**（6 艘船 × 本体 + 无背景版），另外 167 张是复原范围时加的保守网，
+重渲后逐字节相同 = 顺带证明了它们没被改坏。
+
+**连带的出图缺陷**：`make_pair_sheet.py` 两侧任一缺失就 `跳过` ⇒ 新皮肤**根本不出现在对照表里**，
+而它恰恰是最需要人看的那一类。现在缺"改前"时画一块明确的占位「线上没有这张」，
+标签也从 `逐字节相同/差异像素` 扩成三态。见 `.diag/pipeline/sheet_paintings.png`。
+
+**四步主页的进度条（用户第四次提"看不出进行到哪"）**，两个非显然的坑：
+1. **"正在跑哪一步"不能靠 verdict**——跑动中的阶段此刻**还没有结论**，`statusOf` 算 idle ⇒
+   节点永远不会是 `.run` ⇒ 那条进度条永远不推进。必须由 gauge 的 `stage` 反查它属于哪一步来标。
+2. 节点每 8 秒随 `render()` **重建**，gaugeTick 打上的 `.run` 会被冲掉 ⇒ 重建之后必须再打一次
+   （`render()` 末尾 `if(G) gaugeTick()`）。
+跑完之后整行 `display:none`，静止帧逐像素相同的判据不受影响（这条判据也配了反向断言）。
+
+**一个 `continue` 让整页 JS 不执行**：把 `if(!el||!tot) continue;` 写进 `forEach` 回调 ⇒
+浏览器**不解析整段脚本**，页面 HTML 还在但 `panelState()` 全是 undefined。
+探针撞上时只报一句看不懂的 `AttributeError: 'str' object has no attribute 'get'`
+（`pg.ev` 把 JS 错误当字符串返回）。⇒ 新增 `scripts/diag/check_page_js.py`（抽出 PAGE 里的 JS 跑
+`node --check`，没有 node 就明确 SKIP），并在**探针入口**先跑它：宁可在这里说清"整页没解析"，
+也不要让后面 90 条判据红成一片假象。
+
+**实测数字**：179 张重渲 **3 分 34 秒**（≈1.2 秒/张，与上午单批实测 1.25 秒/张对得上）；
+渲染期间进程树 **725 MB / 3 个进程**；判据 `panel_ui_probe` 93→**96 条**全绿、
+`test_pipeline_gating` 55 条全绿。
+
+**涉及文件**: `scripts/update_pipeline.py`（`st_review` 三类分档 + 换入清单并集 + `new_paintings.txt`、
+`st_swapin` 台账钩子）、`scripts/diag/make_pair_sheet.py`（缺"改前"画占位、三态标签）、
+`scripts/pipeline_panel.py`（`.runline` + 每步 `.sfill` + verdict 不背这个锅 + 重建后重打标记）、
+`scripts/diag/check_page_js.py`（新）、`scripts/diag/panel_ui_probe.py`（+3 条）。
+相关：§74、§75、§76、§78、WF-15、WF-23。
