@@ -377,6 +377,23 @@ def main():
         asks.append(pg.ev(EV("return document.querySelector('.ask').textContent.trim()")))
     chk('四步各有一句不同的现状（不是一句套话复用四次）',
         len(set(asks)) == 4 and all(len(a) >= 6 for a in asks), ' | '.join(asks))
+
+    # ★ 「这次更新已经换完了」这句必须看**全部 13 档**。2026-10-01 的真事故：用户只跑了
+    #   第 4 步那三档（swap-in / derive / regress），第 2 步的 179 张立绘一张没重导，
+    #   主屏大字却宣布换完 —— 只看本步的绿 = 假绿灯。
+    a4 = pg.ev(EV("""const S=window.__probe.state();
+        const idle=(S.stages||[]).filter(s=>statusOf(s.key)==='idle').map(s=>s.key);
+        window.__probe.go(4);
+        return {idle, ask:document.querySelector('.ask').textContent.trim(),
+                why:document.querySelector('.why').textContent.trim()};"""))
+    if a4 and a4.get('idle'):
+        chk('有阶段没跑过时，第 4 步不许宣布「已经换完了」（假绿灯）',
+            '换完了' not in a4['ask'], f"idle={a4['idle'][:4]} 主屏=「{a4['ask'][:34]}」")
+        chk('这句要报出没跑的**数量**并指名差在哪几档',
+            str(len(a4['idle'])) in a4['ask'] and any(k in a4['why'] for k in a4['idle']),
+            f"ask=「{a4['ask'][:30]}」 why=「{a4['why'][:46]}」")
+    else:
+        chk('13 档全有结论时第 4 步才允许宣布换完', '换完了' in (a4 or {}).get('ask', ''), str(a4))
     pg.ev(EV('window.__probe.go(1); return 1')); time.sleep(0.15)
 
     # ★ 可读性不再靠"给文字蒙一层半透明纱"——实测 alpha .90 仍会被一颗星在字下面顶出

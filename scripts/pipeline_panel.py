@@ -503,8 +503,15 @@ class H(BaseHTTPRequestHandler):
                     # done=跳过缓存（只有暂存判绿档），verdict=上次结论（13 档全记）。
                     # 两个都要，且**指纹不同就一个都不读** —— 拿旧更新包的结论给这次的界面涂绿，
                     # 正是这条流水线最怕的那类假绿灯。
-                    state = dict(raw.get('done', {}))
-                    state.update(raw.get('verdict', {}))
+                    sc_now = scope_stamp_safe()
+                    # done（跳过缓存）同样要认范围章：清单换过之后那条"已完成"就是假的
+                    state = {k: v for k, v in (raw.get('done') or {}).items()
+                             if v.get('scope') == sc_now}
+                    # verdict 还要过第二道章：**范围清单的身份**。清单换过（被冲空又复原也算），
+                    # 上一批跑出来的"本次增量没有立绘源包 ⇒ 跳过"就不是这轮的结论。
+                    for k, v in (raw.get('verdict') or {}).items():
+                        if v.get('scope') == sc_now:
+                            state[k] = v
             except Exception:
                 pass
             sheets = []
@@ -604,7 +611,8 @@ def glob_sheets():
 
 # 输入指纹要 os.walk 整个 files/AssetBundles（91,643 个文件，实测数秒）。
 # 前端每 8s 轮询一次 /api/state，不缓存的话每次轮询都白扫一遍盘，首屏还会空着十几秒像死掉。
-_CACHE = {'fp': [None, 0.0], 'scope': [None, 0.0], 'means': [None, 0.0], 'units': [None, 0.0]}
+_CACHE = {'fp': [None, 0.0], 'scope': [None, 0.0], 'means': [None, 0.0], 'units': [None, 0.0],
+           'scopetag': [None, 0.0]}
 
 
 def _cached(slot, ttl, fn):
@@ -628,6 +636,19 @@ def fingerprint_safe():
             print(f'[警告] 读输入指纹失败：{e}')
             return None
     return _cached('fp', 30.0, calc) or '(读不到：源包目录打不开？)'
+
+
+def scope_stamp_safe():
+    """当前范围清单的身份（与 `update_pipeline.scope_stamp()` 同源）。读不到 ⇒ 'none'。"""
+    def calc():
+        sys.path.insert(0, HERE)
+        try:
+            import update_pipeline as up
+            return up.scope_stamp()
+        except Exception as e:
+            print(f'[警告] 读范围清单身份失败：{e}')
+            return None
+    return _cached('scopetag', 20.0, calc) or 'none'
 
 
 def scope_safe(fp=None):
@@ -2040,16 +2061,35 @@ function askOf(n){
       acts:[{a:'detail',t:'打开对照表',k:'pact mag'},{a:'next',t:'去第 4 步 →',k:'link2'}]};
   }
   const live4=list.filter(s=>s.tier==='live'), aw4=live4.filter(s=>stn(s.key)==='await');
+  /* 「换完了」这句必须看**全部 13 档**，其余几句也要带上"这轮还有哪几档没跑"。
+     2026-10-01 实测的假绿灯：用户只跑了 swap-in/derive/regress（第 4 步），
+     第 2 步的立绘 179 张一张没重导，主屏却大字写「这次更新已经换完了」。 */
+  const all13=S.stages||[], notYet=all13.filter(s=>stn(s.key)==='idle');
+  const whereNot=notYet.map(s=>'第 '+s.step+' 步 '+s.key).join('、');
+  const tail=notYet.length?(' 这轮还有 '+notYet.length+' 项没跑过：'+whereNot+'。'):'';
+  if(notYet.length && !aw4.length && !fail && !live4.some(s=>stn(s.key)==='pass'))
+    return {eb, red:1, ask:'还没换完：有 '+nEm(notYet.length)+' 项这轮根本没跑',
+      why:'没跑过的项不算完成。差在：'+whereNot+'。暂存区里现在这些是上一批留下的，别当成"已重导"。',
+      acts:[{a:'tocheck',t:'▶ 从头跑到待确认',k:'pact mag'},{a:'detail',t:'看是哪几项',k:'link2'}]};
   if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
-    why:'闸门判红说明这次换入会丢东西——别绕，先查源包。',
+    why:'闸门判红说明这次换入会丢东西——别绕，先查源包。'+tail,
     acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},{a:'detail',t:'看日志',k:'link2'}]};
   if(aw4.length) return {eb, ask:nEm(aw4.length)+' 项暂存产物等着换进正式区',
-    why:'换入前整批备份到 Output/_OLD_bak/；索引有零回退闸门，会掉条目就直接停。',
+    why:'换入前整批备份到 Output/_OLD_bak/；索引有零回退闸门，会掉条目就直接停。'+tail,
     acts:[{a:'swap',t:'⚑ 换入正式区',k:'pact sign mag'},{a:'regress',t:'只跑回归',k:'link2'}]};
   if(!live4.some(s=>stn(s.key)==='pass')&&!S.running)
     return {eb, ask:'现在没有待换入的东西',
-      why:'先跑第 2 步（重导）和第 3 步（看图），暂存区里有货了这里才会亮。',
+      why:'先跑第 2 步（重导）和第 3 步（看图），暂存区里有货了这里才会亮。'+
+          (notYet.length?('没跑过的正是：'+whereNot+'。'):''),
       acts:[{a:'prev',t:'← 回第 2 步',k:'pact mag'},{a:'detail',t:'看暂存区有什么',k:'link2'}]};
+  if(notYet.length){
+    const byStep={};
+    notYet.forEach(s=>{ (byStep[s.step]=byStep[s.step]||[]).push(s.key); });
+    const where=Object.keys(byStep).map(n=>'第 '+n+' 步（'+byStep[n].join(' / ')+'）').join('、');
+    return {eb, red:1, ask:'还没换完：有 '+nEm(notYet.length)+' 项这轮根本没跑',
+      why:'没跑过的项不算完成。差在：'+where+'。暂存区里现在这些是上一批留下的，别当成"已重导"。',
+      acts:[{a:'tocheck',t:'▶ 从头跑到待确认',k:'pact mag'},{a:'detail',t:'看是哪几项',k:'link2'}]};
+  }
   return {eb, ask:'这次更新已经换完了', why:'画廊已部署、回归跑过；要再来一轮就从第 1 步开始。',
     acts:[{a:'regress',t:'▶ 只跑回归',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
 }

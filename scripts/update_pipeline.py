@@ -410,6 +410,19 @@ def bundles_of(fp):
     return (fp or '').split(' ')[0]
 
 
+def scope_stamp():
+    """当前范围清单的身份（内容哈希）。清单换了 = 上一批"跳过/无事可做"的结论一律作废。
+
+    只比输入指纹不够：2026-10-01 实测，清单被冲空之后跑出来的 `paintings: 本次增量没有立绘源包
+    ⇒ 跳过` 也记在**同一个输入指纹**下；清单复原之后，界面照搬那条结论就还是绿的。
+    """
+    p = os.path.join(WORK, 'affected.txt')
+    try:
+        return hashlib.md5(open(p, 'rb').read()).hexdigest()[:10]
+    except OSError:
+        return 'none'
+
+
 def scope_state(full, fp=None):
     """这次更新的范围 → (mode, payload)：
 
@@ -892,6 +905,7 @@ def main():
     flags = set(a.approve) | ({'force'} if a.force else set())
     want = {x.strip() for x in a.only.split(',') if x.strip()}
     fp = fingerprint()
+    sc = scope_stamp()      # 结论的第二枚章：范围清单的身份
     st = json.load(open(STATE, encoding='utf-8')) if os.path.isfile(STATE) else {}
     if st.get('fingerprint') != fp:
         log(f'输入指纹变了（{st.get("fingerprint", "无记录")} → {fp}），旧状态作废，全部重判')
@@ -904,7 +918,11 @@ def main():
         # read 档**永不缓存**：preflight / review 这类安全检查缓存下来 = 从此不再检查，
         # 正是本项目最怕的静默失效。要重跑 staged 档用 --force。
         cacheable = s.tier == 'staged' and 'force' not in flags
-        if cacheable and st['done'].get(s.key, {}).get('fingerprint') == fp:
+        # 跳过缓存也必须认**范围清单的身份**：清单换过（被冲空又复原也算），上一批记的
+        # "paintings 已完成"就是假的 —— 那会让这一次真的跳过 179 张不重导。
+        d0 = st['done'].get(s.key, {})
+        # 没盖章的旧条目一律不算这轮的：失效方向必须是"多跑一次"，不能是"少跑一次"。
+        if cacheable and d0.get('fingerprint') == fp and d0.get('scope') == sc:
             log(f'⏭  {s.key} 本指纹下已完成（{st["done"][s.key].get("detail", "")[:60]}），跳过；'
                 f'要重跑请加 --force')
             RESULTS[s.key] = st['done'][s.key]
@@ -925,13 +943,15 @@ def main():
         # ⚠️ 只缓存**判绿**的暂存阶段当"已完成"：把失败也记成已完成，下次跑到这里会被直接跳过，
         #    等于一条永远不再复查的流水线 —— 正是本项目最怕的那类静默失效。
         if RESULTS[s.key]['ok'] and s.tier == 'staged':
-            st['done'][s.key] = dict(RESULTS[s.key], fingerprint=fp)
+            st['done'][s.key] = dict(RESULTS[s.key], fingerprint=fp, scope=sc)
         else:
             st['done'].pop(s.key, None)
         # verdict 是另一件事：**给界面看的"上次结论"**，13 个阶段全都记。
         # 以前只有 done 那 4 个能被界面读到，其余一律显示"未跑"，看着像整条线没跑过。
-        # 它不参与任何跳过判断。
-        st.setdefault('verdict', {})[s.key] = dict(RESULTS[s.key])
+        # 它不参与任何跳过判断。但每条都要盖上"哪批输入 + 哪份范围"两枚章，否则界面会拿
+        # 上一批的绿涂到这一批上（§74 那条假绿灯就是这么来的）。
+        st.setdefault('verdict', {})[s.key] = dict(RESULTS[s.key], fingerprint=fp, scope=sc)
+        st['scope'] = sc
         json.dump(st, open(STATE, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
         if not RESULTS[s.key]['ok']:
             log(f'!! {s.key} 判红 ⇒ 停在这里，不往下跑（红着继续只会把错的换进去）')
