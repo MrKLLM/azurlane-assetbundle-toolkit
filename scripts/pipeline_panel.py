@@ -343,33 +343,35 @@ PAGE = r'''
    两条铁律：
    ① **一个颜色只表示一件事**。颜色只属于「状态」（未跑/判绿/判红/等你签字/在跑），
       阶段档位一律用文字+图标。
-   ② **版面照深色仪表盘的正经做法：中性阶梯 + 发丝线 + 零投影。**
+   ② **深色仪表盘的正经分层法：表面阶梯 + 发丝线 + 零投影。**
       参照物是两个公开设计系统的实测 token（Linear / Raycast），它们的规则里
-      逐条点到了上一版的病：
-        · "Don't use lavender as a section background or card fill" ⇒ 上一版
+      逐条点到了更早那版的病：
+        · "Don't use lavender as a section background or card fill" ⇒ 旧版
           `--pane:#12101f / --card:#181527 / --deep:#150d1f` 全是薰衣草底；
         · "The brand resists drop shadows almost entirely, leaning on tonal lifts
-          and subtle top-edge highlights" ⇒ 上一版每个面板挂 `0 22px 46px -32px`；
+          and subtle top-edge highlights" ⇒ 旧版每个面板挂 `0 22px 46px -32px`；
         · "Don't introduce a second chromatic accent / Don't add atmospheric
-          gradients" ⇒ 上一版紫+品红+青三彩并用，还在每块面板顶边画了一道
+          gradients" ⇒ 旧版紫+品红+青三彩并用，还在每块面板顶边画了一道
           紫→品红的渐变"灯管"。
-      ⇒ 现在：中性五档表面阶梯（只留一丝冷调，不偏紫）、1px 实色发丝线、
-      投影全部换成 `inset` 顶边微高光、**唯一的 chrome 强调色 = 品牌紫**，
-      氛围全部交给背景那片星野（他要的"东京夜"留在这儿，不留在面板上）。
-      五个状态色 idle/pass/fail/await/run **一个都不动**——那是语义不是配色。
-   所有可视量都走变量，于是旧版面整体挂在 `body.legacy` 上，`V` 键当场对照。 */
+      ⇒ 现在：**海军蓝**五档表面阶梯（色相压在 215° 一带，与背景那片夜航星野同源）、
+      1px 实色发丝线、投影全部换成 `inset` 顶边微高光、
+      **唯一的 chrome 强调色 = 蓝白**（`--brand`），氛围只交给背景的星野。
+      五个状态色 idle/pass/fail/await/run **一个都不动**——那是语义不是配色，
+      探针逐条比它们的计算 rgb，改一个字都算红。
+   所有可视量都走变量，于是更早那套薰衣草版面整体挂在 `body.legacy` 上，
+   `V` 键当场对照。 */
 :root{
-  /* 表面阶梯（Linear 是 #010102→#0f1011→#141516→#18191a；这里同构、偏冷不偏紫） */
-  --abyss:#07080b; --deep:#0b0c10; --pane:#101116; --card:#15161b; --raise:#1b1d23;
-  --head:#0c0d11;
-  /* 发丝线：实色、1px、三档，不用 rgba 紫 */
-  --line:#24262c; --line2:#33363e; --line3:#454954;
-  /* 文字坡：中性冷灰，不用薰衣草白 */
-  --txt:#f1f2f4; --txt2:#c9cdd4; --dim:#9096a0; --dim2:#666b75;
+  /* 表面阶梯（同构 Linear 的 5 档，色相压到 215° 的海军蓝，不偏紫） */
+  --abyss:#04070d; --deep:#070c15; --pane:#0b1322; --card:#101a2c; --raise:#16243a;
+  --head:#060b14;
+  /* 发丝线：实色、1px、三档，冷蓝灰 */
+  --line:#1a2740; --line2:#26375a; --line3:#3a5382;
+  /* 文字坡：冷灰偏蓝 */
+  --txt:#e9eef8; --txt2:#b3bfd5; --dim:#7b879f; --dim2:#586279;
   --idle:#3f5a6e; --pass:#4fd6a8; --fail:#ff6f6f; --await:#f2bd72; --run:#5fd0e8;
-  --brand:#8b8cf5;          /* 唯一的 chrome 强调色（Linear 的 #5e6ad2 同位） */
-  --brand-hi:#a5a6ff;       /* 它的 hover，不算第二种彩 */
-  --pop:var(--brand);       /* 兼容旧引用：品红退役，一律回落到品牌紫 */
+  --brand:#cfe0ff;          /* 唯一的 chrome 强调色：蓝白（与夜航星野同源） */
+  --brand-hi:#eef4ff;       /* 它的 hover，不算第二种彩 */
+  --pop:var(--brand);       /* 兼容旧引用：品红退役，一律回落到强调色 */
   /* 星点色：按**色温**排（蓝白→白→淡金），不再有糖果粉 */
   --s-1:#eef4ff; --s-2:#dbe6f7; --s-3:#fff2df; --s-4:#ffd9ae;
   --s-link:#9aa4c8;         /* 星座连线：中性冷灰蓝，压到近不可见 */
@@ -384,7 +386,6 @@ PAGE = r'''
   --elev:0 0 0 0 transparent;                 /* 投影一律归零 */
   --edge:inset 0 1px 0 rgba(255,255,255,.045);/* 换成顶边微高光 */
   --tt:none; --ph-ls:.2px;                    /* 小标签不再全大写 + .18em 宽字距 */
-  --glow:.26;                                 /* 背景那三团光的强度 */
   --hero-fs:20px; --hero-ls:-.2px;
 }
 body.legacy{
@@ -399,7 +400,7 @@ body.legacy{
   --elev:0 22px 46px -32px rgba(0,0,0,.92);
   --edge:inset 0 1px 0 rgba(214,200,255,.07);
   --tt:uppercase; --ph-ls:.18em;
-  --glow:.55; --hero-fs:17px; --hero-ls:.04em;
+  --hero-fs:17px; --hero-ls:.04em;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -410,28 +411,32 @@ body{margin:0;font:13px/1.55 var(--fb);color:var(--txt);overflow:hidden;
 ::-webkit-scrollbar-thumb:hover{background:var(--line3)}
 ::-webkit-scrollbar-track{background:transparent}
 
-/* ══ 背景层：东京夜的星野（氛围只留在这里，面板上一个都不给）═══════════
-   三团不动的城市光晕当底（强度走 `--glow`，新版面压到 .26），星点画在一张 2D 画布上：
-   鼠标划过 ⇒ 星点显影；停手 ⇒ 能量归零后**写回 home 再画一帧**。
-   最后那一句是关键：它保证"亮过又淡掉"的终点和初始帧**逐像素相同**。 */
+/* ══ 背景层：夜航星野（氛围只留在这里，面板上一个都不给）═══════════════
+   上一版是"东京夜"：三团不动的城市光晕（橙/紫/青）当底 + 显影式星点（划过才亮、
+   520ms 淡净、静止时全黑）。那三团光晕是**第二、第三、第四个彩**，正是"AI 味"
+   的来源；显影式星点则让天在 99% 的时间里等于不存在。
+   ⇒ 现在：光晕全删，换成**底边一条极淡的地平线雾**（给"夜"一个落脚点，静态）；
+   星点改成**常驻 + 极慢视差漂移**，亮度全局封顶（见 JS 的 `ST.DIM`），
+   可读性另外还靠主屏文字区的 avoid 矩形。天从此一直在，且它是状态面。
+   星云单独一张**永不重绘**的画布：它整幅是静态的，跟着星点画布每帧 clearRect 再 blit
+   一次等于白拷 6MB/帧（SwiftShader 上实测拖慢截图到 2s+）。 */
 #bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
-#bgfx .bfield{position:absolute;inset:-10%}
-#bgfx .glow{position:absolute;border-radius:50%;opacity:var(--glow);
-  transition:opacity .3s var(--ez)}
-#bgfx .g1{left:-30vmax;bottom:-40vmax;width:86vmax;height:86vmax;
-  background:radial-gradient(closest-side,rgba(255,150,66,.55) 0%,rgba(255,150,66,.16) 44%,
-    transparent 100%)}
-#bgfx .g2{right:-28vmax;bottom:-34vmax;width:76vmax;height:76vmax;
-  background:radial-gradient(closest-side,rgba(139,140,245,.46) 0%,rgba(139,140,245,.13) 44%,
-    transparent 100%)}
-#bgfx .g3{right:-6vmax;top:-34vmax;width:62vmax;height:62vmax;
-  background:radial-gradient(closest-side,rgba(47,208,255,.34) 0%,rgba(47,208,255,.10) 44%,
-    transparent 100%)}
+/* 地平线雾：`::before` 排在两张画布之前 ⇒ 在星点之下，只给底边垫一层空气。 */
+#bgfx::before{content:'';position:absolute;left:0;right:0;bottom:0;height:34vh;
+  pointer-events:none;
+  background:linear-gradient(180deg,transparent,rgba(120,150,210,.055) 62%,
+    rgba(150,170,215,.03) 100%)}
 #bgfx canvas{position:absolute;inset:0;width:100%;height:100%}
-/* 星云单独一张**永不重绘**的画布：它整幅是静态的，跟着星点画布每帧 clearRect 再 blit
-   一次等于白拷 6MB/帧（SwiftShader 上实测拖慢截图到 2s+），而且每帧重合成还会带来
-   dither 抖动。分开之后静止帧天然逐像素相同。 */
-body.plain #bgfx .glow,body.plain #bgfx #nebula{display:none}
+body.plain #bgfx::before,body.plain #bgfx #nebula{display:none}
+
+/* 指针光晕：一团极淡的冷白光跟着指针走（B 方向保留的那一条）。
+   压在 `#bgfx` 之上、`.app` 之下 ⇒ **天然进不了数据面**：抽屉、日志 `pre`、
+   对照图都是不透明面板，光晕在它们底下，一个像素都渗不进去。 */
+#pool{position:fixed;z-index:0;pointer-events:none;width:520px;height:520px;left:0;top:0;
+  margin:-260px 0 0 -260px;border-radius:50%;opacity:0;
+  background:radial-gradient(closest-side,rgba(180,205,255,.075),transparent 100%);
+  transition:opacity .3s var(--ez)}
+body.plain #pool,body.calm #pool,body.nopool #pool{display:none}
 
 /* ══ 骨架：三个独立滚动的区，页面本身不滚 ═══════════════════════════════ */
 .app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh}
@@ -467,7 +472,7 @@ button:hover{border-color:var(--line2);background:var(--raise);color:var(--txt)}
 button:active{transform:translateY(1px)}
 button:disabled{opacity:.35;cursor:not-allowed;transform:none}
 button:disabled:hover{border-color:var(--line);background:var(--card);color:var(--txt)}
-button:focus-visible{outline:2px solid rgba(139,140,245,.5);outline-offset:2px}
+button:focus-visible{outline:2px solid color-mix(in srgb,var(--brand) 55%,transparent);outline-offset:2px}
 /* 主动作 = 唯一的 chrome 强调色，**实心平涂、无渐变、无外发光**。
    旧版面那道品红渐变 + 光晕正是"AI 生成界面"的典型指纹。 */
 button.go{background:var(--brand);border-color:var(--brand);color:#0b0c12;font-weight:600}
@@ -488,36 +493,24 @@ button.help:hover{background:var(--card);border-color:var(--line3)}
 button.mini{font-size:11.5px;padding:var(--s1) var(--s2);border-radius:var(--r-tag)}
 
 /* ══ 光效层：指针携光 —— 全站唯一一条动效语言 ══════════════════════════
-   隐喻只有一句：**光由指针携带**。指针进入 → 一道光沿控件边框从进入点绕一圈；
-   控件内部跟着一团柔光；按下 → 光从落点泄进背景星野（背景那层本来就吃这个冲量）。
+   隐喻只有一句：**光由指针携带**。这一版把上版那套"每个控件绕一圈的边框跑光 +
+   磁吸位移"删了 —— 一次 hover 四个动作同时开火，吵，而且 conic 渐变绕边本身就是
+   最典型的"AI 加的特效"。现在只剩两件事：
+     · 一团极淡的光晕跟着指针（`#pool`，在 `.app` 之下 ⇒ 数据面天然吃不到）；
+     · hover 时控件**离指针最近的那条边**亮起 1px（`#fxedge`）—— 像光打在实体件的棱上，
+       不是绕着按钮跑一圈。
    三条纪律，一条都不能破：
-     · 全部**指针驱动**，没有一条常驻循环 ⇒ 静止时与初始帧逐像素相同（和背景同一条要求，
-       也是 8 秒轮询不再闪的前提）。
-     · 只上**控件**（按钮 / 步骤块 / 筛选片 / 签字框）和卡片左光条；
-       日志 `pre`、对照图、指标 pill 这些**数据面一个都不放过光**。
+     · 全部**指针驱动**，没有一条常驻循环（常驻的只有背景那层，且它在 `calm` 下冻结）。
+     · 只上**控件**（按钮 / 步骤块 / 筛选片 / 签字框）；日志 `pre`、对照图、指标 pill
+       这些**数据面一个都不放过光**。
      · `body.calm`（M 键）整层停用，用来当场对比"这层到底值不值"。 */
-@property --ang{syntax:'<angle>';inherits:false;initial-value:0deg}
-#fxbeam,#fxpool{position:fixed;z-index:70;pointer-events:none;display:none;opacity:0}
-#fxbeam{padding:1.5px;
-  background:conic-gradient(from var(--ang),transparent 0 52%,var(--bc,var(--brand)) 72%,
-    #fff 81%,var(--bc,var(--brand)) 90%,transparent 98%);
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-  -webkit-mask-composite:xor;mask-composite:exclude}
-#fxpool{background:radial-gradient(circle at var(--px,50%) var(--py,50%),
-    var(--pc,rgba(210,216,235,.16)),transparent 60%);mix-blend-mode:screen}
-body:not(.calm) #fxbeam.go,body:not(.calm) #fxpool.on{display:block}
-#fxbeam.go{animation:beam .78s var(--ez)}
-/* 不用 fill：播完 opacity 自己回到 0 ⇒ "光走了不留痕"是可断言的，而不是靠 JS 记时清类 */
-@keyframes beam{0%{opacity:0;--ang:var(--a0,0deg)}14%{opacity:1}84%{opacity:1}
-  100%{opacity:0;--ang:calc(var(--a0,0deg) + 360deg)}}
+#fxedge{position:fixed;z-index:70;pointer-events:none;display:none;opacity:0;overflow:hidden;
+  transition:opacity .18s var(--ez)}
+body:not(.calm) #fxedge.on{display:block;opacity:.85}
 #chipmark{position:absolute;bottom:-1px;height:2px;border-radius:2px;left:0;width:0;
   background:var(--brand);opacity:0;pointer-events:none;
   transition:left .34s var(--ez),width .34s var(--ez),opacity .2s var(--ez)}
 #chips{position:relative}
-/* 磁吸：只有主操作与左轨会朝指针让出 2px，普通按钮不让（它们挨得太近会晃）。
-   写全 transition 列表而不是只写 transform —— 简写会连带抹掉底色/描边的过渡。 */
-.mag{transition:transform .55s var(--ez),background .16s var(--ez),
-  border-color .16s var(--ez),box-shadow .2s var(--ez),opacity .16s}
 
 /* ══ 主屏：一次只暴露下一步 ═══════════════════════════════════════════
    整块版面只回答一个问题：**"现在该做什么，点下去会发生什么"**。
@@ -723,10 +716,11 @@ body.legacy .signbox.on{box-shadow:0 0 16px -6px rgba(242,189,114,.75)}
 .chip{font-size:11px;padding:var(--s1) var(--s2);border-radius:var(--r-chip);
   border:1px solid var(--line);background:transparent;color:var(--dim)}
 .chip:hover{color:var(--txt);border-color:var(--line2)}
-.chip.on{border-color:rgba(139,140,245,.5);color:var(--txt);background:rgba(139,140,245,.13)}
+.chip.on{border-color:color-mix(in srgb,var(--brand) 55%,transparent);color:var(--txt);
+  background:color-mix(in srgb,var(--brand) 13%,transparent)}
 .kbd{font:10.5px/1 var(--fm);padding:3px 7px;border-radius:var(--r-tag);
   border:1px solid var(--line);color:var(--dim);background:var(--pane)}
-.kbd b{color:#e4d7ff;font-weight:600}
+.kbd b{color:var(--brand-hi);font-weight:600}
 
 /* ══ 对照图：必须坐在完全不透明的底上 ═════════════════════════════════ */
 .sheets{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px,1fr));gap:10px}
@@ -783,8 +777,8 @@ body.legacy #help .panel{background:linear-gradient(180deg,#141024,#0c0817);
   vertical-align:top}
 #help th{font:500 11px/1 var(--fb);letter-spacing:var(--ph-ls);text-transform:var(--tt);
   color:var(--dim)}
-#help code{font:11.5px/1.5 var(--fm);background:rgba(139,140,245,.12);padding:1px 6px;
-  border-radius:var(--r-tag);color:#b9bdf5}
+#help code{font:11.5px/1.5 var(--fm);background:color-mix(in srgb,var(--brand) 12%,transparent);padding:1px 6px;
+  border-radius:var(--r-tag);color:var(--brand)}
 #help .close{position:sticky;top:0;float:right}
 .warn{background:rgba(255,111,111,.10);border:1px solid rgba(255,111,111,.34);
   border-radius:var(--r-ctl);
@@ -794,11 +788,10 @@ body.legacy #help .panel{background:linear-gradient(180deg,#141024,#0c0817);
   align-items:center;justify-content:center;cursor:zoom-out}
 #lightbox.on{display:flex}
 #lightbox img{max-width:96vw;max-height:96vh;object-fit:contain}
-/* ── M 键「动效从简」：整层光效停用，但**状态指示一个都不跟着没** ──────────
+/* ── M 键「动效从简」：整层光效停用、背景星野冻结，但**状态指示一个都不跟着没** ──
    #stepfill 表达的是"当前在哪一步"，那是信息不是装饰 ⇒ 只掐它的位移，不掐它本身。 */
-body.calm #fxbeam,body.calm #fxpool{display:none!important}
+body.calm #fxedge{display:none!important}
 body.calm #stepfill,body.calm #chipmark{transition:none}
-body.calm .mag{transition:none}
 body.calm .stage::before{transform:none!important}
 body.calm .signbox.on::after{display:none}
 @media (max-width:1080px){#detail .body{grid-template-columns:1fr;overflow:auto}
@@ -807,16 +800,16 @@ body.calm .signbox.on::after{display:none}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style></head><body>
 
-<div id="bgfx" aria-hidden="true"><div class="bfield">
-  <i class="glow g1"></i><i class="glow g2"></i><i class="glow g3"></i></div>
+<div id="bgfx" aria-hidden="true">
   <canvas id="nebula"></canvas><canvas id="stars"></canvas></div>
+<i id="pool" aria-hidden="true"></i>
 
 <div class="app">
 <header>
   <div class="brand">
     <svg width="22" height="22" viewBox="0 0 26 26" fill="none" aria-hidden="true">
       <path d="M17.4 2.6l1.5 4.3 4.3 1.5-4.3 1.5-1.5 4.3-1.5-4.3L11.6 8.4l4.3-1.5z"
-            fill="#8b8cf5"/>
+            fill="#cfe0ff"/>
       <circle cx="5.4" cy="6.6" r="1.1" fill="#eef4ff"/>
       <circle cx="10.2" cy="12.4" r=".8" fill="#fff2df" opacity=".9"/>
       <circle cx="3.6" cy="14.2" r=".7" fill="#dbe6f7" opacity=".7"/>
@@ -914,7 +907,7 @@ body.calm .signbox.on::after{display:none}
   </div>
 </div>
 
-<i id="fxbeam"></i><i id="fxpool"></i>
+<i id="fxedge"></i>
 
 <div id="help"><div class="veil" data-close></div><div class="panel">
   <button class="close ghost" data-close>关闭 ✕</button>
@@ -1004,31 +997,35 @@ body.calm .signbox.on::after{display:none}
   <h3>键位（摸熟比找按钮快）</h3>
   <p><code>1</code>…<code>4</code> 切步骤 · <code>R</code> 跑当前步的主动作 ·
   <code>P</code> 只看计划 · <code>H</code> 开关本抽屉 · <code>Esc</code> 关掉弹层 ·
-  <code>S</code> 开关星野背景 · <code>M</code> 开关「动效从简」（关掉光沿边框走一圈、
-  指针柔光、磁吸这些，只留状态本身）· <code>V</code> 开关「新旧版面对照」
-  （新版面=中性阶梯+发丝线+零投影，旧版=薰衣草底+渐变灯管+投影），两个选择都会记住。</p>
+  <code>S</code> 开关星野背景 · <code>M</code> 开关「动效从简」（把指针光晕与棱边光
+  整层停用，<b>并冻结背景星野</b>，只留状态本身）· <code>V</code> 开关「新旧版面对照」
+  （新版面=海军蓝阶梯+发丝线+零投影，旧版=薰衣草底+渐变灯管+投影），两个选择都会记住。</p>
 
   <h3>版面为什么长这样</h3>
   <p>深色仪表盘的正经分层法只有一条：<b>底色抬档 + 1px 发丝线 + 顶边一道微高光，不用投影</b>。
   参照的是两个公开设计系统的实测 token，它们的规则里逐条点到上一版的病：
   「别拿薰衣草色当分区底色或卡片填充」「几乎不用 drop shadow，纵向层级全靠色阶与描边」
   「别引入第二种强调色」「别加氛围渐变」。</p>
-  <p>所以：五档中性表面（只留一丝冷调，不偏紫）、发丝线三档实色、
-  圆角按 4/6/8/12 分档、间距走 4 的倍数栅格、小标签不再全大写加宽字距、
-  chrome 强调色<b>只有一个</b>品牌紫（主动作用它，签字按钮借用「等你签字」那个琥珀，
+  <p>所以：五档<b>海军蓝</b>表面阶梯（色相压在 215° 一带，与背景那片夜航星野同源，
+  不是中性冷灰也不是薰衣草）、发丝线三档实色、圆角按 4/6/8/12 分档、
+  间距走 4 的倍数栅格、小标签不再全大写加宽字距、
+  chrome 强调色<b>只有一个</b>蓝白（主动作用它，签字按钮借用「等你签字」那个琥珀，
   语义自洽）。氛围全部交给背景那片星野，面板上一分都不给。
   <b>五个状态色一个都没动</b>——那是语义不是配色。</p>
 
   <h3>背景与光效</h3>
-  <p>东京夜的星野，<b>显影式</b>：底上是三团不动的城市光晕（强度已压到旧版一半以下），
-  星点画在一张画布上，<b>静止时全灭</b>——划过哪里哪里才亮。每颗星是<b>预渲染的精灵</b>：
+  <p>夜航星野，<b>常驻</b>：天一直在，只是很暗（亮度全局封顶，像夜里抬头）。三层视差以
+  0.35 / 0.7 / 1.4 px·s⁻¹ 极慢漂移，银河带上的星沿带轴走，带外水平漂并环绕 ——
+  带子不会被撕开，边缘也不会突然跳出一颗。每颗星是<b>预渲染的精灵</b>：
   高斯核 + 按星随机旋转的锥形衍射芒，亮星六芒带淡色晕，暗星只是软边微点；
   亮度按幂律分布（亮星不到 1%），颜色按<b>色温</b>（蓝白→白→淡金）而不是糖果色。
-  收摊时把每颗星的亮度与位置写回原位再画一帧，所以"亮过又淡掉"的终点和最初那张
-  <b>逐像素相同</b>；控件上的光效同一条规矩：全部由指针驱动，没有一条常驻循环。</p>
-  <p>觉得干扰：<code>S</code> 关整片星野，<code>M</code> 只关控件光效，
+  这片天还是<b>状态面</b>：当前那一步的正上方，星点亮度抬起来（信标列）；某个阶段判绿，
+  就从信标处荡开一圈很淡的波。主屏大字底下<b>不画星</b>，可读性靠避让而不是蒙纱。</p>
+  <p>光效只有两件事，全部由指针驱动：一团极淡的光晕跟着指针，以及 hover 时控件
+  <b>离指针最近的那条边</b>亮起 1px（像光打在实体件的棱上，不是绕按钮跑一圈）。
+  觉得干扰：<code>S</code> 关整片星野，<code>M</code> 连光晕一起关并冻结背景，
   <code>V</code> 换回旧版面对照，三个都会记住。
-  想让它常驻一点微光（不划也能看见几颗），改 <code>ST.AMB</code> 这一个数就行。</p>
+  想让天更亮/更暗，改 <code>ST.DIM</code> 这一个数就行；想让漂移更快，改 <code>ST.DRIFT</code>。</p>
 
   <h3>出问题自己先查的三行</h3>
   <p><code>py -3 scripts/diag/check_inputs.py azdata</code> ·
@@ -1059,35 +1056,34 @@ function statusOf(k){
   return 'pass';
 }
 
-/* ── 背景：东京夜的星野 —— 静止时全黑，指针经过才显影、约 520ms 淡净 ──────
-   显影口径借自 https://mimo.xiaomi.com/coder（量过那页才写准）：它**不是星野**，
-   是"擦除式显影"——一层遮罩被光标擦出洞，洞随划速从 8px 长到 128px，
-   亮点约 520ms 内二次衰减淡完、不残留，而且**故意用不规则软边 + 正弦抖动**
-   去躲开"几何均一"。上一版我只借了"经过才亮"，星体本身却画成了正圆 + 一个手绘
-   "+" 字形 —— 那就是用户说的"敷衍"。本轮把星体本身重做，见下面 SPR。
-
-   每颗星只有一个 `lit`(0..1)：光标经过就充到 1，之后按秒指数衰减；
-   **只有 lit 够亮的星才画** ⇒ 静止时整片天空是空的，划过才出现一条星带。
-
-   三条硬约束仍然一条不丢：
-     · 静止时逐像素完全相同：能量归零时把所有 lit 强制写回 0、位置写回 home 再画一帧
-       ⇒ 显影过又淡掉的终点与初始帧是同一张图（探针逐像素比这个）。
-       ⚠️ 所以"闪烁"只能调制 `lit` 那一项：`vis = amb + f(lit)`，amb 项绝不吃时间，
-       否则常驻星点会让静止两帧自己就不相同。
-     · 衰减与弹簧都按**秒**积分（乘 dt），不按帧 —— 按帧写在低帧率下会"永远淡不干净"。
-     · 指针「瞬移」不算划过，且**按速度判**（>4200px/s 或距上一拍 >250ms），
-       不能按固定像素：正常快扫一步就 48~58px，按像素判会把整层背景判成"对鼠标没反应"。
+/* ── 背景：夜航星野 —— 天一直活着，且它有职责 ──────────────────────────
+   上一版是"显影式"：静止全黑、光标划过才亮、约 520ms 淡净。三条问题：
+     · 它是**死的** —— 静止时屏幕上什么都没有，鼠标一停就"关灯"，星空只在被摸到的一瞬存在；
+     · 它和**任务无关** —— 星星亮不亮跟"哪个阶段过了"毫无关系，纯装饰，
+       这正是它读起来像"AI 加的太空背景"的原因；
+     · 它上面还叠了四层同时开火的效果（边框跑光 + 柔光团 + 磁吸位移 + 涟漪）。
+   这一版改三件事（B 方向「夜航」）：
+     ① **常驻**：每颗星有自己的基准亮度（幂律分布，暗星是绝对多数），全局封顶 `DIM`；
+     ② **漂移**：三层视差 0.35 / 0.7 / 1.4 px·s⁻¹。银河带上的星**沿带轴**漂（参数 tb 取模），
+        带外的按水平漂并环绕 —— 这样带子永远不会被撕开，边缘也不会"啪"地跳出一颗；
+     ③ **有职责**：当前那一步正上方，星点亮度抬起来（信标列）；某个阶段判绿 ⇒
+        一圈极淡的波从信标处荡开。天从此是**状态面**。
+   ⚠️ 代价必须说清：这版天空**永不静止**，上一版"静止两帧逐像素相同"那条探针判据不再成立。
+      换成的判据是「冻结态（M）逐像素相同 + 漂移有界且慢 + 内容区跨轮询逐像素相同」，
+      见 `scripts/diag/panel_ui_probe.py`。自绘还限流到 `FPS`：漂移极慢，不需要 60 帧。
    仍然没有 WebGL、没有噪声函数：一张 2D 画布 + 一张预渲染精灵图集。 */
 function mul32(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
   t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
-const ST={cv:null,g:null,w:0,h:0,list:[],pairs:[],neb:null,raf:0,t0:0,frames:0,
-          peak:0,lit:0,strokes:0,bursts:0,rings:[],C:[],LC:'#9aa4c8',
-          AMB:0.10,          // 常驻星点占比的亮度；想要"完全只有经过才亮"就把它设成 0
-          RMIN:9,RMAX:130,   // 显影半径：随笔画速度从 9px 长到 130px
-          DECAY:4.6,         // 亮度衰减 /秒 ⇒ 520ms 后只剩 9%
-          SPRING:34,DAMP:4.2,EPS:0.12,LIT_EPS:0.012,
+const ST={cv:null,g:null,w:0,h:0,list:[],pairs:[],neb:null,raf:0,t:0,acc:0,frames:0,lastDraw:0,
+          bursts:0,rings:[],C:[],LC:'#9aa4c8',
+          DIM:0.62,          // 全局亮度封顶：夜里抬头那种亮度，大字底下也读得清
+          FPS:20,            // 自绘帧率：漂移 ≤1.4px/s，20 帧足够顺
+          DRIFT:[0.35,0.7,1.4],   // 三层视差速度 px/s（层速差 = 深度感）
+          PTR:300,           // 指针软性提亮半径（按距离平方衰减，不是硬圆盘）
+          band:null,beacon:null,ptr:{x:-9999,y:-9999},
           LINK_A:0.16,        // 星座连线的 alpha 上限（旧版 0.52 太像连点图）
-          last:null,lastT:0,pend:null,avoid:[]};
+          frozen:false,       // 冻结位（见 freezeSky）：钉住天，供逐像素比对
+          last:null,avoid:[]};
 function rgbOf(h){
   h=(h||'#ffffff').trim();
   if(h[0]==='#'){ const s=h.length===4? h.slice(1).split('').map(c=>c+c).join('') : h.slice(1);
@@ -1161,18 +1157,18 @@ function starColors(){
   spriteBake();
 }
 function starsBuild(){
-  const R=mul32(20260930);                   // 同种子 ⇒ 刷新后星位不变，不会"每次进来换一片天"
+  const R=mul32(20261001);                   // 同种子 ⇒ 刷新后星位不变，不会"每次进来换一片天"
   const w=ST.w, h=ST.h;
-  const n=Math.round(Math.min(3200,Math.max(1100,w*h/520)));
-  ST.list=[];
+  /* 常驻星野的星数要比"显影式"克制：上一版 3200 颗只在划过时画一小片，
+     现在**每颗每帧都要画**，得按真实开销定价。 */
+  const n=Math.round(Math.min(1600,Math.max(700,w*h/2400)));
+  ST.list=[]; ST.pairs=[];
   const gx=w*0.04, gy=h*1.08, dx=w*0.96, dy=-h*0.84;          // 一条斜着的银河带
+  const len=Math.hypot(dx,dy);
+  ST.band={gx:gx,gy:gy,dx:dx,dy:dy};
   for(let i=0;i<n;i++){
-    let x,y;
-    if(i<n*0.62){ const t=R(), o=(R()-0.5)*w*0.24;
-      x=gx+dx*t+o; y=gy+dy*t+(R()-0.5)*w*0.13; }
-    else { x=R()*w; y=R()*h; }
-    /* 亮度按**幂律**分：真实天区里暗星是绝对多数。上一版 `big` 有 ~5%，
-       于是满屏都是带十字的"亮星"，看着像撒了一把图钉。现在 hero <0.5%、star ~9%。 */
+    const band=i<n*0.62, layer=i%3;
+    /* 亮度按**幂律**分：真实天区里暗星是绝对多数。hero <0.5%、star ~9%。 */
     const u=R();
     const kind = u>0.995 ? 'hero' : u>0.905 ? 'star' : 'dust';
     const z=0.34+R()*0.66;
@@ -1180,13 +1176,22 @@ function starsBuild(){
     const a  = kind==='hero' ? 0.74+R()*0.26 : kind==='star' ? 0.30+R()*0.32 : 0.10+R()*0.24;
     // 色温与亮度相关：暗尘偏蓝白，只有亮星才允许走到暖端
     const ci = kind==='dust' ? (R()<0.80?0:1) : kind==='star' ? (R()*3|0) : (R()*4|0);
-    ST.list.push({hx:x,hy:y,x:x,y:y,vx:0,vy:0,z:z,kind:kind,lit:0,
-      amb:(i%47===0 && kind!=='hero' ? ST.AMB*(0.4+R()*0.6) : 0),
-      sz:sz, a:a, c:ci, rot:R()*6.2832, ph:R()*6.2832});
+    const st={band:band,layer:layer,kind:kind,z:z,sz:sz,a:a,c:ci,lit:0,
+      rot:R()*6.2832, ph:R()*6.2832, tw:0.5+R()*1.2, x:0,y:0,v:0};
+    if(band){
+      /* 带上的星**沿带轴**漂：只存参数 tb∈[0,1) 与垂直抖动 ox/oy，位置每帧现算。
+         换成"横移 + 环绕"会把这条斜带切成两截（出左边的星带着带轴的 y 回到右边）。 */
+      st.tb=R(); st.ox=(R()-0.5)*w*0.24; st.oy=(R()-0.5)*w*0.13;
+      st.dv=ST.DRIFT[layer]/len;             // 每秒推进的 tb 比例
+      st.hx=gx+dx*st.tb+st.ox; st.hy=gy+dy*st.tb+st.oy;
+    } else {
+      st.hx=R()*w; st.hy=R()*h;
+      st.dv=ST.DRIFT[layer];                 // 带外：水平漂 px/s
+    }
+    ST.list.push(st);
   }
   /* 星座连线只算一次（建表时），每帧按当前亮度画：两端都亮才连线。
-     新版把上限压到 0.16 alpha、线宽 0.6 —— 上一版 0.52 的紫线是"连点图"观感的主因。 */
-  ST.pairs=[];
+     上限 0.16 alpha、线宽 0.6 —— 上一版 0.52 的紫线是"连点图"观感的主因。 */
   const far=ST.list.filter(t=>t.kind!=='dust'&&t.z>0.70), lim=Math.min(150,w*0.10);
   for(let i=0;i<far.length;i++){
     const a=far[i], cand=[];
@@ -1201,7 +1206,7 @@ function starsBuild(){
   nebBake(R);
 }
 /* 银河带不是"点更密"就完事，得有**星云**：摊开的高斯团叠在带轴上，alpha 只有 2~5%。
-   烘成一张静态位图，每帧一次 drawImage，所以它不吃"静止帧必须相同"这条。 */
+   烘成一张静态位图，每帧一次 drawImage；它不吃"冻结帧必须可复现"这条（它本来就不动）。 */
 function nebBake(R){
   if(!SPR.cloud||!SPR.cloud.length) return;
   const dpr=SPR.dpr, w=ST.w, h=ST.h;
@@ -1220,32 +1225,52 @@ function nebBake(R){
   }
   g.globalAlpha=1;
 }
-/* 闪烁只调制 `lit` 那一项：lit=0 时返回值与时间无关 ⇒ 静止帧仍然逐像素相同。 */
+/* 常驻可见度 = 基准亮度 × 慢闪 × 信标提亮 × 指针软提亮 × 点击余辉。
+   ⚠️ 每一项都吃时间（闪烁、漂移）⇒「静止两帧逐像素相同」不再成立；
+   换成的判据是「冻结态（CALM）逐像素相同」：冻结时 t 不再推进，整帧可复现。 */
 function vis(st,t){
-  return st.amb + (st.lit>0.0005
-    ? st.lit*(0.84+0.16*Math.sin((t||0)*2.3+st.ph)) : 0);
+  let v=st.a*(0.86+0.14*Math.sin(t*st.tw+st.ph));
+  const bc=ST.beacon;
+  // 系数 1.20：列心提亮到 2.2×，列内均值约 1.5×全屏 —— 低于这个量级信标就只是
+  // "碰巧有几颗亮星"，读不出"天在告诉你现在走到第几步"。
+  if(bc){ const d=Math.abs(st.x-bc.x)/bc.half; if(d<1) v*=1+1.20*(1-d)*(1-d); }
+  if(!CALM&&!ST.frozen){ const dx=st.x-ST.ptr.x, dy=st.y-ST.ptr.y, R=ST.PTR, d2=dx*dx+dy*dy;
+    if(d2<R*R){ const f=1-d2/(R*R); v*=1+2.4*f*f; } }
+  if(st.lit>0.001) v*=1+st.lit*1.5;
+  return v;
 }
-function starsDraw(){
+/* 主屏文字区：装饰给它让路（同一条纪律，只是从"不在那儿显影"改成"不在那儿画"）。 */
+function inAvoid(x,y){
+  const av=ST.avoid; if(!av||!av.length) return false;
+  for(const a of av) if(x>=a[0]&&x<=a[2]&&y>=a[1]&&y<=a[3]) return true;
+  return false;
+}
+function starsDraw(t){
   const g=ST.g; if(!g) return;
-  const t=performance.now()/1000;
-  g.clearRect(0,0,ST.w,ST.h);      // 星云在另一张画布上，这里只画会动的部分
+  const w=ST.w, h=ST.h, B=ST.band;
+  g.clearRect(0,0,w,h);            // 星云在另一张画布上，这里只画会动的部分
+  for(const st of ST.list){        // 先算这一帧每颗星的位置与可见度（连线要复用，别算两遍）
+    if(st.band){ const tb=(st.tb+t*st.dv)%1;
+      st.x=B.gx+B.dx*tb+st.ox; st.y=B.gy+B.dy*tb+st.oy; }
+    else { st.x=((st.hx+t*st.dv)%(w+120))-60; st.y=st.hy; }
+    st.v=inAvoid(st.x,st.y)?0:vis(st,t);
+  }
   g.lineWidth=0.6; g.strokeStyle=ST.LC;
   for(const [a,b,rest] of ST.pairs){
-    const v=Math.min(vis(a,t),vis(b,t));
-    if(v<0.55) continue;                       // 两端都够亮才连：显影区中心才出现星座
+    const v=Math.min(a.v,b.v);
+    if(v<0.50) continue;                       // 两端都够亮才连
+    if(inAvoid((a.x+b.x)/2,(a.y+b.y)/2)) continue;
     const d=Math.hypot(b.x-a.x,b.y-a.y), over=Math.abs(d-rest)/Math.max(1,rest);
-    const al=Math.max(0,ST.LINK_A-over*0.30)*v;
+    const al=Math.max(0,ST.LINK_A-over*0.30)*Math.min(1,v);
     if(al<0.006) continue;
     g.globalAlpha=Math.min(ST.LINK_A,al);
     g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke();
   }
   for(const st of ST.list){
-    const v=vis(st,t);
-    if(v<0.014) continue;                      // 静止时一颗都不画 —— "只有经过才显示"
-    const al=st.a*v; if(al<0.008) continue;
+    if(st.v<=0) continue;
+    const al=Math.min(ST.DIM, st.a*st.v); if(al<0.008) continue;
     const spr=SPR[st.kind] && SPR[st.kind][st.c]; if(!spr) continue;
-    const s=st.sz;
-    g.globalAlpha=Math.min(1,al);
+    const s=st.sz; g.globalAlpha=al;
     if(st.kind==='dust') g.drawImage(spr,st.x-s/2,st.y-s/2,s,s);
     else { g.save(); g.translate(st.x,st.y); g.rotate(st.rot);
            g.drawImage(spr,-s/2,-s/2,s,s); g.restore(); }
@@ -1262,81 +1287,47 @@ function starsResize(){
   ST.w=innerWidth; ST.h=innerHeight;
   ST.cv.width=Math.max(2,ST.w*dpr|0); ST.cv.height=Math.max(2,ST.h*dpr|0);
   ST.g.setTransform(dpr,0,0,dpr,0,0);
-  starsBuild(); starsDraw();
+  starsBuild(); starsDraw(ST.t);
 }
+/* 常驻循环：漂移 ≤1.4px/s，20 帧足够顺，所以把重绘限流到 `FPS`，
+   中间那些 rAF 只累加时间 —— 常驻不等于要烧满 60 帧。 */
 function starsFrame(ts){
-  const dt=ST.t0?Math.min(0.05,(ts-ST.t0)/1000):1/60; ST.t0=ts;
-  const k=ST.SPRING, d=Math.exp(-ST.DAMP*dt), ld=Math.exp(-ST.DECAY*dt);
-  let peak=0, lit=0;
-  for(const st of ST.list){
-    st.vx+=((st.hx-st.x)*k)*dt; st.vy+=((st.hy-st.y)*k)*dt;
-    st.vx*=d; st.vy*=d;
-    st.x+=st.vx*dt; st.y+=st.vy*dt;
-    const ad=Math.abs(st.x-st.hx)+Math.abs(st.y-st.hy);
-    if(ad>peak) peak=ad;
-    st.lit*=ld; if(st.lit>lit) lit=st.lit;
-  }
-  for(const r of ST.rings){ r.r+=r.v*dt; r.a-=dt*1.5; }
+  const dt=ST.last?Math.min(0.1,(ts-ST.last)/1000):1/60; ST.last=ts;
+  ST.t+=dt; ST.acc+=dt;
+  if(ts-ST.lastDraw < 1000/ST.FPS){ ST.raf=requestAnimationFrame(starsFrame); return; }
+  const ad=ST.acc; ST.acc=0; ST.lastDraw=ts;
+  for(const r of ST.rings){ r.r+=r.v*ad; r.a-=ad*1.6; }
   ST.rings=ST.rings.filter(r=>r.a>0.02);
-  ST.peak=peak; ST.lit=lit; ST.frames++;
-  if(lit>ST.LIT_EPS || peak>ST.EPS || ST.rings.length){
-    starsDraw(); ST.raf=requestAnimationFrame(starsFrame);
-  } else {                    // 收摊：亮度清零、位置写回 home，再画一帧 ⇒ 与初始帧逐像素相同
-    ST.raf=0;
-    for(const st of ST.list){ st.x=st.hx; st.y=st.hy; st.vx=0; st.vy=0; st.lit=0; }
-    ST.rings.length=0; ST.lit=0; starsDraw();
-  }
+  const ld=Math.exp(-2.6*ad);
+  for(const st of ST.list){ if(st.lit>0.0005) st.lit*=ld; else st.lit=0; }
+  ST.frames++; starsDraw(ST.t);
+  ST.raf=requestAnimationFrame(starsFrame);
 }
-function starsStart(){ if(!ST.raf && SEA){ ST.t0=0; ST.raf=requestAnimationFrame(starsFrame); } }
-/* 显影：半径随笔画速度长大（参考页 8→128px 的同一条曲线口径） */
-function starsLight(x,y,speed,down){
-  const R=down?ST.RMAX*1.5:Math.min(ST.RMAX, ST.RMIN + (speed||0)*1.5), R2=R*R;
-  let hit=0;
-  const av=ST.avoid||[];
-  for(const st of ST.list){
-    const dx=st.x-x, dy=st.y-y, d2=dx*dx+dy*dy;
-    if(d2>R2) continue;
-    if(av.length){ let skip=false;                   // 主屏文字区：装饰给它让路
-      for(const a of av) if(st.hx>=a[0]&&st.hx<=a[2]&&st.hy>=a[1]&&st.hy<=a[3]){skip=true;break;}
-      if(skip) continue; }
-    const f=Math.pow(1-d2/R2, 1.15);
-    if(f>st.lit) st.lit=f;
-    hit++;
-    if(down){                                  // 点击顺带轻轻拨一下，让"亮"有物理感
-      const d=Math.sqrt(d2)||1, imp=520*(1-d2/R2)*st.z/(1+d/70);
-      st.vx+=dx/d*imp; st.vy+=dy/d*imp;
-    }
-  }
-  if(down && hit){ ST.bursts++; ST.rings.push({x:x,y:y,r:6,v:520,a:0.5,c:ST.LC}); }
-  if(hit){ ST.strokes++; starsStart(); }
-  return hit;
+function starsStart(){ if(!ST.raf && SEA && !CALM && !ST.frozen){ ST.last=0; ST.acc=0; ST.raf=requestAnimationFrame(starsFrame); } }
+/* ── 冻结位：把天停在**当前这一帧**，用于逐像素比对（漂移常开 ⇒ 没有别的办法拿到可比的两帧）。
+   与 `CALM` 的区别只有一个：它**不碰光效层** —— 探针要一边冻结背景、一边验棱边光。
+   产品里没有单独暴露这个开关，只有 M 键会同时置上两者（见 calmApply）。 */
+function freezeSky(on){
+  ST.frozen=!!on;
+  if(ST.frozen){ if(ST.raf){ cancelAnimationFrame(ST.raf); ST.raf=0; } if(ST.g) starsDraw(ST.t); }
+  else starsStart();
 }
-function starMove(x,y){
-  if(!SEA) return;
-  const now=performance.now();
-  let jump=true, speed=0;
-  if(ST.last){
-    const dt=Math.max(0.004,(now-ST.lastT)/1000);
-    speed=Math.hypot(x-ST.last[0],y-ST.last[1])/dt;
-    jump=(now-ST.lastT>250)||speed>4200;
-  }
-  ST.last=[x,y]; ST.lastT=now;
-  if(jump) return;
-  starsLight(x,y,speed,false);
-}
-window.addEventListener('pointermove',e=>{
-  if(!SEA) return;
-  if(ST.pend){ ST.pend.e=e; return; }         // 节流到每帧一次，但永远取最新坐标不丢中间点
-  ST.pend={e:e};
-  requestAnimationFrame(()=>{ const ev=ST.pend&&ST.pend.e; ST.pend=null;
-                              if(ev) starMove(ev.clientX,ev.clientY); });
-},{passive:true});
+/* 指针只做两件事：挪软提亮中心、按下时在落点荡一圈波并给附近星点余辉。
+   不再有"划过才显影"的逐星循环 —— 天本来就是亮的，指针只是把它提亮一点。 */
+function starMove(x,y){ if(!SEA) return; ST.ptr.x=x; ST.ptr.y=y; }
+window.addEventListener('pointermove',e=>{ starMove(e.clientX,e.clientY); },{passive:true});
 window.addEventListener('pointerdown',e=>{
-  if(!SEA) return;
-  ST.last=[e.clientX,e.clientY]; ST.lastT=performance.now();
-  starsLight(e.clientX,e.clientY,0,true);
+  if(!SEA||CALM) return;
+  ST.ptr.x=e.clientX; ST.ptr.y=e.clientY; ST.bursts++;
+  ST.rings.push({x:e.clientX,y:e.clientY,r:5,v:520,a:0.34,c:'#cfe0ff'});
+  const R=ST.PTR, R2=R*R;
+  for(const st of ST.list){ const dx=st.x-e.clientX, dy=st.y-e.clientY, d2=dx*dx+dy*dy;
+    if(d2<R2){ const f=(1-d2/R2)*0.85; if(f>st.lit) st.lit=f; } }
 },{passive:true});
-window.addEventListener('blur',()=>{ ST.last=null; });
+/* 指针离开窗口 ⇒ 提亮中心收走，否则那片"亮"会永远停在原处。 */
+function ptrGone(){ ST.ptr.x=ST.ptr.y=-9999; }
+window.addEventListener('blur',ptrGone);
+document.addEventListener('pointerleave',ptrGone);
 function seaApply(){
   document.body.classList.toggle('plain',!SEA);
   $('#bSea').textContent='星辰 · '+(SEA?'开':'关');
@@ -1356,18 +1347,18 @@ function seaApply(){
 $('#bSea').onclick=()=>{ SEA=!SEA; localStorage.setItem('panel.sea',SEA?'1':'0'); seaApply(); };
 
 /* ── 光效引擎：光由指针携带 ────────────────────────────────────────────
-   三个动作，一套语言：
-     ① 进入 —— 一道光沿控件**边框**从指针进入的那一点起跑，绕一圈回到它，然后消失；
-     ② 停留 —— 控件内部一团柔光跟着指针走（`mix-blend-mode:screen`，只提亮不压暗，
-                所以永远不会把字"糊掉"）；主操作与左轨额外朝指针让出 2px（磁吸）；
-     ③ 按下 —— 光从落点泄进背景星野：往星野里打一圈**该控件自己的颜色**的涟漪，
-                于是"点界面"和"那片天"是同一套物理，而不是两层各演各的。
-   实现上是**两个全局单例浮层**（#fxbeam / #fxpool）搬到目标控件的矩形上，
-   不给每个控件加子节点 —— 控件全是 render() 重建出来的，往节点里塞东西就会跟着抖。
-   ⚠️ 数据面（`pre` 日志、对照图里的立绘）不吃柔光：screen 混合会改变画面像素值，
-      而这张界面第一用途是**验资产正确性**。对照图只吃边框光（光在框上，不进图里）。 */
+   这一版只剩两件事（上版那套"边框绕一圈跑光 + 控件内柔光 + 磁吸位移"全删了）：
+     ① 光晕 —— 一团极淡的冷白光跟着指针（`#pool`）。它压在 `.app` 之下，
+        而抽屉 / 日志 `pre` / 对照图 / 指标 pill 全是不透明面板 ⇒ **数据面天然吃不到光**，
+        不再需要靠"挑选择器"来挡。
+     ② 棱边光 —— hover 时控件**离指针最近的那条边**亮起 1px（`#fxedge`），
+        像光打在实体件的棱上；颜色跟着**语义**走：主动作=蓝白、签字=琥珀、其余中性。
+   按下仍然把光泄进背景星野（往星野里打一圈该控件颜色的涟漪），
+   于是"点界面"和"那片天"还是同一套物理，而不是两层各演各的。
+   实现上是**全局单例浮层**搬到目标控件的矩形上 —— 控件全是 render() 重建出来的，
+   往节点里塞子元素或类名都会在重建时丢。 */
 let CALM = localStorage.getItem('panel.calm')==='1';
-/* V 键：新版面（中性阶梯、零投影）↔ 旧版面（薰衣草底 + 渐变灯管 + 投影）当场对照。
+/* V 键：新版面（海军蓝阶梯、零投影）↔ 旧版面（薰衣草底 + 渐变灯管 + 投影）当场对照。
    两条都留在 CSS 里，靠 `body.legacy` 切换 —— 他判"丑不丑"要能立刻比，
    静态对比图不如这个（同一台服务器、同一个进程、同一个鼠标位置）。 */
 let LEGACY = localStorage.getItem('panel.legacy')==='1';
@@ -1376,55 +1367,43 @@ function legacyApply(){
   if(ST.g){ starColors(); starsResize(); }        // 星点色板跟着版面走
   else starColors();
 }
-const FX={beam:$('#fxbeam'),pool:$('#fxpool'),cur:null,last:null,down:false,pt:{}};
-const FXSEL='button,.step,.signbox,.sheets a';
+const FX={edge:$('#fxedge'),pool:$('#pool'),cur:null,last:null,pt:{}};
+/* 步骤节点 `.snode` 不是"实体件"（没有边框、是个竖排的标签组），给它打棱边光很怪 ⇒ 排除。 */
+const FXSEL='button:not(.snode),.signbox,.sheets a';
 function fxTone(el){
   const c=el.classList;
-  // 边框光/柔光的颜色跟着**语义**走：主动作=品牌紫，签字=等你签字的琥珀，其余中性。
-  if(c.contains('go')) return ['#a5a6ff','rgba(139,140,245,.26)'];
-  if(c.contains('sign')||c.contains('signbox')) return ['#f2bd72','rgba(242,189,114,.22)'];
-  if(c.contains('step')) return ['#8b8cf5','rgba(139,140,245,.16)'];
-  if(c.contains('chip')) return ['#8b8cf5','rgba(139,140,245,.13)'];
-  return ['rgba(206,212,228,.75)','rgba(220,225,240,.13)'];
+  // 棱边光的颜色跟着**语义**走：主动作=蓝白，签字=等你签字的琥珀，其余中性。
+  if(c.contains('go')) return 'rgba(207,224,255,.9)';
+  if(c.contains('sign')||c.contains('signbox')) return 'rgba(242,189,114,.9)';
+  if(c.contains('chip')||c.contains('mini')) return 'rgba(207,224,255,.55)';
+  return 'rgba(214,224,242,.5)';
 }
-function fxOff(){ FX.pool&&(FX.pool.classList.remove('on')); FX.beam&&FX.beam.classList.remove('go');
-                 if(FX.cur){ magClear(); MAG.el=null; FX.cur.el.style.transform=''; FX.cur=null; } }
+function fxOff(){ FX.edge&&FX.edge.classList.remove('on'); FX.cur=null; FX.k=null; }
 function fxEnter(el,e){
-  if(CALM||!FX.beam) return;
+  if(CALM||!FX.edge) return;
   const r=el.getBoundingClientRect();
   if(r.width<10||r.height<10||r.bottom<0||r.top>innerHeight) return;
-  const img=el.matches('.sheets a');                          // 图：只上边框光，不上柔光
-  const [bc,pc]=fxTone(el), br=getComputedStyle(el).borderRadius||'9px';
-  const b=FX.beam;
-  b.style.left=(r.left-1.5)+'px'; b.style.top=(r.top-1.5)+'px';
-  b.style.width=(r.width+3)+'px'; b.style.height=(r.height+3)+'px';
-  b.style.borderRadius=br; b.style.setProperty('--bc',bc);
-  // 让白色那段核心正好落在指针进入点上（conic 的 0deg 在 12 点，atan2 的 0 在 3 点）
-  const th=Math.atan2(e.clientY-(r.top+r.height/2), e.clientX-(r.left+r.width/2))*180/Math.PI;
-  b.style.setProperty('--a0',(((th+90-292)%360+360)%360)+'deg');
-  b.classList.remove('go'); void b.offsetWidth; b.classList.add('go');
-  b.onanimationend=()=>b.classList.remove('go');
-  if(img){ FX.cur={el,r,img:true}; return; }
-  const p=FX.pool;
-  p.style.left=r.left+'px'; p.style.top=r.top+'px';
-  p.style.width=r.width+'px'; p.style.height=r.height+'px';
-  p.style.borderRadius=br; p.style.setProperty('--pc',pc);
-  p.classList.add('on');
-  FX.cur={el,r,img:false}; fxMove(e);
+  FX.cur={el:el,r:r}; fxMove(e);
 }
+/* 最近棱边：把指针在控件内的相对位置换算成四条边各自的距离，取最小那条。 */
 function fxMove(e){
   if(e&&e.clientX!=null) FX.pt=e;
-  if(!FX.cur||CALM) return;
-  const {el,r,img}=FX.cur, p=FX.pt;
-  if(!r||img||p.clientX==null) return;
-  FX.pool.style.setProperty('--px',(p.clientX-r.left)+'px');
-  FX.pool.style.setProperty('--py',(p.clientY-r.top)+'px');
-  if(el.classList.contains('mag')){
-    // 位移上限 7px、按下压到 0.972 —— 全交给弹簧，所以松手有轻微过冲
-    const dx=(p.clientX-(r.left+r.width/2))/(r.width/2);
-    const dy=(p.clientY-(r.top+r.height/2))/(r.height/2);
-    magTo(el, dx*7, dy*5.4, FX.down);
-  }
+  const p=FX.pt; if(!FX.cur||CALM||p.clientX==null) return;
+  const r=FX.cur.r, el=FX.cur.el, b=FX.edge;
+  const nx=(p.clientX-r.left)/Math.max(1,r.width), ny=(p.clientY-r.top)/Math.max(1,r.height);
+  const px=(Math.max(0,Math.min(1,nx))*100).toFixed(1), py=(Math.max(0,Math.min(1,ny))*100).toFixed(1);
+  const d={t:ny,b:1-ny,l:nx,r:1-nx};
+  const k=Object.keys(d).sort((a,c)=>d[a]-d[c])[0];
+  FX.k=k;                       // 探针读它验"最近棱边"这条逻辑真的在跑
+  const col=fxTone(el);
+  b.style.left=r.left+'px'; b.style.top=r.top+'px';
+  b.style.width=r.width+'px'; b.style.height=r.height+'px';
+  b.style.borderRadius=getComputedStyle(el).borderRadius||'8px';
+  b.style.background = k==='t' ? 'radial-gradient(58px 1px at '+px+'% 0,'+col+',transparent)'
+    : k==='b' ? 'radial-gradient(58px 1px at '+px+'% 100%,'+col+',transparent)'
+    : k==='l' ? 'radial-gradient(1px 58px at 0 '+py+'%,'+col+',transparent)'
+    : 'radial-gradient(1px 58px at 100% '+py+'%,'+col+',transparent)';
+  b.classList.add('on');
 }
 document.addEventListener('pointerover',e=>{
   const el=e.target.closest?e.target.closest(FXSEL):null;
@@ -1442,23 +1421,30 @@ document.addEventListener('pointerout',e=>{
   if(e.relatedTarget&&el.contains(e.relatedTarget)) return;
   FX.last=null; fxOff();
 },{passive:true});
-document.addEventListener('pointermove',e=>{ if(FX.cur) fxMove(e); },{passive:true});
+document.addEventListener('pointermove',e=>{
+  if(FX.cur) fxMove(e);
+  const p=FX.pool; if(!p) return;                          // 光晕：跟着指针，进出窗口即收
+  p.style.transform='translate('+e.clientX+'px,'+e.clientY+'px)';
+  p.style.opacity=(SEA&&!CALM)?'1':'0';
+},{passive:true});
 document.addEventListener('pointerdown',e=>{
-  FX.down=true; fxMove(e);
+  fxMove(e);
   const el=e.target.closest?e.target.closest(FXSEL):null;
   if(!el||CALM||!SEA) return;                 // 按下 = 把光泄进背景星野，颜色跟着控件走
-  ST.rings.push({x:e.clientX,y:e.clientY,r:4,v:780,a:.7,c:fxTone(el)[0]});
+  ST.rings.push({x:e.clientX,y:e.clientY,r:4,v:780,a:.5,c:fxTone(el)});
   ST.bursts++; starsStart();
 },{passive:true});
-document.addEventListener('pointerup',()=>{ FX.down=false; fxMove(); },{passive:true});
 addEventListener('scroll',()=>{ FX.last=null; fxOff(); },true);
 function chipMark(){
   const on=$('.chip.on'), mk=$('#chipmark'); if(!on||!mk) return;
   mk.style.left=on.offsetLeft+'px'; mk.style.width=on.offsetWidth+'px'; mk.style.opacity='1';
 }
+/* M 键「动效从简」= 光效整层停用 + **背景星野冻结**。
+   冻结不是"看不见"：t 停止推进后整帧可复现，探针正是拿这个当"没有失控动画"的证据。 */
 function calmApply(){
   document.body.classList.toggle('calm',CALM);
   if(CALM) fxOff();
+  freezeSky(CALM);
 }
 
 /* ── 数据 ─────────────────────────────────────────────────────────── */
@@ -1516,29 +1502,6 @@ const SPRG={m:new Map(),raf:0,last:0,
     this.raf=requestAnimationFrame(tick);},
   live(){ return this.raf?1:0; }};
 
-/* ── 主行动按钮的磁吸 + 按压，全部走弹簧 ─────────────────────────────
-   静止时 transform 必须回到**完全空**，否则"划过一圈再离开→回到同一张帧"会红。 */
-const MAG={el:null};
-function magPaint(){ const e=MAG.el; if(!e) return;
-  // ⚠️ 弹簧条目只有 {x,v,t,k,d,apply}：位移是 x、速度是 v。这里曾把 y 轴写成 y.y
-  //    （读一个不存在的字段）→ undefined.toFixed 抛异常 → **整条 rAF 循环被打死**，
-  //    之后所有弹簧（含抽屉的进出）都不再更新，症状是"抽屉关不掉/卡片量不到"，
-  //    看起来像版面问题，其实是一行拼写。apply 回调必须自己保证不抛。 */
-  const x=SPRG.m.get('mx'), y=SPRG.m.get('my'), s=SPRG.m.get('ms');
-  e.style.transform='translate3d('+(x?x.x:0).toFixed(2)+'px,'+(y?y.x:0).toFixed(2)+'px,0)'+
-                     ' scale('+(s?s.x:1).toFixed(4)+')'; }
-function magTo(el,dx,dy,press){
-  if(MAG.el&&MAG.el!==el) magClear();
-  MAG.el=el;
-  SPRG.to('mx',dx,magPaint,260,20); SPRG.to('my',dy,magPaint,260,20);
-  SPRG.to('ms',press?0.972:1,magPaint,320,22); }
-function magClear(){ const e=MAG.el; if(!e) return;
-  SPRG.to('mx',0,magPaint,150,17); SPRG.to('my',0,magPaint,150,17);
-  SPRG.to('ms',1,magPaint,300,16);
-  // 收敛后清掉内联 transform —— 留个 translate3d(0,0,0) 会改变合成层，像素比对会飘
-  setTimeout(()=>{ if(!MAG.el&&e.style.transform&&/0\.000?0?\)/.test(e.style.transform))
-                     e.style.transform=''; },420); }
-
 /* ── 数字滚动：主屏那句里的量词是**数据**，让它从旧值滚到新值，
    而不是瞬间替换。滚动一次性收敛，不是常驻循环。 */
 function rollNums(root){
@@ -1553,7 +1516,7 @@ function rollNums(root){
   });
 }
 
-/* ── 星野避让：主屏大字与主按钮**不坐面板**，可读性靠"星点不在这些矩形里显影"来保证。
+/* ── 星野避让：主屏大字与主按钮**不坐面板**，可读性靠"星点不在这些矩形里画"来保证。
    这是让装饰让步，不是给数据蒙一层纱 —— 蒙纱那条路实测 alpha .90 仍会被顶出 36 级差异。 */
 function avoidRefresh(){
   const a=[];
@@ -1562,6 +1525,29 @@ function avoidRefresh(){
     if(r.width>2&&r.height>2&&r.bottom>0&&r.top<innerHeight)
       a.push([r.left-34,r.top-26,r.right+34,r.bottom+26]);});
   ST.avoid=a;
+  beaconRefresh();
+}
+/* ── 信标列：当前那一步节点的正上方，星点亮度抬起来 —— 天从此和任务有关。
+   节点是 render() 重建出来的，所以每次 render / resize 都重取一次（挂在 avoidRefresh 上）。 */
+function beaconRefresh(){
+  const on=$('#stepsbar .snode.on')||$('#stepsbar .snode');
+  if(!on){ ST.beacon=null; return; }
+  const r=on.getBoundingClientRect();
+  ST.beacon={x:r.left+r.width/2, half:Math.min(150,innerWidth*0.13)};
+}
+/* ── 判绿荡波：某个阶段从"没绿"变成"绿" ⇒ 从信标处荡开一圈极淡的波。
+   这条是"天是状态面"的落地 —— 不是随便加个涟漪：只在**状态真的翻转**时才响。
+   首帧不响（PASSWATCH 为空 ⇒ 没有"从 false 变 true"），所以刷新页面不会有假波。 */
+let PASSWATCH={};
+function passWatch(){
+  const st=(S&&S.state)||{}; let hit=false;
+  for(const k in st){ const now=statusOf(k)==='pass';
+    if(now&&PASSWATCH[k]===false) hit=true;
+    PASSWATCH[k]=now; }
+  if(hit&&ST.beacon){
+    ST.rings.push({x:ST.beacon.x,y:innerHeight*0.62,r:8,v:620,a:0.30,c:'#cfe0ff'});
+    ST.bursts++; starsStart();
+  }
 }
 
 /* ══ 主屏那句话是怎么推出来的 ══════════════════════════════════════════
@@ -1582,65 +1568,65 @@ function askOf(n){
     const pf=st.preflight, pl=st.pull;
     if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
       why:esc((pf&&fail.key==='preflight'?pf.detail:fail.key)+'：先看它为什么红。'),
-      acts:[{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
+      acts:[{a:'diff',t:'▶ 再查一次',k:'pact'},{a:'detail',t:'看细节',k:'link2'}]};
     if(pf&&!pf.ok) return {eb, red:1, ask:'权威输入缺东西，先别往下走',
       why:'inputs/azdata、inputs/gamecfg 与画廊 vendor 是重导的唯一起点，缺了跑出来的是错的。',
-      acts:[{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看缺了哪些',k:'link2'}]};
+      acts:[{a:'diff',t:'▶ 再查一次',k:'pact'},{a:'detail',t:'看缺了哪些',k:'link2'}]};
     if(!pf) return {eb, ask:'先确认权威输入还在位',
       why:'只读地查一遍，不写任何东西。',
-      acts:[{a:'diff',t:'▶ 预检 + 看差异',k:'pact mag'}]};
+      acts:[{a:'diff',t:'▶ 预检 + 看差异',k:'pact'}]};
     const m=/新增 (\d+)\/变更 (\d+)/.exec((pl&&pl.detail)||'');
     if(!pl) return {eb, ask:'看看模拟器上多了什么',
       why:'只读地列一遍设备上的包、算出新增与变更，不下载。',
-      acts:[{a:'diff',t:'▶ 看差异',k:'pact mag'}]};
+      acts:[{a:'diff',t:'▶ 看差异',k:'pact'}]};
     if(aw.length) return {eb, ask:'模拟器上有 '+nEm(+(m?m[1]:0))+' 个新包、'+nEm(+(m?m[2]:0))+
         ' 个变更还没拉到本地',
       why:'拉下来会写 files/AssetBundles。源包一旦被覆盖，旧版本本地就没有了——所以这一步要你签字。',
-      acts:[{a:'pull',t:'⚑ 拉进本地',k:'pact sign mag'},{a:'diff',t:'重新算一遍差异',k:'link2'}]};
+      acts:[{a:'pull',t:'⚑ 拉进本地',k:'pact sign'},{a:'diff',t:'重新算一遍差异',k:'link2'}]};
     return {eb, ask:'包已经在本地了', why:'下一步：从这些源包重算产物，全部先进暂存区。',
-      acts:[{a:'next',t:'去第 2 步 →',k:'pact mag'},{a:'diff',t:'再算一遍差异',k:'link2'}]};
+      acts:[{a:'next',t:'去第 2 步 →',k:'pact'},{a:'diff',t:'再算一遍差异',k:'link2'}]};
   }
   if(n===2){
     if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
       why:'它停在这里不往下跑。日志里有那行原因。',
-      acts:[{a:'tocheck',t:'▶ 重跑到待确认',k:'pact mag'},{a:'detail',t:'看日志',k:'link2'}]};
+      acts:[{a:'tocheck',t:'▶ 重跑到待确认',k:'pact'},{a:'detail',t:'看日志',k:'link2'}]};
     if(idle.length===list.length) return {eb, ask:'从源包重算 '+nEm(list.length)+' 类产物',
       why:'立绘 / Spine / Live2D 只写暂存区；依赖表、元数据、语音、CG 要你签字才动正式区。要跑一会儿。',
-      acts:[{a:'tocheck',t:'▶ 开始重导',k:'pact mag'}]};
+      acts:[{a:'tocheck',t:'▶ 开始重导',k:'pact'}]};
     if(aw.length) return {eb, ask:'重导好了 '+nEm(list.length-idle.length)+' / '+nEm(list.length)+
         ' 项，其中 '+nEm(aw.length)+' 项要你签字才写正式区',
       why:'没签字的那几项只算了差异，正式区一个字节没碰。勾上签字再跑才会覆盖。',
-      acts:[{a:'tocheck',t:'▶ 重跑到待确认',k:'pact mag'},{a:'staged',t:'只重跑导出三件',k:'link2'}]};
+      acts:[{a:'tocheck',t:'▶ 重跑到待确认',k:'pact'},{a:'staged',t:'只重跑导出三件',k:'link2'}]};
     if(idle.length) return {eb, ask:'重导跑好了 '+nEm(list.length-idle.length)+' 项，还剩 '+nEm(idle.length)+' 项',
       why:'继续跑会把剩下的算完。',
-      acts:[{a:'tocheck',t:'▶ 跑完剩下的',k:'pact mag'}]};
+      acts:[{a:'tocheck',t:'▶ 跑完剩下的',k:'pact'}]};
     return {eb, ask:'产物都重导好了', why:'下一步：出改前 | 改后的对照表，纯读。',
-      acts:[{a:'next',t:'去第 3 步 →',k:'pact mag'},{a:'detail',t:'看这 7 项写到哪儿',k:'link2'}]};
+      acts:[{a:'next',t:'去第 3 步 →',k:'pact'},{a:'detail',t:'看这 7 项写到哪儿',k:'link2'}]};
   }
   if(n===3){
     const rv=st.review;
     if(fail) return {eb, red:1, ask:'对照表没做出来', why:esc(rv&&rv.detail||''),
-      acts:[{a:'review',t:'▶ 再出一次',k:'pact mag'},{a:'detail',t:'看日志',k:'link2'}]};
+      acts:[{a:'review',t:'▶ 再出一次',k:'pact'},{a:'detail',t:'看日志',k:'link2'}]};
     if(!rv) return {eb, ask:'出一张改前 | 改后的对照表',
       why:'纯读，随时可以反复跑。图会放在「细节」里，点开能放大。',
-      acts:[{a:'review',t:'▶ 出对照表',k:'pact mag'}]};
+      acts:[{a:'review',t:'▶ 出对照表',k:'pact'}]};
     return {eb, ask:'对照表好了，'+nEm((S.sheets||[]).length)+' 张，看一眼再决定换不换',
       why:'这一步不写任何正式产物。换入是第 4 步，要你签字。',
-      acts:[{a:'detail',t:'打开对照表',k:'pact mag'},{a:'next',t:'去第 4 步 →',k:'link2'}]};
+      acts:[{a:'detail',t:'打开对照表',k:'pact'},{a:'next',t:'去第 4 步 →',k:'link2'}]};
   }
   const live4=list.filter(s=>s.tier==='live'), aw4=live4.filter(s=>stn(s.key)==='await');
   if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
     why:'闸门判红说明这次换入会丢东西——别绕，先查源包。',
-    acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},{a:'detail',t:'看日志',k:'link2'}]};
+    acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign'},{a:'detail',t:'看日志',k:'link2'}]};
   if(aw4.length) return {eb, ask:nEm(aw4.length)+' 项暂存产物等着换进正式区',
     why:'换入前整批备份到 Output/_OLD_bak/；索引有零回退闸门，会掉条目就直接停。',
-    acts:[{a:'swap',t:'⚑ 换入正式区',k:'pact sign mag'},{a:'regress',t:'只跑回归',k:'link2'}]};
+    acts:[{a:'swap',t:'⚑ 换入正式区',k:'pact sign'},{a:'regress',t:'只跑回归',k:'link2'}]};
   if(!live4.some(s=>stn(s.key)==='pass')&&!S.running)
     return {eb, ask:'现在没有待换入的东西',
       why:'先跑第 2 步（重导）和第 3 步（看图），暂存区里有货了这里才会亮。',
-      acts:[{a:'prev',t:'← 回第 2 步',k:'pact mag'},{a:'detail',t:'看暂存区有什么',k:'link2'}]};
+      acts:[{a:'prev',t:'← 回第 2 步',k:'pact'},{a:'detail',t:'看暂存区有什么',k:'link2'}]};
   return {eb, ask:'这次更新已经换完了', why:'画廊已部署、回归跑过；要再来一轮就从第 1 步开始。',
-    acts:[{a:'regress',t:'▶ 只跑回归',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
+    acts:[{a:'regress',t:'▶ 只跑回归',k:'pact'},{a:'detail',t:'看细节',k:'link2'}]};
 }
 
 function render(){
@@ -1699,6 +1685,7 @@ function render(){
       ? '<button class="link2" data-a="'+c.a+'">'+c.t+'</button>'
       : '<button class="'+c.k+'" data-a="'+c.a+'">'+c.t+'</button>').join('');
   avoidRefresh();
+  passWatch();
 
   const ungrouped=all.filter(s=>!steps[s.step||0]);
   if(ungrouped.length){
@@ -1913,11 +1900,29 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                           calmApply(); return CALM; },
                 legacy(on){ LEGACY=!!on; localStorage.setItem('panel.legacy',LEGACY?'1':'0');
                             legacyApply(); fxOff(); FX.last=null; return LEGACY; },
-                fx(){ return {calm:CALM, beam:!!(FX.beam&&FX.beam.classList.contains('go')),
-                              beamAnim:!!(FX.beam&&FX.beam.getAnimations().length),
-                              pool:!!(FX.pool&&FX.pool.classList.contains('on')),
-                              poolShown:!!(FX.pool&&getComputedStyle(FX.pool).display!=='none'),
-                              cur:FX.cur?String(FX.cur.el.className):null}; },
+                fx(){ const e=FX.edge,p=FX.pool;
+                  return {calm:CALM, k:FX.k||null,
+                          edge:!!(e&&e.classList.contains('on')),
+                          edgeShown:!!(e&&getComputedStyle(e).display!=='none'),
+                          edgeBg:e?e.style.background:'',
+                          pool:!!(p&&Number(p.style.opacity||0)>0),
+                          poolShown:!!(p&&getComputedStyle(p).display!=='none'),
+                          cur:FX.cur?String(FX.cur.el.className):null}; },
+                /* 背景星野的现状。探针靠这几项判「漂移有界且慢」与「冻结态可复现」，
+                   不再有"静止零动画"这条（那正是 B2 方向要付的代价）。 */
+                sky(){ return {sea:SEA, calm:CALM, frozen:!!ST.frozen, running:!!ST.raf,
+                               t:ST.t, frames:ST.frames, stars:ST.list.length,
+                               drift:ST.DRIFT.slice(), fps:ST.FPS, dim:ST.DIM,
+                               beacon:ST.beacon?ST.beacon.x:null,
+                               beaconHalf:ST.beacon?ST.beacon.half:null,
+                               avoid:(ST.avoid||[]).length, rings:ST.rings.length}; },
+                /* 冻结/解冻：冻结后 `t` 不再推进、指针提亮也停用 ⇒ 整帧可复现。
+                   这是唯一能在"漂移常开"下拿到可比两帧的办法。 */
+                freeze(on){ freezeSky(on); return !!ST.frozen; },
+                /* 把相位钉到指定值再画一帧。冻结只保证"不再推进"，但两次冻结落在不同相位上
+                   ⇒ 跨段的像素比对仍会差一整片天。钉住相位之后，"新版↔旧版""切回来"这些
+                   比对量到的才只有 chrome 本身。 */
+                tAt(v){ ST.t=+v||0; if(ST.g) starsDraw(ST.t); return ST.t; },
                 hover(sel){ const el=$(sel); if(!el) return null;
                   const r=el.getBoundingClientRect();
                   return {x:r.left+r.width*0.3,y:r.top+r.height*0.5}; },

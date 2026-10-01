@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-10-01 11:15
+> **生成时间**: 2026-10-01 11:37
 2026-09-29 16:47
 > 历轮会话流水（2026-09-20 ~ 09-27）已**逐字**外迁 `docs/archive/2026-09-26_PROJECT_STATUS_外迁归档.md`（A1~A15 段）；
 > 结论性知识在 `docs/TROUBLESHOOTING.md` §25~§67 与 `docs/WORKFLOWS.md` WF-14~WF-23。本文只留当前状态。
@@ -21,7 +21,7 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
 ⇒ 签字门空转、`cg` 带 `--redo` 会直接全量覆写 `Output/CG_v2`；`run()` 的 `capture_output` 把子进程输出憋到结束
 ⇒ 依赖表那 43 分钟前台零进度；超时只杀直接子进程会漏 Chrome 树。
 **仍未验**：9 个阶段的真实执行（`deps`/`meta`/`paintings`/`live2d`/`audio`/`cg`/`swap-in`/`derive`/`regress` 与 `pull` 的写半边），
-设备侧仍有 **1036 个新包 / 118 个变更**未拉；跑之前先 `py -3 scripts/diag/test_pipeline_gating.py`（40 条判据）。**语音产物口径已定：无需单独备份**（可确定性再生，体检 `scripts/diag/l2d_voice_inventory.py`），不可复原的只有 `inputs/azdata`｜低优先：声优中文姓名回填、UI/图标批量导出、`organize.py`。
+设备侧仍有 **1036 个新包 / 118 个变更**未拉；跑之前先 `py -3 scripts/diag/test_pipeline_gating.py`（40 条判据）。**语音产物口径已定：无需单独备份**（可确定性再生，体检 `scripts/diag/l2d_voice_inventory.py`），不可复原的只有 `inputs/azdata`｜**控制台界面（2026-10-01 第四轮，见 §72 / WF-23 追加）**：按用户选的 B「夜航」方向重做 —— 海军蓝表面阶梯 + 蓝白强调（五个状态色 rgb 不动）、星野改**常驻 + 三层视差漂移**（天当状态面：信标列对准当前步 + 判绿荡波）、光效换成**指针携光**（光晕 + 最近棱边光）、文字区星野避让；`scripts/diag/panel_ui_probe.py` 契约随之重写，**78 条全绿**。｜低优先：声优中文姓名回填、UI/图标批量导出、`organize.py`。
 
 ---
 
