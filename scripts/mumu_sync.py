@@ -236,6 +236,30 @@ def local_files(root):
 ONLY_SUB = []           # --only 归一化后的前缀，如 ['AssetBundles/painting/', ...]
 
 
+def load_pruned():
+    """`ledger/pruned.json` → {相对路径: 删除时的大小}。没有台账就返回空。
+
+    这是"删了源包还能不能识别 diff"的答案：被本工具**有意归档**的包不该再报成"新增"
+    （否则清一次 28.9GB，下次 diff 就把它们全列出来、白下一遍）；
+    但**设备上大小又变了**的那些不算归档 —— 那是真的新版本，必须重拉。
+    """
+    p = os.path.join(P.ROOT, 'ledger', 'pruned.json')
+    try:
+        d = json.load(open(p, encoding='utf-8'))
+        return {k: v[0] for k, v in (d.get('pruned') or {}).items()} if d.get('schema') == 1 else {}
+    except (OSError, ValueError, IndexError):
+        return {}
+
+
+def split_archived(cands, r_files, pruned):
+    """→ (要拉的, 已归档不算新增的)"""
+    if not pruned:
+        return cands, []
+    arch = [x for x in cands if pruned.get(x) == r_files.get(x)]
+    keep = [x for x in cands if pruned.get(x) != r_files.get(x)]
+    return keep, arch
+
+
 def wanted(rel, only_top):
     """判断该文件是否在关注范围内。"""
     if not only_top:
@@ -292,6 +316,11 @@ def cmd_diff(args):
         if wanted(x, ONLY_TOP) and r_files[x] != l_files[x]
     )
     missing = sorted(x for x in l_files.keys() - r_files.keys() if wanted(x, ONLY_TOP))
+    # 台账里"有意归档"的包不算新增（设备上大小又变了的那些照旧算）
+    added, archived = split_archived(added, r_files, load_pruned())
+    if archived:
+        print(f"\n== 已归档（台账记录，故意不在本地）: {len(archived)} 个，"
+              f"合计 {sum(r_files[x] for x in archived)/2**30:.2f} GB —— 不重拉 ==")
 
     lo = getattr(args, "list_out", "")
     if lo:
@@ -356,7 +385,8 @@ def cmd_sync(args):
         x for x in r_files.keys() & l_files.keys()
         if wanted(x, ONLY_TOP) and r_files[x] != l_files[x]
     )
-    targets = sorted(set(added) | set(size_diff))
+    targets = sorted(set(split_archived(added, r_files, load_pruned())[0]) | set(size_diff))
+
 
     if not targets:
         print("✓ 本地已是最新（路径+大小全部一致）")

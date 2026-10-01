@@ -3885,3 +3885,41 @@ POSIX 的 `SO_REUSEADDR` 只放行 `TIME_WAIT`；**Windows 的语义是"随便�
 `scripts/extract_spine_v2.py`、`scripts/reconstruct_live2d.py`、`scripts/extract_motions.py`、
 `scripts/fix_model3.py`、`scripts/extract_cv_voice.py`、`scripts/export_dependency_manifest.py`、
 `scripts/apply_live2d_motions.py`、`scripts/diag/run_cg_export.py`。相关：WF-15、§71、§76。
+
+---
+
+## §78. 资产台账落地：删源包之前，先让 diff 还认得它（2026-10-01 深夜）
+
+**需求（用户原话摘要）**: 想把已还原的源包上云后清掉省地方，但担心「这样下次跑 diff 怎么办」，
+并要求台账**可迁移**（像浏览器密码/标签页那样导入导出，换设备不必重拉、也不误判"全都缺"）。
+三条决议由用户拍板：台账单独目录进 git、"已还原"= **产物存在且生成时记录的源包大小/哈希对得上**、
+prune 边界按保守方案。
+
+**形状**（`scripts/asset_ledger.py` + `ledger/`）：
+- `sources.json`（**不进 git**，20 秒可重建、3MB 单行 JSON 进库只会天天产生大 diff）
+- `artifacts.json` / `pruned.json`（进 git：溯源与归档记录**不可再生**）
+- `export`/`import` 一个自包含文件 = 迁移单元；`schema` 对不上直接拒绝合并，不猜格式。
+- **diff 侧的接法**（这才是回答"删了怎么办"的地方）：`mumu_sync` 读 `pruned.json`，
+  把"归档过且设备上大小没变"的包从**新增**里摘出来单独报数；
+  **设备上大小变了的不算归档**（那是真新版本，必须重拉）；没有台账时一律不吞（保守）。
+
+**建账过程中被自己的测试抓出的两处"少记"**（少记 = 将来 diff 误判，性质和 §74 同族）：
+1. `build` 只扫每个类型目录的**第一层** ⇒ `dorm3d/` 这类嵌套结构整批漏掉（70178 vs 全盘 92679）。
+2. 更隐蔽：**AB 根下直接放着 41 个无后缀源包**（`ammo`、`channel`…），只遍历子目录就一个都不记。
+   ⇒ 现在两者都进了判据（`sub/deep` 与根下散包必须出现在台账里，且根下散包**永不进删除计划**）。
+
+**判据**：`scripts/diag/test_asset_ledger.py` 23 条，全部在临时目录里跑，绝不碰真盘。
+按"会不会让人丢数据"来设计——正向（该删的能删）好写，**反向才是重点**：
+产物缺失 / 源包被改（同长度篡改，确保撞到的是哈希那道而不是大小那道）/ 大小与哈希两条原因要分得开 /
+`--apply` 没 `--yes` 必须退出码 2 且一个文件都不动 / `dependencies` 与根下散包永不进计划 /
+导出→清空→导入后溯源逐字节一致、归档记录也回来。
+测试自己也写错过两次：拿编造的字节数当"归档时大小"、把 `brand_new` 同时放进本地与设备列表 ⇒
+判据当场红的是我，不是产品，这正是它该有的表现。
+
+**接入点**：`st_swapin` 换入成功后立刻按本次范围 `record`（那一刻源包与产物一一对得上，
+是唯一有意义的记录时机）；全库一次性建账走 `record --all-live`（要读 7GB 算哈希，十几分钟，
+**没有实测过全量耗时，所以留给你决定何时跑**，我只在 5 个皮肤上验过通路）。
+
+**涉及文件**: `scripts/asset_ledger.py`（新）、`scripts/diag/test_asset_ledger.py`（新）、
+`ledger/README.md`（新）、`.gitignore`、`scripts/mumu_sync.py`（`load_pruned`/`split_archived`）、
+`scripts/update_pipeline.py`（`st_swapin` 换入后记溯源）。相关：§74、§77、WF-15。

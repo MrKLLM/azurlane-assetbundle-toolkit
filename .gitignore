@@ -97,3 +97,7 @@ inputs/*/*.json
 # 画廊第三方运行时库：台账入库，库本体不入库（正本在 Output/gallery_v2/vendor/，
 # 由 scripts/fetch_gallery_vendor.py 按台账 sha256 校验后补齐）。
 gallery_src/vendor/*.js
+
+# 资产台账：源包清单可由 `asset_ledger.py build` 20 秒重建（3MB 单行 JSON，进 git 只会天天产生大 diff）
+# 进 git 的是 artifacts.json / pruned.json（不可再生的溯源与归档记录）
+ledger/sources.json

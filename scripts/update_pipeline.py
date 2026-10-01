@@ -738,6 +738,7 @@ def st_swapin(approved):
     lst = os.path.join(WORK, 'changed_paintings.txt')
     if not os.path.isfile(lst) or not open(lst, encoding='utf-8').read().strip():
         return verdict('swap-in', True, '没有待换入的立绘（清单为空）')
+    stems = [l.strip() for l in open(lst, encoding='utf-8') if l.strip()]
     hl = [l for l in open(os.path.join(WORK, 'hardlinks.txt'), encoding='utf-8') if l.strip()]
     bak = os.path.join(OUT, '_OLD_bak', f'pipeline_{time.strftime("%Y%m%d_%H%M")}')
     argv = [PY, 'scripts/diag/painting_swap_in.py', '--list', lst,
@@ -745,8 +746,17 @@ def st_swapin(approved):
     if hl:
         argv.append('--break-hardlink')
     rc, so, _ = run(argv, timeout=3600, echo=['换入', '备份', 'nlink', '拒绝'])
-    return verdict('swap-in', rc == 0, f'painting_swap_in rc={rc}；备份 {bak}；'
-                                       f'本次{"已" if hl else "无需"}断硬链')
+    ok = rc == 0
+    note = ''
+    if ok and stems:
+        # 换进正式区的那一刻才是"已还原"成立的时刻 —— 溯源台账必须在此刻记
+        # （源包哈希与产物一一对上，将来 prune 才有依据判断"这个源包删了也不丢东西"）
+        _, sor, _ = run([PY, 'scripts/asset_ledger.py', 'record', '--type', 'painting',
+                         '--stems', ','.join(stems)], timeout=1800, echo=['溯源已记'])
+        note = '；台账：' + ((sor or '').strip().splitlines() or ['没输出'])[-1][:70]
+    return verdict('swap-in', ok, f'painting_swap_in rc={rc}；备份 {bak}；'
+                                  f'本次{"已" if hl else "无需"}断硬链{note}')
+
 
 
 def st_derive(approved):
