@@ -4279,3 +4279,41 @@ B 从设备取一份新皮肤清单。跑完的结果是 **A 被自己的判据�
 其中语音页抽查 `yalisangna_alter` 23/23 行、每行可播、无占位符残留）。
 索引计数：`with_voice` 860→859、`voice_text_skins` 44→56、皮肤与船总数一字未动。
 证据：`.diag/index.pre_voicefix.json`（改动前的索引副本）、`.diag/{sv_after,hei_check,idx_diff2,idx_diff3}.txt`。
+
+---
+
+## §85. 同一份错派在两个产物里各存了一份；而我给闸门加的"替代证据"被错数据自己满足了（2026-10-02 下午）
+
+用户问"丛芒是谁"——因为我在汇报里把 `congmang` 按拼音写成"丛芒"。查表：是**匆忙（HMS Hasty）**，
+皇家驱逐，`congmang_2`=「人偶藏馆」；`congmang_2_hei` 是 `story` 类的黑化版，皮肤名在表里就是 `？？？`、
+`voice_actor=-1`、自己的包号 90055 **不在盘上**。**教训：中文舰名一律查 `ship_meta`/皮肤表，不许从拼音猜。**
+
+顺着这条把它查实，结果推翻我上一轮报给用户的"待确认项"：
+
+1. **台词层有同一份错派。** `skin_words.json` 的 `m['congmang_2_hei'] = 201401`——那是**本体皮肤2**的行。
+   全库扫：以 `_hei` 结尾的键 **12 个，12 个全部**指向别的皮肤那一行，正是我刚在语音层撤掉的那同一批。
+   根因在 `build_skin_words.py:171`：`rows_by_painting.get(kl) or rows_by_painting.get(E.VAR.sub('', kl))`
+   —— 又一次贪婪剥光。**它的注释还写着"不做身份后缀剥离（§57 判死）"，代码却在剥。**
+2. **我给闸门加的替代证据是不合格的。** 上一轮那条"归零 ⇒ 除非撤掉后仍有台词"被这 12 个键的
+   **错派台词**满足了 ⇒ 等于让错数据给自己的继续存在作证，闸门据此从 24 红降到 0 红。
+   ⇒ 改成按**实体规则**判（黑化名归零/清空 = 撤错派，计入"需人看"并点名），
+   不再拿"另一个产物里有没有值"当证据。**替代证据必须来自与被检查对象独立的口径**，
+   否则同一份脏数据能同时充当"被告"和"证人"。
+3. **收成一份实现，而不是两份互相抄。** 新增 `extract_cv_voice.row_candidates(kl)`：
+   画法后缀逐层、黑化不产生回退候选、改造的回退排最后。语音层 `resolve()` 与台词层
+   `build_skin_words` 都从这里取；测试里加一条"源码里不得再出现 `VAR.sub`"的静态检查
+   （17 例，含 5 例 `row_candidates` 直测）。
+   ⚠️ 还剩一份没并进来：`build_gallery_index.py` 的 `VAR_TAIL`（用途是"主包缺失时挂变体包"，
+   语义不同，且被索引零回退闸门覆盖），**记为已知重复，未动**。
+
+**重导后的最终状态**（全部真跑，非推断）：`skin_words` 的 `m` 4167→4167，
+**掉出 12（黑化）· 换行 37（改造，与语音层同一批）· 新增 12**——新增那 12 个逐条查过是合理的：
+4 个剥一层即命中自己那行（`aierdeliqi_9_n`→101267「金月桂香」、`mile_3_n`→101532），
+8 个是"同一角色的另一套皮肤"回退（信浓/尾张/斯库拉的誓约、英格拉罕3、灵敏改造），按用户口径允许。
+12 个黑化键现在**语音 0 / 台词 0 / 两张映射里都不存在**；`voice_text_skins` 回到 44、`with_voice` 859。
+`derive` ✅ 闸门绿 + `deploy 4/4`、`regress` ✅ 五件全绿（含"仅台词档"与阴性对照）。
+
+**涉及文件**: `scripts/extract_cv_voice.py`（`row_candidates()`、`resolve()` 改用它）、
+`scripts/build_skin_words.py`、`scripts/diag/gallery_index_diff_check.py`（黑化撤错派两档 + 替代证据改规则）、
+`scripts/diag/test_voice_owner.py`（11→17 例）。取证：`.diag/{congmang,congmang2,txt_layer,sw_diff,sw_added,final12}.txt`、
+`.diag/skin_words.prev.json`。相关：§57、§60、§83、§84、WF-15。

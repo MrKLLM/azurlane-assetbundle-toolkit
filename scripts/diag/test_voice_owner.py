@@ -85,6 +85,35 @@ print('\n%s 全库 %d 个皮肤名：可解析 %d · 无解 %d；黑化名里仍
       % ('[OK]' if not hei else '[FAIL]', len(keys), len(res), len(miss), len(hei)))
 fails += len(hei)
 
+# ── 共用规则本体：`row_candidates()` 是语音层与台词层唯一的口径来源 ──────────
+# （台词层原来自己写了一遍贪婪剥后缀，于是同一份错派在两个产物里各存一份，§85）
+print()
+RC = [
+    ('黑化名不产生任何回退候选', 'hei2_hei', ['hei2_hei']),
+    ('黑化+画法后缀只回到黑化那一层', 'hei3_hei_n', ['hei3_hei_n', 'hei3_hei']),
+    ('改造名先自己、再本体（本体那层排在最后）',
+     'gaizao_alter', ['gaizao_alter', 'gaizao']),
+    ('改造+画法后缀逐层剥，本体排在最末',
+     'tongti_alter_n', ['tongti_alter_n', 'tongti_alter', 'tongti']),
+    ('改造+黑化：黑化压过改造，不给回退候选', 'both_alter_hei', ['both_alter_hei']),
+]
+rc_fail = 0
+for desc, name, want in RC:
+    got = E.row_candidates(name)
+    ok = got == want
+    rc_fail += 0 if ok else 1
+    print('%s %-40s %-18s 期望 %-42s 实得 %s' % ('✓' if ok else '✗', desc, name, want, got))
+fails += rc_fail
+
+# 台词层必须与语音层同源：直接查 build_skin_words 里不该再有第二份剥后缀逻辑
+bsw = open(os.path.join(ROOT, 'scripts', 'build_skin_words.py'), encoding='utf-8').read()
+leak = [ln.strip()[:70] for ln in bsw.splitlines()
+        if 'VAR.sub' in ln and not ln.strip().startswith('#')]
+print('\n%s 台词层没有第二份剥后缀实现（源码里 VAR.sub 出现 %d 处）: %s'
+      % ('[OK]' if not leak else '[FAIL]', len(leak), leak or '无'))
+fails += len(leak)
+
 print('\n%s 语音归属解析 %d/%d' % ('[PASS]' if not fails else '[FAIL]',
-                                 len(CASES) + 1 - fails, len(CASES) + 1))
+                                 len(CASES) + 1 + len(RC) + 1 - fails,
+                                 len(CASES) + 1 + len(RC) + 1))
 sys.exit(1 if fails else 0)

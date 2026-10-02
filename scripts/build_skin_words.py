@@ -163,12 +163,19 @@ def build(voice, words, alias, group2cat, cv_tbl, rows_by_painting, gallery_keys
             labels.setdefault(g, labels[c])
 
     # 第二趟：皮肤表里有行、语音表里却没有的皮肤（主包没随资产下发，§57 那 43 张）。
-    # 键用字段名本身（= character_voice 的 key），中文类别名照表取；不做身份后缀剥离（§57 判死）。
+    # 键用字段名本身（= character_voice 的 key），中文类别名照表取。
+    # ⚠️ 归属候选必须与语音层**同一份规则**（`E.row_candidates`）：这里原来写的是
+    #    `E.VAR.sub('', kl)` 一次贪婪剥光，于是 12 个黑化键被剥到本体那一行，
+    #    把本体的台词派给了黑化版——与 §84 刚在语音层撤掉的是同一份错派（见 §85）。
     for k in gallery_keys:
         if k in voice:
             continue
         kl = k.lower()
-        hit = rows_by_painting.get(kl) or rows_by_painting.get(E.VAR.sub('', kl))
+        hit = None
+        for cand in E.row_candidates(kl):
+            hit = rows_by_painting.get(cand)
+            if hit:
+                break
         if not hit:
             continue
         sid = str(hit[0][0] * 10 + hit[0][1])

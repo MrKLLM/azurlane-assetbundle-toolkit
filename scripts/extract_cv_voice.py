@@ -179,6 +179,25 @@ def art_chain(name):
         out.append(cur)
 
 
+def row_candidates(kl):
+    """一个皮肤名「该用哪一行的数据」候选序列（按优先级，全部小写）。
+
+    这是**唯一的**一份三分类落地：语音归属（`resolve`）与台词归属（`build_skin_words`）都从这里取，
+    免得同一套语义在两个脚本里各写一遍、改一处漏一处（本轮台词层就是这么漏掉 12 个黑化键的）。
+      · 画法后缀：逐层剥，每层都是一个合法候选（同一张皮肤的另一幅画）；
+      · 黑化后缀：到此为止 —— 独立发声实体，不产生任何回退候选；
+      · 改造后缀：放在**最后** —— 同一角色的另一套皮肤，实在没有自己的行才借用本体。"""
+    out = art_chain(kl)
+    stem = out[-1]
+    if HEI_SUF.search(stem):
+        return out
+    if ALTER_SUF.search(stem):
+        for c in art_chain(ALTER_SUF.sub('', stem)):
+            if c not in out:
+                out.append(c)
+    return out
+
+
 def resolve(keys, rows, banks):
     """皮肤 → {cv, idx or None, src}。idx=None 表示等解码出包内序号档后再定（同船回退）。
 
@@ -194,10 +213,10 @@ def resolve(keys, rows, banks):
     stems = {p: ship_stem(p) for p in rows_l}
 
     def pick(name, orig):
-        """在 name 的画法候选链上找行；命中后 src 要相对**最初那个名字** orig 判定 ——
-        否则从 `_alter` 回退进来的那一层会把自己标成 `row`（本轮实测错过：`aisaikesi_alter`
-        自己的行没包，回退到本体 10709 却被标成 row，把"回退"伪装成"命中自有行"）。"""
-        for cand in art_chain(name):
+        """按 `row_candidates` 的优先级找第一个"有行且包在盘上"的。
+        src 必须相对**最初那个名字** orig 判定 —— 否则从 `_alter` 回退进来的那一层会把自己
+        标成 `row`（本轮实测错过：把"回退"伪装成"命中自有行"，虚报 6 个）。"""
+        for cand in row_candidates(name):
             hit = [t for t in rows_l.get(cand, []) if t[0] in banks]
             if hit:
                 return {'cv': hit[0][0], 'idx': hit[0][1],
@@ -206,14 +225,11 @@ def resolve(keys, rows, banks):
 
     for k in keys:
         kl = k.lower()
-        stem = art_chain(kl)[-1]                 # 剥光画法后缀之后的名字
         got = pick(kl, kl)
-        if got is None and ALTER_SUF.search(stem) and not HEI_SUF.search(stem):
-            got = pick(ALTER_SUF.sub('', stem), kl)   # 同角色的本体，最后一级回退
         if got:
             res[k] = got
             continue
-        if HEI_SUF.search(stem):
+        if HEI_SUF.search(row_candidates(kl)[-1]):
             miss.append(k)                       # 独立实体：宁缺勿错派
             continue
         st = ship_stem(kl)

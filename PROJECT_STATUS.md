@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-10-02 14:08
+> **生成时间**: 2026-10-02 14:56
 > 历轮会话流水（2026-09-20 ~ 09-27）已**逐字**外迁 `docs/archive/2026-09-26_PROJECT_STATUS_外迁归档.md`（A1~A15 段）；
 > 结论性知识在 `docs/TROUBLESHOOTING.md` §25~§67 与 `docs/WORKFLOWS.md` WF-14~WF-23。本文只留当前状态。
 > **最近三轮**：画廊视觉定稿刷进正本（见 **§6 顶部 ★ 块** + §62 + WF-16 追加）｜354 张「🔇 无语音」按可救性拆细并裁定关闭（**§57**）｜静态立绘「只画游戏里开着的层」根因修掉、换入 48 张（**§55**）+ 敦刻尔克改判（**§56**）。逐轮流水已逐字外迁归档 A15 段。
@@ -42,7 +42,12 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
 真跑又露出两条：① `skin_voice.json` 原来**只合并不撤回**，12 个黑化版仍挂着本体的包 ⇒ 加"只撤本轮看过的键、
 且算不出归属或包号已变"的撤回逻辑（映射 4152→4140，正好 −12）；② 零回退闸门把 `voiceText None→12`（补全）
 叫成回退、又把"旧包无从判定"当成"证明丢了本船语音" ⇒ 加 `empty()` 方向判据 + "无从判定"独立一档并要求替代证据
-（撤语音后仍有台词），24 处红降到 0 红 + 1 条"需人看"。索引计数 `with_voice` 860→859、`voice_text_skins` 44→56。——用户两次按的都是第 4 步那颗换入，于是 `swap-in: 清单为空`；**§77 已把路径收进 `scripts/paths.py`**（`AL_ASSETS_ROOT` 换机器、12 个文件接上、`mumu_sync --only` 按类型拉取且与 `--list-out` 硬互斥），闸门 `py -3 scripts/diag/check_paths.py`：链路 0 处写死、43 个一次性脚本记为欠账不判红；**§78 资产台账已落地**（`scripts/asset_ledger.py` + `ledger/`，闸门 23 条）："已还原"= 产物在 **且** 溯源记录的源包大小+md5 与盘上现状对得上；`prune` 默认 dry-run、`--apply` 还要 `--yes`、`dependencies`/`hashes*`/AB 根下 41 个散包永不删；删过的写 `pruned.json`，`mumu_sync` 据此**不再把它们报成新增**（设备上大小变了的照旧算新版本）；`export`/`import` 是换设备的迁移单元。建账时被抓出两处"少记"（只扫第一层、漏 AB 根下散包），已进判据。
+（撤语音后仍有台词），24 处红降到 0 红 + 1 条"需人看"。索引计数 `with_voice` 860→859、`voice_text_skins` 44→56。
+**台词层也有同一份错派（见 §85，已修）**：`build_skin_words.py` 原来自己写了一遍贪婪剥后缀
+（注释还写着"不做身份后缀剥离"），12 个黑化键的台词指向本体的行 ⇒ 归属规则收成**一份**
+`extract_cv_voice.row_candidates()`，两层共用；闸门那条"撤语音后仍有台词"的替代证据**不合格**
+（被错派台词自己满足）⇒ 改按实体规则判。重导后 12 个黑化键语音 0 / 台词 0 / 两张映射里都不存在，
+`voice_text_skins` 回到 44，`derive` ✅ `regress` ✅。**已知重复未并**：`build_gallery_index.VAR_TAIL`（语义不同、有闸门覆盖）。——用户两次按的都是第 4 步那颗换入，于是 `swap-in: 清单为空`；**§77 已把路径收进 `scripts/paths.py`**（`AL_ASSETS_ROOT` 换机器、12 个文件接上、`mumu_sync --only` 按类型拉取且与 `--list-out` 硬互斥），闸门 `py -3 scripts/diag/check_paths.py`：链路 0 处写死、43 个一次性脚本记为欠账不判红；**§78 资产台账已落地**（`scripts/asset_ledger.py` + `ledger/`，闸门 23 条）："已还原"= 产物在 **且** 溯源记录的源包大小+md5 与盘上现状对得上；`prune` 默认 dry-run、`--apply` 还要 `--yes`、`dependencies`/`hashes*`/AB 根下 41 个散包永不删；删过的写 `pruned.json`，`mumu_sync` 据此**不再把它们报成新增**（设备上大小变了的照旧算新版本）；`export`/`import` 是换设备的迁移单元。建账时被抓出两处"少记"（只扫第一层、漏 AB 根下散包），已进判据。
 **执行状态（2026-10-01 23:40）**：13 档**全部有本轮结论**（`.diag/pipeline/pipeline_state.json`，
 指纹 `bundles=92679 deps=30fe6261e7`、范围章 `b885a9477f` 三处一致）——`preflight`/`pull`（签字拉完 1036 个新包）/
 `deps`/`meta`（换入 + 权威闸门绿）/`paintings`（179 张）/`spine`/`live2d`/`review`/`swap-in`（12 张）/`derive`/`regress`

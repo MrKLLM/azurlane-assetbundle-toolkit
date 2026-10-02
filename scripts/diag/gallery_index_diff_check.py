@@ -114,12 +114,18 @@ def diff(old, new, allow_ship, allow_skin, packs, expect=None):
                         misfit.append('  %s: 旧包 %s 不在其皮肤的游戏表包号 %s 内'
                                       % (sid, sorted(olds), sorted(mine)))
                     elif not olds:
-                        # 旧索引里这条压根没有 `voices` 列表 ⇒ **无从判定**旧包属于谁。
-                        # 此时不能直接断言"丢了本船语音"（那是把"不知道"当成"证明了"），
-                        # 但也不能放行：要求撤掉语音后**仍有台词**，否则就是静默变空白。
-                        # 本轮实例：黑化版 `congmang_2_hei` 32→0，同时 voiceText 补上 12 条。
-                        vt = b.get('voiceText') or (s.get('voiceText') if k == 'voiceCount' else None)
-                        if vt:
+                        # 旧索引里这条压根没有 `voices` 列表 ⇒ 旧包归属**无从判定**。
+                        # 不能断言"丢了本船语音"（那是把"不知道"当成"证明了"），也不能直接放行。
+                        # ⚠️ 替代证据不能写"还有台词"：本轮实测台词层有同一份错派（黑化键的
+                        #    voiceText 指向本体的行），那等于让错数据给自己的存在作证（§85）。
+                        vt = b.get('voiceText') or s.get('voiceText') or 0
+                        if HEI_TAIL.search(sid):
+                            # 黑化版按裁定不得借用任何非自己那一行的数据 ⇒ 归零属预期，点名即可
+                            rep['voiceCount 归零=黑化版撤错派(需人看)'] += 1
+                            misfit.append('  %s: 黑化版（独立发声实体）语音归零，'
+                                          '旧索引无 voices 列表无从核对旧包；台词 %s 条'
+                                          % (sid, vt if isinstance(vt, int) else len(vt)))
+                        elif vt:
                             rep['voiceCount 归零=旧包无从判定但台词已在(需人看)'] += 1
                             misfit.append('  %s: 旧索引无 voices 列表，无法判定旧包归属；'
                                           '现 voiceCount=%s 但台词 %s 条已在（须人确认这确实是撤错派）'
@@ -139,6 +145,10 @@ def diff(old, new, allow_ship, allow_skin, packs, expect=None):
                 else:
                     bad.append('船标量变化与声明不符: %s.%s 期望 %r 实得 %r'
                                % (sid, k, expect[sid][k], b.get(k)))
+            elif HEI_TAIL.search(str(sid)) and empty(b.get(k)):
+                rep['船标量撤错派(黑化):%s' % k] += 1
+                misfit.append('  船 %s.%s %r→%r（黑化版撤掉属于本体的错派）'
+                              % (sid, k, a.get(k), b.get(k)))
             elif empty(a.get(k)) and not empty(b.get(k)):
                 # 从"没有"变成"有" = 补全，不是回退（撤掉错派语音后台词层接管就是这一类）
                 rep['船标量补全:%s' % k] += 1
@@ -166,6 +176,13 @@ def diff(old, new, allow_ship, allow_skin, packs, expect=None):
                 rep['皮肤标量允许变化:%s' % k] += 1
                 if k == 'image' and a.get(k) and not b.get(k):
                     bad.append('皮肤立绘路径丢失: %s' % key)
+            elif HEI_TAIL.search(key) and empty(b.get(k)):
+                # 黑化版（独立发声实体）的标量清空 = 撤掉错派，不是回退。
+                # 与语音侧同一条规则：台词层原来也把本体的台词派给了 12 个黑化键（§85），
+                # 撤掉时方向是"有→空"，不点名就会被当成丢数据。仍然报出来给人看。
+                rep['皮肤标量撤错派(黑化):%s' % k] += 1
+                misfit.append('  皮肤 %s.%s %r→%r（黑化版撤掉属于本体的错派）'
+                              % (key, k, a.get(k), b.get(k)))
             elif empty(a.get(k)) and not empty(b.get(k)):
                 rep['皮肤标量补全:%s' % k] += 1
             else:
