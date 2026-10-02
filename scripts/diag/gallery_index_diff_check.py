@@ -23,6 +23,14 @@ sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 DEF_AZDATA = os.path.join(ROOT, 'inputs', 'azdata', 'azdata_ship_skin_template.json')
 VAR_TAIL = re.compile(r'(_hx|_n|_rw|_bj|_jz|_alter|_heihei|_hei)+$')
+# 黑化后缀 = 独立发声实体（2026-10-02 用户裁定，见 docs/TROUBLESHOOTING.md §84）
+HEI_TAIL = re.compile(r'(_heihei|_hei)$')
+
+
+def empty(v):
+    """标量"没有值"的口径：None / 空串 / 空列表 / 0 都算空。
+    闸门要靠它区分「补全」与「回退」——把 `None→12` 叫回退是方向判反（本轮 23 处误报）。"""
+    return v is None or v == '' or v == [] or v == 0
 
 
 def skin_packs(azdata):
@@ -95,11 +103,30 @@ def diff(old, new, allow_ship, allow_skin, packs, expect=None):
                     mine = set()
                     for sk in (s.get('skins') or []):
                         key = str(sk.get('key') or '').lower()
-                        mine |= packs.get(key, set()) | packs.get(VAR_TAIL.sub('', key), set())
+                        mine |= packs.get(key, set())
+                        # 黑化版是**独立发声实体**（2026-10-02 用户裁定，见 §84）：
+                        # 它"本船的包"只算它自己那一行的，基础皮肤那套是**另一个实体**的台词，
+                        # 拿掉属修正。旧口径按船算，会把"错派给黑化版的本体台词"当成"丢了本船语音"判红。
+                        if not HEI_TAIL.search(key):
+                            mine |= packs.get(VAR_TAIL.sub('', key), set())
                     if olds and not (olds & mine):
                         rep['voiceCount 归零=旧语音本属他船(修正)'] += 1
                         misfit.append('  %s: 旧包 %s 不在其皮肤的游戏表包号 %s 内'
                                       % (sid, sorted(olds), sorted(mine)))
+                    elif not olds:
+                        # 旧索引里这条压根没有 `voices` 列表 ⇒ **无从判定**旧包属于谁。
+                        # 此时不能直接断言"丢了本船语音"（那是把"不知道"当成"证明了"），
+                        # 但也不能放行：要求撤掉语音后**仍有台词**，否则就是静默变空白。
+                        # 本轮实例：黑化版 `congmang_2_hei` 32→0，同时 voiceText 补上 12 条。
+                        vt = b.get('voiceText') or (s.get('voiceText') if k == 'voiceCount' else None)
+                        if vt:
+                            rep['voiceCount 归零=旧包无从判定但台词已在(需人看)'] += 1
+                            misfit.append('  %s: 旧索引无 voices 列表，无法判定旧包归属；'
+                                          '现 voiceCount=%s 但台词 %s 条已在（须人确认这确实是撤错派）'
+                                          % (sid, b.get(k), vt if isinstance(vt, int) else len(vt)))
+                        else:
+                            bad.append('voiceCount 归零且无台词兜底(旧包无从判定): %s %s→%s'
+                                       % (sid, a.get(k), b.get(k)))
                     else:
                         bad.append('voiceCount 归零(丢了这艘船自己的语音): %s %s→%s 旧包=%s 本船包号=%s'
                                    % (sid, a.get(k), b.get(k), sorted(olds), sorted(mine)))
@@ -112,6 +139,9 @@ def diff(old, new, allow_ship, allow_skin, packs, expect=None):
                 else:
                     bad.append('船标量变化与声明不符: %s.%s 期望 %r 实得 %r'
                                % (sid, k, expect[sid][k], b.get(k)))
+            elif empty(a.get(k)) and not empty(b.get(k)):
+                # 从"没有"变成"有" = 补全，不是回退（撤掉错派语音后台词层接管就是这一类）
+                rep['船标量补全:%s' % k] += 1
             else:
                 bad.append('船标量回退: %s.%s %r→%r' % (sid, k, a.get(k), b.get(k)))
 
@@ -136,6 +166,8 @@ def diff(old, new, allow_ship, allow_skin, packs, expect=None):
                 rep['皮肤标量允许变化:%s' % k] += 1
                 if k == 'image' and a.get(k) and not b.get(k):
                     bad.append('皮肤立绘路径丢失: %s' % key)
+            elif empty(a.get(k)) and not empty(b.get(k)):
+                rep['皮肤标量补全:%s' % k] += 1
             else:
                 bad.append('皮肤标量回退: %s.%s %r→%r' % (key, k, a.get(k), b.get(k)))
     return rep, bad, misfit

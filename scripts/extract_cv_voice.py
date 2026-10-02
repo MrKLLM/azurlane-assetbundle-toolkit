@@ -409,10 +409,25 @@ def run(skin_keys, mode, out_audio, map_path, jobs, skip_done=False):
                 old = json.load(open(map_path, encoding='utf-8'))
             except Exception:
                 old = {}
+        # 合并是**必须**的（增量跑时不能把本轮没看的皮肤抹掉），但只合并就会留下
+        # "归属规则改了、错映射还在"：本轮把 12 个黑化版判成无解之后，它们仍以
+        # src=strip 挂着本体的包（90302/30405/10705…），画廊照样能播——错派被缓存吃掉了。
+        # ⇒ 撤回范围严格限定在**本轮看过的键**里，且只撤"算不出归属"或"包号已变"这两种，
+        #   其余（有行但没台词等）保守留着，不误伤增量跑。
+        retracted = []
+        for k in skin_keys:
+            if k in map_out or k not in old:
+                continue
+            r = res.get(k)
+            if r is None or old[k].get('cv') != r['cv']:
+                old.pop(k)
+                retracted.append(k)
         old.update(map_out)
         os.makedirs(os.path.dirname(map_path), exist_ok=True)
         json.dump(old, open(map_path, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
-        print('映射表: %s（%d 皮肤）' % (map_path, len(old)))
+        print('映射表: %s（%d 皮肤）%s' % (map_path, len(old),
+              f'｜撤回本轮已不该存在的陈旧映射 {len(retracted)} 条 {retracted[:6]}'
+              if retracted else ''))
     if miss:
         p = os.path.join(DIAG, '_cv_voice_miss.json')
         json.dump(sorted(miss), open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
