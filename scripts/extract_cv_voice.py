@@ -48,6 +48,17 @@ OPUS_BITRATE = '48k'
 # 皮肤目录名里的「后处理变体」：同一皮肤的另一张画法，语音与皮肤序号都不受影响。
 # ⚠️ 不含 _g/_meta/_asmr —— 它们是独立皮肤（guying_g 在皮肤表里有自己的行、idx=9），剥掉会串到基础皮肤。
 VAR = re.compile(r'(_hx|_n|_rw|_bj|_jz|_alter|_heihei|_hei)+$')
+# ── 后缀三分类（2026-10-02 用户领域裁定定下来的口径，见 docs/TROUBLESHOOTING.md §83）──
+# 旧 `VAR` 是**一次贪婪剥掉整串**，于是 `X_alter_n`（改造皮肤的另一张画）被直接剥回 `X`
+# —— 拿到的是**改造之前**那套皮肤的语音包。按来源分档实测影响 55 个皮肤名。
+#   · 画法后缀：同一张皮肤的另一幅画/层 ⇒ 可以一层层剥，每剥一层都要重新查行。
+ART_SUF = re.compile(r'(_n|_hx|_rw|_bj|_jz)$')
+#   · `_alter` 改造：**同一个角色的另一套皮肤**（用户口径"相当于皮肤"）⇒ 允许剥，
+#     但只能作为**最后一级**回退（先给它自己的行留位置），且剥完仍要逐层查行。
+ALTER_SUF = re.compile(r'_alter$')
+#   · `_hei`/`_heihei` 黑化：**独立发声实体** ⇒ 既不剥、也不许走同船回退。
+#     拿本体台词派给黑化版，与 §57 判死的 `_wjz` 那三类同源。
+HEI_SUF = re.compile(r'(_heihei|_hei)$')
 # 「第几号皮肤」尾缀：定位船名(stem)时要剥掉；_g/_h 这类不带数字的也是独立皮肤
 SKIN_TAIL = re.compile(r'(_\d+|_h|_g|_meta|_asmr|_gv|_rw|_bj|_jz|_alter|_heihei|_hei)$')
 SONG = re.compile(r'^vocal_')           # 歌曲人声，不是台词
@@ -154,28 +165,63 @@ def ship_stem(k):
     return s
 
 
+def art_chain(name):
+    """原名 + 逐层剥一个「画法后缀」得到的候选链（先长后短）。
+
+    为什么要**逐层**而不是一次剥光：`X_alter_n` 一次剥光会直接变成 `X`，跳过 `X_alter`
+    这个"改造版自己那一行"；逐层剥才能在 `X_alter` 上停下来（实测影响 37 个皮肤名）。"""
+    out, cur = [name], name
+    while True:
+        m = ART_SUF.search(cur)
+        if not m:
+            return out
+        cur = cur[:m.start()]
+        out.append(cur)
+
+
 def resolve(keys, rows, banks):
     """皮肤 → {cv, idx or None, src}。idx=None 表示等解码出包内序号档后再定（同船回退）。
 
-    候选一律小写（表已按小写归一，见 load_skin_rows）。**不做身份后缀剥离**：
-    `_memory/_rank/_heihua/_ex/_wjz` 这类可能是另一个发声实体，剥错就是把别人的台词派给它。"""
+    候选一律小写（表已按小写归一，见 load_skin_rows）。后缀按**三分类**处理
+    （`ART_SUF` / `ALTER_SUF` / `HEI_SUF`，口径来自 2026-10-02 用户领域裁定，见 §83）：
+      1. 这张皮肤自己的行 —— 原名，或逐层剥「画法后缀」后的名字；
+      2. 改造版没有自己的行时，允许回退到本体（**同一角色的另一套皮肤**）；
+      3. 黑化版（`_hei`/`_heihei`）是**独立发声实体**：既不剥后缀也不走同船回退，直接判无解。
+    **不做其它身份后缀剥离**：`_memory/_rank/_heihua/_ex/_wjz` 这类可能是另一个发声实体，
+    剥错就是把别人的台词派给它。"""
     res, miss = {}, []
     rows_l = {p.lower(): v for p, v in rows.items()}
     stems = {p: ship_stem(p) for p in rows_l}
-    for k in keys:
-        kl = k.lower()
-        for cand, src in ((kl, 'row'), (VAR.sub('', kl), 'strip')):
+
+    def pick(name, orig):
+        """在 name 的画法候选链上找行；命中后 src 要相对**最初那个名字** orig 判定 ——
+        否则从 `_alter` 回退进来的那一层会把自己标成 `row`（本轮实测错过：`aisaikesi_alter`
+        自己的行没包，回退到本体 10709 却被标成 row，把"回退"伪装成"命中自有行"）。"""
+        for cand in art_chain(name):
             hit = [t for t in rows_l.get(cand, []) if t[0] in banks]
             if hit:
-                res[k] = {'cv': hit[0][0], 'idx': hit[0][1], 'src': src}
-                break
+                return {'cv': hit[0][0], 'idx': hit[0][1],
+                        'src': 'row' if cand == orig else 'strip'}
+        return None
+
+    for k in keys:
+        kl = k.lower()
+        stem = art_chain(kl)[-1]                 # 剥光画法后缀之后的名字
+        got = pick(kl, kl)
+        if got is None and ALTER_SUF.search(stem) and not HEI_SUF.search(stem):
+            got = pick(ALTER_SUF.sub('', stem), kl)   # 同角色的本体，最后一级回退
+        if got:
+            res[k] = got
+            continue
+        if HEI_SUF.search(stem):
+            miss.append(k)                       # 独立实体：宁缺勿错派
+            continue
+        st = ship_stem(kl)
+        alt = sorted({t for p in rows_l if stems[p] == st for t in rows_l[p] if t[0] in banks})
+        if alt:
+            res[k] = {'cv': alt[0][0], 'idx': None, 'src': 'sibling'}
         else:
-            st = ship_stem(kl)
-            alt = sorted({t for p in rows_l if stems[p] == st for t in rows_l[p] if t[0] in banks})
-            if alt:
-                res[k] = {'cv': alt[0][0], 'idx': None, 'src': 'sibling'}
-            else:
-                miss.append(k)
+            miss.append(k)
     return res, miss
 
 

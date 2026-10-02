@@ -4205,3 +4205,48 @@ B 从设备取一份新皮肤清单。跑完的结果是 **A 被自己的判据�
 `scripts/diag/ship_meta_authority_diff.py`、`scripts/diag/test_meta_gate_proofs.py`（新）、
 `tools/sharecfg_re/42_publish_gamecfg.py`。取证：`.diag/{b_probe,b_rows,src_diff,alter_real,alter_list2,meta_diff,gate4,proofs}.txt`、
 `.diag/game_screen.png`。相关：§57、§81、§82、WF-15、WF-23。
+
+---
+
+## §84. 后缀三分类落地：改造=同角色皮肤（可回退），黑化=独立发声实体（不可回退）（2026-10-02 下午）
+
+用户给出领域裁定后，§83 那条"55 个名字接错语音"的修法才定型。**不能简单把 `_alter` 从剥后缀表里摘掉**
+——那样连"停在 `X_alter` 自己那一行"都做不到，41 个名字会直接掉进同船回退，比现状更糟。
+
+**三分类**（`scripts/extract_cv_voice.py` 里三个具名正则，不再是一条 `VAR` 一把梭）：
+
+| 类别 | 后缀 | 语义 | 解析器允许什么 |
+|---|---|---|---|
+| 画法变体 | `_n` `_hx` `_rw` `_bj` `_jz` | 同一张皮肤的另一幅画/层 | **逐层**剥，每剥一层查一次行 |
+| 改造 | `_alter` | 同一角色的另一套皮肤（用户口径"相当于皮肤"） | 先给它自己的行；实在没有才回退到本体 |
+| 黑化 | `_hei` `_heihei` | **独立发声实体** | 既不剥后缀，也不走同船回退 ⇒ 判无解 |
+
+**关键实现细节：`VAR` 是一次贪婪剥光整串后缀**，所以 `X_alter_n` 直接变成 `X`，跳过了 `X_alter`
+这一层。⇒ 新增 `art_chain()`：候选链按"剥一个画法后缀"逐层展开，**先长后短**逐层查行。
+
+**实测（4506 个皮肤名，旧解析器 vs 新，全部走 `resolve()` 真入口）**：
+行为变化 **49 处** = 换包 **37**（改造立绘从"改造前那套"换到自己那套，如 `birui_alter_n`
+30402→970405）+ 改为无解 **12**（黑化：`aerjiliya_hei`、`tiancheng_hei`、`yuekecheng_alter_hei`…）。
+可解析 4152→4140、无解 354→366，差值正好是那 12 个。明细 `.diag/pipeline/voice_owner_AB.tsv`。
+
+**两个自己造的假成果**（都靠"逐条核样例"才发现，没让它们进汇报）：
+1. **`src` 标签相对内层候选名算** ⇒ 从 `_alter` 回退到本体的那条，把自己标成了 `row`，
+   于是"43 个钉到自有行"里有 6 个其实是回退（cv 根本没变）。⇒ `pick(name, orig)` 把判定基准
+   显式传进去；复算后是 **49 处行为变化、标签变而归属不变 0**。**教训**：分类字段是给人做统计的，
+   它错了整份结论就错，哪怕数值列全对。
+2. **反向对照测试的 fixture 白测了两条**：合成名写成 `_alt`（不是 `_alter`）、`hei_nopack`（不以 `_hei` 结尾），
+   于是"改造无包允许回退"那两条测的其实是"查无此名 ⇒ 无解"，恰好和期望值方向相反才暴露；
+   另外回退目标行（本体 `gaizao`）压根没放进 fixture，期望值也写错了 cv。
+   ⇒ 合成 fixture 的硬要求：**每条规则都要有能区分它与其它规则的唯一落点**，
+   且"允许"类规则必须配一条"这条不成立时应该是什么"的对照（本项目最终 11 例，含 4 条必为无解）。
+3. 全库还加了一条不变式判据：**任何以黑化后缀结尾的名字，都不得出现在可解析集合里**
+   （实测 0 命中才算过）——它比逐条断言更防漂移，因为以后新增黑化皮肤会自动被覆盖。
+
+**闸门与回归**：`test_voice_owner.py` 11/11、`test_pipeline_gating.py` 全绿；
+`voice_gap_audit` 的三档口径（§81.2）不受影响（它自己算 `stripped`）。
+**未做**：语音重导（≈75 分钟）——清单已交用户过目，等点头才动 `Output/Audio`。
+
+**涉及文件**: `scripts/extract_cv_voice.py`（`ART_SUF`/`ALTER_SUF`/`HEI_SUF`、`art_chain()`、`resolve()`）、
+`scripts/diag/test_voice_owner.py`（新，11 例）。取证：`.diag/{ab_final,ab_list,ab_probe,vo3}.txt`、
+`.diag/pipeline/voice_owner_AB.tsv`、`.diag/baseline_old/ecv_old.py`（`git show HEAD:` 取的旧基线）。
+相关：§57、§81、§83、WF-15。
