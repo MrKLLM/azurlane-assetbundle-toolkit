@@ -4149,7 +4149,7 @@ B 从设备取一份新皮肤清单。跑完的结果是 **A 被自己的判据�
    ⇒ **没有台词、没有皮肤名是正确状态**；画廊维持 🔇 与回落 label 才对，硬接就是 §47 型语义错。
    ⚠️ 排除"我们漏抽"时**别用裸 `grep` 搜加密表**：串是 `^(255-i)` 编码的，`grep xinnong_h` 恒 0 命中
    不构成任何证据（本轮差点把它当成"表里确实没有"的第三条证据）。必须走 `37_parse_sharecfgdata.py` 解完再查。
-2. **B 落地（只读侧，正式区一个字节没动）**：`42_publish_gamecfg.py` 发布第 4 张表
+2. **B 落地（先只读侧，随后经用户点头换入正式区）**：`42_publish_gamecfg.py` 发布第 4 张表
    `inputs/gamecfg/ship_skin_template.json`（2865 行，与 azdata 同构、只留标量字段、`id` 统一 int），
    新增唯一读取口 `scripts/skin_table.py`，`build_ship_meta.load()` 与 `extract_cv_voice.load_skin_rows()` 接上。
    - **为什么是逐字段合并而不是整表替换**：设备那份清洗掉了嵌套字段（`bound_bone`/`fx_container`…），
@@ -4159,6 +4159,14 @@ B 从设备取一份新皮肤清单。跑完的结果是 **A 被自己的判据�
      **条目 4507 → 4507（新增 0、丢失 0），字段改动 20 处全是皮肤名升级**——7 个真名替掉舰名或
      没展开的 `{namecode}`（顺带消掉 3 个占位符），`aierdeliqi_9_n`/`mile_3_n` 的语音从
      "同船回退 `idx=None`"变成"停在真行 `cv=10126 idx=7` / `cv=10153 idx=2`"。
+   - **换入后实测（13:06~13:13）**：`meta`(2 秒，闸门绿) → `derive`(5 秒，index 闸门绿、`deploy --check 4/4`)
+     → `regress`(2 分 03 秒，WF-16 五件全绿)。正式区 `ship_meta.json` 里 7 个皮肤名已是真名
+     （金月桂香 / 幽幽桥上，坏坏来袭！ / 晴雨狐嫁 / 飞雪织缘 / 幻夜绮舞…），`base_painting` 指回本名、
+     `source` 从 `suffix` 升到 `painting`。画廊索引**条目 4503→4503（新增 0 丢失 0）、字段改动 2 处**：
+     `aierdeliqi_9_n` 与 `mile_3_n` 各新增 `voiceExtra`（`cv-10126/-battle,-gift` 与 `cv-10153/…`）
+     —— 这是把第三个读点 `build_gallery_index.py` 的 `SKIN_ROWS` 也接进 `skin_table` 才拿到的；
+     不接它就会留下"同一张表两处各读一份"的漂移。
+     ⚠️ 顺带量到：`skin_name` 里仍有 **576** 个 `{namecode:NN}` 未展开（占位符表覆盖不全，独立待办）。
 3. **闸门必须先能区分"有据升级"与"回退"，而这条判据本身要能被反向测到。**
    `ship_meta_authority_diff.py` 第一次跑判红（4 处 `base_painting` + 2 处 `suffix→painting`）——
    它没错，是它**只会两种回答**：白名单内的转换，或"改动须为 0"。而权威源升级产生的恰恰是

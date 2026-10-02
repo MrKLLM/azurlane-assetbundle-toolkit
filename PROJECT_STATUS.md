@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-10-02 10:58
+> **生成时间**: 2026-10-02 13:20
 > 历轮会话流水（2026-09-20 ~ 09-27）已**逐字**外迁 `docs/archive/2026-09-26_PROJECT_STATUS_外迁归档.md`（A1~A15 段）；
 > 结论性知识在 `docs/TROUBLESHOOTING.md` §25~§67 与 `docs/WORKFLOWS.md` WF-14~WF-23。本文只留当前状态。
 > **最近三轮**：画廊视觉定稿刷进正本（见 **§6 顶部 ★ 块** + §62 + WF-16 追加）｜354 张「🔇 无语音」按可救性拆细并裁定关闭（**§57**）｜静态立绘「只画游戏里开着的层」根因修掉、换入 48 张（**§55**）+ 敦刻尔克改判（**§56**）。逐轮流水已逐字外迁归档 A15 段。
@@ -29,7 +29,10 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
 实测差异 **条目零增减、20 处全是皮肤名升级**（含消掉 3 个 `{namecode}` 占位符），
 `aierdeliqi_9_n`/`mile_3_n` 的语音从"同船回退 `idx=None`"变成"停在真行 `cv=10126 idx=7` / `cv=10153 idx=2`"；
 闸门 `ship_meta_authority_diff` 为此新增**「快照缺行→权威表已有行」方向性判据**（远→近才放行，反向必拦），
-配套反向对照测试 `scripts/diag/test_meta_gate_proofs.py` 8 例全过。**待你点头**：`--only meta --approve meta` 换入 + `derive` + `regress`。
+配套反向对照测试 `scripts/diag/test_meta_gate_proofs.py` 8 例全过。**13:06 已换入正式区**
+（`meta` 2 秒闸门绿 → `derive` 5 秒 index 闸门绿 + `deploy --check 4/4` → `regress` 2 分 03 秒 WF-16 五件全绿）；
+画廊索引条目 4503→4503（零增减）、`aierdeliqi_9_n`/`mile_3_n` 各新增变体包语音 `voiceExtra`
+——为此把第三个读点 `build_gallery_index.py` 的 `SKIN_ROWS` 也接进了同一个合并口。
 **C 重新定量（见 §83）**：`extract_cv_voice.VAR` 贪婪剥后缀导致 **55 个**改造/黑化立绘被派到**改造前那艘船**的语音包
 （其中 **37 个**表里有自己的行且包就在盘上、18 个该显式 🔇）——比上轮估的"2 张"大 27 倍，改法要你先裁定黑化/改造是否各算独立发声实体。——用户两次按的都是第 4 步那颗换入，于是 `swap-in: 清单为空`；**§77 已把路径收进 `scripts/paths.py`**（`AL_ASSETS_ROOT` 换机器、12 个文件接上、`mumu_sync --only` 按类型拉取且与 `--list-out` 硬互斥），闸门 `py -3 scripts/diag/check_paths.py`：链路 0 处写死、43 个一次性脚本记为欠账不判红；**§78 资产台账已落地**（`scripts/asset_ledger.py` + `ledger/`，闸门 23 条）："已还原"= 产物在 **且** 溯源记录的源包大小+md5 与盘上现状对得上；`prune` 默认 dry-run、`--apply` 还要 `--yes`、`dependencies`/`hashes*`/AB 根下 41 个散包永不删；删过的写 `pruned.json`，`mumu_sync` 据此**不再把它们报成新增**（设备上大小变了的照旧算新版本）；`export`/`import` 是换设备的迁移单元。建账时被抓出两处"少记"（只扫第一层、漏 AB 根下散包），已进判据。
 **执行状态（2026-10-01 23:40）**：13 档**全部有本轮结论**（`.diag/pipeline/pipeline_state.json`，

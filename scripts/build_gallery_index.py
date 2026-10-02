@@ -5,6 +5,7 @@
 import sys, os, re, json, glob
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+import skin_table  # 皮肤表唯一读取口（azdata 快照 + 设备侧权威表逐字段合并）
 from ship_name_map import SHIP_NAME_MAP
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -295,8 +296,7 @@ for stem, e in SKIN_VOICE.items():
 # 一个 painting 若同时属于两个发声实体（如 lafei 既是舰船 10117 也是剧情角色 90024），
 # 就把这一档**整体放弃**——按 §47 的教训，派错声比留空更糟。
 SKIN_ROWS = {}
-for _r in json.load(open(os.path.join(ROOT, 'inputs', 'azdata',
-                                      'azdata_ship_skin_template.json'), encoding='utf-8')).values():
+for _r in skin_table.load().values():
     if isinstance(_r, dict):
         _p = str(_r.get('painting') or '').strip().lower()
         if _p:
