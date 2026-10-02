@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。
-version: 1.6.9
+version: 1.6.10
 ---
 
 # 无头 Chrome + CDP 批量导出

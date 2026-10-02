@@ -1161,6 +1161,15 @@ body.legacy #help .panel{background:linear-gradient(180deg,#141024,#0c0817);
 #help code{font:11.5px/1.5 var(--fm);background:color-mix(in srgb,var(--brand) 12%,transparent);padding:1px 6px;
   border-radius:var(--r-tag);color:var(--brand)}
 #help .close{position:sticky;top:0;float:right}
+#help .hmode{display:flex;align-items:center;gap:7px;margin:0 0 var(--s4);
+  padding-bottom:var(--s3);border-bottom:1px solid var(--line)}
+#help .hmode .seg{font:500 12px/1 var(--fb);padding:6px 13px;border-radius:999px;
+  border:1px solid var(--line);background:transparent;color:var(--txt2);cursor:pointer;
+  transition:color .16s var(--ez),border-color .16s var(--ez),background .16s var(--ez)}
+#help .hmode .seg.on{color:var(--txt);border-color:var(--brand);
+  background:color-mix(in srgb,var(--brand) 14%,transparent)}
+#help .hmode .hmodenote{font-size:11.5px;color:var(--txt2);margin-left:2px}
+body.hsimple #help .dt{display:none}
 .warn{background:rgba(255,111,111,.10);border:1px solid rgba(255,111,111,.34);
   border-radius:var(--r-ctl);
   padding:9px 12px;font-size:12.5px;color:#ffc2c2;margin-bottom:11px;display:none}
@@ -1340,6 +1349,10 @@ input,textarea{cursor:text}
 
 <div id="help"><div class="veil" data-close></div><div class="panel">
   <button class="close ghost" data-close>关闭 ✕</button>
+  <div class="hmode">
+    <button class="seg" data-hm="simple">简洁</button><button class="seg" data-hm="detail">详细</button>
+    <span class="hmodenote" id="hnote"></span>
+  </div>
   <h3 style="margin-top:0">这是什么</h3>
   <p><b>资产更新控制台</b>把你游戏更新之后要做的那一串事，按四步排成一条主线。
   它<b>不重新实现</b>任何导出逻辑：每个按钮都是去起
@@ -1499,8 +1512,9 @@ function mul32(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a)
   t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 const ST={cv:null,g:null,w:0,h:0,list:[],pairs:[],neb:null,raf:0,t0:0,frames:0,
           peak:0,lit:0,strokes:0,bursts:0,rings:[],C:[],LC:'#9aa4c8',
-          AMB:0.10,          // 常驻星点占比的亮度；想要"完全只有经过才亮"就把它设成 0
-          RMIN:9,RMAX:130,   // 显影半径：随笔画速度从 9px 长到 130px
+          AMB:0.26,          // 常驻星点占比的亮度；想要"完全只有经过才亮"就把它设成 0
+          RMIN:46,RMAX:190,  // 显影半径：随笔画速度从 46px 长到 190px（旧 9→130 时慢速划过
+                             //   只点亮两三颗，用户读到的就是"撒了几粒灰"而不是"一片星空"）
           DECAY:4.6,         // 亮度衰减 /秒 ⇒ 520ms 后只剩 9%
           SPRING:34,DAMP:4.2,EPS:0.12,LIT_EPS:0.012,
           LINK_A:0.16,        // 星座连线的 alpha 上限（旧版 0.52 太像连点图）
@@ -1580,7 +1594,7 @@ function starColors(){
 function starsBuild(){
   const R=mul32(20260930);                   // 同种子 ⇒ 刷新后星位不变，不会"每次进来换一片天"
   const w=ST.w, h=ST.h;
-  const n=Math.round(Math.min(3200,Math.max(1100,w*h/520)));
+  const n=Math.round(Math.min(4200,Math.max(1500,w*h/400)));
   ST.list=[];
   const gx=w*0.04, gy=h*1.08, dx=w*0.96, dy=-h*0.84;          // 一条斜着的银河带
   for(let i=0;i<n;i++){
@@ -1597,8 +1611,13 @@ function starsBuild(){
     const a  = kind==='hero' ? 0.74+R()*0.26 : kind==='star' ? 0.30+R()*0.32 : 0.10+R()*0.24;
     // 色温与亮度相关：暗尘偏蓝白，只有亮星才允许走到暖端
     const ci = kind==='dust' ? (R()<0.80?0:1) : kind==='star' ? (R()*3|0) : (R()*4|0);
+    /* 常驻那一档按**星型分别抽**：旧版 `i%47` 是等概率抽，抽到的多半是最暗的 dust，
+       而 dust 的 a 只有 0.10~0.34，再乘上 AMB 就落在 `al<0.008` 那条丢弃线附近 ⇒
+       实测静止帧整屏只有 67 个像素亮着（占视口 0.01%），"静止全黑"黑到看不见天。
+       ⇒ 亮星每 3 颗留 1 颗、尘每 13 颗留 1 颗（hero 一律不留，把惊喜留给划过那一刻）。 */
+    const isAmb = kind==='star' ? (i%3===0) : kind==='dust' ? (i%13===0) : false;
     ST.list.push({hx:x,hy:y,x:x,y:y,vx:0,vy:0,z:z,kind:kind,lit:0,
-      amb:(i%47===0 && kind!=='hero' ? ST.AMB*(0.4+R()*0.6) : 0),
+      amb:(isAmb ? ST.AMB*(0.55+R()*0.45) : 0),
       sz:sz, a:a, c:ci, rot:R()*6.2832, ph:R()*6.2832});
   }
   /* 星座连线只算一次（建表时），每帧按当前亮度画：两端都亮才连线。
@@ -1629,11 +1648,21 @@ function nebBake(R){
   const g=c.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
   g.clearRect(0,0,w,h);
   const gx=w*0.04, gy=h*1.08, dx=w*0.96, dy=-h*0.84;
-  for(let i=0;i<30;i++){
-    const t=R(), o=(R()-0.5)*w*0.20;
-    const s=180+R()*340, al=0.018+R()*0.030;
+  /* 旧版是 30 个**正圆**高斯（alpha 1.8~4.8%）：圆边沿一被看出来，整条带就假了 ——
+     截图上读到的不是"银河"，是"撒了几团烟"。⇒ 沿带轴拉长 1.6~3.2 倍、数量翻倍、
+     单颗 alpha 减半，并让横向偏移走三角分布（越靠带轴越密）。这样它们叠成一条
+     连续、有纤维感的带子，而看不出任何一个单独的团。 */
+  const ang=Math.atan2(dy,dx), cs=Math.cos(ang), sn=Math.sin(ang);
+  const span=Math.hypot(dx,dy);
+  for(let i=0;i<64;i++){
+    const along=(R()-0.5)*span*1.04;
+    const across=(R()+R()-1)*w*0.13;                 // 三角分布 ⇒ 带轴密、两侧稀
+    const cx=gx+along*cs-across*sn, cy=gy+along*sn+across*cs;
+    const s=150+R()*300, stretch=1.6+R()*1.6, al=0.010+R()*0.016;
+    g.save(); g.translate(cx,cy); g.rotate(ang); g.scale(stretch,1);
     g.globalAlpha=al;
-    g.drawImage(SPR.cloud[R()<0.72?0:1], gx+dx*t+o-s/2, gy+dy*t+(R()-0.5)*w*0.11-s/2, s, s);
+    g.drawImage(SPR.cloud[R()<0.78?0:1],-s/2,-s/2,s,s);
+    g.restore();
   }
   g.globalAlpha=1;
 }
@@ -2490,6 +2519,30 @@ document.addEventListener('keydown',e=>{
                     :step===4?'swap':'tocheck'); }
 });
 $$('#help [data-close]').forEach(el=>el.onclick=()=>$('#help').classList.remove('on'));
+
+// 说明书两档。默认「简洁」= 只留"我要做什么"那四节，其余细节收着（用户：没看懂说明书）。
+// 分节靠 h3 的标题文本判定，所以改标题必须同时改这张表，否则那一节会静默变成常驻显示。
+const HDETAIL=['颜色与档位怎么读','为什么不信退出码','不在这里的两件事',
+               '键位','进度台怎么读','背景与光效','出问题自己先查的三行'];
+(function helpGroup(){
+  let on=false;
+  for(const el of $('#help .panel').children){
+    if(el.classList.contains('hmode')) continue;
+    if(el.tagName==='H3') on=HDETAIL.some(k=>el.textContent.trim().startsWith(k));
+    if(on) el.classList.add('dt');
+  }
+})();
+let HM=localStorage.getItem('panel.helpmode')||'simple';
+function hmApply(){
+  document.body.classList.toggle('hsimple',HM!=='detail');
+  $$('#help .hmode .seg').forEach(b=>b.classList.toggle('on',b.dataset.hm===HM));
+  const n=$$('#help .dt').filter(e=>e.tagName==='H3').length;
+  $('#hnote').textContent=HM==='detail'?'全部 '+$$('#help .panel h3').length+' 节'
+                                       :'已收起 '+n+' 节细节';
+}
+$$('#help .hmode .seg').forEach(b=>b.onclick=()=>{
+  HM=b.dataset.hm; localStorage.setItem('panel.helpmode',HM); hmApply(); });
+hmApply();
 
 document.addEventListener('click',e=>{ if(e.target.matches('.sheets img')){
   $('#lightbox img').src=e.target.src; $('#lightbox').classList.add('on'); e.preventDefault(); } });

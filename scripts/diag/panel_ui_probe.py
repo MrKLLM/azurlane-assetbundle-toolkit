@@ -339,6 +339,25 @@ def main():
             return 2
     except Exception as e:
         print(f'[警告] 页面 JS 预检没跑成：{type(e).__name__}: {e}')
+    # 第二道预检：**验的必须是现在这份代码**。控制台在 import 时把 HTML 烘成常量 PAGE，
+    # 所以"改了页面但没重启进程"时，探针会把旧页面的绿当成新页面的绿报出去（§72 真实事故，
+    # 本轮又撞上一次：星野参数改完没重启，量到的还是旧分布）。
+    try:
+        sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+        import pipeline_panel as PP
+        served = urllib.request.urlopen(f'http://127.0.0.1:{a.port}/', timeout=6).read().decode('utf-8', 'replace')
+        if served.strip() != PP.PAGE.strip():
+            print(f'[FAIL] {a.port} 上跑的控制台**不是当前这份 pipeline_panel.py**（页面字节 '
+                  f'{len(served)} ≠ 正本 {len(PP.PAGE)}）⇒ 先重启它再跑探针，'
+                  f'否则验的是旧页面：\n'
+                  f'  py -3 scripts/pipeline_panel.py --port {a.port} --no-open')
+            return 2
+        print(f'[OK] 预检：{a.port} 上的页面与 pipeline_panel.py 正本一致（{len(served)} 字节）')
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f'[警告] 页面一致性预检没跑成：{type(e).__name__}: {e}（控制台起来了么？）')
+        return 2
     cdp = a.cdp or a.port + 100
 
     win = [int(x) for x in a.win.split(',')]
@@ -1067,6 +1086,49 @@ def main():
     hot = pg.ev(EV("return !!document.querySelector('.dot.hot')"))
     chk('悬停阶段卡会点亮左轨对应的状态点', bool(hot),
         '卡=%s' % pg.ev(EV('return document.querySelector(".stage .skey").textContent')))
+
+    # ── 说明书两档：切档必须真的收起内容，"收起几节"这个数字还得对得上 ────
+    print()
+    print('── 说明书：简洁/详细两档 ─────────────────────────')
+    n0 = len(pg.exc)
+    pg.ev(EV("document.querySelector('#bHelp').click(); return 1")); time.sleep(0.45)
+
+    def hmode():
+        return pg.ev(EV("""return {
+          vis:[...document.querySelectorAll('#help .panel h3')].filter(e=>e.offsetParent)
+                 .map(e=>e.textContent.trim().slice(0,7)),
+          dt:[...document.querySelectorAll('#help .panel h3.dt')].map(e=>e.textContent.trim().slice(0,7)),
+          note:document.querySelector('#hnote').textContent,
+          ls:localStorage.getItem('panel.helpmode')};"""))
+    h1 = hmode()
+    chk('说明书默认是简洁档（不是"全部展开"糊用户一脸）',
+        str(h1.get('note', '')).startswith('已收起') and len(h1.get('vis') or []) <= 6,
+        f'可见 {h1.get("vis")} · {h1.get("note")}')
+    chk('被收起的节在简洁档里确实不可见（分组失效会变成常驻全展开）',
+        not (set(h1.get('vis') or []) & set(h1.get('dt') or [])) and len(h1.get('dt') or []) >= 5,
+        f'收起 {len(h1.get("dt") or [])} 节')
+    pg.ev(EV("[...document.querySelectorAll('#help .hmode .seg')][1].click(); return 1"))
+    time.sleep(0.35)
+    h2 = hmode()
+    chk('切「详细」后节数 = 简洁可见 + 收起，且选择写进 localStorage',
+        len(h2.get('vis') or []) == len(h1.get('vis') or []) + len(h1.get('dt') or [])
+        and h2.get('ls') == 'detail',
+        f'{len(h2.get("vis") or [])} 节全可见, ls={h2.get("ls")}')
+    chk('切档过程没引入 JS 异常', len(pg.exc) == n0, str(pg.exc[n0:n0 + 2]))
+    pg.ev(EV("[...document.querySelectorAll('#help .hmode .seg')][0].click();"
+             "localStorage.removeItem('panel.helpmode');"
+             "document.querySelector('#help').classList.remove('on'); return 1"))
+    time.sleep(0.3)
+
+    # ── 星野：常驻那一档不能"名义上有、实际看不见" ──────────────────────
+    # 旧版 amb 覆盖 47/2187 = 2.1%，且抽到的多半是最暗的 dust（乘完 a 落在丢弃线附近），
+    # 于是静止帧整屏只有 67 个像素亮着（占视口 0.01%）——"有常驻微光"这条照样算过。
+    st = pg.ev(EV("return {amb:ST.list.filter(t=>t.amb>0).length,n:ST.list.length,"
+                  "AMB:ST.AMB,R:[ST.RMIN,ST.RMAX]}"))
+    chk('常驻星点占比与亮度都够"看得见一片天"（≥8% 且 AMB≥0.2）',
+        isinstance(st, dict) and st['amb'] >= st['n'] * 0.08 and st['AMB'] >= 0.2, str(st))
+    chk('显影半径下限够大（慢速划过点亮的是带子，不是两三颗）',
+        isinstance(st, dict) and st['R'][0] >= 40, f'RMIN/RMAX={st.get("R") if isinstance(st, dict) else "?"}')
 
     # ── 进度台：四个量都是**服务端算的事实**，且只在真的在跑时出现 ──────────
     # 不能真起一条流水线来验（跑一次几分钟、还会写盘），所以合成一份 state 从**真入口**
