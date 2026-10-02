@@ -197,7 +197,10 @@ VOICEPAGE = r"""(async(key)=>{
                                                              vc: ship.voiceCount});
   tabEl.click();
   const e=(SV||{})[key]||{}, w=wordsOf(key)||{};
-  const nLines=(e.lines||[]).length, nText=(e.lines||[]).filter(l=>w[l.cat]).length;
+  const nLines=(e.lines||[]).length;
+  /* 活动版行**故意**不配字幕（正文没有来源，§86）⇒ 期望值必须跟着这条规则，
+     否则探针会把"改对了"读成"逐行对齐=False"。 */
+  const nText=(e.lines||[]).filter(l=>!l.ev && w[l.cat]).length;
   let rows=[];
   for(let i=0;i<60;i++){ rows=[...document.querySelectorAll('.audwrap .aud')];
     if(rows.length>=Math.max(1,nLines)) break; await t(300); }
@@ -214,7 +217,9 @@ VOICEPAGE = r"""(async(key)=>{
     expectTexts:nText, gotTexts:texts.filter(x=>x).length, head:h4,
     firstText:texts.find(x=>x)||'', firstAudio:audios[0], audioHeights:audios.map(a=>a&&a.h).slice(0,6),
     playable: !!playable, residue: !!residue,
-    rowsAligned: texts.slice(0,nLines).every((tx,i)=> tx===(w[(e.lines[i]||{}).cat]||'')),
+    sid:(SW.m||{})[key]||'',
+    rowsAligned: texts.slice(0,nLines).every((tx,i)=>{const l=e.lines[i]||{};
+      return tx===(l.ev?'':(w[l.cat]||''));}),
     extra:(sk.voiceExtra||[]).length, vc:ship.voiceCount});
 })"""
 
@@ -559,10 +564,27 @@ def main():
             fails.append('没挑到「索引认为有语音、且该行有正文」的语音页样本 ⇒ 这条判据等于没测')
         else:
             r = jev('(%s)(%s)' % (VOICEPAGE, json.dumps(vk)), '语音页')
+            # **独立锚点**：逐行对齐是拿页面的 `w[l.cat]` 比页面自己印出来的字 ⇒ 自洽闭环，
+            # 派错船也照样绿（§86 那条 cv*10+idx 撞船就是在这条判据下挂了一整天）。
+            # 这里改成拿"页面实际取词用的那一行 id"回查皮肤表：它必须落在本皮肤按同一份
+            # 剥后缀规则算出的候选行集合里。不在 = 字幕派给了别的实体。
+            own = None
+            try:
+                sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+                import extract_cv_voice as E
+                rows = E.load_skin_rows()
+                cands = {str(int(cv) * 10 + int(idx))
+                         for c in E.row_candidates(vk.lower()) for cv, idx in rows.get(c, [])}
+                own = (str(r.get('sid')) in cands) if r.get('gotTexts') else True
+            except Exception as ex:
+                print('   ⚠️ 归属回查没跑成（%s）⇒ 这条判据等于没测' % str(ex)[:60])
             ok = (r.get('gotRows') == r.get('expectRows') and r.get('gotTexts') == r.get('expectTexts')
-                  and r.get('rowsAligned') and r.get('playable') and not r.get('residue'))
+                  and r.get('rowsAligned') and r.get('playable') and not r.get('residue')
+                  and own is True)
             print(f'{"✅" if ok else "❌"} [语音页] {vk} 行数 {r.get("gotRows")}/{r.get("expectRows")} '
                   f'正文 {r.get("gotTexts")}/{r.get("expectTexts")} 逐行对齐={r.get("rowsAligned")} '
+                  f'字幕归属={"本皮肤自己的行" if own is True else ("★派给了别的实体" if own is False else "★没查成")} '
+                  f'(行 {r.get("sid")}) '
                   f'每行可播={r.get("playable")} audio高={r.get("audioHeights")} '
                   f'占位符残留={bool(r.get("residue"))} '
                   f'首条=「{(r.get("firstText") or "")[:30]}」 变体包={r.get("extra")}')
