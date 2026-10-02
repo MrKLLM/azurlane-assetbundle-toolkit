@@ -25,6 +25,14 @@ import sys as _p_sys, os as _p_os
 _p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
 import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 
+# 分离进程 / GBK 控制台下 print('⚠️') 会抛 UnicodeEncodeError 把整条 diff 打断在报告中间
+# （§9.3 根因 3 那一类：不是跑挂了，是**报不出**）。
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
 # 中国版 MuMu 12 装在 Netease\MuMu，旧版 / 国际版装在 Netease\MuMuPlayer。
 # 两个都列出来，谁存在就用谁，避免升级后路径失效。
 # 路径出口在 paths.py：AL_ADB 优先 → PATH → 两个已知安装位置。
