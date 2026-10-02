@@ -38,10 +38,29 @@ PROTECTED = ('painting', 'suffix')                 # 本来就走配置桥，必
 NEW_OK = ('painting_ci', 'suffix_ci', 'npc_table', 'npc_suffix', 'npc_family', 'family')
 
 
+def row_backed(t, tab_paint):
+    """「有据升级」判据（提到模块级是为了能被反向对照测到 —— 闸门里的判据没法测就等于橡皮章）。
+
+    新 base 必须同时满足：①权威皮肤表里**确实有这一行**；②是本名的前缀（同族回退，不是随便换个名）；
+    ③比旧值更贴近本名（更长）。反向（从近退回远）、表里查无此行、改的不是 base_painting 一律 False。
+    """
+    k, f, a, b = t
+    if f != 'base_painting' or not a or a == b:
+        return False
+    kl, bl = k.lower(), str(b).lower()
+    return bl in tab_paint and kl.startswith(bl) and len(bl) > len(str(a))
+
+
 def load_new():
     path = os.path.join(ROOT, 'scripts', 'build_ship_meta.py')
     spec = importlib.util.spec_from_file_location('bsm', path)
     mod = importlib.util.module_from_spec(spec)
+    # importlib 直接 exec 模块时，`sys.path[0]` 不是 scripts/（那是 `python scripts/x.py` 才有的），
+    # 于是 build_ship_meta 里的兄弟模块导入（skin_table）会 ModuleNotFoundError。
+    # 只在这台机器上"看起来能跑"的闸门等于没有闸门 —— 显式把 scripts/ 放进去。
+    d = os.path.dirname(path)
+    if d not in sys.path:
+        sys.path.insert(0, d)
     spec.loader.exec_module(mod)
     skin, stats, wiki = mod.load()
     meta, _, _, _ = mod.build_meta(skin, stats, wiki)
@@ -118,15 +137,24 @@ def main():
                 and n.get('skin_id') == base_of.get(g)
                 and str(n.get('name') or '') == str(new[k].get('cn') or ''))
 
+    # 「有据升级」：权威皮肤表里**确实有这一行**了，所以 base_painting 从"退到亲戚"变成"它自己"。
+    # 这条专门服务数据源升级（设备侧表补出社区快照缺的行），判据是可回查的行存在性，
+    # 不是"新值看起来更像名字" —— 所以它同样是一方向性判据：只允许 退让值 → 本名，反向一律算回退。
+    tab_paint = {str(r.get('painting') or '').strip().lower()
+                 for r in skin.values() if isinstance(r, dict)}
+
+
     npc_ok = [t for t in hard if justified(t)]
     fix_ok = [t for t in hard if not justified(t) and base_fix(t)]
-    bad = [t for t in hard if not justified(t) and not base_fix(t)]
+    bad = [t for t in hard if not justified(t) and not base_fix(t) and not row_backed(t, tab_paint)]
+    row_ok = [t for t in hard if not justified(t) and not base_fix(t) and row_backed(t, tab_paint)]
     groups_fixed = {new[t[0]].get('base_painting') for t in fix_ok}
     print('1) 受保护档(painting/suffix) %d 条 -> 字段改动 %d 处：'
           '"皮肤标题→NPC 实体名" %d 处（逐条回查表） + "脏 stats 行→基皮肤行" %d 处 / %d 组（方向性判据）'
+          ' + "快照缺行→权威表已有行" %d 处（回查皮肤表）'
           '，其余 %d 处（须为 0）'
           % (sum(1 for v in old.values() if v.get('source') in PROTECTED),
-             len(hard), len(npc_ok), len(fix_ok), len(groups_fixed), len(bad)))
+             len(hard), len(npc_ok), len(fix_ok), len(groups_fixed), len(row_ok), len(bad)))
     for g in sorted(groups_fixed):
         sk = painting2skin.get(g)
         o, n = old_pick.get((sk or {}).get('ship_group')), new_pick.get((sk or {}).get('ship_group'))
@@ -147,7 +175,10 @@ def main():
     illegal = [(k, old[k].get('source'), new[k]['source'])
                for k in old if k in new
                and new[k]['source'] != old[k].get('source')
-               and new[k]['source'] not in NEW_OK]
+               and new[k]['source'] not in NEW_OK
+               # 唯一允许的额外换档：升到 `painting`（直查权威表命中），且这一行**确实在表里**。
+               # 与上面 row_backed 同源同判据，不接受"看起来更准"。
+               and not (new[k]['source'] == 'painting' and k.lower() in tab_paint)]
     moved = collections.Counter((old[k].get('source'), new[k]['source'])
                                 for k in old if k in new and new[k]['source'] != old[k].get('source'))
     print('3) 换档条目 %d 个，非法新档 %d（须为 0）' % (sum(moved.values()), len(illegal)))

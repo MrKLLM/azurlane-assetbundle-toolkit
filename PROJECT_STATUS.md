@@ -21,8 +21,17 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
 （`npclingmin_alter` id 900549，cv 90054 ≠ 灵敏 70109），所以它属"另一个发声实体"，该从 `VAR` 剥后缀表里摘出去；
 同一份表（`.diag/sharecfg_re/cfg_json_scalar/ship_skin_template.json`，2865 行）**已经有 azdata 快照缺的
 `aierdeliqi_9`=金月桂香 / `mile_3`=幽幽桥上，坏坏来袭！** ⇒ 权威源切换的取证已完成，接线待放行。
-誓约皮肤固定占 `idx=8`；但信浓/尾张/斯库拉的 `_h` 与英格拉罕第 3 套**连设备侧都没有行**（那份配置是 09-24 的）
-⇒ 要**先启动一次游戏**让它更新配置，再同步 `sharecfgdata/`（裸 grep 恒 0 命中，串是 `^(255-i)` 编码的）。——用户两次按的都是第 4 步那颗换入，于是 `swap-in: 清单为空`；**§77 已把路径收进 `scripts/paths.py`**（`AL_ASSETS_ROOT` 换机器、12 个文件接上、`mumu_sync --only` 按类型拉取且与 `--list-out` 硬互斥），闸门 `py -3 scripts/diag/check_paths.py`：链路 0 处写死、43 个一次性脚本记为欠账不判红；**§78 资产台账已落地**（`scripts/asset_ledger.py` + `ledger/`，闸门 23 条）："已还原"= 产物在 **且** 溯源记录的源包大小+md5 与盘上现状对得上；`prune` 默认 dry-run、`--apply` 还要 `--yes`、`dependencies`/`hashes*`/AB 根下 41 个散包永不删；删过的写 `pruned.json`，`mumu_sync` 据此**不再把它们报成新增**（设备上大小变了的照旧算新版本）；`export`/`import` 是换设备的迁移单元。建账时被抓出两处"少记"（只扫第一层、漏 AB 根下散包），已进判据。
+誓约皮肤固定占 `idx=8`；信浓/尾张/斯库拉的 `_h` 与英格拉罕第 3 套**连设备侧都没有行**——10-02 已按建议启动游戏到主界面
+（无下载任务、`sharecfgdata` 整目录仍是 09-24），且这三个名字在**全部**已解出的表里都查不到
+⇒ 判定为**游戏提前下发、尚未开放**的资源，"没有台词/没有皮肤名"是正确状态，不是我们漏抽（裸 grep 恒 0 命中不算证据，串是 `^(255-i)` 编码的，必须走 `37_parse_sharecfgdata.py`）。
+**B 已落地（只读侧）**：`inputs/gamecfg/ship_skin_template.json`（2865 行，`42_publish_gamecfg.py` 发布）+ `scripts/skin_table.py`
+逐字段合并口（设备覆盖、快照补齐、断言不丢行），`build_ship_meta` / `extract_cv_voice` 已接上；
+实测差异 **条目零增减、20 处全是皮肤名升级**（含消掉 3 个 `{namecode}` 占位符），
+`aierdeliqi_9_n`/`mile_3_n` 的语音从"同船回退 `idx=None`"变成"停在真行 `cv=10126 idx=7` / `cv=10153 idx=2`"；
+闸门 `ship_meta_authority_diff` 为此新增**「快照缺行→权威表已有行」方向性判据**（远→近才放行，反向必拦），
+配套反向对照测试 `scripts/diag/test_meta_gate_proofs.py` 8 例全过。**待你点头**：`--only meta --approve meta` 换入 + `derive` + `regress`。
+**C 重新定量（见 §83）**：`extract_cv_voice.VAR` 贪婪剥后缀导致 **55 个**改造/黑化立绘被派到**改造前那艘船**的语音包
+（其中 **37 个**表里有自己的行且包就在盘上、18 个该显式 🔇）——比上轮估的"2 张"大 27 倍，改法要你先裁定黑化/改造是否各算独立发声实体。——用户两次按的都是第 4 步那颗换入，于是 `swap-in: 清单为空`；**§77 已把路径收进 `scripts/paths.py`**（`AL_ASSETS_ROOT` 换机器、12 个文件接上、`mumu_sync --only` 按类型拉取且与 `--list-out` 硬互斥），闸门 `py -3 scripts/diag/check_paths.py`：链路 0 处写死、43 个一次性脚本记为欠账不判红；**§78 资产台账已落地**（`scripts/asset_ledger.py` + `ledger/`，闸门 23 条）："已还原"= 产物在 **且** 溯源记录的源包大小+md5 与盘上现状对得上；`prune` 默认 dry-run、`--apply` 还要 `--yes`、`dependencies`/`hashes*`/AB 根下 41 个散包永不删；删过的写 `pruned.json`，`mumu_sync` 据此**不再把它们报成新增**（设备上大小变了的照旧算新版本）；`export`/`import` 是换设备的迁移单元。建账时被抓出两处"少记"（只扫第一层、漏 AB 根下散包），已进判据。
 **执行状态（2026-10-01 23:40）**：13 档**全部有本轮结论**（`.diag/pipeline/pipeline_state.json`，
 指纹 `bundles=92679 deps=30fe6261e7`、范围章 `b885a9477f` 三处一致）——`preflight`/`pull`（签字拉完 1036 个新包）/
 `deps`/`meta`（换入 + 权威闸门绿）/`paintings`（179 张）/`spine`/`live2d`/`review`/`swap-in`（12 张）/`derive`/`regress`

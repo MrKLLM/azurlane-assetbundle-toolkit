@@ -13,7 +13,7 @@
       "tools/sharecfg_re/45_publish_npc_painting.py",
       "tools/sharecfg_re/46_publish_name_code.py"
     ],
-    "landed_at": "2026-09-27"
+    "landed_at": "2026-10-02"
   },
   "files": [
     {
@@ -48,6 +48,19 @@
       "consumers": [
         "scripts/build_ship_meta.py"
       ]
+    },
+    {
+      "path": "ship_skin_template.json",
+      "bytes": 3436333,
+      "sha256": "064f9750744121ebf567059a1406431733ee74c1d96a171742efb49f5eb91c93",
+      "rows": 2865,
+      "role": "皮肤行 id → painting / name / ship_group / voice_actor 等（2865 行，与 azdata 同构，只留消费字段）",
+      "consumers": [
+        "scripts/skin_table.py",
+        "scripts/extract_cv_voice.py",
+        "scripts/build_ship_meta.py"
+      ],
+      "source": ".diag/sharecfg_re/cfg_json_scalar/ship_skin_template.json"
     },
     {
       "path": "ship_skin_words.json",

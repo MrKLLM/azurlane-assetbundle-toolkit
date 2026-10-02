@@ -21,7 +21,8 @@ import hashlib, json, os, sys, datetime
 sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 SRC = {'lua_json': os.path.join(ROOT, '.diag', 'sharecfg_re', 'lua_json'),
-       'cfg_json': os.path.join(ROOT, '.diag', 'sharecfg_re', 'cfg_json')}
+       'cfg_json': os.path.join(ROOT, '.diag', 'sharecfg_re', 'cfg_json'),
+       'cfg_json_scalar': os.path.join(ROOT, '.diag', 'sharecfg_re', 'cfg_json_scalar')}
 DST = os.path.join(ROOT, 'inputs', 'gamecfg')
 
 # (产物名, 源表名, 台账说明, 消费方, 源子目录)
@@ -35,6 +36,12 @@ SPECS = [
     ('ship_skin_words.json', 'ship_skin_words',
      '皮肤行 id → 各台词字段的中文正文（只保留非空标量字段；嵌套字段尚未装配，见 §36 B 段）',
      ['scripts/build_skin_words.py'], 'cfg_json'),
+    # 皮肤表：设备侧比社区快照新（09-24 那份已含 aierdeliqi_9 / mile_3 两行，azdata 快照没有），
+    # 且 7 行 azdata 给的是舰名或没展开的 {namecode}，设备侧是真皮肤名 ⇒ 合并时以本表为准。
+    ('ship_skin_template.json', 'ship_skin_template',
+     '皮肤行 id → painting / name / ship_group / voice_actor 等（2865 行，与 azdata 同构，只留消费字段）',
+     ['scripts/skin_table.py', 'scripts/extract_cv_voice.py', 'scripts/build_ship_meta.py'],
+     'cfg_json_scalar'),
 ]
 
 
@@ -63,6 +70,19 @@ def reshape(name, rows):
                  if isinstance(v, str) and str(v).strip()}
             if d:
                 out[str(int(r['id']))] = d
+        return out
+    if name == 'ship_skin_template':
+        # 与 azdata 那份**同构**才能当兜底替换：键=id、值=行。设备侧多出的战斗数值/嵌套数组
+        # （antiaircraft/cannon/hand_3_02/…）没有任何消费方读，留着只会让两份文件永远对不上；
+        # `id` 统一成 int，避免 azdata(int) 与本表(str) 在 `int(r['id'])` 之外还要各自兼容。
+        out = {}
+        for r in rows:
+            rid = r.get('id')
+            if rid is None:
+                continue
+            out[str(int(rid))] = {k: v for k, v in r.items()
+                                  if not isinstance(v, (dict, list))}
+            out[str(int(rid))]['id'] = int(rid)
         return out
     return {str(i): r for i, r in enumerate(rows)}
 

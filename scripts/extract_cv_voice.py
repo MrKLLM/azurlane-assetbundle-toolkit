@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 import sys as _p_sys, os as _p_os
 _p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
 import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
+import skin_table  # 皮肤表唯一读取口：azdata 快照 + 设备侧权威表逐字段合并（见 scripts/skin_table.py）
 
 sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -108,7 +109,7 @@ def load_skin_rows():
     ⚠️ 表键**一律小写归一**：皮肤表里 `2B`/`A2`/`HDN101` 这类是大写，而磁盘目录名是小写，
     原样查表会让 145 张明明有包的皮肤掉进「无解」（2026-09-27 普查 499 无解时查出）。
     磁盘侧候选也要 `.lower()`（见 resolve）。"""
-    d = json.load(open(os.path.join(AZDATA, 'azdata_ship_skin_template.json'), encoding='utf-8'))
+    d = skin_table.load()
     by = collections.defaultdict(list)
     for k, r in d.items():
         if not isinstance(r, dict):

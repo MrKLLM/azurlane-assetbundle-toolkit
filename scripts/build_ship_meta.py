@@ -16,6 +16,7 @@ import sys, os, re, json, glob, argparse, collections
 sys.stdout.reconfigure(encoding='utf-8')
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+import skin_table   # 皮肤表唯一读取口（azdata 快照 + 设备侧权威表逐字段合并）
 AZDATA = os.path.join(ROOT, 'inputs', 'azdata')   # 权威快照，台账 inputs/azdata/MANIFEST.json
 OUT = os.path.join(ROOT, 'Output')
 
@@ -78,7 +79,8 @@ except Exception:
 
 
 def load():
-    skin = json.load(open(os.path.join(AZDATA, 'azdata_ship_skin_template.json'), encoding='utf-8'))
+    # 皮肤表走唯一读取口：设备侧权威表能补出 azdata 快照缺的行（如 aierdeliqi_9 / mile_3）
+    skin = skin_table.load()
     stats = json.load(open(os.path.join(AZDATA, 'azdata_ship_data_statistics.json'), encoding='utf-8'))
     wpath = os.path.join(OUT, 'WikiData', 'ship_data.json')
     wiki = json.load(open(wpath, encoding='utf-8')) if os.path.exists(wpath) else []
