@@ -5,9 +5,16 @@
 为什么单独一份产物而不是改写 `skin_voice.json`：后者是 75 分钟全量导出的已验收产物
 （零回退闸门以它为基准），这里只做「按同一把钥匙 join」，两份产物各自可重生。
 
-钥匙：`skin_voice.json` 每条皮肤带 `cv`（语音包号）与 `idx`（皮肤序号），
-      皮肤行 id = `cv*10 + idx` —— 正是 `ship_skin_words` 表的主键。
-      语音与正文因此取自**同一行**，不存在"字幕与声音不同皮肤"的错配。
+钥匙：**皮肤表里那一行的主键 id**（`E.row_id_for`，与语音层共用同一份后缀口径 `E.row_candidates`）。
+      ⚠️ 不是 `cv*10 + idx` —— 那是把「语音包号 + 包内档位」当主键，两件事。老批次恰好形如
+      `cv*10+idx`，皮肤序号 ≥10 之后游戏换了号段（`aisaikesi_10` 真行是 **137090**），
+      算术式会进位撞进下一艘船的行（`10709*10+10=107100` = 约克城II ⇒ 埃塞克斯的皮肤10
+      整列台词显示成约克城的，2026-10-02 用户从「普通触摸字幕比语音短」报出）。
+      音频侧本来就是对的（`cv-10709.b` 里确有 `touch_1_10` 这一档，14.08 秒），错的只有文本钥匙。
+      两层取值：皮肤行优先；皮肤行**没有**的类别回退到该船本体行 —— 誓约/资料/强化这类是船级台词，
+      皮肤行里根本没这个字段，而音频侧 `tier_for()` 对这些类别取的就是本体档文件，正文必须跟着同源
+      （第一版只换钥匙、没加这层，实测把 432 条本来能显示的台词判成"无正文"= 修好触摸弄没誓约）。
+      黑化版是独立发声实体（§84 用户口径），不回退本体。
 
 类别名 → 台词字段全部查 `character_voice` 表，不靠语义猜：
   · cue 类别（cat）    = 表的 resource_key（`get`/`task`/`warcry`/`touch_head`…）
@@ -127,27 +134,62 @@ def field_lines(row, cv_tbl, labels, nc=None, st=None):
 
 
 def build(voice, words, alias, group2cat, cv_tbl, rows_by_painting, gallery_keys, nc):
-    """→ (m: 皮肤→行id, w: 行id→{运行时名: 正文}, L: 运行时名→中文类别名, 统计)"""
+    """→ (m: 皮肤→行id, w: 行id→{运行时名: 正文}, L: 运行时名→中文类别名, 统计, 钥匙改派清单)"""
     m, w, labels = {}, {}, {}
+    audit = []
     st = collections.Counter()
     for skin, e in voice.items():
-        sid = str(int(e['cv']) * 10 + int(e['idx']))
+        arith = int(e['cv']) * 10 + int(e['idx'])
+        auth = E.row_id_for(skin.lower(), rows_by_painting, e['cv'])
+        sid = str(auth if auth is not None else arith)
+        if auth is not None and auth != arith:
+            st['钥匙改派'] += 1
+            audit.append((skin, arith, auth, '改派' if str(auth) in words else '真行没正文·靠船级回退'))
         row = words.get(sid)
-        if not row:
+        # 船级类别（誓约/资料/强化/委托…）皮肤行里根本没有这些字段 —— 音频侧 `tier_for()`
+        # 取的就是本体档的文件，正文必须跟着回退到**本体行**，否则修好触摸、弄没誓约（实测 432 条）。
+        # 黑化版是独立发声实体（§84 用户口径），不许回退本体。
+        brow = None
+        if not E.HEI_SUF.search(E.art_chain(skin.lower())[-1]):
+            base = E.row_id_for(E.ship_stem(skin.lower()), rows_by_painting, e['cv'])
+            if base is not None and str(base) != sid:
+                brow = words.get(str(base))
+        if not row and not brow:
             st['皮肤无正文行'] += 1
             continue
         m[skin] = sid
         cats = {l['cat'] for l in e.get('lines', [])}
         names = set(cats) | set(e.get('l2d') or {}) | set(e.get('tap') or {})
+
+        # 「本皮肤档」的槽位：音频文件名里带着这条皮肤自己的序号 ⇒ 游戏给这一档单独录了词。
+        # 这些槽位**不许**回退到本体行（那等于把本体的句子冒充成这一档的字幕，是另一种错派）；
+        # 只有音频取自基础档（`tier_for()` 回退到 0 档文件）的类别，正文才跟着回本体行。
+        def cue_tier(path):
+            return E.split_cue(os.path.splitext(os.path.basename(path))[0])[1]
+        own_tier = set()
+        if e['idx']:
+            for l in e.get('lines', []):
+                if not l.get('ev') and cue_tier(l['f']) == e['idx']:
+                    own_tier.add(l['cat'])
+            for g, ps in (e.get('l2d') or {}).items():
+                if any(cue_tier(p) == e['idx'] for p in ps):
+                    own_tier.add(g)
+            own_tier |= {g for g, p in (e.get('tap') or {}).items() if cue_tier(p) == e['idx']}
         # 中文类别名：cue 侧导出时已带（voice_name），动作组/触摸槽顺着 group2cat 取
         for l in e.get('lines', []):
             if l.get('label'):
                 labels.setdefault(l['cat'], l['label'])
         ent = w.setdefault(sid, {})
         for n in names:
-            t = text_for(row, n, alias, nc, st)
+            t = text_for(row, n, alias, nc, st) if row else ''
+            if not t and brow and n not in own_tier:
+                t = text_for(brow, n, alias, nc, st)
+                if t:
+                    st['船级类别·取自本体行'] += 1
             if not t:
                 st['槽位无正文'] += 1
+                if n in own_tier:
+                    st['本皮肤档无同源正文'] += 1
                 continue
             if ent.get(n) and ent[n] != t:
                 raise SystemExit('同名槽位在同一个皮肤行上取到两条不同正文: %s/%s' % (skin, n))
@@ -164,21 +206,16 @@ def build(voice, words, alias, group2cat, cv_tbl, rows_by_painting, gallery_keys
 
     # 第二趟：皮肤表里有行、语音表里却没有的皮肤（主包没随资产下发，§57 那 43 张）。
     # 键用字段名本身（= character_voice 的 key），中文类别名照表取。
-    # ⚠️ 归属候选必须与语音层**同一份规则**（`E.row_candidates`）：这里原来写的是
+    # ⚠️ 归属与第一趟、与语音层**同一份规则**（`E.row_id_for` → `E.row_candidates`）：这里原来写的是
     #    `E.VAR.sub('', kl)` 一次贪婪剥光，于是 12 个黑化键被剥到本体那一行，
     #    把本体的台词派给了黑化版——与 §84 刚在语音层撤掉的是同一份错派（见 §85）。
     for k in gallery_keys:
         if k in voice:
             continue
-        kl = k.lower()
-        hit = None
-        for cand in E.row_candidates(kl):
-            hit = rows_by_painting.get(cand)
-            if hit:
-                break
-        if not hit:
+        auth = E.row_id_for(k.lower(), rows_by_painting)
+        if auth is None:
             continue
-        sid = str(hit[0][0] * 10 + hit[0][1])
+        sid = str(auth)
         row = words.get(sid)
         if not row:
             st['无音频皮肤·表里无词行'] += 1
@@ -198,7 +235,7 @@ def build(voice, words, alias, group2cat, cv_tbl, rows_by_painting, gallery_keys
         m.setdefault(k, sid)
         st['无音频皮肤·配上台词'] += 1
         st['无音频皮肤·正文字条'] += len(ent)
-    return m, w, labels, st
+    return m, w, labels, st, audit
 
 
 def main():
@@ -207,6 +244,7 @@ def main():
     ap.add_argument('--words', default=DEF_WORDS)
     ap.add_argument('--out', default=DEF_OUT)
     ap.add_argument('--report', action='store_true', help='只统计不写盘')
+    ap.add_argument('--audit', default='', help='把钥匙改派清单写到这个路径（对照表用）')
     a = ap.parse_args()
     voice = json.load(open(a.voice, encoding='utf-8'))
     words = json.load(open(a.words, encoding='utf-8'))
@@ -216,7 +254,7 @@ def main():
     import extract_cv_voice as E          # 皮肤表→包号/序号 这条 join 只允许有一份实现
     rows = E.load_skin_rows()
     keys = E.gallery_keys()
-    m, w, labels, st = build(voice, words, alias, group2cat, cv_tbl, rows, keys, nc)
+    m, w, labels, st, audit = build(voice, words, alias, group2cat, cv_tbl, rows, keys, nc)
     left = sum(1 for ent in w.values() for t in ent.values() if '{namecode' in t)
     if st['占位符未展开'] or left:
         raise SystemExit('台词里还有 %d 处 {namecode} 没展开（%d 行受影响）——'
@@ -231,6 +269,14 @@ def main():
     print('无音频皮肤（有表行、主包未下发）%d 张配上台词 / 正文字条 %d | 整皮无台词 %d | 表里无词行 %d'
           % (st['无音频皮肤·配上台词'], st['无音频皮肤·正文字条'],
              st['无音频皮肤·整皮无台词'], st['无音频皮肤·表里无词行']))
+    print('台词钥匙 改用表主键 %d 处（算术式会撞上别的实体）| 船级类别取自本体行 %d 条'
+          % (st['钥匙改派'], st['船级类别·取自本体行']))
+    if a.audit:
+        with open(a.audit, 'w', encoding='utf-8', newline='') as f:
+            f.write('皮肤\t旧钥匙(算术cv*10+idx)\t真行id\t处置\n')
+            for k, old, new, act in sorted(audit):
+                f.write('%s\t%d\t%d\t%s\n' % (k, old, new, act))
+        print('  改派清单: %s（%d 行）' % (a.audit, len(audit)))
     print('产物 %d B (%.1f MB)' % (len(blob.encode('utf-8')), len(blob.encode('utf-8')) / 1048576))
     if a.report:
         print('（--report 未写盘）')

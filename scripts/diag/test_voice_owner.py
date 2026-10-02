@@ -105,6 +105,60 @@ for desc, name, want in RC:
     print('%s %-40s %-18s 期望 %-42s 实得 %s' % ('✓' if ok else '✗', desc, name, want, got))
 fails += rc_fail
 
+# ── 台词钥匙 = 表主键，**不能**由「语音包号 × 10 + 包内档位」反算 ──────────────
+# 2026-10-02 真实案例：埃塞克斯皮肤10 的真行是 137090，而音频在 cv-10709 包里的档位是 10，
+# 算术式 `10709*10+10` = 107100 正好是**约克城II**那一行 ⇒ 整列台词派给了别的船（用户从
+# 「字幕比语音短」报出）。正向全库看不出来：那一行存在、有正文，join 判"成功"。
+KEYROWS = {'aisaikesi': [(10709, 0)], 'aisaikesi_10': [(13709, 0)], 'yuekechengII': [(10710, 0)]}
+AK = [
+    ('皮肤序号 ≥10 换号段 ⇒ 主键不是 cv*10+idx', 'aisaikesi_10', 137090),
+    ('老批次恰好吻合（正向对照，规则不得把对的改坏）', 'aisaikesi', 107090),
+    ('画法变体逐层剥，仍回到那张皮肤的真行', 'aisaikesi_10_n', 137090),
+    ('查无此名必须返回 None，不许猜一个', 'aisaikesi_99', None),
+]
+ak_fail = 0
+for desc, name, want in AK:
+    got = E.row_id_for(name, KEYROWS)
+    ok = got == want
+    ak_fail += 0 if ok else 1
+    print('%s %-42s %-16s 期望 %-9s 实得 %s' % ('✓' if ok else '✗', desc, name, want, got))
+# 反向对照：算术式在这条案例上会得到什么（必须是"隔壁船"那一行，否则案例失效）
+arith = 10709 * 10 + 10
+ok = arith == 107100 and E.row_id_for('yuekechengII', KEYROWS) == 107100
+ak_fail += 0 if ok else 1
+print('%s %-42s %-16s 算术式 %d == 约克城II 行 %s' % ('✓' if ok else '✗',
+      '对照：旧算术式确实撞进了隔壁船的行', 'aisaikesi_10', arith, ok))
+fails += ak_fail
+
+# ── 画法变体不占语音档位，必须从所属皮肤继承 ────────────────────────────────
+# 旧实现按「一个目录名一档」分配，`X_n`/`X_hx` 各吃掉一档：变体播到别的皮肤的台词，
+# 又把真皮肤该拿的档挤掉（实测 15 个变体，`z23_10_hx/_n/_n_hx` 占走 11/12/13、
+# `z23_11` 被推到 14）。
+TIER = [
+    ('变体不抢档：两张真皮肤各自命中，变体继承',
+     {'es': {'cv': 1, 'idx': 0, 'src': 'row'},
+      'es_2': {'cv': 1, 'idx': None, 'src': 'sibling'},
+      'es_2_n': {'cv': 1, 'idx': None, 'src': 'sibling'},
+      'es_3': {'cv': 1, 'idx': None, 'src': 'sibling'}},
+     {1: ['touch_1', 'touch_1_2', 'touch_1_3']},
+     {'es_2': 2, 'es_2_n': 2, 'es_3': 3}),
+    ('包里有空档也不许分给变体（`_10` 只有一张皮肤拿）',
+     {'ai': {'cv': 10709, 'idx': 0, 'src': 'row'},
+      'ai_10': {'cv': 10709, 'idx': None, 'src': 'sibling'},
+      'ai_10_hx': {'cv': 10709, 'idx': None, 'src': 'sibling'}},
+     {10709: ['touch_1', 'touch_1_10', 'touch_1_11']},
+     {'ai_10': 10, 'ai_10_hx': 10}),
+]
+tier_fail = 0
+for desc, res, cs, want in TIER:
+    E.assign_pending_idx(res, cs)
+    bad = {k: (res[k]['idx'], res[k]['src']) for k, v in want.items() if res[k]['idx'] != v}
+    ok = not bad
+    tier_fail += 0 if ok else 1
+    print('%s %-40s 期望 %s 实得 %s' % ('✓' if ok else '✗', desc, list(want.values()),
+          {k: res[k]['idx'] for k in want}))
+fails += tier_fail
+
 # 台词层必须与语音层同源：直接查 build_skin_words 里不该再有第二份剥后缀逻辑
 bsw = open(os.path.join(ROOT, 'scripts', 'build_skin_words.py'), encoding='utf-8').read()
 leak = [ln.strip()[:70] for ln in bsw.splitlines()
@@ -113,7 +167,6 @@ print('\n%s 台词层没有第二份剥后缀实现（源码里 VAR.sub 出现 %
       % ('[OK]' if not leak else '[FAIL]', len(leak), leak or '无'))
 fails += len(leak)
 
-print('\n%s 语音归属解析 %d/%d' % ('[PASS]' if not fails else '[FAIL]',
-                                 len(CASES) + 1 + len(RC) + 1 - fails,
-                                 len(CASES) + 1 + len(RC) + 1))
+TOTAL = len(CASES) + 1 + len(RC) + 1 + len(AK) + 1 + len(TIER)
+print('\n%s 语音归属解析 %d/%d' % ('[PASS]' if not fails else '[FAIL]', TOTAL - fails, TOTAL))
 sys.exit(1 if fails else 0)

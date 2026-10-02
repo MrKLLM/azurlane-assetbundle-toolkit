@@ -1089,7 +1089,9 @@ function renderVoice(){
   const draw=()=>{
     wrap.innerHTML='';
     const e=(SV||{})[key]||{}, lines=e.lines||[], w=wordsOf(key)||{};
-    const withText=lines.filter(l=>w[l.cat]).length;
+    /* `_ex` 活动版是**另一条录音**，台词表里没有它的位置（全表只有 6 行带 `*_replace` 字段）
+       ⇒ 不许顶用本句的正文，否则同一个「普通触摸」出两行、字幕一模一样（实测 17802 行）。 */
+    const withText=lines.filter(l=>!l.ev && w[l.cat]).length;
     const tk=Object.keys(w);
     const h=document.createElement('h4');
     h.textContent = lines.length
@@ -1100,7 +1102,13 @@ function renderVoice(){
               ? `台词 ${tk.length} 条（该皮肤的语音主包未随资产下发，所以只能读不能播） · ${sk.label||key}`
               : `该皮肤本地没有语音包（主包 cv-${(e.cv||'?')} 未随包导出） · ${sk.label||key}`);
     wrap.appendChild(h);
-    lines.forEach(l=>row(l.label||l.cat, l.f, OPT.lines?w[l.cat]:''));
+    /* 活动版那一行改后只有声音没有字幕（正文没随配置表下发），不解释一句会被当成"字幕坏了"。 */
+    if(lines.some(l=>l.ev)){
+      const n=document.createElement('div'); n.className='hint';
+      n.textContent='标「活动版」的是活动限定录音：正文没有随配置表下发，所以只有声音、不配字幕。';
+      wrap.appendChild(n); }
+    lines.forEach(l=>row((l.label||l.cat)+(l.ev?' · 活动版':''), l.f,
+                         OPT.lines&&!l.ev?w[l.cat]:''));
     /* 「有表行、主包没下发」那 44 张：正文取自 character_voice 的字段名，中文类别名同源。
        这里**不造播放器**——没有对应音频文件，装了就是个点了没响的假控件。 */
     if(!lines.length && tk.length && !sk.voiceCount)
@@ -1132,7 +1140,8 @@ function loadVoiceMap(){ return _voiceP||(_voiceP=(async()=>{
     })().then(j=>{ SV=j; return j; })); }
 /* ---------- 台词正文（skin_words.json，由 scripts/build_skin_words.py 产出）----------
    {m:{皮肤key: 皮肤行id}, w:{皮肤行id: {类别名|动作组|触摸槽: 中文正文}}}。
-   正文与音频取自同一行（皮肤行 id = cv*10+idx），所以两者天然同档；
+   皮肤行id 是**皮肤表主键**，由生成侧按 painting 查表得到（⚠️ 不是 `cv*10+idx`：那是「语音包号 +
+   包内档位」，皮肤序号 ≥10 会进位撞进下一艘船的行，2026-10-02 实测把埃塞克斯皮肤10 派成了约克城II）。
    取不到就是**这一档游戏本来没写台词**（如部分船的摸头），不是链路坏了。 */
 let _wordP=null, SW={m:{},w:{},L:{}};
 function loadWords(){ return _wordP||(_wordP=(async()=>{
@@ -1189,7 +1198,7 @@ function talkCount(key){ const lines=((SV||{})[key]||{}).lines||[];
   const w=wordsOf(key)||{}, tk=Object.keys(w);
   /* 没有可播音频但有正文：那 44 张「有表行、主包未下发」的皮肤走这条（§57 / §6 第 16 条） */
   if(!lines.length) return tk.length?`台词 ${tk.length} 条（音频未随包下发）`:'';
-  return `台词 ${lines.length} 条 · 正文 ${lines.filter(l=>w[l.cat]).length} 条`; }
+  return `台词 ${lines.length} 条 · 正文 ${lines.filter(l=>!l.ev&&w[l.cat]).length} 条`; }
 function talkPill(key){ const s=talkCount(key); return s?`<span class="pill">${s}</span>`:''; }
 /* 标签条上的语音控件：三个视图共用。clickEl 传 null 表示不做「点画面即触摸」。 */
 function mountSkinVoice(barEl, clickEl, keyOf){

@@ -198,6 +198,32 @@ def row_candidates(kl):
     return out
 
 
+def row_id_for(kl, rows, prefer_cv=None):
+    """皮肤名 → 它在皮肤表里那一行的**主键 id**（按 `row_candidates` 的优先级取第一个有行的）。
+
+    ⚠️ 这个 id **不能**由「语音包号 × 10 + 包内档位」反算出来 —— 那是两件不同的事：
+      · 表主键：老批次恰好长得像 `cv*10+idx`；皮肤序号上到 10 之后游戏换了号段
+        （第二位 0→3，如 `aisaikesi_10` = **137090**、`z23_10` = 431232、`biaoqiang_10` = 231211），
+        末位是批次内顺序号、不是皮肤序号；
+      · 包内档位：`cv-10709.b` 里那条 cue 叫 `touch_1_10`。
+    拿算术式当主键，`10709*10+10 = 107100` 会进位撞进**下一艘船**的行（实测撞上约克城II）。
+
+    `prefer_cv`：同一个 painting 在表里可能有多行（META/联动给它另开一档，如 `aerjiliya`
+    同时有 900419 与 903020）。台词与音频必须出自**同一个发声实体** ⇒ 有语音包号时先挑
+    包号一致的那一行，挑不到才退回第一行。漏了这一步会把 9 个 META 档的 262 条台词判成无词。
+    """
+    for cand in row_candidates(kl):
+        hit = rows.get(cand)
+        if not hit:
+            continue
+        if prefer_cv is not None:
+            same = [t for t in hit if t[0] == int(prefer_cv)]
+            if same:
+                hit = same
+        return int(hit[0][0]) * 10 + int(hit[0][1])
+    return None
+
+
 def resolve(keys, rows, banks):
     """皮肤 → {cv, idx or None, src}。idx=None 表示等解码出包内序号档后再定（同船回退）。
 
@@ -241,15 +267,34 @@ def resolve(keys, rows, banks):
     return res, miss
 
 
+def art_root(k, present):
+    """画法变体往上第一个「自己也在表里」的名字 —— 那才是这张皮肤的代表。
+
+    只穿 `ART_SUF`（`_n`/`_hx`…），不穿 `_alter`：改造版是另一套皮肤，有自己的行。"""
+    cur, best = k.lower(), k.lower()
+    while True:
+        m = ART_SUF.search(cur)
+        if not m:
+            return best
+        cur = cur[:m.start()]
+        if cur in present:
+            best = cur
+
+
 def assign_pending_idx(res, cue_sets):
     """快照缺行的皮肤分配皮肤序号：取「包内实际存在的序号档」里还没被同船其它皮肤占用的。
 
     不拿目录名尾缀硬算——实测 `_N`→N-1 这条推断对配置表已知行也只有 78% 正确（lafei_8 实际 idx=5）。
     分不到档的退回基础档 idx=0。
+
+    ⚠️ 画法变体（`X_n`/`X_hx` = 同一张皮肤的另一幅画）**不参与分配**，分配完从 `X` 继承：
+    按目录名一个名字占一档，会让变体各吃掉一档（实测 15 个），既让变体播到别的皮肤的台词，
+    又把真皮肤该拿的档挤掉（`z23_10_hx/_n/_n_hx` 占走 11/12/13，`z23_11` 被推到 14）。
     """
+    present = {k.lower() for k in res}
     pend = collections.defaultdict(list)
     for k, e in res.items():
-        if e['idx'] is None:
+        if e['idx'] is None and art_root(k, present) == k.lower():
             pend[(e['cv'], ship_stem(k))].append(k)
     for (cv, stem), ks in pend.items():
         used = {e['idx'] for e in res.values() if e['cv'] == cv and e['idx'] is not None}
@@ -261,6 +306,13 @@ def assign_pending_idx(res, cue_sets):
                 e['idx'], e['src'] = free.pop(0), 'sibling-tier'
             else:
                 e['idx'], e['src'] = 0, 'sibling-base'
+    for k, e in res.items():
+        if e['idx'] is not None:
+            continue
+        a = art_root(k, present)
+        src = [res[s] for s in res if s.lower() == a and res[s]['idx'] is not None]
+        if src:
+            e['cv'], e['idx'], e['src'] = src[0]['cv'], src[0]['idx'], 'art-inherit'
 
 
 def decode_bank(acb, tmp):
