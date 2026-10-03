@@ -12,8 +12,9 @@
   ship-without-cv             该皮肤 voice_actor 为 0/-1（这艘船本就没有 CV）⇒ 结构性无解
   other
 
-并交叉「正文可得性」：**直接查权威表** `inputs/gamecfg/ship_skin_words.json`（键 = 皮肤行 id
-= cv*10+idx），不看 `skin_words.json` 的 `m`——那张 `m` 是 `build_skin_words.py` 只遍历
+并交叉「正文可得性」：**直接查权威表** `inputs/gamecfg/ship_skin_words.json`（键 = 皮肤表**主键 id**，
+按 painting 查表得到，⚠️ 不是 `cv*10+idx`——那个算式在皮肤序号 ≥10 处会撞进隔壁船的行，见 §86），
+不看 `skin_words.json` 的 `m`——那张 `m` 是 `build_skin_words.py` 只遍历
 `skin_voice.json` 里已解析出声的皮肤建出来的，拿它问「无解皮肤有没有正文」是循环判据，
 恒为 0 且不构成证据。一批「没声音」的皮肤正文其实齐全，可以只做字幕不做点击播放。
 
@@ -145,8 +146,10 @@ def main():
             rec.update(cls='no-row-unknown', cv=None, stripped=[], row_files=0, fam=[])
             out.append(rec)
             continue
-        cv, idx = rows[hit_key][0]
-        sid = str(cv * 10 + idx)
+        # 三元组 (语音包号, 包内档位, 表行主键)——主键只能查，不能再写 `cv*10+idx` 反推：
+        # 皮肤序号 ≥10 的新批次那 28 行会被算成隔壁船的行（§86），这里跟着错过正文。
+        cv, idx, row_id = rows[hit_key][0]
+        sid = str(row_id)
         wrow = words_by_id.get(sid) or {}
         files = sorted(cue_files_for(cv))
         has_main = ('cv-%d.b' % cv) in files

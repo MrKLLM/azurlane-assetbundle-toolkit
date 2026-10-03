@@ -35,14 +35,21 @@ def ck(name, cond, got=''):
 
 
 class Rec:
-    """替掉 run()：只记录被调用了什么，绝不真跑。"""
+    """替掉 run()：只记录被调用了什么，绝不真跑。`rc_of` 让某条命令返回指定退出码，
+    用来测"某个只读判据红了，阶段结论会不会跟着红"——不设这个参数时它恒 0，等于
+    所有只读半边都默认通过，那正是上一版漏掉的形状。"""
 
-    def __init__(self, out=''):
+    def __init__(self, out='', rc_of=None):
         self.calls = []
         self.out = out
+        self.rc_of = rc_of or {}
 
     def __call__(self, argv, **kw):
+        line = ' '.join(str(a) for a in argv)
         self.calls.append([str(a) for a in argv])
+        for key, rc in self.rc_of.items():
+            if key in line:
+                return rc, self.out, ''
         return 0, self.out, ''
 
     def hit(self, *keys):
@@ -184,6 +191,53 @@ def t_gates():
             ck('cg: 增量只导变更的皮肤（--only 收窄）',
                only and '--only' in only[0] and only[0][only[0].index('--only') + 1] == '2b_2',
                str(only))
+
+            # ── 降级台账接进了 audio 档（2026-10-03）：它红了，这一档就不许报绿 ──
+            # 只读判据默认全 0 的桩测不出这条：上一版所有"跑了两道审计"的结论都是无条件 True，
+            # 而 audio 档真正要拦的恰恰是"游戏改了形状、我们只能猜着填"那种情况。
+            r = Rec()
+            old, up.run = up.run, r
+            try:
+                ok = up.st_audio(set())
+            finally:
+                up.run = old
+            ck('audio: 未签字 → 降级台账这道只读判据确实跑了',
+               len(r.hit('check_degradation')) == 1, str(r.calls))
+            ck('audio: 未签字 → 台账结论进了给前端看的那行', '降级' in up.RESULTS['audio']['detail']
+               or 'OK' in up.RESULTS['audio']['detail'], up.RESULTS['audio']['detail'])
+            r = Rec(rc_of={'check_degradation': 1})
+            old, up.run = up.run, r
+            try:
+                ok = up.st_audio(set())
+            finally:
+                up.run = old
+            ck('audio: 台账判红 → 未签字分支也判红（不再无条件绿）', ok is False,
+               str(up.RESULTS['audio']))
+            ck('audio: 台账判红 → 结论里说清"先判断再签字"', '先判断' in up.RESULTS['audio']['detail'],
+               up.RESULTS['audio']['detail'])
+            r = Rec(rc_of={'check_degradation': 1})
+            old, up.run = up.run, r
+            try:
+                ok = up.st_audio({'audio'})
+            finally:
+                up.run = old
+            ck('audio: 台账判红 → 即使签了字，结论仍是红（签了字也不等于数据形状没变）',
+               ok is False and len(r.hit('extract_cv_voice')) == 1, str(up.RESULTS['audio']))
+
+            # ── 「恒 exit 0 只作参考」的辅助脚本，退出码必须被读 ──
+            # voice_gap_audit 设计上不返回非 0（它的产出是分类清单，不是判据），
+            # 所以 rc≠0 只有一个意思：它自己崩了。2026-10-03 换三元组时把它弄坏（ValueError），
+            # 因为没人看这个 rc，audio 档照绿了一整天 ⇒ 这类"参考型"脚本的崩溃必须有色。
+            r = Rec(rc_of={'voice_gap_audit': 1})
+            old, up.run = up.run, r
+            try:
+                ok = up.st_audio(set())
+            finally:
+                up.run = old
+            ck('audio: gap_audit 崩了（它恒 0，非 0 即故障）→ 未签字分支也判红', ok is False,
+               str(up.RESULTS['audio']))
+            ck('audio: 判红时结论点名是 gap_audit 崩，不是含糊的"rc 非 0"',
+               'gap_audit 崩' in up.RESULTS['audio']['detail'], up.RESULTS['audio']['detail'])
         finally:
             up.fingerprint = real
     tmp_work(body)

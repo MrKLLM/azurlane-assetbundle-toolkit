@@ -240,6 +240,38 @@ def row_id_for(kl, rows, prefer_cv=None):
     return None
 
 
+def degradation_report(res, miss, keys, rows):
+    """把「静默降级」点名成清单——供 `scripts/diag/check_degradation.py` 与台账比对。
+
+    这四类今天都有**很小的存量**，所以判据不是"有没有"而是"有没有变多"：
+    例行的拉取-还原应当一路绿；只有**新出现**的条目才说明游戏改了形状、需要人看一眼。
+    每一项存的是**具体皮肤名**，不是计数——计数会把"3 条旧的换成 3 条新的"这种
+    最该报警的情况吞掉。
+    """
+    kinds = {
+        'borrow-pack': sorted(k for k, e in res.items() if e['src'] == 'sibling-base'),
+        'tier-allocated': sorted(k for k, e in res.items() if e['src'] == 'sibling-tier'),
+        'no-row': sorted(miss),
+    }
+    # 号段偏移不认识：只算"磁盘上真有这张皮肤、表里也有它的行、但档位推不出来"的那些。
+    # ⚠️ 900xxx 剧情/独立实体行**不算降级**——它们的 `ship_group` 存的是组首 id（如 900001 的组是 900001
+    #    本身），偏移天然不是 0/+3000，"没有档位"是正确状态（实测这类 372 行、全部 id≥900000）。
+    #    但也不能只看 `id≥900000`：900xxx 里有 369 行偏移恰好是 0（如 900269 的组是 90026），
+    #    那样会把能用的行误判成剧情行。⇒ 判据是「偏移不认识 **且** 不是 900xxx 号段」。
+    odd = []
+    for k in keys:
+        for cand in row_candidates(k.lower()):
+            hit = rows.get(cand)
+            if not hit:
+                continue
+            # load_skin_rows 把"能算出档位"的排在前面，所以第一行就是该用的那一行
+            if hit[0][1] is None and hit[0][2] < 900000:
+                odd.append(k)
+            break
+    kinds['unknown-offset'] = sorted(set(odd))
+    return kinds
+
+
 def resolve(keys, rows, banks):
     """皮肤 → {cv, idx or None, src}。idx=None 表示等解码出包内序号档后再定（同船回退）。
 
@@ -463,6 +495,12 @@ def run(skin_keys, mode, out_audio, map_path, jobs, skip_done=False):
                 if done % 25 == 0 or done == len(need):
                     print('  已导出 %d/%d 包 (失败 %d)' % (done, len(need), fail))
     assign_pending_idx(res, cue_sets)
+    deg = degradation_report(res, miss, skin_keys, rows)
+    print('静默降级清单（逐项点名，台账比对交给 check_degradation.py）: %s'
+          % {k: len(v) for k, v in sorted(deg.items())})
+    os.makedirs(DIAG, exist_ok=True)
+    json.dump(deg, open(os.path.join(DIAG, 'degradation_now.json'), 'w', encoding='utf-8'),
+              ensure_ascii=False, indent=1, sort_keys=True)
 
     map_out, unknown_all = {}, collections.Counter()
     for k in skin_keys:

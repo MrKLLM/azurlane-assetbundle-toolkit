@@ -666,20 +666,33 @@ def st_live2d(full, approved):
 def st_audio(approved):
     # ⚠️ 这一步**没有暂存通道**：extract_cv_voice 直接写 Output/Audio 与 gallery_v2/skin_voice.json。
     # 上一版收了 approved 参数却没检查它 ⇒ "签字放行"对这一步是空话，跑一次就覆写一次正式区。
+    # 降级台账**先跑**：它是只读的，且是"这一步到底该不该签字"的判据之一
+    # （新增降级 = 游戏改了形状，这时候签 --approve audio 只会把猜的结果写进正式区）。
+    rcg, sog, _ = run([PY, 'scripts/diag/check_degradation.py'], timeout=1800,
+                      echo=['存量', '新增', 'OK', 'FAIL'])
+    deg_line = next((l.strip() for l in (sog or '').splitlines()
+                     if 'OK' in l or 'FAIL' in l), '降级台账没给结论（rc=%s）' % rcg)
     if 'audio' not in approved:
         rc2, so2, _ = run([PY, 'scripts/diag/voice_gap_audit.py'], timeout=1800,
                           echo=['缺口', '合计'])
         rc3, _, _ = run([PY, 'scripts/diag/l2d_voice_inventory.py'], timeout=600, echo=['合计'])
-        return verdict('audio', True,
-                       '只跑了两道只读语音审计，一个音频包都没解码 · Output/Audio 未动'
-                       f'（gap_audit rc={rc2} · inventory rc={rc3}）· 未签字，请 --approve audio')
+        # ⚠️ `voice_gap_audit` 的 rc **必须被消费**。它设计上恒 exit 0（结论是分类清单不是判据），
+        # 所以 rc≠0 只有一个意思：**它自己崩了**。2026-10-03 实测这条被无视了一整天——
+        # 换三元组时把它弄坏（ValueError），阶段结论照绿。恒 0 的辅助脚本一旦不看退出码，
+        # 坏了也没有任何地方会变红，等于把"有没有坏"变成只有人工翻日志才知道。
+        return verdict('audio', rcg == 0 and rc2 == 0 and rc3 == 0,
+                       '只跑了两道只读语音审计 + 降级台账，一个音频包都没解码 · Output/Audio 未动'
+                       f'（gap_audit rc={rc2} · inventory rc={rc3} · {deg_line}）'
+                       + ('' if rcg == 0 else ' · 有新增降级，先判断再签字')
+                       + ('' if rc2 == 0 else ' · gap_audit 崩了（它恒 exit 0，非 0 即故障）')
+                       + ' · 未签字，请 --approve audio')
     rc, so, _ = run([PY, 'scripts/extract_cv_voice.py', '--all', '--skip-done'],
                     timeout=7200, echo=['包', '失败', '合计', '进度'])
     rc2, so2, _ = run([PY, 'scripts/diag/voice_gap_audit.py'], timeout=1800, echo=['缺口', '合计'])
     rc3, _, _ = run([PY, 'scripts/diag/l2d_voice_inventory.py'], timeout=600)
-    return verdict('audio', rc3 == 0,
-                   f'cv_voice rc={rc}（单包失败不反映到退出码）；voice_gap_audit 恒 exit 0 只作参考；'
-                   f'l2d_voice_inventory（可信）rc={rc3}')
+    return verdict('audio', rc3 == 0 and rcg == 0 and rc2 == 0,
+                   f'cv_voice rc={rc}（单包失败不反映到退出码）；voice_gap_audit rc={rc2}'
+                   f'（恒 exit 0，非 0 = 它自己崩了）；l2d_voice_inventory（可信）rc={rc3}；{deg_line}')
 
 
 def st_cg(full, approved):
