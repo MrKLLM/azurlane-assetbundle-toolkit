@@ -115,11 +115,21 @@ def split_cue(n):
 
 
 def load_skin_rows():
-    """painting（磁盘皮肤名）→ [(cv, idx)]，cv = skin id // 10（语音包号），idx = skin id % 10。
+    """painting（磁盘皮肤名）→ [(语音包号, 包内档位, 表行主键)]，按 (包号, 档位) 升序。
 
-    ⚠️ 表键**一律小写归一**：皮肤表里 `2B`/`A2`/`HDN101` 这类是大写，而磁盘目录名是小写，
-    原样查表会让 145 张明明有包的皮肤掉进「无解」（2026-09-27 普查 499 无解时查出）。
-    磁盘侧候选也要 `.lower()`（见 resolve）。"""
+    ⚠️ 三个量**各自权威**，谁也不是谁的算式（旧版在这里写 `id//10, id%10`，把三件事当一件，
+    于是台词层拿 `cv*10+idx` 反推主键会撞船，见 docs/TROUBLESHOOTING.md §86）：
+      · **语音包号 = 表里的 `ship_group`**（实测 2865 行全有值；`aisaikesi_10` 行 137090 → 10709）；
+      · **表行主键 = `id`**，只能查、不能推；
+      · **包内档位**：老号段（`id//10 == ship_group`）就是 `id % 10`；皮肤序号上到 10 之后游戏
+        另开 `+3000` 号段（28 行，偏移分布实测只有 0 与 3000 两种），那里 `id % 10` 是
+        **批次内顺序号**（按上线顺序，不是皮肤序号：`lafei_11`=0 / `lafei_10`=1 / `lafei_12`=2），
+        档位 = `10 + 批次顺序号`。8 个多行组的顺序号全部连续无重复。
+    档位算不出来的行（偏移既不是 0 也不是 3000，如 900xxx 剧情档）留 `None`，由调用方回退，
+    **不许猜一个档**。
+
+    ⚠️ 表键一律小写归一：皮肤表里 `2B`/`A2`/`HDN101` 这类是大写，而磁盘目录名是小写，
+    原样查表会让 145 张明明有包的皮肤掉进「无解」（2026-09-27 普查 499 无解时查出）。"""
     d = skin_table.load()
     by = collections.defaultdict(list)
     for k, r in d.items():
@@ -129,8 +139,14 @@ def load_skin_rows():
         if not p:
             continue
         sid = int(r.get('id') or k)
-        by[p.lower()].append((sid // 10, sid % 10))
-    return {p: sorted(set(v)) for p, v in by.items()}
+        grp = r.get('ship_group')
+        if not isinstance(grp, int):
+            continue
+        off = sid // 10 - grp
+        tier = sid % 10 if off == 0 else (10 + sid % 10 if off == 3000 else None)
+        by[p.lower()].append((grp, tier, sid))
+    return {p: sorted(v, key=lambda t: (t[0], t[1] if t[1] is not None else 1 << 30))
+            for p, v in by.items()}
 
 
 def gallery_keys():
@@ -220,7 +236,7 @@ def row_id_for(kl, rows, prefer_cv=None):
             same = [t for t in hit if t[0] == int(prefer_cv)]
             if same:
                 hit = same
-        return int(hit[0][0]) * 10 + int(hit[0][1])
+        return hit[0][2]
     return None
 
 
@@ -239,15 +255,18 @@ def resolve(keys, rows, banks):
     stems = {p: ship_stem(p) for p in rows_l}
 
     def pick(name, orig):
-        """按 `row_candidates` 的优先级找第一个"有行且包在盘上"的。
+        """按 `row_candidates` 的优先级找第一个"有行、包在盘上、**档位算得出来**"的。
         src 必须相对**最初那个名字** orig 判定 —— 否则从 `_alter` 回退进来的那一层会把自己
         标成 `row`（本轮实测错过：把"回退"伪装成"命中自有行"，虚报 6 个）。"""
         for cand in row_candidates(name):
-            hit = [t for t in rows_l.get(cand, []) if t[0] in banks]
+            hit = [t for t in rows_l.get(cand, []) if t[0] in banks and t[1] is not None]
             if hit:
                 return {'cv': hit[0][0], 'idx': hit[0][1],
                         'src': 'row' if cand == orig else 'strip'}
         return None
+
+    def tier_key(t):
+        return (t[0], 1 << 30 if t[1] is None else t[1])
 
     for k in keys:
         kl = k.lower()
@@ -259,7 +278,8 @@ def resolve(keys, rows, banks):
             miss.append(k)                       # 独立实体：宁缺勿错派
             continue
         st = ship_stem(kl)
-        alt = sorted({t for p in rows_l if stems[p] == st for t in rows_l[p] if t[0] in banks})
+        alt = sorted((t for p in rows_l if stems[p] == st for t in rows_l[p] if t[0] in banks),
+                     key=tier_key)
         if alt:
             res[k] = {'cv': alt[0][0], 'idx': None, 'src': 'sibling'}
         else:

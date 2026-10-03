@@ -71,10 +71,9 @@ def main():
         s = set()
         for cand in E.row_candidates(skin.lower()):
             if rows.get(cand):
-                s |= {str(int(cv) * 10 + int(idx)) for cv, idx in rows[cand]}
+                s |= {str(sid) for _pack, _tier, sid in rows[cand]}
         if not E.HEI_SUF.search(E.art_chain(skin.lower())[-1]):
-            s |= {str(int(cv) * 10 + int(idx))
-                  for cv, idx in rows.get(E.ship_stem(skin.lower()), [])}
+            s |= {str(sid) for _pack, _tier, sid in rows.get(E.ship_stem(skin.lower()), [])}
         return s
 
     def audio_moved(skin):

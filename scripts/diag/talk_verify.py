@@ -573,8 +573,8 @@ def main():
                 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
                 import extract_cv_voice as E
                 rows = E.load_skin_rows()
-                cands = {str(int(cv) * 10 + int(idx))
-                         for c in E.row_candidates(vk.lower()) for cv, idx in rows.get(c, [])}
+                cands = {str(sid) for c in E.row_candidates(vk.lower())
+                         for _pack, _tier, sid in rows.get(c, [])}
                 own = (str(r.get('sid')) in cands) if r.get('gotTexts') else True
             except Exception as ex:
                 print('   ⚠️ 归属回查没跑成（%s）⇒ 这条判据等于没测' % str(ex)[:60])

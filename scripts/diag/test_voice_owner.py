@@ -19,21 +19,22 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 import extract_cv_voice as E      # noqa: E402
 
-# 合成：painting → [(cv, idx)]。⚠️ 名字必须真的以裁定过的那几个后缀**结尾**，
+# 合成：painting → [(语音包号, 包内档位, 表行主键)]（与 `load_skin_rows()` 的三元组同形）。
+# ⚠️ 名字必须真的以裁定过的那几个后缀**结尾**，
 # 否则测的是"查无此名"而不是分类规则（上一版 fixture 写成 `_alt` 就是白测两条）。
 ROWS = {
-    'tongti':        [(1001, 0)],   # 本体
-    'tongti_alter':  [(9001, 0)],   # 改造版：同角色的另一套皮肤，有自己的行与包
-    'gaizao_alter':  [(9006, 7)],   # 改造版：有行，但包没下发
-    'gaizao':        [(1006, 0)],   # ↑ 它的本体（回退要有落点，否则测的是"查无此名"）
-    'heihua_hei':    [(9003, 0)],   # 黑化版：有行也有包（游戏真给它配了声）
-    'hei2_hei':      [(9004, 0)],   # 黑化版：有行，包没下发
-    'hei3_hei_n':    [(9005, 3)],   # 黑化版的无背景版：有行，包没下发
-    'both_alter_hei': [(9007, 0)],  # 改造+黑化：黑化必须压过改造
+    'tongti':        [(1001, 0, 10010)],   # 本体
+    'tongti_alter':  [(9001, 0, 90010)],   # 改造版：同角色的另一套皮肤，有自己的行与包
+    'gaizao_alter':  [(9006, 7, 90067)],   # 改造版：有行，但包没下发
+    'gaizao':        [(1006, 0, 10060)],   # ↑ 它的本体（回退要有落点，否则测的是"查无此名"）
+    'heihua_hei':    [(9003, 0, 90030)],   # 黑化版：有行也有包（游戏真给它配了声）
+    'hei2_hei':      [(9004, 0, 90040)],   # 黑化版：有行，包没下发
+    'hei3_hei_n':    [(9005, 3, 90053)],   # 黑化版的无背景版：有行，包没下发
+    'both_alter_hei': [(9007, 0, 90070)],  # 改造+黑化：黑化必须压过改造
 }
 BANKS = {1001, 9001, 9003, 1006}     # 盘上真有主包的 cv；其余都没下发
 # 让 ship_stem 能把 `solo_9_n` 归到 `solo`（同船回退那条路要有样本）
-ROWS['solo'] = [(2002, 0)]
+ROWS['solo'] = [(2002, 0, 20020)]
 BANKS.add(2002)
 
 
@@ -109,7 +110,9 @@ fails += rc_fail
 # 2026-10-02 真实案例：埃塞克斯皮肤10 的真行是 137090，而音频在 cv-10709 包里的档位是 10，
 # 算术式 `10709*10+10` = 107100 正好是**约克城II**那一行 ⇒ 整列台词派给了别的船（用户从
 # 「字幕比语音短」报出）。正向全库看不出来：那一行存在、有正文，join 判"成功"。
-KEYROWS = {'aisaikesi': [(10709, 0)], 'aisaikesi_10': [(13709, 0)], 'yuekechengII': [(10710, 0)]}
+KEYROWS = {'aisaikesi': [(10709, 0, 107090)],
+           'aisaikesi_10': [(10709, 10, 137090)],   # 包号来自 ship_group，不是 id//10
+           'yuekechengII': [(10710, 0, 107100)]}
 AK = [
     ('皮肤序号 ≥10 换号段 ⇒ 主键不是 cv*10+idx', 'aisaikesi_10', 137090),
     ('老批次恰好吻合（正向对照，规则不得把对的改坏）', 'aisaikesi', 107090),
@@ -129,6 +132,42 @@ ak_fail += 0 if ok else 1
 print('%s %-42s %-16s 算术式 %d == 约克城II 行 %s' % ('✓' if ok else '✗',
       '对照：旧算术式确实撞进了隔壁船的行', 'aisaikesi_10', arith, ok))
 fails += ak_fail
+
+# ── 真表上的权威三元组（包号 = ship_group；档位 = id%10 或 10+批次序）──────────────
+# 这条把"从猜改成推"钉住：数值全部取自 2026-10-02 的 `inputs/gamecfg/ship_skin_template.json`。
+# ⚠️ 排序也必须测：算不出档位的剧情档（900xxx，tier=None）要排在**后面**，
+#    否则 `row_id_for` 取 hit[0] 会取到故事行，等于把台词派给剧情实体。
+REAL = [
+    ('aisaikesi',     (10709, 0, 107090)),    # 老号段：档位 == id%10
+    ('aisaikesi_g',   (10709, 9, 107099)),
+    ('aisaikesi_10',  (10709, 10, 137090)),   # +3000 号段：包号仍是本体，档位 = 10+批次序 0
+    ('qiye_9',        (10706, 10, 137060)),
+    ('qiye_10',       (10706, 11, 137061)),   # 批次序 ≠ 皮肤序号：_9 先上线
+    ('biaoqiang_10',  (20121, 11, 231211)),
+    ('dujiaoshou_11', (20603, 12, 236032)),
+    ('lafei_11',      (10117, 10, 131170)),   # 同组三行：_11=0 / _10=1 / _12=2
+    ('lafei_10',      (10117, 11, 131171)),
+    ('lafei_12',      (10117, 12, 131172)),
+    ('z23_9',         (40123, 10, 431230)),
+    ('z23_11',        (40123, 11, 431231)),
+    ('z23_10',        (40123, 12, 431232)),
+    ('nengdai_9',     (30221, 10, 332210)),
+    ('guanghui_8',    (20703, 10, 237030)),
+]
+_rows = E.load_skin_rows()
+real_fail = 0
+for name, want in REAL:
+    got = _rows.get(name, [None])[0]
+    ok = got == want
+    real_fail += 0 if ok else 1
+    print('%s 真表 %-14s 期望 %-20s 实得 %s' % ('✓' if ok else '✗', name, want, got))
+# 阴性对照：带剧情档同名的皮肤，第一行必须是能算出档位的真皮肤行
+for name in ('aisaikesi', 'salatuojia_10', 'z23_10', 'lafei_10'):
+    first = _rows[name][0]
+    ok = first[1] is not None
+    real_fail += 0 if ok else 1
+    print('%s 剧情档不抢位 %-14s 第一行 %s' % ('✓' if ok else '✗', name, first))
+fails += real_fail
 
 # ── 画法变体不占语音档位，必须从所属皮肤继承 ────────────────────────────────
 # 旧实现按「一个目录名一档」分配，`X_n`/`X_hx` 各吃掉一档：变体播到别的皮肤的台词，
@@ -167,6 +206,6 @@ print('\n%s 台词层没有第二份剥后缀实现（源码里 VAR.sub 出现 %
       % ('[OK]' if not leak else '[FAIL]', len(leak), leak or '无'))
 fails += len(leak)
 
-TOTAL = len(CASES) + 1 + len(RC) + 1 + len(AK) + 1 + len(TIER)
+TOTAL = len(CASES) + 1 + len(RC) + 1 + len(AK) + 1 + len(REAL) + 4 + len(TIER)
 print('\n%s 语音归属解析 %d/%d' % ('[PASS]' if not fails else '[FAIL]', TOTAL - fails, TOTAL))
 sys.exit(1 if fails else 0)
