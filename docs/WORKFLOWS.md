@@ -926,6 +926,12 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
   正确做法：`CommandLine -match 'Azur Lane Assets' -and CommandLine -match 'chrome_hitv|chrome_galprobe|...'`。
   本次实测：只杀 python 主进程后残留 **4 组无头 Chrome 占着 CDP 端口 9342/9377/9378/9379**，
   正是「多个无头 Chrome 抢 profile → 偶发假失败」的来源。
+  - **2026-10-03 更新（§89）**：探针的端口与 profile 已收成一份出口 `scripts/cdp_slot.py`——
+    端口由 OS 挑空闲的（`AL_CDP_PORT` 可钉死，被占即拒绝启动），profile 变成
+    **`.diag/chrome_<tag>_<pid>`**。所以①上面那条按命令行匹配**仍然有效**（`-match 'chrome_hitv'`
+    是子串匹配，命中 `chrome_hitv_85972`），但**别把名单当全集**——按前缀 `'chrome_'` 匹配才不会漏掉新 tag；
+    ②"残留 Chrome 占着固定端口"这一类偶发假失败从结构上消失了，代价是 profile 目录数量变多，
+    收尾照旧跑 `clean_diag_profiles.py`（它有"30 分钟内修改的保留"窗口，不会误杀并发会话正在用的那份）。
 
 - ⚠️ **每一轮 CDP 批处理都会在 `.diag/` 留一个几百 MB 的无头 Chrome profile**（`--user-data-dir`），39 个就能吃掉 7.7 GB。
   收尾必跑：`py -3 scripts/diag/clean_diag_profiles.py`（干跑看清单）→ 加 `--yes` 删。三条硬判据全过才删：

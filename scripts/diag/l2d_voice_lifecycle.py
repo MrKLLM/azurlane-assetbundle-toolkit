@@ -11,9 +11,10 @@ sys.stdout.reconfigure(encoding='utf-8')
 import websocket
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+import cdp_slot            # 端口 / profile 不写死：写死会让两个会话灌进同一个页面（见该模块 docstring）
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
-PORT = 9342
-DEBUG_DIR = os.path.join(ROOT, '.diag', 'chrome_l2d_voicecut2')
+PORT, DEBUG_DIR = cdp_slot.slot(ROOT, 'voicecut')
 BASE = 'http://127.0.0.1:8777/gallery_v2/index.html'
 KEY = sys.argv[1] if len(sys.argv) > 1 else 'benningdun_2'
 GROUP = sys.argv[2] if len(sys.argv) > 2 else 'touch_head'

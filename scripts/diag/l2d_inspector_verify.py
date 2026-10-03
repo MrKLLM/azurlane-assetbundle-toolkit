@@ -14,10 +14,10 @@ sys.stdout.reconfigure(encoding='utf-8')
 import websocket
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+import cdp_slot            # 端口 / profile 不写死：写死会让两个会话灌进同一个页面（见该模块 docstring）
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
-PORT = 9373
-PROFILE = os.path.join(ROOT, '.diag', 'chrome_insp')
-os.makedirs(PROFILE, exist_ok=True)
+PORT, PROFILE = cdp_slot.slot(ROOT, 'insp')
 proc = subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
   '--remote-allow-origins=*', f'--user-data-dir={PROFILE}', '--no-first-run',
   '--no-default-browser-check', '--disable-background-timer-throttling', '--enable-unsafe-swiftshader',

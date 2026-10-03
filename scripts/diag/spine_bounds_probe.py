@@ -6,11 +6,13 @@ sys.stdout.reconfigure(encoding='utf-8')
 import websocket
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+import cdp_slot            # 端口不写死：写死会让两个会话灌进同一个页面（见该模块 docstring）
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
-PORT = 9349
+PORT = cdp_slot.port('bounds')
 FOLDER = sys.argv[1] if len(sys.argv) > 1 else 'aluomangshi_2'
 SKIN = sys.argv[2] if len(sys.argv) > 2 else '1'
-PROFILE = os.path.join(ROOT, '.diag', 'chrome_bounds_' + str(int(time.time())))   # 每次全新 profile：复用会把上一次的 chrome 当本页
+PROFILE = cdp_slot.profile(ROOT, 'bounds')   # 每次全新 profile：复用会把上一次的 chrome 当本页
 proc = subprocess.Popen([
     CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
     '--remote-allow-origins=*', f'--user-data-dir={PROFILE}',

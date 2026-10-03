@@ -4460,3 +4460,35 @@ A0 把猜测面从 61 缩到 39，但 26 格「音频改档·正文待补」是�
 
 **涉及文件**: 本节只是口径纠正与证据补记，未改代码。相关：§82、§84、§85、§87。
 
+## §89. 探针的 CDP 端口与 profile 写死 = 两个会话灌进同一个浏览器，产出"整序列统一偏移一位"的假数据（2026-10-03 午后）
+
+§6 第 20 条那笔欠账（第 19 条假红灯的成因）清掉了。**这不是"不优雅"，是假数据**：
+`--user-data-dir` 相同的第二个 chrome **不会另起进程，而是附着到第一个**，于是两个会话的 CDP 命令
+灌进同一个页面；端口写死同理。症状都不是报错，而是 `hit_verify` 那种"每条 `played` 恰好滞后一个部位"
+——**看起来很像真结果**，所以能骗过一整轮验收（§60 末段量过一次）。
+
+**收成一份出口 `scripts/cdp_slot.py`**，7 个探针迁过去（`hit_verify` / `talk_verify` / `interact_verify` /
+`l2d_inspector_verify` / `l2d_coord_forensics` / `l2d_voice_lifecycle` / `spine_bounds_probe`）：
+- 端口默认让 OS 挑一个**真空闲**的；`AL_CDP_PORT` 可钉死用于复现某次运行，但**被占就直接退出**并写清为什么
+  —— 宁可不跑，也不许静默附着到别人的浏览器。
+- profile 一律 `.diag/chrome_<tag>_<pid>`，每进程一份；`AL_CDP_PROFILE_DIR` 换落点。
+  名字仍带 `chrome_` 前缀 ⇒ `clean_diag_profiles.py` 照旧能清（每份几百 MB，现在会更多）。
+
+**验收（都是真跑的，不是推断）**：
+- 并发跑 `l2d_inspector_verify` + `interact_verify` → 端口 56183 / 56182、profile 各自一份、**两个都 exit 0**；
+- 红路径对照：把 `AL_CDP_PORT` 指向一个正被监听的端口 → 子进程 **exit 1** 并打出那段说明；
+- 迁完再跑 WF-16 五件：**全绿 107 秒**。
+
+**顺带两条**：
+1. `cdp_slot` 的拒绝信息走 `SystemExit` → **stderr**，而探针只把 stdout 转了 UTF-8 ⇒ GBK 控制台下
+   中文被编成 GBK，**抓输出的调用方按 UTF-8 解码直接崩**（我第一次量红路径就崩在这里）。
+   这是 §9.3 根因 3 的同一族，只是这次崩的恰好是"闸门拒绝启动"那句话——**闸门自己把结论弄丢了**。
+   ⇒ `cdp_slot` 里把 stdout 与 stderr 一起 `reconfigure('utf-8')`。
+2. 旧的固定名 profile（`chrome_insp` / `chrome_talk` / `chrome_intv` 等 8 个）随这次迁移成为孤儿，
+   已用 `clean_diag_profiles.py --yes` 回收 **1.65 GiB**（`.diag` 13G→11G）。该工具带
+   "修改于 30 分钟内的保留"窗口，正好挡住并发会话正在用的那几份。
+
+**涉及文件**: 新增 `scripts/cdp_slot.py`；改 `scripts/diag/{hit_verify,talk_verify,interact_verify,
+l2d_inspector_verify,l2d_coord_forensics,l2d_voice_lifecycle,spine_bounds_probe}.py`。
+`wf16_regression.py` 无需改（它只管按序 spawn，端口/profile 由各探针自己拿）。相关：§60 末段、WF-16。
+
