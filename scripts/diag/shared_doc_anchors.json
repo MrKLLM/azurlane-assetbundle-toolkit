@@ -98,6 +98,12 @@
       "needle": "把它做成机械核对",
       "commit": "",
       "note": "第 3c 步里指向本工具的那条"
+    },
+    {
+      "file": "PROJECT_STATUS.md",
+      "needle": "剧情黑脸剪影",
+      "commit": "f22f91c",
+      "note": "§88 口径纠正：_hei 是剧情黑脸剪影、非角色、无配音"
     }
   ]
 }
