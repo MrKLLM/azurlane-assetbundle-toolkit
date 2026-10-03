@@ -74,7 +74,25 @@ def diff(old, new, allow_ship, allow_skin, packs, expect=None):
     bad = []
     misfit = []
 
+    # 「掉出索引」只有一种是合法外迁：这条确实搬进了 `new['silhouettes']`（§88：`_hei` 是剧情黑脸
+    # 剪影，不是皮肤，2026-10-03 用户拍板移出皮肤区）。放行是**双向可核**的——条目必须真的出现在
+    # 新版剪影清单里，且键满足黑化后缀，还不得同时留在皮肤区里；所以这不是按名字开的例外名单，
+    # 拿它掩盖一次真删除会在下面三条断言里撞车。
+    sil = {s.get('key') for s in (new.get('silhouettes') or []) if s.get('key')}
+    not_hei = sorted(k for k in sil if not HEI_TAIL.search(k.lower()))
+    if not_hei:
+        bad.append('剪影清单里混进了非 `_hei` 条目: %s' % not_hei[:5])
+    still = sorted(k for k in sil if k in n_k)
+    if still:
+        bad.append('剪影条目同时还在皮肤区里（外迁没做干净）: %s' % still[:5])
+    ghost = sorted(k for k in sil if k not in o_k and k not in {x for x in n_k})
+    if ghost:
+        bad.append('剪影清单里有两边都不认识的条目: %s' % ghost[:5])
+
     for gone in sorted(set(o_s) - set(n_s)):
+        if gone in sil:
+            rep['船外迁为剪影'] += 1
+            continue
         bad.append('船掉出索引: %s' % gone)
     for add in sorted(set(n_s) - set(o_s)):
         rep['船新增'] += 1
@@ -156,6 +174,9 @@ def diff(old, new, allow_ship, allow_skin, packs, expect=None):
                 bad.append('船标量回退: %s.%s %r→%r' % (sid, k, a.get(k), b.get(k)))
 
     for key in sorted(set(o_k) - set(n_k)):
+        if key in sil:
+            rep['皮肤外迁为剪影'] += 1
+            continue
         bad.append('皮肤掉出索引: %s' % key)
     for key in sorted(set(n_k) - set(o_k)):
         rep['皮肤新增'] += 1

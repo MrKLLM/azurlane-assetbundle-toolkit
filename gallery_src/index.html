@@ -583,7 +583,7 @@ main{position:relative;z-index:1}
   <h1>碧蓝航线资产浏览器</h1>
   <div class="ctl"><input type="text" id="search" placeholder="搜索 中文名 / 拼音ID"></div>
   <div class="ctl"><label>类别</label><div class="seg" id="fCat">
-    <button data-c="" class="on">全部</button><button data-c="ship">舰船</button><button data-c="story">剧情角色</button>
+    <button data-c="" class="on">全部</button><button data-c="ship">舰船</button><button data-c="story">剧情角色</button><button data-c="hei">剧情剪影</button>
   </div></div>
   <div class="ctl"><label>阵营</label><select id="fFaction"><option value="">全部</option></select></div>
   <div class="ctl"><label>舰种</label><select id="fType"><option value="">全部</option></select></div>
@@ -628,9 +628,21 @@ main{position:relative;z-index:1}
 <script>
 const G = window.GALLERY;
 const P = location.protocol === 'file:' ? '../' : '../'; // 图片相对路径前缀（两种协议下均可）
-const ships = G.ships;
+/* ---------- 剧情剪影（`_hei`）：不是皮肤，也不配音 ----------
+   §88 查清：`_hei` 是剧情里的**黑脸剪影**，不是角色、没有配音；用户 2026-10-03 拍板
+   「不显示在皮肤区，但保留一个入口方便管理」。索引层已把它们从 `ships[].skins` 外迁到
+   顶层 `silhouettes`，这里包成"单皮肤伪船"，好让卡片 / 搜索 / 弹层**复用同一条渲染路径**，
+   不另写一套 UI（另写的那套永远会和主路径漂移）。
+   ⚠️ 它们只从顶部第 4 档进：`catOf()` 返回 'hei'，而 `renderGrid()` 在「全部」档只渲染
+   ship + story 两组 ⇒ 主网格与各船皮肤区都不出现它们。 */
+const HEI = (G.silhouettes||[]).map(s=>({
+  id:s.key, name:(s.shipName||'')+' · 剧情剪影', hasCn:false, npc:false,
+  type:'', rarity:'', faction:'', category:'hei', voiceCount:0, sil:s,
+  skins:[{key:s.key, label:'剧情剪影', image:s.image, spine:false, live2d:''}],
+  spineSkins:[], live2dSkins:[]}));
+const ships = G.ships.concat(HEI);
 let view = ships.slice();
-let catFilter = '';   // ''=全部 / ship=舰船 / story=剧情角色
+let catFilter = '';   // ''=全部 / ship=舰船 / story=剧情角色 / hei=剧情剪影
 
 /* ---------- 全局交互开关（localStorage 持久化，三个视图共用） ----------
    两条各自独立：关掉「点击出声」后点画面仍然会上字幕（只是不出声），
@@ -717,19 +729,19 @@ function uniqCount(arr){ const m={}; arr.forEach(x=>{if(x)m[x]=(m[x]||0)+1;}); r
 
 /* ---------- 渲染网格（按 category 分区：舰船 / 剧情角色） ---------- */
 const mainEl = document.getElementById('main');
-function catOf(s){ return s.category==='story' ? 'story' : 'ship'; }
+function catOf(s){ return s.category==='hei' ? 'hei' : (s.category==='story' ? 'story' : 'ship'); }
 function makeCard(s){
   const card=document.createElement('div'); card.className='card';
   const ds=defSkin(s); const th=thumbOf(ds);
   const badges=[]; if(hasSpine(s))badges.push('<span class="b-spine">SPINE</span>'); if(hasL2d(s))badges.push('<span class="b-l2d">L2D</span>'); if(s.voiceCount)badges.push('<span class="b-voice">🔊'+s.voiceCount+'</span>');
   const tags=[]; if(s.rarity)tags.push(`<span class="tag ${rarClass(s.rarity)}">${s.rarity}</span>`); if(s.faction)tags.push(`<span class="tag f">${s.faction}</span>`); if(s.type)tags.push(`<span class="tag s">${s.type}</span>`);
   card.innerHTML=`<div class="thumb">${th?`<img loading="lazy" src="${th}">`:'<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:12px">无立绘</div>'}<div class="badge">${badges.join('')}</div></div>
-    <div class="body"><div class="nm">${s.name}</div><div class="py">${s.id} · ${s.skins.length}皮肤</div><div class="tags">${tags.join('')}</div></div>`;
+    <div class="body"><div class="nm">${s.name}</div><div class="py">${s.id} · ${s.sil?'剧情剪影':s.skins.length+'皮肤'}</div><div class="tags">${tags.join('')}</div></div>`;
   /* 卡片可 Tab 聚焦：以前整张网格只有鼠标一条路，键盘走不到任何一张卡（§6.18 ④）。
      Enter/Space 的激活走 mainEl 上的**一个**委托监听器，不给千张卡各挂一个。 */
   if(GLASS_IO) GLASS_IO.observe(card); else card.classList.add('g');   // 毛玻璃按需挂载
   card.tabIndex=0; card.setAttribute('role','button');
-  card.setAttribute('aria-label',s.name+' · '+s.skins.length+' 个皮肤');
+  card.setAttribute('aria-label',s.name+' · '+(s.sil?'剧情剪影':s.skins.length+' 个皮肤'));
   card.onclick=()=>openShip(s,card);
   /* 缩略图淡入：懒加载的图到货那一刻不该"啪"地跳出来。
      complete 分支必须有 —— 命中缓存时 load 事件根本不会再发。 */
@@ -744,7 +756,8 @@ function renderGrid(){
   mainEl.innerHTML='';
   const cntEl=document.getElementById('count');
   if(!view.length){ mainEl.innerHTML='<div class="empty">没有匹配的内容</div>'; cntEl.textContent='共 0 项'; return; }
-  const groups = catFilter==='' ? [['ship','舰船'],['story','剧情角色']] : [[catFilter, catFilter==='ship'?'舰船':'剧情角色']];
+  const CATL={ship:'舰船',story:'剧情角色',hei:'剧情剪影'};
+  const groups = catFilter==='' ? [['ship','舰船'],['story','剧情角色']] : [[catFilter, CATL[catFilter]||catFilter]];
   let shown=0; const per={};
   groups.forEach(([key,label])=>{
     const list = view.filter(s=>catOf(s)===key);
@@ -955,9 +968,26 @@ function buildSkinList(s){
   });
 }
 function setSkin(sk){ curSkin=sk; paintSrc='cg'; const s=curShip;
-  document.getElementById('mName').textContent=s.name;
-  document.getElementById('mPy').textContent=s.id+(s.hasCn?'':' (未匹配中文名)');
-  document.getElementById('mMeta').innerHTML=`${s.rarity?`<span class="${rarClass(s.rarity)}">${s.rarity}</span>`:''}${s.faction?`<span>阵营 <b>${s.faction}</b></span>`:''}${s.type?`<span>舰种 <b>${s.type}</b></span>`:''}<span>语音 <b>${s.voiceCount}</b>${(!s.voiceCount&&s.voiceText)?` / 台词 <b>${s.voiceText}</b>`:''}</span>`;
+  const nameEl=document.getElementById('mName'), pyEl=document.getElementById('mPy'), metaEl=document.getElementById('mMeta');
+  if(s.sil){
+    /* 剪影不是皮肤：标题位给"这是什么"，来源做成可点入口跳回本体船 —— 用户要的就是
+       "别混在皮肤区，但要能找到、能管理"（§88 / 2026-10-03 拍板）。 */
+    nameEl.textContent='剧情剪影';
+    pyEl.textContent=s.id;
+    metaEl.innerHTML='';
+    const tag=document.createElement('span'); tag.textContent='剧情里的黑脸剪影 · 不是皮肤 · 无配音';
+    metaEl.appendChild(tag);
+    const sp=ships.find(x=>x.id===s.sil.ship);
+    const j=document.createElement('span'); j.className='pill';
+    j.textContent='来源：'+(s.sil.shipName||s.sil.ship)+(s.sil.srcSkin?(' · 皮肤 '+s.sil.srcSkin):'');
+    if(sp && s.sil.shipCn){ j.style.cursor='pointer'; j.onclick=()=>openShip(sp,null); }
+    else j.title='本体船不在索引里（未登记角色）';
+    metaEl.appendChild(j);
+  } else {
+  nameEl.textContent=s.name;
+  pyEl.textContent=s.id+(s.hasCn?'':' (未匹配中文名)');
+  metaEl.innerHTML=`${s.rarity?`<span class="${rarClass(s.rarity)}">${s.rarity}</span>`:''}${s.faction?`<span>阵营 <b>${s.faction}</b></span>`:''}${s.type?`<span>舰种 <b>${s.type}</b></span>`:''}<span>语音 <b>${s.voiceCount}</b>${(!s.voiceCount&&s.voiceText)?` / 台词 <b>${s.voiceText}</b>`:''}</span>`;
+  }
   const spineOn=!!(sk.spine && sk.spine.parts && sk.spine.parts.length), l2dOn=s.live2dSkins.includes(sk.key);
   /* 语音标签放行判据：有可播音频**或**有台词（主包没下发但表里有正文的那 44 张，见 §57） */
   const canVoice=s.voiceCount>0||s.voiceText>0;
@@ -1860,7 +1890,7 @@ async function startSpine(s, sk){
 
 /* ---------- 类别分段控件：总数标注 + 点击切换分区 ---------- */
 (function initCatSeg(){
-  const all=ships.reduce((a,s)=>{a[catOf(s)]++;return a;},{ship:0,story:0});
+  const all=ships.reduce((a,s)=>{a[catOf(s)]++;return a;},{ship:0,story:0,hei:0});
   const seg=document.getElementById('fCat');
   const sl=document.createElement('span'); sl.className='segslide'; seg.appendChild(sl);
   const on=()=>seg.querySelector('button.on');
@@ -1868,7 +1898,9 @@ async function startSpine(s, sk){
     const c=b.dataset.c;
     if(c==='ship')b.textContent='舰船 '+all.ship;
     else if(c==='story')b.textContent='剧情角色 '+all.story;
-    else b.textContent='全部 '+ships.length;
+    else if(c==='hei')b.textContent='剧情剪影 '+all.hei;
+    /* 「全部」的数**不含**剪影：它们不在主网格出现，把它算进去就等于报一个点不到的数。 */
+    else b.textContent='全部 '+G.ships.length;
     b.onclick=()=>{catFilter=c; document.querySelectorAll('#fCat button').forEach(x=>x.classList.toggle('on',x===b));
       slidePill(sl,on(),true); renderGrid();};
   });

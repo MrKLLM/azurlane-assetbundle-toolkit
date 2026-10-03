@@ -6,6 +6,7 @@ import sys, os, re, json, glob
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 import skin_table  # 皮肤表唯一读取口（azdata 快照 + 设备侧权威表逐字段合并）
+import extract_cv_voice as E   # 只要它那份后缀定义（HEI_SUF/ART_SUF）——同一套语义不许写两份
 from ship_name_map import SHIP_NAME_MAP
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -391,8 +392,36 @@ for sh in ships.values():
 ship_list = sorted(ships.values(),
                    key=lambda s: (s['npc'], not s['hasCn'], s['faction'], s['type'], s['name']))
 
+# ---------- 剧情剪影外迁（§88：`_hei` 是剧情里的黑脸剪影，不是皮肤、也没有配音）----------
+# 它们不进各船的「皮肤/变体」列表、也不进主网格，只从顶部第 4 档「剧情剪影」进（用户 2026-10-03 拍板）。
+# ⚠️ 判据复用语音层那一份后缀定义（`extract_cv_voice.HEI_SUF`），**不许在这里再写一遍正则**——
+#    同一套语义在两个脚本各写一份，就是 §85 那批错派的成因。
+silhouettes = []
+skin_owner = {sk['key']: sh['id'] for sh in ship_list for sk in sh['skins']}   # 剥完 _hei 后那张皮肤属于哪艘船
+for sh in ship_list:
+    keep = []
+    for sk in sh['skins']:
+        if not E.HEI_SUF.search(sk['key'].lower()):
+            keep.append(sk)
+            continue
+        src_skin = E.HEI_SUF.sub('', sk['key'])        # aerjiliya_hei→aerjiliya、congmang_2_hei→congmang_2
+        owner = skin_owner.get(src_skin)               # congmang_2 不是船，它是 congmang 的皮肤2
+        silhouettes.append({
+            'key': sk['key'], 'label': sk['label'], 'image': sk['image'],
+            'ship': owner or sh['id'], 'srcSkin': src_skin if owner else '',
+            'shipName': (ships.get(owner) or sh)['name']})
+    sh['skins'] = keep
+# 只剩剪影的船（1 艘）从主网格摘掉——它的全部"皮肤"都是剪影，留着就是一张假卡
+ship_list = [sh for sh in ship_list if sh['skins']]
+# 来源船必须真能在主网格点开，否则前端那条链接是死的（`shipCn` 就是这个意思）
+alive = {sh['id'] for sh in ship_list}
+for s in silhouettes:
+    s['shipCn'] = s['ship'] in alive
+silhouettes.sort(key=lambda x: (x['ship'], x['key']))
+
 cnt = {
     'ships': len(ship_list), 'with_cn': sum(1 for s in ship_list if s['hasCn']),
+    'silhouettes': len(silhouettes),
     'skins': sum(len(s['skins']) for s in ship_list),
     'spine': len(skins and [k for k,v in skins.items() if v['spine']]),
     'live2d': sum(1 for v in skins.values() if v['live2d']),
@@ -404,7 +433,7 @@ cnt = {
     'ship': sum(1 for s in ship_list if s['category'] == 'ship'),
     'story': sum(1 for s in ship_list if s['category'] == 'story'),
 }
-index = {'generated': 'v2', 'counts': cnt, 'ships': ship_list}
+index = {'generated': 'v2', 'counts': cnt, 'ships': ship_list, 'silhouettes': silhouettes}
 os.makedirs(GAL, exist_ok=True)
 json.dump(index, open(os.path.join(GAL, 'index.json'), 'w', encoding='utf-8'),
           ensure_ascii=False)
