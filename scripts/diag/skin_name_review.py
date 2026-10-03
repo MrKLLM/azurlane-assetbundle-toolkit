@@ -61,6 +61,9 @@ def main():
     st = json.load(open(os.path.join(GAMECFG, 'ship_skin_template.json'), encoding='utf-8'))
     nc = json.load(open(os.path.join(GAMECFG, 'name_code.json'), encoding='utf-8'))
     name_by_id = {int(r['id']): (r.get('name') or '') for r in st.values()}
+    # 双形态皮肤的权威标记：`next` 指向另一形态那一行（antu_2↔antu_3 互指）
+    next_by_id = {int(r['id']): r.get('next') for r in st.values()}
+    dual_form_groups = 0
     rows = E.load_skin_rows()
 
     recs, by_ship_names = [], collections.defaultdict(list)
@@ -100,13 +103,32 @@ def main():
             rec = dict(ship=s['id'], shipName=s.get('name') or '', key=key, old=lab,
                        new=new, rid=rid, why=why)
             recs.append(rec)
-            if nm and not marks:
+            # 撞名只统计"真的会显示这个名字"的条目：基皮固定显示「默认立绘」、画法变体带后缀
+            # 各自成串，都不参与——把它们算进来会造出一堆假重名（第一版把基皮算进去，虚报 59 条）
+            if nm and not marks and lab != '默认立绘':
                 by_ship_names[(s['id'], nm)].append(key)
     for (sid, nm), ks in by_ship_names.items():
         if len(ks) > 1:
+            # 「同船两张不同皮肤同名」绝大多数是**双形态皮肤**（同一套装的两个形态，用户 2026-10-03 指认）。
+            # 游戏自己有标记：皮肤行的 `next` 指向另一形态那一行（antu_2.next=304092、antu_3.next=304091 互指）。
+            # ⇒ 按字段判，不写例外名单：整组都被 `next` 串起来的 = 数据事实，放行；串不起来的才留给人看。
+            ids = {r['rid'] for r in recs if r['ship'] == sid and r['new'] == nm and r['rid'] is not None}
+            nxt = next_by_id
+            linked = bool(ids) and all(nxt.get(i) in ids for i in ids)
+            # `next` 只标了 304xxx 那批；μ兵装 `_idol`/`_idolns`、`_doa`/`_doa_wjz`、
+            # `_dark`/`_dark_memory` 这些"同一套装的第二形态"行落在 900xxx 号段、`next` 是空的。
+            # 第二形态的键**必然是第一形态键的前缀**且名字相同 ⇒ 用这个结构判，仍然不列名字清单。
+            # 前缀不要求下划线边界：`chicheng_idol` / `chicheng_idolns`（μ兵装两形态）是连写的。
+            # 误判风险由"同船 + 游戏内名字完全相同"这一条兜住——两套装若真同名，才会落到这里。
+            if not linked:
+                ks2 = sorted({k.lower() for k in ks})
+                linked = len(ks2) > 1 and all(k == ks2[0] or k.startswith(ks2[0]) for k in ks2)
+            if linked:
+                dual_form_groups += 1
+                continue
             for r in recs:
                 if r['ship'] == sid and r['new'] == nm:
-                    r['why'].append('同船重名(%d)' % len(ks))
+                    r['why'].append('同船重名(%d,未被 next 串起)' % len(ks))
 
     chg = [r for r in recs if r['new'] and r['new'] != r['old']]
     same = [r for r in recs if r['new'] and r['new'] == r['old']]
@@ -115,6 +137,7 @@ def main():
     print('皮肤条目 %d | 会变的 %d | 本来就一样的 %d | 换不了(保留占位标签) %d | 其中**可疑需人看** %d'
           % (len(recs), len(chg), len(same), len(keep), len(sus)))
     print('可疑分布:', collections.Counter(w for r in sus for w in r['why']).most_common())
+    print('按 `next` 字段判为**双形态皮肤**而自动放行的同船同名组: %d 组' % dual_form_groups)
 
     os.makedirs(os.path.dirname(a.tsv), exist_ok=True)
     with open(a.tsv, 'w', encoding='utf-8', newline='') as f:
@@ -125,7 +148,9 @@ def main():
                        r['rid'] if r['rid'] is not None else '', '|'.join(r['why'])))
 
     def img(r):
-        return 'Output/gallery_v2/thumbs/%s.webp' % r['key']
+        # ⚠️ 本文档落在 `docs/` 下 ⇒ 相对路径必须先回到仓库根。写成 `Output/...` 会被解析成
+        # `docs/Output/...`，预览器一律"加载失败"（2026-10-03 第一版就踩了这个，B3-H 记过同类坑）。
+        return '../Output/gallery_v2/thumbs/%s.webp' % r['key']
 
     L = ['# 皮肤标签换成游戏真名 —— 改前/改后对照（2026-10-03）', '',
          '> 生成：`py -3 scripts/diag/skin_name_review.py`（只读，不动 `Output/`）。',

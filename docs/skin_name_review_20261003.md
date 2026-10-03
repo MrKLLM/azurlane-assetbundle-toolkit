@@ -4,11 +4,11 @@
 > 数据：`Output/gallery_v2/index.json`（现标签）+ `inputs/gamecfg/ship_skin_template.json`（真名）
 > + `name_code.json`（占位符展开）。画法后缀（`_n`/`_hx`）保留成 `·无背景版` 等标记。
 
-**总账**：皮肤条目 4487 | 会变 **3033** | 本来就一样 1351 | 换不了、保留现标签 78 | 需人看的可疑 149
+**总账**：皮肤条目 4487 | 会变 **3033** | 本来就一样 1351 | 换不了、保留现标签 78 | 需人看的可疑 107
 
-可疑分布：同船重名(2) 89、名字塌了(==船名) 82、像垃圾串:全问号 13、长度异常 12、同船重名(3) 4
+可疑分布：名字塌了(==船名) 82、像垃圾串:全问号 13、长度异常 12
 
-## 一、需要人勾选的（149 条）
+## 一、需要人勾选的（107 条）
 
 勾选规则：把 `- [ ]` 改成 `- [x]` 表示**这条不许换**（保留现标签）；不勾 = 按对照表换。
 
@@ -16,1043 +16,749 @@
 
 改前 `无背景版` → 改后 `？？？·无背景版`
 
-![dosair_n](Output/gallery_v2/thumbs/dosair_n.webp)
+![dosair_n](../Output/gallery_v2/thumbs/dosair_n.webp)
 
 - [ ] 这条不换
 ### 甘古特 · `gangute_dark` — 像垃圾串:全问号
 
 改前 `dark` → 改后 `？？？`
 
-![gangute_dark](Output/gallery_v2/thumbs/gangute_dark.webp)
+![gangute_dark](../Output/gallery_v2/thumbs/gangute_dark.webp)
 
 - [ ] 这条不换
 ### npcjinluhao · `npcjinluhao_3` — 像垃圾串:全问号
 
 改前 `皮肤3` → 改后 `？？？`
 
-![npcjinluhao_3](Output/gallery_v2/thumbs/npcjinluhao_3.webp)
+![npcjinluhao_3](../Output/gallery_v2/thumbs/npcjinluhao_3.webp)
 
 - [ ] 这条不换
 ### npcshi · `npcshi_3` — 像垃圾串:全问号
 
 改前 `皮肤3` → 改后 `？？`
 
-![npcshi_3](Output/gallery_v2/thumbs/npcshi_3.webp)
+![npcshi_3](../Output/gallery_v2/thumbs/npcshi_3.webp)
 
 - [ ] 这条不换
 ### 恰巴耶夫 · `qiabayefu_dark` — 像垃圾串:全问号
 
 改前 `dark` → 改后 `？？？`
 
-![qiabayefu_dark](Output/gallery_v2/thumbs/qiabayefu_dark.webp)
+![qiabayefu_dark](../Output/gallery_v2/thumbs/qiabayefu_dark.webp)
 
 - [ ] 这条不换
 ### 天原凉子 · `ryouko_shallow` — 像垃圾串:全问号
 
 改前 `shallow` → 改后 `？？？?`
 
-![ryouko_shallow](Output/gallery_v2/thumbs/ryouko_shallow.webp)
+![ryouko_shallow](../Output/gallery_v2/thumbs/ryouko_shallow.webp)
 
 - [ ] 这条不换
 ### 水星纪念 · `shuixingjinian_dark` — 像垃圾串:全问号
 
 改前 `dark` → 改后 `？？？`
 
-![shuixingjinian_dark](Output/gallery_v2/thumbs/shuixingjinian_dark.webp)
+![shuixingjinian_dark](../Output/gallery_v2/thumbs/shuixingjinian_dark.webp)
 
 - [ ] 这条不换
 ### 苏维埃罗西亚 · `suweiailuoxiya_dark` — 像垃圾串:全问号
 
 改前 `dark` → 改后 `？？？`
 
-![suweiailuoxiya_dark](Output/gallery_v2/thumbs/suweiailuoxiya_dark.webp)
+![suweiailuoxiya_dark](../Output/gallery_v2/thumbs/suweiailuoxiya_dark.webp)
 
 - [ ] 这条不换
 ### 苏维埃同盟 · `suweiaitongmeng_dark` — 像垃圾串:全问号
 
 改前 `dark` → 改后 `？？？`
 
-![suweiaitongmeng_dark](Output/gallery_v2/thumbs/suweiaitongmeng_dark.webp)
+![suweiaitongmeng_dark](../Output/gallery_v2/thumbs/suweiaitongmeng_dark.webp)
 
 - [ ] 这条不换
 ### 塔什干 · `tashigan_dark` — 像垃圾串:全问号
 
 改前 `dark` → 改后 `？？？`
 
-![tashigan_dark](Output/gallery_v2/thumbs/tashigan_dark.webp)
+![tashigan_dark](../Output/gallery_v2/thumbs/tashigan_dark.webp)
 
 - [ ] 这条不换
 ### unknown1 · `unknown1_hx` — 像垃圾串:全问号
 
 改前 `和谐版` → 改后 `？？？？？·和谐版`
 
-![unknown1_hx](Output/gallery_v2/thumbs/unknown1_hx.webp)
+![unknown1_hx](../Output/gallery_v2/thumbs/unknown1_hx.webp)
 
 - [ ] 这条不换
 ### unknown2 · `unknown2_hx` — 像垃圾串:全问号
 
 改前 `和谐版` → 改后 `？？？？？·和谐版`
 
-![unknown2_hx](Output/gallery_v2/thumbs/unknown2_hx.webp)
+![unknown2_hx](../Output/gallery_v2/thumbs/unknown2_hx.webp)
 
 - [ ] 这条不换
 ### 威严 · `weiyan_dark` — 像垃圾串:全问号
 
 改前 `dark` → 改后 `？？？`
 
-![weiyan_dark](Output/gallery_v2/thumbs/weiyan_dark.webp)
+![weiyan_dark](../Output/gallery_v2/thumbs/weiyan_dark.webp)
 
 - [ ] 这条不换
-### 埃姆登 · `aimudeng_5` — 同船重名(2)
-
-改前 `皮肤5` → 改后 `水畔的夕暮私语`
-
-![aimudeng_5](Output/gallery_v2/thumbs/aimudeng_5.webp)
-
-- [ ] 这条不换
-### 埃姆登 · `aimudeng_5_asmr` — 同船重名(2)
-
-改前 `皮肤5·ASMR` → 改后 `水畔的夕暮私语`
-
-![aimudeng_5_asmr](Output/gallery_v2/thumbs/aimudeng_5_asmr.webp)
-
-- [ ] 这条不换
-### 安土 · `antu_2` — 同船重名(2)
-
-改前 `皮肤2` → 改后 `午夜的瑰色电梯`
-
-![antu_2](Output/gallery_v2/thumbs/antu_2.webp)
-
-- [ ] 这条不换
-### 安土 · `antu_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `午夜的瑰色电梯`
-
-![antu_3](Output/gallery_v2/thumbs/antu_3.webp)
-
-- [ ] 这条不换
-### 赤城 · `chicheng_idol` — 同船重名(2)
-
-改前 `idol` → 改后 `赤城(μ兵装)`
-
-![chicheng_idol](Output/gallery_v2/thumbs/chicheng_idol.webp)
-
-- [ ] 这条不换
-### 赤城 · `chicheng_idolns` — 同船重名(2)
-
-改前 `idolns` → 改后 `赤城(μ兵装)`
-
-![chicheng_idolns](Output/gallery_v2/thumbs/chicheng_idolns.webp)
-
-- [ ] 这条不换
-### 海筹 · `haichou_2` — 同船重名(2)
-
-改前 `皮肤2` → 改后 `醒梦芳醇`
-
-![haichou_2](Output/gallery_v2/thumbs/haichou_2.webp)
-
-- [ ] 这条不换
-### 海筹 · `haichou_2_asmr` — 同船重名(2)
-
-改前 `皮肤2·ASMR` → 改后 `醒梦芳醇`
-
-![haichou_2_asmr](Output/gallery_v2/thumbs/haichou_2_asmr.webp)
-
-- [ ] 这条不换
-### BLACK★ROCK SHOOTER（后排） · `heiyansheshou_wjz` — 同船重名(2)
-
-改前 `wjz` → 改后 `BLACK★ROCK SHOOTER`
-
-![heiyansheshou_wjz](Output/gallery_v2/thumbs/heiyansheshou_wjz.webp)
-
-- [ ] 这条不换
-### 虎 · `hu_2` — 同船重名(2)
-
-改前 `皮肤2` → 改后 `临水的辰星`
-
-![hu_2](Output/gallery_v2/thumbs/hu_2.webp)
-
-- [ ] 这条不换
-### 虎 · `hu_2_asmr` — 同船重名(2)
-
-改前 `皮肤2·ASMR` → 改后 `临水的辰星`
-
-![hu_2_asmr](Output/gallery_v2/thumbs/hu_2_asmr.webp)
-
-- [ ] 这条不换
-### 伊404 · `i404_2` — 同船重名(2)
-
-改前 `皮肤2` → 改后 `绛縢华舞`
-
-![i404_2](Output/gallery_v2/thumbs/i404_2.webp)
-
-- [ ] 这条不换
-### 伊404 · `i404_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `绛縢华舞`
-
-![i404_3](Output/gallery_v2/thumbs/i404_3.webp)
-
-- [ ] 这条不换
-### 建武 · `jianwu_2` — 同船重名(2)
-
-改前 `皮肤2` → 改后 `妆点，只为今夜`
-
-![jianwu_2](Output/gallery_v2/thumbs/jianwu_2.webp)
-
-- [ ] 这条不换
-### 建武 · `jianwu_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `妆点，只为今夜`
-
-![jianwu_3](Output/gallery_v2/thumbs/jianwu_3.webp)
-
-- [ ] 这条不换
-### 加斯科涅 · `jiasikenie_idol` — 同船重名(2)
-
-改前 `idol` → 改后 `加斯科涅(μ兵装)`
-
-![jiasikenie_idol](Output/gallery_v2/thumbs/jiasikenie_idol.webp)
-
-- [ ] 这条不换
-### 加斯科涅 · `jiasikenie_idolns` — 同船重名(2)
-
-改前 `idolns` → 改后 `加斯科涅(μ兵装)`
-
-![jiasikenie_idolns](Output/gallery_v2/thumbs/jiasikenie_idolns.webp)
-
-- [ ] 这条不换
-### 金鹿号 · `jinluhao_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `微笑的白色魅影`
-
-![jinluhao_3](Output/gallery_v2/thumbs/jinluhao_3.webp)
-
-- [ ] 这条不换
-### 金鹿号 · `jinluhao_4` — 同船重名(2)
-
-改前 `皮肤4` → 改后 `微笑的白色魅影`
-
-![jinluhao_4](Output/gallery_v2/thumbs/jinluhao_4.webp)
-
-- [ ] 这条不换
-### 吉尚 · `jishang_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `Milk&Kiss`
-
-![jishang_3](Output/gallery_v2/thumbs/jishang_3.webp)
-
-- [ ] 这条不换
-### 吉尚 · `jishang_3_asmr` — 同船重名(2)
-
-改前 `皮肤3·ASMR` → 改后 `Milk&Kiss`
-
-![jishang_3_asmr](Output/gallery_v2/thumbs/jishang_3_asmr.webp)
-
-- [ ] 这条不换
-### 克利夫兰 · `kelifulan_idol` — 同船重名(2)
-
-改前 `idol` → 改后 `克利夫兰(μ兵装)`
-
-![kelifulan_idol](Output/gallery_v2/thumbs/kelifulan_idol.webp)
-
-- [ ] 这条不换
-### 克利夫兰 · `kelifulan_idolns` — 同船重名(2)
-
-改前 `idolns` → 改后 `克利夫兰(μ兵装)`
-
-![kelifulan_idolns](Output/gallery_v2/thumbs/kelifulan_idolns.webp)
-
-- [ ] 这条不换
-### 莫加多尔 · `mojiaduoer_4` — 同船重名(2)
-
-改前 `皮肤4` → 改后 `共坠的渴慕`
-
-![mojiaduoer_4](Output/gallery_v2/thumbs/mojiaduoer_4.webp)
-
-- [ ] 这条不换
-### 莫加多尔 · `mojiaduoer_5` — 同船重名(2)
-
-改前 `皮肤5` → 改后 `共坠的渴慕`
-
-![mojiaduoer_5](Output/gallery_v2/thumbs/mojiaduoer_5.webp)
-
-- [ ] 这条不换
-### 死亡主宰 · `siwangzhuzai_wjz` — 同船重名(2)
-
-改前 `wjz` → 改后 `DEAD MASTER`
-
-![siwangzhuzai_wjz](Output/gallery_v2/thumbs/siwangzhuzai_wjz.webp)
-
-- [ ] 这条不换
-### 四万十 · `siwanshi_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `优哉游哉的龙神大人`
-
-![siwanshi_3](Output/gallery_v2/thumbs/siwanshi_3.webp)
-
-- [ ] 这条不换
-### 四万十 · `siwanshi_4` — 同船重名(2)
-
-改前 `皮肤4` → 改后 `优哉游哉的龙神大人`
-
-![siwanshi_4](Output/gallery_v2/thumbs/siwanshi_4.webp)
-
-- [ ] 这条不换
-### 苏维埃同盟 · `suweiaitongmeng_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `缠丝审讯`
-
-![suweiaitongmeng_3](Output/gallery_v2/thumbs/suweiaitongmeng_3.webp)
-
-- [ ] 这条不换
-### 苏维埃同盟 · `suweiaitongmeng_4` — 同船重名(2)
-
-改前 `皮肤4` → 改后 `缠丝审讯`
-
-![suweiaitongmeng_4](Output/gallery_v2/thumbs/suweiaitongmeng_4.webp)
-
-- [ ] 这条不换
-### 天津风 · `tianjinfeng_2` — 同船重名(2)
-
-改前 `皮肤2` → 改后 `狐仙大人驾到`
-
-![tianjinfeng_2](Output/gallery_v2/thumbs/tianjinfeng_2.webp)
-
-- [ ] 这条不换
-### 天津风 · `tianjinfeng_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `狐仙大人驾到`
-
-![tianjinfeng_3](Output/gallery_v2/thumbs/tianjinfeng_3.webp)
-
-- [ ] 这条不换
-### 维克斯堡 · `weikesibao_2` — 同船重名(2)
-
-改前 `皮肤2` → 改后 `闪亮的赛车偶像`
-
-![weikesibao_2](Output/gallery_v2/thumbs/weikesibao_2.webp)
-
-- [ ] 这条不换
-### 维克斯堡 · `weikesibao_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `闪亮的赛车偶像`
-
-![weikesibao_3](Output/gallery_v2/thumbs/weikesibao_3.webp)
-
-- [ ] 这条不换
-### 谢菲尔德 · `xiefeierde_idol` — 同船重名(2)
-
-改前 `idol` → 改后 `谢菲尔德(μ兵装)`
-
-![xiefeierde_idol](Output/gallery_v2/thumbs/xiefeierde_idol.webp)
-
-- [ ] 这条不换
-### 谢菲尔德 · `xiefeierde_idolns` — 同船重名(2)
-
-改前 `idolns` → 改后 `谢菲尔德(μ兵装)`
-
-![xiefeierde_idolns](Output/gallery_v2/thumbs/xiefeierde_idolns.webp)
-
-- [ ] 这条不换
-### 约克城 · `yuekechengii_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `交错的温柔时光`
-
-![yuekechengii_3](Output/gallery_v2/thumbs/yuekechengii_3.webp)
-
-- [ ] 这条不换
-### 约克城 · `yuekechengii_4` — 同船重名(2)
-
-改前 `皮肤4` → 改后 `交错的温柔时光`
-
-![yuekechengii_4](Output/gallery_v2/thumbs/yuekechengii_4.webp)
-
-- [ ] 这条不换
-### 云龙 · `yunlong_2` — 同船重名(2)
-
-改前 `皮肤2` → 改后 `溶于重重夜色`
-
-![yunlong_2](Output/gallery_v2/thumbs/yunlong_2.webp)
-
-- [ ] 这条不换
-### 云龙 · `yunlong_3` — 同船重名(2)
-
-改前 `皮肤3` → 改后 `溶于重重夜色`
-
-![yunlong_3](Output/gallery_v2/thumbs/yunlong_3.webp)
-
-- [ ] 这条不换
-### 霞.改 · `xia_doa` — 同船重名(3)
-
-改前 `doa` → 改后 `霞`
-
-![xia_doa](Output/gallery_v2/thumbs/xia_doa.webp)
-
-- [ ] 这条不换
-### 霞.改 · `xia_doa_wjz` — 同船重名(3)
-
-改前 `doa·wjz` → 改后 `霞`
-
-![xia_doa_wjz](Output/gallery_v2/thumbs/xia_doa_wjz.webp)
-
-- [ ] 这条不换
-### 艾菈·冯·杜勒 · `aila_wjz` — 名字塌了(==船名)|同船重名(2)
+### 艾菈·冯·杜勒 · `aila_wjz` — 名字塌了(==船名)
 
 改前 `wjz` → 改后 `艾菈·冯·杜勒`
 
-![aila_wjz](Output/gallery_v2/thumbs/aila_wjz.webp)
+![aila_wjz](../Output/gallery_v2/thumbs/aila_wjz.webp)
 
 - [ ] 这条不换
-### 埃姆登 · `aimudeng_4_npc` — 名字塌了(==船名)|同船重名(2)
+### 埃姆登 · `aimudeng_4_npc` — 名字塌了(==船名)
 
 改前 `皮肤4·npc` → 改后 `埃姆登`
 
-![aimudeng_4_npc](Output/gallery_v2/thumbs/aimudeng_4_npc.webp)
+![aimudeng_4_npc](../Output/gallery_v2/thumbs/aimudeng_4_npc.webp)
 
 - [ ] 这条不换
-### 比叡 · `birui_memory` — 名字塌了(==船名)|同船重名(2)
+### 比叡 · `birui_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `比叡`
 
-![birui_memory](Output/gallery_v2/thumbs/birui_memory.webp)
+![birui_memory](../Output/gallery_v2/thumbs/birui_memory.webp)
 
 - [ ] 这条不换
-### 赤城 · `chicheng_alter` — 名字塌了(==船名)|同船重名(2)
+### 赤城 · `chicheng_alter` — 名字塌了(==船名)
 
 改前 `alter` → 改后 `赤城`
 
-![chicheng_alter](Output/gallery_v2/thumbs/chicheng_alter.webp)
+![chicheng_alter](../Output/gallery_v2/thumbs/chicheng_alter.webp)
 
 - [ ] 这条不换
 ### 大黄蜂 · `dahuangfeng_hx` — 名字塌了(==船名)
 
 改前 `和谐版` → 改后 `大黄蜂·和谐版`
 
-![dahuangfeng_hx](Output/gallery_v2/thumbs/dahuangfeng_hx.webp)
+![dahuangfeng_hx](../Output/gallery_v2/thumbs/dahuangfeng_hx.webp)
 
 - [ ] 这条不换
-### 高雄 · `gaoxiong_dark` — 名字塌了(==船名)|同船重名(2)
+### 高雄 · `gaoxiong_dark` — 名字塌了(==船名)
 
 改前 `dark` → 改后 `高雄`
 
-![gaoxiong_dark](Output/gallery_v2/thumbs/gaoxiong_dark.webp)
+![gaoxiong_dark](../Output/gallery_v2/thumbs/gaoxiong_dark.webp)
 
 - [ ] 这条不换
-### 海咲 · `haixiao_doa` — 名字塌了(==船名)|同船重名(2)
+### 海咲 · `haixiao_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `海咲`
 
-![haixiao_doa](Output/gallery_v2/thumbs/haixiao_doa.webp)
+![haixiao_doa](../Output/gallery_v2/thumbs/haixiao_doa.webp)
 
 - [ ] 这条不换
-### 海咲 · `haixiao_doa_wjz` — 名字塌了(==船名)|同船重名(2)
+### 海咲 · `haixiao_doa_wjz` — 名字塌了(==船名)
 
 改前 `doa·wjz` → 改后 `海咲`
 
-![haixiao_doa_wjz](Output/gallery_v2/thumbs/haixiao_doa_wjz.webp)
+![haixiao_doa_wjz](../Output/gallery_v2/thumbs/haixiao_doa_wjz.webp)
 
 - [ ] 这条不换
 ### 好人理查德 · `haorenlichade_alter` — 名字塌了(==船名)
 
 改前 `alter` → 改后 `好人理查德`
 
-![haorenlichade_alter](Output/gallery_v2/thumbs/haorenlichade_alter.webp)
+![haorenlichade_alter](../Output/gallery_v2/thumbs/haorenlichade_alter.webp)
 
 - [ ] 这条不换
 ### 绀紫之心 · `hdn102_1` — 名字塌了(==船名)
 
 改前 `皮肤1` → 改后 `绀紫之心`
 
-![hdn102_1](Output/gallery_v2/thumbs/hdn102_1.webp)
+![hdn102_1](../Output/gallery_v2/thumbs/hdn102_1.webp)
 
 - [ ] 这条不换
 ### 圣黑之心 · `hdn202_1` — 名字塌了(==船名)
 
 改前 `皮肤1` → 改后 `圣黑之心`
 
-![hdn202_1](Output/gallery_v2/thumbs/hdn202_1.webp)
+![hdn202_1](../Output/gallery_v2/thumbs/hdn202_1.webp)
 
 - [ ] 这条不换
-### 布兰 · `hdn301_memory` — 名字塌了(==船名)|同船重名(2)
+### 布兰 · `hdn301_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `布兰`
 
-![hdn301_memory](Output/gallery_v2/thumbs/hdn301_memory.webp)
+![hdn301_memory](../Output/gallery_v2/thumbs/hdn301_memory.webp)
 
 - [ ] 这条不换
 ### 群白之心 · `hdn302_1` — 名字塌了(==船名)
 
 改前 `皮肤1` → 改后 `群白之心`
 
-![hdn302_1](Output/gallery_v2/thumbs/hdn302_1.webp)
+![hdn302_1](../Output/gallery_v2/thumbs/hdn302_1.webp)
 
 - [ ] 这条不换
-### 贝露 · `hdn401_memory` — 名字塌了(==船名)|同船重名(2)
+### 贝露 · `hdn401_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `贝露`
 
-![hdn401_memory](Output/gallery_v2/thumbs/hdn401_memory.webp)
+![hdn401_memory](../Output/gallery_v2/thumbs/hdn401_memory.webp)
 
 - [ ] 这条不换
 ### 翡绿之心 · `hdn402_1` — 名字塌了(==船名)
 
 改前 `皮肤1` → 改后 `翡绿之心`
 
-![hdn402_1](Output/gallery_v2/thumbs/hdn402_1.webp)
+![hdn402_1](../Output/gallery_v2/thumbs/hdn402_1.webp)
 
 - [ ] 这条不换
-### 仲裁者·赫米忒·IX · `hermit_alter` — 名字塌了(==船名)|同船重名(2)
+### 仲裁者·赫米忒·IX · `hermit_alter` — 名字塌了(==船名)
 
 改前 `alter` → 改后 `仲裁者·赫米忒·IX`
 
-![hermit_alter](Output/gallery_v2/thumbs/hermit_alter.webp)
+![hermit_alter](../Output/gallery_v2/thumbs/hermit_alter.webp)
 
 - [ ] 这条不换
-### 赫斯缇雅 · `hesitiya_wjz` — 名字塌了(==船名)|同船重名(2)
+### 赫斯缇雅 · `hesitiya_wjz` — 名字塌了(==船名)
 
 改前 `wjz` → 改后 `赫斯缇雅`
 
-![hesitiya_wjz](Output/gallery_v2/thumbs/hesitiya_wjz.webp)
+![hesitiya_wjz](../Output/gallery_v2/thumbs/hesitiya_wjz.webp)
 
 - [ ] 这条不换
 ### 环 · `huan_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `环`
 
-![huan_doa](Output/gallery_v2/thumbs/huan_doa.webp)
+![huan_doa](../Output/gallery_v2/thumbs/huan_doa.webp)
 
 - [ ] 这条不换
-### 旧金山 · `jiujinshan_wjz` — 名字塌了(==船名)|同船重名(2)
+### 旧金山 · `jiujinshan_wjz` — 名字塌了(==船名)
 
 改前 `wjz` → 改后 `旧金山`
 
-![jiujinshan_wjz](Output/gallery_v2/thumbs/jiujinshan_wjz.webp)
+![jiujinshan_wjz](../Output/gallery_v2/thumbs/jiujinshan_wjz.webp)
 
 - [ ] 这条不换
-### 科罗拉多 · `keluoladuo_2` — 名字塌了(==船名)|同船重名(2)
+### 科罗拉多 · `keluoladuo_2` — 名字塌了(==船名)
 
 改前 `皮肤2` → 改后 `科罗拉多`
 
-![keluoladuo_2](Output/gallery_v2/thumbs/keluoladuo_2.webp)
+![keluoladuo_2](../Output/gallery_v2/thumbs/keluoladuo_2.webp)
 
 - [ ] 这条不换
 ### 拉菲II · `lafeiii_n` — 名字塌了(==船名)
 
 改前 `无背景版` → 改后 `拉菲II·无背景版`
 
-![lafeiii_n](Output/gallery_v2/thumbs/lafeiii_n.webp)
+![lafeiii_n](../Output/gallery_v2/thumbs/lafeiii_n.webp)
 
 - [ ] 这条不换
-### 蕾妮雅 · `leiniya_wjz` — 名字塌了(==船名)|同船重名(2)
+### 蕾妮雅 · `leiniya_wjz` — 名字塌了(==船名)
 
 改前 `wjz` → 改后 `蕾妮雅`
 
-![leiniya_wjz](Output/gallery_v2/thumbs/leiniya_wjz.webp)
+![leiniya_wjz](../Output/gallery_v2/thumbs/leiniya_wjz.webp)
 
 - [ ] 这条不换
-### 灵敏 · `lingmin_alter` — 名字塌了(==船名)|同船重名(2)
+### 灵敏 · `lingmin_alter` — 名字塌了(==船名)
 
 改前 `alter` → 改后 `灵敏`
 
-![lingmin_alter](Output/gallery_v2/thumbs/lingmin_alter.webp)
+![lingmin_alter](../Output/gallery_v2/thumbs/lingmin_alter.webp)
 
 - [ ] 这条不换
-### 黎塞留 · `lisailiu_memory` — 名字塌了(==船名)|同船重名(2)
+### 黎塞留 · `lisailiu_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `黎塞留`
 
-![lisailiu_memory](Output/gallery_v2/thumbs/lisailiu_memory.webp)
+![lisailiu_memory](../Output/gallery_v2/thumbs/lisailiu_memory.webp)
 
 - [ ] 这条不换
-### 琉·璃昂 · `liuliang_wjz` — 名字塌了(==船名)|同船重名(2)
+### 琉·璃昂 · `liuliang_wjz` — 名字塌了(==船名)
 
 改前 `wjz` → 改后 `琉·璃昂`
 
-![liuliang_wjz](Output/gallery_v2/thumbs/liuliang_wjz.webp)
+![liuliang_wjz](../Output/gallery_v2/thumbs/liuliang_wjz.webp)
 
 - [ ] 这条不换
 ### 露娜 · `luna_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `露娜`
 
-![luna_doa](Output/gallery_v2/thumbs/luna_doa.webp)
+![luna_doa](../Output/gallery_v2/thumbs/luna_doa.webp)
 
 - [ ] 这条不换
-### 罗恩 · `luoen_3` — 名字塌了(==船名)|同船重名(2)
+### 罗恩 · `luoen_3` — 名字塌了(==船名)
 
 改前 `皮肤3` → 改后 `罗恩`
 
-![luoen_3](Output/gallery_v2/thumbs/luoen_3.webp)
+![luoen_3](../Output/gallery_v2/thumbs/luoen_3.webp)
 
 - [ ] 这条不换
-### 罗马 · `luoma_ghost` — 名字塌了(==船名)|同船重名(2)
+### 罗马 · `luoma_ghost` — 名字塌了(==船名)
 
 改前 `ghost` → 改后 `罗马`
 
-![luoma_ghost](Output/gallery_v2/thumbs/luoma_ghost.webp)
+![luoma_ghost](../Output/gallery_v2/thumbs/luoma_ghost.webp)
 
 - [ ] 这条不换
-### 马里兰 · `malilan_2` — 名字塌了(==船名)|同船重名(2)
+### 马里兰 · `malilan_2` — 名字塌了(==船名)
 
 改前 `皮肤2` → 改后 `马里兰`
 
-![malilan_2](Output/gallery_v2/thumbs/malilan_2.webp)
+![malilan_2](../Output/gallery_v2/thumbs/malilan_2.webp)
 
 - [ ] 这条不换
-### 玛莉萝丝 · `maliluosi_doa` — 名字塌了(==船名)|同船重名(2)
+### 玛莉萝丝 · `maliluosi_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `玛莉萝丝`
 
-![maliluosi_doa](Output/gallery_v2/thumbs/maliluosi_doa.webp)
+![maliluosi_doa](../Output/gallery_v2/thumbs/maliluosi_doa.webp)
 
 - [ ] 这条不换
-### 玛莉萝丝 · `maliluosi_doa_wjz` — 名字塌了(==船名)|同船重名(2)
+### 玛莉萝丝 · `maliluosi_doa_wjz` — 名字塌了(==船名)
 
 改前 `doa·wjz` → 改后 `玛莉萝丝`
 
-![maliluosi_doa_wjz](Output/gallery_v2/thumbs/maliluosi_doa_wjz.webp)
+![maliluosi_doa_wjz](../Output/gallery_v2/thumbs/maliluosi_doa_wjz.webp)
 
 - [ ] 这条不换
-### 莫妮卡 · `monika_doa` — 名字塌了(==船名)|同船重名(2)
+### 莫妮卡 · `monika_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `莫妮卡`
 
-![monika_doa](Output/gallery_v2/thumbs/monika_doa.webp)
+![monika_doa](../Output/gallery_v2/thumbs/monika_doa.webp)
 
 - [ ] 这条不换
-### 莫妮卡 · `monika_doa_wjz` — 名字塌了(==船名)|同船重名(2)
+### 莫妮卡 · `monika_doa_wjz` — 名字塌了(==船名)
 
 改前 `doa·wjz` → 改后 `莫妮卡`
 
-![monika_doa_wjz](Output/gallery_v2/thumbs/monika_doa_wjz.webp)
+![monika_doa_wjz](../Output/gallery_v2/thumbs/monika_doa_wjz.webp)
 
 - [ ] 这条不换
-### 妮娜·弗里德 · `nina_wjz` — 名字塌了(==船名)|同船重名(2)
+### 妮娜·弗里德 · `nina_wjz` — 名字塌了(==船名)
 
 改前 `wjz` → 改后 `妮娜·弗里德`
 
-![nina_wjz](Output/gallery_v2/thumbs/nina_wjz.webp)
+![nina_wjz](../Output/gallery_v2/thumbs/nina_wjz.webp)
 
 - [ ] 这条不换
-### 宁海 · `ninghai_memory` — 名字塌了(==船名)|同船重名(2)
+### 宁海 · `ninghai_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `宁海`
 
-![ninghai_memory](Output/gallery_v2/thumbs/ninghai_memory.webp)
+![ninghai_memory](../Output/gallery_v2/thumbs/ninghai_memory.webp)
 
 - [ ] 这条不换
 ### 阿尔萨斯 · `npcaersasi_3` — 名字塌了(==船名)
 
 改前 `皮肤3` → 改后 `阿尔萨斯`
 
-![npcaersasi_3](Output/gallery_v2/thumbs/npcaersasi_3.webp)
+![npcaersasi_3](../Output/gallery_v2/thumbs/npcaersasi_3.webp)
 
 - [ ] 这条不换
 ### 埃米尔·贝尔汀 · `npcaimierbeierding_5` — 名字塌了(==船名)
 
 改前 `皮肤5` → 改后 `埃米尔·贝尔汀`
 
-![npcaimierbeierding_5](Output/gallery_v2/thumbs/npcaimierbeierding_5.webp)
+![npcaimierbeierding_5](../Output/gallery_v2/thumbs/npcaimierbeierding_5.webp)
 
 - [ ] 这条不换
 ### 布伦努斯 · `npcbulunnusi_3` — 名字塌了(==船名)
 
 改前 `皮肤3` → 改后 `布伦努斯`
 
-![npcbulunnusi_3](Output/gallery_v2/thumbs/npcbulunnusi_3.webp)
+![npcbulunnusi_3](../Output/gallery_v2/thumbs/npcbulunnusi_3.webp)
 
 - [ ] 这条不换
 ### 关岛 · `npcguandao_3` — 名字塌了(==船名)
 
 改前 `皮肤3` → 改后 `关岛`
 
-![npcguandao_3](Output/gallery_v2/thumbs/npcguandao_3.webp)
+![npcguandao_3](../Output/gallery_v2/thumbs/npcguandao_3.webp)
 
 - [ ] 这条不换
 ### 光辉 · `npcguanghui_9` — 名字塌了(==船名)
 
 改前 `皮肤9` → 改后 `光辉`
 
-![npcguanghui_9](Output/gallery_v2/thumbs/npcguanghui_9.webp)
+![npcguanghui_9](../Output/gallery_v2/thumbs/npcguanghui_9.webp)
 
 - [ ] 这条不换
 ### 加斯科涅 · `npcjiasikenie_3` — 名字塌了(==船名)
 
 改前 `皮肤3` → 改后 `加斯科涅`
 
-![npcjiasikenie_3](Output/gallery_v2/thumbs/npcjiasikenie_3.webp)
+![npcjiasikenie_3](../Output/gallery_v2/thumbs/npcjiasikenie_3.webp)
 
 - [ ] 这条不换
 ### 君主 · `npcjunzhu_5` — 名字塌了(==船名)
 
 改前 `皮肤5` → 改后 `君主`
 
-![npcjunzhu_5](Output/gallery_v2/thumbs/npcjunzhu_5.webp)
+![npcjunzhu_5](../Output/gallery_v2/thumbs/npcjunzhu_5.webp)
 
 - [ ] 这条不换
 ### 柯莱特 · `npckelaite_2` — 名字塌了(==船名)
 
 改前 `皮肤2` → 改后 `柯莱特`
 
-![npckelaite_2](Output/gallery_v2/thumbs/npckelaite_2.webp)
+![npckelaite_2](../Output/gallery_v2/thumbs/npckelaite_2.webp)
 
 - [ ] 这条不换
 ### 可畏 · `npckewei_6` — 名字塌了(==船名)
 
 改前 `皮肤6` → 改后 `可畏`
 
-![npckewei_6](Output/gallery_v2/thumbs/npckewei_6.webp)
+![npckewei_6](../Output/gallery_v2/thumbs/npckewei_6.webp)
 
 - [ ] 这条不换
 ### 拉菲Ⅱ · `npclafeiii_4` — 名字塌了(==船名)
 
 改前 `皮肤4` → 改后 `拉菲Ⅱ`
 
-![npclafeiii_4](Output/gallery_v2/thumbs/npclafeiii_4.webp)
+![npclafeiii_4](../Output/gallery_v2/thumbs/npclafeiii_4.webp)
 
 - [ ] 这条不换
 ### 路易九世 · `npcluyijiushi_4` — 名字塌了(==船名)
 
 改前 `皮肤4` → 改后 `路易九世`
 
-![npcluyijiushi_4](Output/gallery_v2/thumbs/npcluyijiushi_4.webp)
+![npcluyijiushi_4](../Output/gallery_v2/thumbs/npcluyijiushi_4.webp)
 
 - [ ] 这条不换
 ### 马里兰 · `npcmalilan_3_n` — 名字塌了(==船名)
 
 改前 `皮肤3·无背景版` → 改后 `马里兰·无背景版`
 
-![npcmalilan_3_n](Output/gallery_v2/thumbs/npcmalilan_3_n.webp)
+![npcmalilan_3_n](../Output/gallery_v2/thumbs/npcmalilan_3_n.webp)
 
 - [ ] 这条不换
 ### 莫加多尔 · `npcmojiaduoer_2` — 名字塌了(==船名)
 
 改前 `皮肤2` → 改后 `莫加多尔`
 
-![npcmojiaduoer_2](Output/gallery_v2/thumbs/npcmojiaduoer_2.webp)
+![npcmojiaduoer_2](../Output/gallery_v2/thumbs/npcmojiaduoer_2.webp)
 
 - [ ] 这条不换
 ### 萨里 · `npcsali_2` — 名字塌了(==船名)
 
 改前 `皮肤2` → 改后 `萨里`
 
-![npcsali_2](Output/gallery_v2/thumbs/npcsali_2.webp)
+![npcsali_2](../Output/gallery_v2/thumbs/npcsali_2.webp)
 
 - [ ] 这条不换
 ### 维克斯堡 · `npcweikesibao_2` — 名字塌了(==船名)
 
 改前 `皮肤2` → 改后 `维克斯堡`
 
-![npcweikesibao_2](Output/gallery_v2/thumbs/npcweikesibao_2.webp)
+![npcweikesibao_2](../Output/gallery_v2/thumbs/npcweikesibao_2.webp)
 
 - [ ] 这条不换
 ### 雅努斯 · `npcyanusi_7` — 名字塌了(==船名)
 
 改前 `皮肤7` → 改后 `雅努斯`
 
-![npcyanusi_7](Output/gallery_v2/thumbs/npcyanusi_7.webp)
+![npcyanusi_7](../Output/gallery_v2/thumbs/npcyanusi_7.webp)
 
 - [ ] 这条不换
 ### 厌战 · `npcyanzhan_4` — 名字塌了(==船名)
 
 改前 `皮肤4` → 改后 `厌战`
 
-![npcyanzhan_4](Output/gallery_v2/thumbs/npcyanzhan_4.webp)
+![npcyanzhan_4](../Output/gallery_v2/thumbs/npcyanzhan_4.webp)
 
 - [ ] 这条不换
-### 女天狗 · `nvtiangou_doa` — 名字塌了(==船名)|同船重名(2)
+### 女天狗 · `nvtiangou_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `女天狗`
 
-![nvtiangou_doa](Output/gallery_v2/thumbs/nvtiangou_doa.webp)
+![nvtiangou_doa](../Output/gallery_v2/thumbs/nvtiangou_doa.webp)
 
 - [ ] 这条不换
-### 女天狗 · `nvtiangou_doa_wjz` — 名字塌了(==船名)|同船重名(2)
+### 女天狗 · `nvtiangou_doa_wjz` — 名字塌了(==船名)
 
 改前 `doa·wjz` → 改后 `女天狗`
 
-![nvtiangou_doa_wjz](Output/gallery_v2/thumbs/nvtiangou_doa_wjz.webp)
+![nvtiangou_doa_wjz](../Output/gallery_v2/thumbs/nvtiangou_doa_wjz.webp)
 
 - [ ] 这条不换
 ### 派蒂 · `paidi_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `派蒂`
 
-![paidi_doa](Output/gallery_v2/thumbs/paidi_doa.webp)
+![paidi_doa](../Output/gallery_v2/thumbs/paidi_doa.webp)
 
 - [ ] 这条不换
-### 平海 · `pinghai_memory` — 名字塌了(==船名)|同船重名(2)
+### 平海 · `pinghai_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `平海`
 
-![pinghai_memory](Output/gallery_v2/thumbs/pinghai_memory.webp)
+![pinghai_memory](../Output/gallery_v2/thumbs/pinghai_memory.webp)
 
 - [ ] 这条不换
 ### 千乃 · `qiannai_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `千乃`
 
-![qiannai_doa](Output/gallery_v2/thumbs/qiannai_doa.webp)
+![qiannai_doa](../Output/gallery_v2/thumbs/qiannai_doa.webp)
 
 - [ ] 这条不换
-### 企业 · `qiye_dark` — 名字塌了(==船名)|同船重名(3)
+### 企业 · `qiye_dark` — 名字塌了(==船名)
 
 改前 `dark` → 改后 `企业`
 
-![qiye_dark](Output/gallery_v2/thumbs/qiye_dark.webp)
+![qiye_dark](../Output/gallery_v2/thumbs/qiye_dark.webp)
 
 - [ ] 这条不换
-### 企业 · `qiye_dark_memory` — 名字塌了(==船名)|同船重名(3)
+### 企业 · `qiye_dark_memory` — 名字塌了(==船名)
 
 改前 `dark·memory` → 改后 `企业`
 
-![qiye_dark_memory](Output/gallery_v2/thumbs/qiye_dark_memory.webp)
+![qiye_dark_memory](../Output/gallery_v2/thumbs/qiye_dark_memory.webp)
 
 - [ ] 这条不换
-### 让·巴尔 · `rangbaer_memory` — 名字塌了(==船名)|同船重名(2)
+### 让·巴尔 · `rangbaer_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `让·巴尔`
 
-![rangbaer_memory](Output/gallery_v2/thumbs/rangbaer_memory.webp)
+![rangbaer_memory](../Output/gallery_v2/thumbs/rangbaer_memory.webp)
 
 - [ ] 这条不换
-### 瑞鹤 · `ruihe_memory` — 名字塌了(==船名)|同船重名(2)
+### 瑞鹤 · `ruihe_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `瑞鹤`
 
-![ruihe_memory](Output/gallery_v2/thumbs/ruihe_memory.webp)
+![ruihe_memory](../Output/gallery_v2/thumbs/ruihe_memory.webp)
 
 - [ ] 这条不换
-### 萨福克 · `safuke_xinshou` — 名字塌了(==船名)|同船重名(2)
+### 萨福克 · `safuke_xinshou` — 名字塌了(==船名)
 
 改前 `xinshou` → 改后 `萨福克`
 
-![safuke_xinshou](Output/gallery_v2/thumbs/safuke_xinshou.webp)
+![safuke_xinshou](../Output/gallery_v2/thumbs/safuke_xinshou.webp)
 
 - [ ] 这条不换
-### 三笠 · `sanli_memory` — 名字塌了(==船名)|同船重名(2)
+### 三笠 · `sanli_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `三笠`
 
-![sanli_memory](Output/gallery_v2/thumbs/sanli_memory.webp)
+![sanli_memory](../Output/gallery_v2/thumbs/sanli_memory.webp)
 
 - [ ] 这条不换
-### 「银狐」女士 · `silverfox_shadow` — 名字塌了(==船名)|同船重名(2)
+### 「银狐」女士 · `silverfox_shadow` — 名字塌了(==船名)
 
 改前 `shadow` → 改后 `「银狐」女士`
 
-![silverfox_shadow](Output/gallery_v2/thumbs/silverfox_shadow.webp)
+![silverfox_shadow](../Output/gallery_v2/thumbs/silverfox_shadow.webp)
 
 - [ ] 这条不换
-### 穗香 · `suixiang_doa` — 名字塌了(==船名)|同船重名(2)
+### 穗香 · `suixiang_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `穗香`
 
-![suixiang_doa](Output/gallery_v2/thumbs/suixiang_doa.webp)
+![suixiang_doa](../Output/gallery_v2/thumbs/suixiang_doa.webp)
 
 - [ ] 这条不换
-### 穗香 · `suixiang_doa_wjz` — 名字塌了(==船名)|同船重名(2)
+### 穗香 · `suixiang_doa_wjz` — 名字塌了(==船名)
 
 改前 `doa·wjz` → 改后 `穗香`
 
-![suixiang_doa_wjz](Output/gallery_v2/thumbs/suixiang_doa_wjz.webp)
+![suixiang_doa_wjz](../Output/gallery_v2/thumbs/suixiang_doa_wjz.webp)
 
 - [ ] 这条不换
-### 苏维埃同盟 · `suweiaitongmeng_wjz` — 名字塌了(==船名)|同船重名(2)
+### 苏维埃同盟 · `suweiaitongmeng_wjz` — 名字塌了(==船名)
 
 改前 `wjz` → 改后 `苏维埃同盟`
 
-![suweiaitongmeng_wjz](Output/gallery_v2/thumbs/suweiaitongmeng_wjz.webp)
+![suweiaitongmeng_wjz](../Output/gallery_v2/thumbs/suweiaitongmeng_wjz.webp)
 
 - [ ] 这条不换
-### 天城 · `tiancheng_cv` — 名字塌了(==船名)|同船重名(2)
+### 天城 · `tiancheng_cv` — 名字塌了(==船名)
 
 改前 `cv` → 改后 `天城`
 
-![tiancheng_cv](Output/gallery_v2/thumbs/tiancheng_cv.webp)
+![tiancheng_cv](../Output/gallery_v2/thumbs/tiancheng_cv.webp)
 
 - [ ] 这条不换
-### 武藏 · `wuzang_s` — 名字塌了(==船名)|同船重名(2)
+### 武藏 · `wuzang_s` — 名字塌了(==船名)
 
 改前 `s` → 改后 `武藏`
 
-![wuzang_s](Output/gallery_v2/thumbs/wuzang_s.webp)
+![wuzang_s](../Output/gallery_v2/thumbs/wuzang_s.webp)
 
 - [ ] 这条不换
 ### 霞.改 · `xia_g` — 名字塌了(==船名)
 
 改前 `G` → 改后 `霞.改`
 
-![xia_g](Output/gallery_v2/thumbs/xia_g.webp)
+![xia_g](../Output/gallery_v2/thumbs/xia_g.webp)
 
 - [ ] 这条不换
-### 翔鹤 · `xianghe_memory` — 名字塌了(==船名)|同船重名(2)
+### 翔鹤 · `xianghe_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `翔鹤`
 
-![xianghe_memory](Output/gallery_v2/thumbs/xianghe_memory.webp)
+![xianghe_memory](../Output/gallery_v2/thumbs/xianghe_memory.webp)
 
 - [ ] 这条不换
-### 西弗吉尼亚 · `xifujiniya_2` — 名字塌了(==船名)|同船重名(2)
+### 西弗吉尼亚 · `xifujiniya_2` — 名字塌了(==船名)
 
 改前 `皮肤2` → 改后 `西弗吉尼亚`
 
-![xifujiniya_2](Output/gallery_v2/thumbs/xifujiniya_2.webp)
+![xifujiniya_2](../Output/gallery_v2/thumbs/xifujiniya_2.webp)
 
 - [ ] 这条不换
-### 新月 · `xinyue_jp` — 名字塌了(==船名)|同船重名(2)
+### 新月 · `xinyue_jp` — 名字塌了(==船名)
 
 改前 `jp` → 改后 `新月`
 
-![xinyue_jp](Output/gallery_v2/thumbs/xinyue_jp.webp)
+![xinyue_jp](../Output/gallery_v2/thumbs/xinyue_jp.webp)
 
 - [ ] 这条不换
-### 希佩尔海军上将(μ兵装) · `xipeier_idol` — 名字塌了(==船名)|同船重名(2)
+### 希佩尔海军上将(μ兵装) · `xipeier_idol` — 名字塌了(==船名)
 
 改前 `idol` → 改后 `希佩尔海军上将(μ兵装)`
 
-![xipeier_idol](Output/gallery_v2/thumbs/xipeier_idol.webp)
+![xipeier_idol](../Output/gallery_v2/thumbs/xipeier_idol.webp)
 
 - [ ] 这条不换
-### 希佩尔海军上将(μ兵装) · `xipeier_idolns` — 名字塌了(==船名)|同船重名(2)
+### 希佩尔海军上将(μ兵装) · `xipeier_idolns` — 名字塌了(==船名)
 
 改前 `idolns` → 改后 `希佩尔海军上将(μ兵装)`
 
-![xipeier_idolns](Output/gallery_v2/thumbs/xipeier_idolns.webp)
+![xipeier_idolns](../Output/gallery_v2/thumbs/xipeier_idolns.webp)
 
 - [ ] 这条不换
 ### 伊莉丝 · `yilisi_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `伊莉丝`
 
-![yilisi_doa](Output/gallery_v2/thumbs/yilisi_doa.webp)
+![yilisi_doa](../Output/gallery_v2/thumbs/yilisi_doa.webp)
 
 - [ ] 这条不换
-### 逸仙 · `yixian_memory` — 名字塌了(==船名)|同船重名(2)
+### 逸仙 · `yixian_memory` — 名字塌了(==船名)
 
 改前 `memory` → 改后 `逸仙`
 
-![yixian_memory](Output/gallery_v2/thumbs/yixian_memory.webp)
+![yixian_memory](../Output/gallery_v2/thumbs/yixian_memory.webp)
 
 - [ ] 这条不换
-### 优米雅·利斯菲尔德 · `youmiya_wjz` — 名字塌了(==船名)|同船重名(2)
+### 优米雅·利斯菲尔德 · `youmiya_wjz` — 名字塌了(==船名)
 
 改前 `wjz` → 改后 `优米雅·利斯菲尔德`
 
-![youmiya_wjz](Output/gallery_v2/thumbs/youmiya_wjz.webp)
+![youmiya_wjz](../Output/gallery_v2/thumbs/youmiya_wjz.webp)
 
 - [ ] 这条不换
-### 约克 · `yueke_ger` — 名字塌了(==船名)|同船重名(2)
+### 约克 · `yueke_ger` — 名字塌了(==船名)
 
 改前 `ger` → 改后 `约克`
 
-![yueke_ger](Output/gallery_v2/thumbs/yueke_ger.webp)
+![yueke_ger](../Output/gallery_v2/thumbs/yueke_ger.webp)
 
 - [ ] 这条不换
-### 凪咲 · `zhixiao_doa` — 名字塌了(==船名)|同船重名(2)
+### 凪咲 · `zhixiao_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `凪咲`
 
-![zhixiao_doa](Output/gallery_v2/thumbs/zhixiao_doa.webp)
+![zhixiao_doa](../Output/gallery_v2/thumbs/zhixiao_doa.webp)
 
 - [ ] 这条不换
-### 凪咲 · `zhixiao_doa_wjz` — 名字塌了(==船名)|同船重名(2)
+### 凪咲 · `zhixiao_doa_wjz` — 名字塌了(==船名)
 
 改前 `doa·wjz` → 改后 `凪咲`
 
-![zhixiao_doa_wjz](Output/gallery_v2/thumbs/zhixiao_doa_wjz.webp)
+![zhixiao_doa_wjz](../Output/gallery_v2/thumbs/zhixiao_doa_wjz.webp)
 
 - [ ] 这条不换
 ### 筑紫 · `zhuzi_doa` — 名字塌了(==船名)
 
 改前 `doa` → 改后 `筑紫`
 
-![zhuzi_doa](Output/gallery_v2/thumbs/zhuzi_doa.webp)
+![zhuzi_doa](../Output/gallery_v2/thumbs/zhuzi_doa.webp)
 
 - [ ] 这条不换
 ### 八舞耶俱矢·八舞夕弦 · `bawu_2` — 长度异常
 
 改前 `皮肤2` → 改后 `Blue Ocean Rendezvous`
 
-![bawu_2](Output/gallery_v2/thumbs/bawu_2.webp)
+![bawu_2](../Output/gallery_v2/thumbs/bawu_2.webp)
 
 - [ ] 这条不换
 ### 八舞耶俱矢·八舞夕弦 · `bawu_2_hx` — 长度异常
 
 改前 `皮肤2·和谐版` → 改后 `Blue Ocean Rendezvous·和谐版`
 
-![bawu_2_hx](Output/gallery_v2/thumbs/bawu_2_hx.webp)
+![bawu_2_hx](../Output/gallery_v2/thumbs/bawu_2_hx.webp)
 
 - [ ] 这条不换
 ### 八舞耶俱矢·八舞夕弦 · `bawu_2_n` — 长度异常
 
 改前 `皮肤2·无背景版` → 改后 `Blue Ocean Rendezvous·无背景版`
 
-![bawu_2_n](Output/gallery_v2/thumbs/bawu_2_n.webp)
+![bawu_2_n](../Output/gallery_v2/thumbs/bawu_2_n.webp)
 
 - [ ] 这条不换
 ### 八舞耶俱矢·八舞夕弦 · `bawu_2_n_hx` — 长度异常
 
 改前 `皮肤2·无背景版·和谐版` → 改后 `Blue Ocean Rendezvous·和谐版·无背景版`
 
-![bawu_2_n_hx](Output/gallery_v2/thumbs/bawu_2_n_hx.webp)
+![bawu_2_n_hx](../Output/gallery_v2/thumbs/bawu_2_n_hx.webp)
 
 - [ ] 这条不换
 ### 标枪 · `biaoqiang_10` — 长度异常
 
 改前 `皮肤10` → 改后 `PINKLOVE★Heart Lancer`
 
-![biaoqiang_10](Output/gallery_v2/thumbs/biaoqiang_10.webp)
+![biaoqiang_10](../Output/gallery_v2/thumbs/biaoqiang_10.webp)
 
 - [ ] 这条不换
 ### 标枪 · `biaoqiang_10_n` — 长度异常
 
 改前 `皮肤10·无背景版` → 改后 `PINKLOVE★Heart Lancer·无背景版`
 
-![biaoqiang_10_n](Output/gallery_v2/thumbs/biaoqiang_10_n.webp)
+![biaoqiang_10_n](../Output/gallery_v2/thumbs/biaoqiang_10_n.webp)
 
 - [ ] 这条不换
 ### 柴郡 · `chaijun_h` — 长度异常
 
 改前 `h` → 改后 `White Seaside Melody！`
 
-![chaijun_h](Output/gallery_v2/thumbs/chaijun_h.webp)
+![chaijun_h](../Output/gallery_v2/thumbs/chaijun_h.webp)
 
 - [ ] 这条不换
 ### 柴郡 · `chaijun_h_n` — 长度异常
 
 改前 `h·无背景版` → 改后 `White Seaside Melody！·无背景版`
 
-![chaijun_h_n](Output/gallery_v2/thumbs/chaijun_h_n.webp)
+![chaijun_h_n](../Output/gallery_v2/thumbs/chaijun_h_n.webp)
 
 - [ ] 这条不换
 ### 黑太子 · `heitaizi_h` — 长度异常
 
 改前 `h` → 改后 `Love's Greeting（爱的礼赞）`
 
-![heitaizi_h](Output/gallery_v2/thumbs/heitaizi_h.webp)
+![heitaizi_h](../Output/gallery_v2/thumbs/heitaizi_h.webp)
 
 - [ ] 这条不换
 ### 黑太子 · `heitaizi_h_n` — 长度异常
 
 改前 `h·无背景版` → 改后 `Love's Greeting（爱的礼赞）·无背景版`
 
-![heitaizi_h_n](Output/gallery_v2/thumbs/heitaizi_h_n.webp)
+![heitaizi_h_n](../Output/gallery_v2/thumbs/heitaizi_h_n.webp)
 
 - [ ] 这条不换
 ### 乌尔里希·冯·胡滕 · `wuerlixi_h` — 长度异常
 
 改前 `h` → 改后 `Liebestrank（迷魂酒/爱情魔药）`
 
-![wuerlixi_h](Output/gallery_v2/thumbs/wuerlixi_h.webp)
+![wuerlixi_h](../Output/gallery_v2/thumbs/wuerlixi_h.webp)
 
 - [ ] 这条不换
 ### 乌尔里希·冯·胡滕 · `wuerlixi_h_n` — 长度异常
 
 改前 `h·无背景版` → 改后 `Liebestrank（迷魂酒/爱情魔药）·无背景版`
 
-![wuerlixi_h_n](Output/gallery_v2/thumbs/wuerlixi_h_n.webp)
+![wuerlixi_h_n](../Output/gallery_v2/thumbs/wuerlixi_h_n.webp)
 
 - [ ] 这条不换
 
@@ -1171,7 +877,7 @@
 | 埃克塞特 | `aikesaite_g` | G | **埃克塞特.改** |
 | 艾菈·冯·杜勒 | `aila_2` | 皮肤2 | **假日的户外风格** |
 | 艾菈·冯·杜勒 | `aila_2_n` | 皮肤2·无背景版 | **假日的户外风格·无背景版** |
-| 艾菈·冯·杜勒 | `aila_wjz` | wjz | **艾菈·冯·杜勒** ⚠名字塌了(==船名) 同船重名(2) |
+| 艾菈·冯·杜勒 | `aila_wjz` | wjz | **艾菈·冯·杜勒** ⚠名字塌了(==船名) |
 | 艾伦·萨姆纳 | `ailunsamuna_2` | 皮肤2 | **Charming Rabbit** |
 | 艾伦·萨姆纳 | `ailunsamuna_2_hx` | 皮肤2·和谐版 | **Charming Rabbit·和谐版** |
 | 艾伦·萨姆纳 | `ailunsamuna_2_n` | 皮肤2·无背景版 | **Charming Rabbit·无背景版** |
@@ -1193,9 +899,9 @@
 | 埃姆登 | `aimudeng_2_n` | 皮肤2·无背景版 | **黑白的夜之主·无背景版** |
 | 埃姆登 | `aimudeng_3` | 皮肤3 | **探求的水月之涧** |
 | 埃姆登 | `aimudeng_4` | 皮肤4 | **引路的双轨极星** |
-| 埃姆登 | `aimudeng_4_npc` | 皮肤4·npc | **埃姆登** ⚠名字塌了(==船名) 同船重名(2) |
-| 埃姆登 | `aimudeng_5` | 皮肤5 | **水畔的夕暮私语** ⚠同船重名(2) |
-| 埃姆登 | `aimudeng_5_asmr` | 皮肤5·ASMR | **水畔的夕暮私语** ⚠同船重名(2) |
+| 埃姆登 | `aimudeng_4_npc` | 皮肤4·npc | **埃姆登** ⚠名字塌了(==船名) |
+| 埃姆登 | `aimudeng_5` | 皮肤5 | **水畔的夕暮私语** |
+| 埃姆登 | `aimudeng_5_asmr` | 皮肤5·ASMR | **水畔的夕暮私语** |
 | 埃姆登 | `aimudeng_5_n` | 皮肤5·无背景版 | **水畔的夕暮私语·无背景版** |
 | 埃塞克斯 | `aisaikesi_10` | 皮肤10 | **泳池里的默契训练** |
 | 埃塞克斯 | `aisaikesi_10_hx` | 皮肤10·和谐版 | **泳池里的默契训练·和谐版** |
@@ -1253,9 +959,9 @@
 | 鞍山 | `anshan_3` | 皮肤3 | **夕照伊人** |
 | 鞍山 | `anshan_g` | G | **鞍山.改** |
 | 鞍山 | `anshan_g_n` | G·无背景版 | **鞍山.改·无背景版** |
-| 安土 | `antu_2` | 皮肤2 | **午夜的瑰色电梯** ⚠同船重名(2) |
+| 安土 | `antu_2` | 皮肤2 | **午夜的瑰色电梯** |
 | 安土 | `antu_2_hx` | 皮肤2·和谐版 | **午夜的瑰色电梯·和谐版** |
-| 安土 | `antu_3` | 皮肤3 | **午夜的瑰色电梯** ⚠同船重名(2) |
+| 安土 | `antu_3` | 皮肤3 | **午夜的瑰色电梯** |
 | 安土 | `antu_3_n` | 皮肤3·无背景版 | **午夜的瑰色电梯·无背景版** |
 | 奥丁 | `aoding_2` | 皮肤2 | **挥毫苍雪** |
 | 奥古斯特·冯·帕塞瓦尔 | `aogusite_2` | 皮肤2 | **女仆魔女** |
@@ -1433,7 +1139,7 @@
 | 比叡 | `birui_4` | 皮肤4 | **红梅垂香** |
 | 比叡 | `birui_5` | 皮肤5 | **海滩瑰景** |
 | 比叡 | `birui_5_n` | 皮肤5·无背景版 | **海滩瑰景·无背景版** |
-| 比叡 | `birui_memory` | memory | **比叡** ⚠名字塌了(==船名) 同船重名(2) |
+| 比叡 | `birui_memory` | memory | **比叡** ⚠名字塌了(==船名) |
 | 比叡 | `birui_younv` | younv | **小比叡** |
 | 比叡·META（前排） | `birui_alter_n` | 无背景版 | **比叡·META·无背景版** |
 | 俾斯麦 | `bisimai_2` | 皮肤2 | **铁血的辉光** |
@@ -1602,10 +1308,10 @@
 | 赤城 | `chicheng_5_n` | 皮肤5·无背景版 | **朝凰来仪·无背景版** |
 | 赤城 | `chicheng_6` | 皮肤6 | **路边的甜蜜** |
 | 赤城 | `chicheng_6_n` | 皮肤6·无背景版 | **路边的甜蜜·无背景版** |
-| 赤城 | `chicheng_alter` | alter | **赤城** ⚠名字塌了(==船名) 同船重名(2) |
+| 赤城 | `chicheng_alter` | alter | **赤城** ⚠名字塌了(==船名) |
 | 赤城 | `chicheng_h` | h | **深红的虞美人** |
-| 赤城 | `chicheng_idol` | idol | **赤城(μ兵装)** ⚠同船重名(2) |
-| 赤城 | `chicheng_idolns` | idolns | **赤城(μ兵装)** ⚠同船重名(2) |
+| 赤城 | `chicheng_idol` | idol | **赤城(μ兵装)** |
+| 赤城 | `chicheng_idolns` | idolns | **赤城(μ兵装)** |
 | 赤城 | `chicheng_younv` | younv | **小赤城** |
 | 川内 | `chuannei_g` | G | **川内.改** |
 | 初春 | `chuchun_2` | 皮肤2 | **初春之雪** |
@@ -1902,7 +1608,7 @@
 | 高雄 | `gaoxiong_6_n` | 皮肤6·无背景版 | **破魔舰术-神护-·无背景版** |
 | 高雄 | `gaoxiong_7` | 皮肤7 | **武者的“内在”修养** |
 | 高雄 | `gaoxiong_7_n` | 皮肤7·无背景版 | **武者的“内在”修养·无背景版** |
-| 高雄 | `gaoxiong_dark` | dark | **高雄** ⚠名字塌了(==船名) 同船重名(2) |
+| 高雄 | `gaoxiong_dark` | dark | **高雄** ⚠名字塌了(==船名) |
 | 高雄 | `gaoxiong_h` | h | **神护樱华** |
 | 葛城 | `gecheng_2` | 皮肤2 | **黎明辉祭** |
 | 葛城 | `gecheng_2_n` | 皮肤2·无背景版 | **黎明辉祭·无背景版** |
@@ -1986,8 +1692,8 @@
 | 哈尔福德 | `haerfude_2` | 皮肤2 | **血族亲王的限定陪伴日** |
 | 哈尔福德 | `haerfude_2_n` | 皮肤2·无背景版 | **血族亲王的限定陪伴日·无背景版** |
 | 哈尔西·鲍威尔 | `haerxibaoweier_3` | 皮肤3 | **春节小福星！** |
-| 海筹 | `haichou_2` | 皮肤2 | **醒梦芳醇** ⚠同船重名(2) |
-| 海筹 | `haichou_2_asmr` | 皮肤2·ASMR | **醒梦芳醇** ⚠同船重名(2) |
+| 海筹 | `haichou_2` | 皮肤2 | **醒梦芳醇** |
+| 海筹 | `haichou_2_asmr` | 皮肤2·ASMR | **醒梦芳醇** |
 | 海筹 | `haichou_2_n` | 皮肤2·无背景版 | **醒梦芳醇·无背景版** |
 | 海风 | `haifeng_2` | 皮肤2 | **软绵绵治愈系** |
 | 海风 | `haifeng_2_n` | 皮肤2·无背景版 | **软绵绵治愈系·无背景版** |
@@ -2026,8 +1732,8 @@
 | 海咲 | `haixiao_2_doa` | 皮肤2·doa | **金色的特别摄影** |
 | 海咲 | `haixiao_3_doa` | 皮肤3·doa | **夜空盛放之花** |
 | 海咲 | `haixiao_3_doa_n` | 皮肤3·doa·无背景版 | **夜空盛放之花·无背景版** |
-| 海咲 | `haixiao_doa` | doa | **海咲** ⚠名字塌了(==船名) 同船重名(2) |
-| 海咲 | `haixiao_doa_wjz` | doa·wjz | **海咲** ⚠名字塌了(==船名) 同船重名(2) |
+| 海咲 | `haixiao_doa` | doa | **海咲** ⚠名字塌了(==船名) |
+| 海咲 | `haixiao_doa_wjz` | doa·wjz | **海咲** ⚠名字塌了(==船名) |
 | 海因里希亲王 | `haiyinlixi_2` | 皮肤2 | **泳池边的救生兔(?)** |
 | 海因里希亲王 | `haiyinlixi_2_n` | 皮肤2·无背景版 | **泳池边的救生兔(?)·无背景版** |
 | 海因里希亲王 | `haiyinlixi_3` | 皮肤3 | **花火烂漫的春绘卷** |
@@ -2062,10 +1768,10 @@
 | 圣黑之心 | `hdn202_1` | 皮肤1 | **圣黑之心** ⚠名字塌了(==船名) |
 | 圣黑之心 | `hdn202_2` | 皮肤2 | **女神的微笑** |
 | 圣黑之心 | `hdn202_2_hx` | 皮肤2·和谐版 | **女神的微笑·和谐版** |
-| 布兰 | `hdn301_memory` | memory | **布兰** ⚠名字塌了(==船名) 同船重名(2) |
+| 布兰 | `hdn301_memory` | memory | **布兰** ⚠名字塌了(==船名) |
 | 群白之心 | `hdn302_1` | 皮肤1 | **群白之心** ⚠名字塌了(==船名) |
 | 群白之心 | `hdn302_2` | 皮肤2 | **女神的羞怯** |
-| 贝露 | `hdn401_memory` | memory | **贝露** ⚠名字塌了(==船名) 同船重名(2) |
+| 贝露 | `hdn401_memory` | memory | **贝露** ⚠名字塌了(==船名) |
 | 翡绿之心 | `hdn402_1` | 皮肤1 | **翡绿之心** ⚠名字塌了(==船名) |
 | 翡绿之心 | `hdn402_2` | 皮肤2 | **女神的一刻** |
 | 翡绿之心 | `hdn402_2_hx` | 皮肤2·和谐版 | **女神的一刻·和谐版** |
@@ -2084,7 +1790,7 @@
 | BLACK★ROCK SHOOTER（后排） | `heiyansheshou_2` | 皮肤2 | **黑之女神** |
 | BLACK★ROCK SHOOTER（后排） | `heiyansheshou_2_n` | 皮肤2·无背景版 | **黑之女神·无背景版** |
 | BLACK★ROCK SHOOTER（后排） | `heiyansheshou_n` | 无背景版 | **BLACK★ROCK SHOOTER·无背景版** |
-| BLACK★ROCK SHOOTER（后排） | `heiyansheshou_wjz` | wjz | **BLACK★ROCK SHOOTER** ⚠同船重名(2) |
+| BLACK★ROCK SHOOTER（后排） | `heiyansheshou_wjz` | wjz | **BLACK★ROCK SHOOTER** |
 | 赫敏 | `hemin_2` | 皮肤2 | **纯白的悠闲假日** |
 | 赫敏 | `hemin_2_n` | 皮肤2·无背景版 | **纯白的悠闲假日·无背景版** |
 | 赫敏 | `hemin_3` | 皮肤3 | **温柔的纯白天使** |
@@ -2099,15 +1805,15 @@
 | 赫敏 | `hemin_h_n` | h·无背景版 | **晨曦的誓言·无背景版** |
 | 和睦号 | `hemuhao_2` | 皮肤2 | **友好的弗兰肯** |
 | 和睦号 | `hemuhao_2_n` | 皮肤2·无背景版 | **友好的弗兰肯·无背景版** |
-| 仲裁者·赫米忒·IX | `hermit_alter` | alter | **仲裁者·赫米忒·IX** ⚠名字塌了(==船名) 同船重名(2) |
+| 仲裁者·赫米忒·IX | `hermit_alter` | alter | **仲裁者·赫米忒·IX** ⚠名字塌了(==船名) |
 | 赫斯缇雅 | `hesitiya_2` | 皮肤2 | **God Vacation！** |
 | 赫斯缇雅 | `hesitiya_2_n` | 皮肤2·无背景版 | **God Vacation！·无背景版** |
-| 赫斯缇雅 | `hesitiya_wjz` | wjz | **赫斯缇雅** ⚠名字塌了(==船名) 同船重名(2) |
+| 赫斯缇雅 | `hesitiya_wjz` | wjz | **赫斯缇雅** ⚠名字塌了(==船名) |
 | 洪亮 | `hongliang_2` | 皮肤2 | **清晨的呼唤！** |
 | 红色山脉 | `hongseshanmai_2` | 皮肤2 | **盲打练习：触觉麻将** |
 | 红色山脉 | `hongseshanmai_2_n` | 皮肤2·无背景版 | **盲打练习：触觉麻将·无背景版** |
-| 虎 | `hu_2` | 皮肤2 | **临水的辰星** ⚠同船重名(2) |
-| 虎 | `hu_2_asmr` | 皮肤2·ASMR | **临水的辰星** ⚠同船重名(2) |
+| 虎 | `hu_2` | 皮肤2 | **临水的辰星** |
+| 虎 | `hu_2_asmr` | 皮肤2·ASMR | **临水的辰星** |
 | 虎 | `hu_2_asmr_hx` | 皮肤2·ASMR·和谐版 | **临水的辰星·和谐版** |
 | 虎 | `hu_2_hx` | 皮肤2·和谐版 | **临水的辰星·和谐版** |
 | 虎 | `hu_2_n` | 皮肤2·无背景版 | **临水的辰星·无背景版** |
@@ -2201,9 +1907,9 @@
 | 伊26 | `i26_2` | 皮肤2 | **深海少女** |
 | 伊26 | `i26_3` | 皮肤3 | **烟火大会前** |
 | 伊26 | `i26_3_n` | 皮肤3·无背景版 | **烟火大会前·无背景版** |
-| 伊404 | `i404_2` | 皮肤2 | **绛縢华舞** ⚠同船重名(2) |
+| 伊404 | `i404_2` | 皮肤2 | **绛縢华舞** |
 | 伊404 | `i404_2_n` | 皮肤2·无背景版 | **绛縢华舞·无背景版** |
-| 伊404 | `i404_3` | 皮肤3 | **绛縢华舞** ⚠同船重名(2) |
+| 伊404 | `i404_3` | 皮肤3 | **绛縢华舞** |
 | 伊404 | `i404_3_n` | 皮肤3·无背景版 | **绛縢华舞·无背景版** |
 | 伊56 | `i56_2` | 皮肤2 | **角落的向日葵** |
 | 加富尔伯爵 | `jiafuerbojue_2` | 皮肤2 | **激战的盛夏海滩** |
@@ -2242,9 +1948,9 @@
 | 江风 | `jiangfeng_3` | 皮肤3 | **忠心的守护灵狐** |
 | 江风 | `jiangfeng_3_n` | 皮肤3·无背景版 | **忠心的守护灵狐·无背景版** |
 | 江风 | `jiangfeng_h` | h | **美梦构造论** |
-| 建武 | `jianwu_2` | 皮肤2 | **妆点，只为今夜** ⚠同船重名(2) |
+| 建武 | `jianwu_2` | 皮肤2 | **妆点，只为今夜** |
 | 建武 | `jianwu_2_n` | 皮肤2·无背景版 | **妆点，只为今夜·无背景版** |
-| 建武 | `jianwu_3` | 皮肤3 | **妆点，只为今夜** ⚠同船重名(2) |
+| 建武 | `jianwu_3` | 皮肤3 | **妆点，只为今夜** |
 | 建武 | `jianwu_3_n` | 皮肤3·无背景版 | **妆点，只为今夜·无背景版** |
 | 建武 | `jianwu_4` | 皮肤4 | **彻夜的杰作** |
 | 建武 | `jianwu_4_n` | 皮肤4·无背景版 | **彻夜的杰作·无背景版** |
@@ -2265,8 +1971,8 @@
 | 加斯科涅 | `jiasikenie_2_n` | 皮肤2·无背景版 | **夏季环境应对外装·无背景版** |
 | 加斯科涅 | `jiasikenie_3` | 皮肤3 | **旅情机巧** |
 | 加斯科涅 | `jiasikenie_3_n` | 皮肤3·无背景版 | **旅情机巧·无背景版** |
-| 加斯科涅 | `jiasikenie_idol` | idol | **加斯科涅(μ兵装)** ⚠同船重名(2) |
-| 加斯科涅 | `jiasikenie_idolns` | idolns | **加斯科涅(μ兵装)** ⚠同船重名(2) |
+| 加斯科涅 | `jiasikenie_idol` | idol | **加斯科涅(μ兵装)** |
+| 加斯科涅 | `jiasikenie_idolns` | idolns | **加斯科涅(μ兵装)** |
 | 贾维斯 | `jiaweisi_2` | 皮肤2 | **青空下的微风** |
 | 杰金斯 | `jiejinsi_3` | 皮肤3 | **星光与白雪的平安夜** |
 | 杰金斯 | `jiejinsi_3_n` | 皮肤3·无背景版 | **星光与白雪的平安夜·无背景版** |
@@ -2301,11 +2007,11 @@
 | 近江 | `jinjiang_2_n_hx` | 皮肤2·无背景版·和谐版 | **逃脱失败……？·和谐版·无背景版** |
 | 金鹿号 | `jinluhao_2` | 皮肤2 | **古堡中的恐怖淑女** |
 | 金鹿号 | `jinluhao_2_n` | 皮肤2·无背景版 | **古堡中的恐怖淑女·无背景版** |
-| 金鹿号 | `jinluhao_3` | 皮肤3 | **微笑的白色魅影** ⚠同船重名(2) |
+| 金鹿号 | `jinluhao_3` | 皮肤3 | **微笑的白色魅影** |
 | 金鹿号 | `jinluhao_3_hx` | 皮肤3·和谐版 | **微笑的白色魅影·和谐版** |
 | 金鹿号 | `jinluhao_3_n` | 皮肤3·无背景版 | **微笑的白色魅影·无背景版** |
 | 金鹿号 | `jinluhao_3_n_hx` | 皮肤3·无背景版·和谐版 | **微笑的白色魅影·和谐版·无背景版** |
-| 金鹿号 | `jinluhao_4` | 皮肤4 | **微笑的白色魅影** ⚠同船重名(2) |
+| 金鹿号 | `jinluhao_4` | 皮肤4 | **微笑的白色魅影** |
 | 金鹿号 | `jinluhao_4_n` | 皮肤4·无背景版 | **微笑的白色魅影·无背景版** |
 | 金色暗影 | `jinseanying_2_tolove` | 皮肤2·tolove | **朋友们的睡衣装备** |
 | 金色暗影 | `jinseanying_2_tolove_n` | 皮肤2·tolove·无背景版 | **朋友们的睡衣装备·无背景版** |
@@ -2317,8 +2023,8 @@
 | 棘鳍 | `jiqi_3` | 皮肤3 | **五彩斑斓的宴会** |
 | 吉尚 | `jishang_2` | 皮肤2 | **冰上的魔女** |
 | 吉尚 | `jishang_2_n` | 皮肤2·无背景版 | **冰上的魔女·无背景版** |
-| 吉尚 | `jishang_3` | 皮肤3 | **Milk&Kiss** ⚠同船重名(2) |
-| 吉尚 | `jishang_3_asmr` | 皮肤3·ASMR | **Milk&Kiss** ⚠同船重名(2) |
+| 吉尚 | `jishang_3` | 皮肤3 | **Milk&Kiss** |
+| 吉尚 | `jishang_3_asmr` | 皮肤3·ASMR | **Milk&Kiss** |
 | 吉尚 | `jishang_3_n` | 皮肤3·无背景版 | **Milk&Kiss·无背景版** |
 | 旧金山 | `jiujinshan_3` | 皮肤3 | **Funny Bunny！** |
 | 旧金山 | `jiujinshan_3_hx` | 皮肤3·和谐版 | **Funny Bunny！·和谐版** |
@@ -2326,7 +2032,7 @@
 | 旧金山 | `jiujinshan_3_n_hx` | 皮肤3·无背景版·和谐版 | **Funny Bunny！·和谐版·无背景版** |
 | 旧金山 | `jiujinshan_4` | 皮肤4 | **It's showtime!** |
 | 旧金山 | `jiujinshan_4_n` | 皮肤4·无背景版 | **It's showtime!·无背景版** |
-| 旧金山 | `jiujinshan_wjz` | wjz | **旧金山** ⚠名字塌了(==船名) 同船重名(2) |
+| 旧金山 | `jiujinshan_wjz` | wjz | **旧金山** ⚠名字塌了(==船名) |
 | 久远 | `jiuyuan_2` | 皮肤2 | **久远(传颂之物)** |
 | 酒匂 | `jiuyun_2` | 皮肤2 | **团子的诱惑** |
 | 酒匂 | `jiuyun_2_n` | 皮肤2·无背景版 | **团子的诱惑·无背景版** |
@@ -2414,13 +2120,13 @@
 | 克利夫兰 | `kelifulan_8` | 皮肤8 | **休息室的意外邂逅？** |
 | 克利夫兰 | `kelifulan_8_n` | 皮肤8·无背景版 | **休息室的意外邂逅？·无背景版** |
 | 克利夫兰 | `kelifulan_h` | h | **心动一刻** |
-| 克利夫兰 | `kelifulan_idol` | idol | **克利夫兰(μ兵装)** ⚠同船重名(2) |
-| 克利夫兰 | `kelifulan_idolns` | idolns | **克利夫兰(μ兵装)** ⚠同船重名(2) |
+| 克利夫兰 | `kelifulan_idol` | idol | **克利夫兰(μ兵装)** |
+| 克利夫兰 | `kelifulan_idolns` | idolns | **克利夫兰(μ兵装)** |
 | 克利夫兰 | `kelifulan_younv` | younv | **小克利夫兰** |
 | 科隆 | `kelong_g` | G | **科隆.改** |
 | 科洛蒂娅·巴兰茨 | `keluodiya_2` | 皮肤2 | **晚安前的夜话** |
 | 科洛蒂娅·巴兰茨 | `keluodiya_2_n` | 皮肤2·无背景版 | **晚安前的夜话·无背景版** |
-| 科罗拉多 | `keluoladuo_2` | 皮肤2 | **科罗拉多** ⚠名字塌了(==船名) 同船重名(2) |
+| 科罗拉多 | `keluoladuo_2` | 皮肤2 | **科罗拉多** ⚠名字塌了(==船名) |
 | 科罗拉多 | `keluoladuo_3` | 皮肤3 | **旅途的旋律** |
 | 科罗拉多 | `keluoladuo_3_n` | 皮肤3·无背景版 | **旅途的旋律·无背景版** |
 | 科罗拉多 | `keluoladuo_4` | 皮肤4 | **夕阳的咏叹调** |
@@ -2521,7 +2227,7 @@
 | 雷鸣 | `leiming_2_n` | 皮肤2·无背景版 | **梦幻的阅读时光·无背景版** |
 | 蕾妮雅 | `leiniya_2` | 皮肤2 | **夏日假期** |
 | 蕾妮雅 | `leiniya_2_n` | 皮肤2·无背景版 | **夏日假期·无背景版** |
-| 蕾妮雅 | `leiniya_wjz` | wjz | **蕾妮雅** ⚠名字塌了(==船名) 同船重名(2) |
+| 蕾妮雅 | `leiniya_wjz` | wjz | **蕾妮雅** ⚠名字塌了(==船名) |
 | 勒马尔 | `lemaer_2` | 皮肤2 | **闪耀的夏天** |
 | 勒马尔 | `lemaer_3` | 皮肤3 | **闪耀的幸福学园** |
 | 勒马尔 | `lemaer_4` | 皮肤4 | **华丽的宴会登场** |
@@ -2573,7 +2279,7 @@
 | 绫濑 | `linglai_2_n` | 皮肤2·无背景版 | **兔子小姐的更衣时间·无背景版** |
 | 灵敏 | `lingmin_2` | 皮肤2 | **天才生物机械师？** |
 | 灵敏 | `lingmin_2_n` | 皮肤2·无背景版 | **天才生物机械师？·无背景版** |
-| 灵敏 | `lingmin_alter` | alter | **灵敏** ⚠名字塌了(==船名) 同船重名(2) |
+| 灵敏 | `lingmin_alter` | alter | **灵敏** ⚠名字塌了(==船名) |
 | 领洋者-娜比娅 | `lingyangzhe3_2` | 皮肤2 | **入浴的小恶魔** |
 | 领洋者-娜比娅 | `lingyangzhe3_2_n` | 皮肤2·无背景版 | **入浴的小恶魔·无背景版** |
 | 里诺 | `linuo_2` | 皮肤2 | **波涛的啦啦队长！** |
@@ -2590,7 +2296,7 @@
 | 黎塞留 | `lisailiu_2_n` | 皮肤2·无背景版 | **潮风的Fleuron·无背景版** |
 | 黎塞留 | `lisailiu_3` | 皮肤3 | **常緑Rêve prophétique** |
 | 黎塞留 | `lisailiu_3_n` | 皮肤3·无背景版 | **常緑Rêve prophétique·无背景版** |
-| 黎塞留 | `lisailiu_memory` | memory | **黎塞留** ⚠名字塌了(==船名) 同船重名(2) |
+| 黎塞留 | `lisailiu_memory` | memory | **黎塞留** ⚠名字塌了(==船名) |
 | 利托里奥 | `lituoliao_2` | 皮肤2 | **那不勒斯之光** |
 | 利托里奥 | `lituoliao_2_n` | 皮肤2·无背景版 | **那不勒斯之光·无背景版** |
 | 利托里奥 | `lituoliao_3` | 皮肤3 | **Calabria Aurea** |
@@ -2603,7 +2309,7 @@
 | 利托里奥 | `lituoliao_5_n` | 皮肤5·无背景版 | **雨中的等候·无背景版** |
 | 琉·璃昂 | `liuliang_2` | 皮肤2 | **在夜晚的酒馆中** |
 | 琉·璃昂 | `liuliang_2_n` | 皮肤2·无背景版 | **在夜晚的酒馆中·无背景版** |
-| 琉·璃昂 | `liuliang_wjz` | wjz | **琉·璃昂** ⚠名字塌了(==船名) 同船重名(2) |
+| 琉·璃昂 | `liuliang_wjz` | wjz | **琉·璃昂** ⚠名字塌了(==船名) |
 | 利物浦 | `liwupu_2` | 皮肤2 | **绮丽的祝福之风** |
 | 利物浦 | `liwupu_2_n` | 皮肤2·无背景版 | **绮丽的祝福之风·无背景版** |
 | 龙凤 | `longfeng_2` | 皮肤2 | **凤舞新年** |
@@ -2641,7 +2347,7 @@
 | 罗德尼 | `luodeni_h` | h | **幸福殿堂** |
 | 罗德尼 | `luodeni_h_n` | h·无背景版 | **幸福殿堂·无背景版** |
 | 罗恩 | `luoen_2` | 皮肤2 | **暗红色的微笑** |
-| 罗恩 | `luoen_3` | 皮肤3 | **罗恩** ⚠名字塌了(==船名) 同船重名(2) |
+| 罗恩 | `luoen_3` | 皮肤3 | **罗恩** ⚠名字塌了(==船名) |
 | 罗恩 | `luoen_4` | 皮肤4 | **苍翠的安眠曲** |
 | 罗恩 | `luoen_4_n` | 皮肤4·无背景版 | **苍翠的安眠曲·无背景版** |
 | 罗恩 | `luoen_5` | 皮肤5 | **暗夜的悸动** |
@@ -2654,7 +2360,7 @@
 | 罗马 | `luoma_2_n` | 皮肤2·无背景版 | **午夜的白天鹅·无背景版** |
 | 罗马 | `luoma_4` | 皮肤4 | **罗马的假日** |
 | 罗马 | `luoma_4_n` | 皮肤4·无背景版 | **罗马的假日·无背景版** |
-| 罗马 | `luoma_ghost` | ghost | **罗马** ⚠名字塌了(==船名) 同船重名(2) |
+| 罗马 | `luoma_ghost` | ghost | **罗马** ⚠名字塌了(==船名) |
 | 鲁普雷希特亲王 | `lupuleixite_2` | 皮肤2 | **腾龙戏春？** |
 | 鲁普雷希特亲王 | `lupuleixite_2_n` | 皮肤2·无背景版 | **腾龙戏春？·无背景版** |
 | 鲁普雷希特亲王 | `lupuleixite_3` | 皮肤3 | **Midnight Pearl** |
@@ -2693,7 +2399,7 @@
 | 马拉尼 | `malani_3` | 皮肤3 | **东煌之仪** |
 | 玛丽·西莱斯特号 | `mali_2` | 皮肤2 | **幽夜冥神** |
 | 玛丽·西莱斯特号 | `mali_2_n` | 皮肤2·无背景版 | **幽夜冥神·无背景版** |
-| 马里兰 | `malilan_2` | 皮肤2 | **马里兰** ⚠名字塌了(==船名) 同船重名(2) |
+| 马里兰 | `malilan_2` | 皮肤2 | **马里兰** ⚠名字塌了(==船名) |
 | 马里兰 | `malilan_3` | 皮肤3 | **真红鼓手** |
 | 马里兰 | `malilan_3_n` | 皮肤3·无背景版 | **真红鼓手·无背景版** |
 | 马里兰 | `malilan_g` | G | **马里兰.改** |
@@ -2701,8 +2407,8 @@
 | 玛莉萝丝 | `maliluosi_2_doa` | 皮肤2·doa | **浪花与小恶魔从者** |
 | 玛莉萝丝 | `maliluosi_2_doa_n` | 皮肤2·doa·无背景版 | **浪花与小恶魔从者·无背景版** |
 | 玛莉萝丝 | `maliluosi_3_doa` | 皮肤3·doa | **热气蒸腾的女神** |
-| 玛莉萝丝 | `maliluosi_doa` | doa | **玛莉萝丝** ⚠名字塌了(==船名) 同船重名(2) |
-| 玛莉萝丝 | `maliluosi_doa_wjz` | doa·wjz | **玛莉萝丝** ⚠名字塌了(==船名) 同船重名(2) |
+| 玛莉萝丝 | `maliluosi_doa` | doa | **玛莉萝丝** ⚠名字塌了(==船名) |
+| 玛莉萝丝 | `maliluosi_doa_wjz` | doa·wjz | **玛莉萝丝** ⚠名字塌了(==船名) |
 | 满潮 | `manchao_2` | 皮肤2 | **缎带轻飘飘** |
 | 满潮 | `manchao_2_n` | 皮肤2·无背景版 | **缎带轻飘飘·无背景版** |
 | 曼彻斯特 | `manchesite_2` | 皮肤2 | **海边的片刻宁静** |
@@ -2787,11 +2493,11 @@
 | 莫加多尔 | `mojiaduoer_2_n_hx` | 皮肤2·无背景版·和谐版 | **静谧一隅的燥热·和谐版·无背景版** |
 | 莫加多尔 | `mojiaduoer_3` | 皮肤3 | **嗅诊的护理天使** |
 | 莫加多尔 | `mojiaduoer_3_n` | 皮肤3·无背景版 | **嗅诊的护理天使·无背景版** |
-| 莫加多尔 | `mojiaduoer_4` | 皮肤4 | **共坠的渴慕** ⚠同船重名(2) |
+| 莫加多尔 | `mojiaduoer_4` | 皮肤4 | **共坠的渴慕** |
 | 莫加多尔 | `mojiaduoer_4_hx` | 皮肤4·和谐版 | **共坠的渴慕·和谐版** |
 | 莫加多尔 | `mojiaduoer_4_n` | 皮肤4·无背景版 | **共坠的渴慕·无背景版** |
 | 莫加多尔 | `mojiaduoer_4_n_hx` | 皮肤4·无背景版·和谐版 | **共坠的渴慕·和谐版·无背景版** |
-| 莫加多尔 | `mojiaduoer_5` | 皮肤5 | **共坠的渴慕** ⚠同船重名(2) |
+| 莫加多尔 | `mojiaduoer_5` | 皮肤5 | **共坠的渴慕** |
 | 莫里 | `moli_g` | G | **莫里.改** |
 | 莫里 | `moli_g_n` | G·无背景版 | **莫里.改·无背景版** |
 | 莫里茨亲王 | `molici_2` | 皮肤2 | **神灯小姐的愿望游戏** |
@@ -2801,8 +2507,8 @@
 | 莫里森 | `molisen_3` | 皮肤3 | **科技？忍术？** |
 | 莫里森 | `molisen_3_n` | 皮肤3·无背景版 | **科技？忍术？·无背景版** |
 | 莫妮卡 | `monika_2_doa` | 皮肤2·doa | **特别的红心Ace** |
-| 莫妮卡 | `monika_doa` | doa | **莫妮卡** ⚠名字塌了(==船名) 同船重名(2) |
-| 莫妮卡 | `monika_doa_wjz` | doa·wjz | **莫妮卡** ⚠名字塌了(==船名) 同船重名(2) |
+| 莫妮卡 | `monika_doa` | doa | **莫妮卡** ⚠名字塌了(==船名) |
+| 莫妮卡 | `monika_doa_wjz` | doa·wjz | **莫妮卡** ⚠名字塌了(==船名) |
 | 莫斯科 | `mosike_2` | 皮肤2 | **待君落子之时** |
 | 莫斯科 | `mosike_2_n` | 皮肤2·无背景版 | **待君落子之时·无背景版** |
 | 摩耶 | `moye_2` | 皮肤2 | **凛然的猎心杀手** |
@@ -2878,7 +2584,7 @@
 | 尼古拉斯 | `nigulasi_g` | G | **尼古拉斯.改** |
 | 妮娜·弗里德 | `nina_2` | 皮肤2 | **Cafe & Diner mode** |
 | 妮娜·弗里德 | `nina_2_n` | 皮肤2·无背景版 | **Cafe & Diner mode·无背景版** |
-| 妮娜·弗里德 | `nina_wjz` | wjz | **妮娜·弗里德** ⚠名字塌了(==船名) 同船重名(2) |
+| 妮娜·弗里德 | `nina_wjz` | wjz | **妮娜·弗里德** ⚠名字塌了(==船名) |
 | 宁海 | `ninghai_2` | 皮肤2 | **食欲之夏** |
 | 宁海 | `ninghai_3` | 皮肤3 | **月宫玉兔** |
 | 宁海 | `ninghai_4` | 皮肤4 | **东煌姐妹！·N** |
@@ -2888,7 +2594,7 @@
 | 宁海 | `ninghai_8` | 皮肤8 | **慌乱的新春厨房** |
 | 宁海 | `ninghai_8_n` | 皮肤8·无背景版 | **慌乱的新春厨房·无背景版** |
 | 宁海 | `ninghai_g` | G | **宁海.改** |
-| 宁海 | `ninghai_memory` | memory | **宁海** ⚠名字塌了(==船名) 同船重名(2) |
+| 宁海 | `ninghai_memory` | memory | **宁海** ⚠名字塌了(==船名) |
 | 纽卡斯尔 | `niukasier_2` | 皮肤2 | **木槿风情** |
 | 纽卡斯尔 | `niukasier_g` | G | **纽卡斯尔.改 ** |
 | 纽伦堡 | `niulunbao_2` | 皮肤2 | **正月的漫游** |
@@ -2946,8 +2652,8 @@
 | 女将 | `nvjiang_g` | G | **女将.改** |
 | 女天狗 | `nvtiangou_2_doa` | 皮肤2·doa | **红枫与温泉假日** |
 | 女天狗 | `nvtiangou_2_doa_n` | 皮肤2·doa·无背景版 | **红枫与温泉假日·无背景版** |
-| 女天狗 | `nvtiangou_doa` | doa | **女天狗** ⚠名字塌了(==船名) 同船重名(2) |
-| 女天狗 | `nvtiangou_doa_wjz` | doa·wjz | **女天狗** ⚠名字塌了(==船名) 同船重名(2) |
+| 女天狗 | `nvtiangou_doa` | doa | **女天狗** ⚠名字塌了(==船名) |
+| 女天狗 | `nvtiangou_doa_wjz` | doa·wjz | **女天狗** ⚠名字塌了(==船名) |
 | 欧根亲王 | `ougen_2` | 皮肤2 | **永不褪色的笑容** |
 | 欧根亲王 | `ougen_3` | 皮肤3 | **百花缭乱** |
 | 欧根亲王 | `ougen_4` | 皮肤4 | **Wein Kornblume** |
@@ -2990,7 +2696,7 @@
 | 平海 | `pinghai_8` | 皮肤8 | **热闹的盛宴准备** |
 | 平海 | `pinghai_8_n` | 皮肤8·无背景版 | **热闹的盛宴准备·无背景版** |
 | 平海 | `pinghai_g` | G | **平海.改** |
-| 平海 | `pinghai_memory` | memory | **平海** ⚠名字塌了(==船名) 同船重名(2) |
+| 平海 | `pinghai_memory` | memory | **平海** ⚠名字塌了(==船名) |
 | 匹兹堡 | `pizibao_2` | 皮肤2 | **斟酒女郎的赌局** |
 | 匹兹堡 | `pizibao_2_hx` | 皮肤2·和谐版 | **斟酒女郎的赌局·和谐版** |
 | 匹兹堡 | `pizibao_2_n` | 皮肤2·无背景版 | **斟酒女郎的赌局·无背景版** |
@@ -3081,8 +2787,8 @@
 | 企业 | `qiye_8_n` | 皮肤8·无背景版 | **旅行的启程·无背景版** |
 | 企业 | `qiye_9` | 皮肤9 | **天际的潜水者** |
 | 企业 | `qiye_9_n` | 皮肤9·无背景版 | **天际的潜水者·无背景版** |
-| 企业 | `qiye_dark` | dark | **企业** ⚠名字塌了(==船名) 同船重名(3) |
-| 企业 | `qiye_dark_memory` | dark·memory | **企业** ⚠名字塌了(==船名) 同船重名(3) |
+| 企业 | `qiye_dark` | dark | **企业** ⚠名字塌了(==船名) |
+| 企业 | `qiye_dark_memory` | dark·memory | **企业** ⚠名字塌了(==船名) |
 | 企业 | `qiye_h` | h | **誓约的星光** |
 | 企业 | `qiye_younv` | younv | **小企业** |
 | 确捷 | `quejie_2` | 皮肤2 | **自习室的Cyclamen** |
@@ -3096,7 +2802,7 @@
 | 让·巴尔 | `rangbaer_4_n` | 皮肤4·无背景版 | **舶刀Première neige·无背景版** |
 | 让·巴尔 | `rangbaer_5` | 皮肤5 | **灯映星展** |
 | 让·巴尔 | `rangbaer_5_n` | 皮肤5·无背景版 | **灯映星展·无背景版** |
-| 让·巴尔 | `rangbaer_memory` | memory | **让·巴尔** ⚠名字塌了(==船名) 同船重名(2) |
+| 让·巴尔 | `rangbaer_memory` | memory | **让·巴尔** ⚠名字塌了(==船名) |
 | 热心 | `rexin_2` | 皮肤2 | **热心的情人节** |
 | 热心 | `rexin_3` | 皮肤3 | **Master·热心？** |
 | 热心 | `rexin_3_n` | 皮肤3·无背景版 | **Master·热心？·无背景版** |
@@ -3111,7 +2817,7 @@
 | 瑞鹤 | `ruihe_3_n` | 皮肤3·无背景版 | **飙速之鹤·无背景版** |
 | 瑞鹤 | `ruihe_4` | 皮肤4 | **急速飞驰Z** |
 | 瑞鹤 | `ruihe_4_n` | 皮肤4·无背景版 | **急速飞驰Z·无背景版** |
-| 瑞鹤 | `ruihe_memory` | memory | **瑞鹤** ⚠名字塌了(==船名) 同船重名(2) |
+| 瑞鹤 | `ruihe_memory` | memory | **瑞鹤** ⚠名字塌了(==船名) |
 | 若叶 | `ruoye_2` | 皮肤2 | **限时圣诞Wakaba** |
 | 若叶 | `ruoye_3` | 皮肤3 | **暖阳与午睡时光** |
 | 若叶 | `ruoye_3_n` | 皮肤3·无背景版 | **暖阳与午睡时光·无背景版** |
@@ -3123,7 +2829,7 @@
 | 如月 | `ruyue_g` | G | **如月.改** |
 | 天原凉子 | `ryouko_shallow` | shallow | **？？？?** ⚠像垃圾串:全问号 |
 | 萨福克 | `safuke_g` | G | **萨福克.改** |
-| 萨福克 | `safuke_xinshou` | xinshou | **萨福克** ⚠名字塌了(==船名) 同船重名(2) |
+| 萨福克 | `safuke_xinshou` | xinshou | **萨福克** ⚠名字塌了(==船名) |
 | 塞德利茨 | `saidelici_4` | 皮肤4 | **黯灭之系谱** |
 | 塞德利茨 | `saidelici_4_n` | 皮肤4·无背景版 | **黯灭之系谱·无背景版** |
 | 塞德利茨 | `saidelici_6` | 皮肤6 | **绽放的苍之华** |
@@ -3162,7 +2868,7 @@
 | 三笠 | `sanli_6_n` | 皮肤6·无背景版 | **湛蓝回眸·无背景版** |
 | 三笠 | `sanli_h` | h | **无垢舰裳** |
 | 三笠 | `sanli_h_n` | h·无背景版 | **无垢舰裳·无背景版** |
-| 三笠 | `sanli_memory` | memory | **三笠** ⚠名字塌了(==船名) 同船重名(2) |
+| 三笠 | `sanli_memory` | memory | **三笠** ⚠名字塌了(==船名) |
 | 三日月 | `sanriyue_2` | 皮肤2 | **僵尸小姐驾到！** |
 | 三隈 | `sanwei_2` | 皮肤2 | **花辞·献舞** |
 | 三隈 | `sanwei_2_n` | 皮肤2·无背景版 | **花辞·献舞·无背景版** |
@@ -3282,7 +2988,7 @@
 | 斯库拉 | `sikula_4_hx` | 皮肤4·和谐版 | **侍女的裁决·和谐版** |
 | 斯库拉 | `sikula_4_n` | 皮肤4·无背景版 | **侍女的裁决·无背景版** |
 | 斯库拉 | `sikula_4_n_hx` | 皮肤4·无背景版·和谐版 | **侍女的裁决·和谐版·无背景版** |
-| 「银狐」女士 | `silverfox_shadow` | shadow | **「银狐」女士** ⚠名字塌了(==船名) 同船重名(2) |
+| 「银狐」女士 | `silverfox_shadow` | shadow | **「银狐」女士** ⚠名字塌了(==船名) |
 | 斯莫利 | `simoli_3` | 皮肤3 | **魔女快递** |
 | 斯佩伯爵海军上将 | `sipeibojue_2` | 皮肤2 | **少女的星期日** |
 | 斯佩伯爵海军上将 | `sipeibojue_3` | 皮肤3 | **平和的每一天** |
@@ -3298,11 +3004,11 @@
 | 斯特拉斯堡 | `sitelasibao_2_n_hx` | 皮肤2·无背景版·和谐版 | **赛场上的电子妖精·和谐版·无背景版** |
 | 死亡主宰 | `siwangzhuzai_2` | 皮肤2 | **战士的小憩** |
 | 死亡主宰 | `siwangzhuzai_n` | 无背景版 | **DEAD MASTER·无背景版** |
-| 死亡主宰 | `siwangzhuzai_wjz` | wjz | **DEAD MASTER** ⚠同船重名(2) |
+| 死亡主宰 | `siwangzhuzai_wjz` | wjz | **DEAD MASTER** |
 | 四万十 | `siwanshi_2` | 皮肤2 | **热乎乎的龙神大人？** |
 | 四万十 | `siwanshi_2_n` | 皮肤2·无背景版 | **热乎乎的龙神大人？·无背景版** |
-| 四万十 | `siwanshi_3` | 皮肤3 | **优哉游哉的龙神大人** ⚠同船重名(2) |
-| 四万十 | `siwanshi_4` | 皮肤4 | **优哉游哉的龙神大人** ⚠同船重名(2) |
+| 四万十 | `siwanshi_3` | 皮肤3 | **优哉游哉的龙神大人** |
+| 四万十 | `siwanshi_4` | 皮肤4 | **优哉游哉的龙神大人** |
 | 四万十 | `siwanshi_4_n` | 皮肤4·无背景版 | **优哉游哉的龙神大人·无背景版** |
 | 司战女神 | `sizhannvshen_2` | 皮肤2 | **女仆的战斗体验** |
 | 司战女神 | `sizhannvshen_2_n` | 皮肤2·无背景版 | **女仆的战斗体验·无背景版** |
@@ -3310,8 +3016,8 @@
 | 松鲷 | `songdiao_2_n` | 皮肤2·无背景版 | **小店长的忙碌Time·无背景版** |
 | 松风 | `songfeng_g` | G | **松风.改** |
 | 穗香 | `suixiang_2_doa` | 皮肤2·doa | **礁石边的盛夏天使** |
-| 穗香 | `suixiang_doa` | doa | **穗香** ⚠名字塌了(==船名) 同船重名(2) |
-| 穗香 | `suixiang_doa_wjz` | doa·wjz | **穗香** ⚠名字塌了(==船名) 同船重名(2) |
+| 穗香 | `suixiang_doa` | doa | **穗香** ⚠名字塌了(==船名) |
+| 穗香 | `suixiang_doa_wjz` | doa·wjz | **穗香** ⚠名字塌了(==船名) |
 | 苏塞克斯 | `susaikesi_2` | 皮肤2 | **艳阳与郁金香** |
 | 苏塞克斯 | `susaikesi_3` | 皮肤3 | **葡萄酒与红玫瑰** |
 | 苏维埃贝拉罗斯 | `suweiaibeilaluosi_2` | 皮肤2 | **消磨时间的方式** |
@@ -3323,14 +3029,14 @@
 | 苏维埃罗西亚 | `suweiailuoxiya_dark` | dark | **？？？** ⚠像垃圾串:全问号 |
 | 苏维埃同盟 | `suweiaitongmeng_2` | 皮肤2 | **天幕危机** |
 | 苏维埃同盟 | `suweiaitongmeng_2_n` | 皮肤2·无背景版 | **天幕危机·无背景版** |
-| 苏维埃同盟 | `suweiaitongmeng_3` | 皮肤3 | **缠丝审讯** ⚠同船重名(2) |
+| 苏维埃同盟 | `suweiaitongmeng_3` | 皮肤3 | **缠丝审讯** |
 | 苏维埃同盟 | `suweiaitongmeng_3_hx` | 皮肤3·和谐版 | **缠丝审讯·和谐版** |
 | 苏维埃同盟 | `suweiaitongmeng_3_n` | 皮肤3·无背景版 | **缠丝审讯·无背景版** |
 | 苏维埃同盟 | `suweiaitongmeng_3_n_hx` | 皮肤3·无背景版·和谐版 | **缠丝审讯·和谐版·无背景版** |
-| 苏维埃同盟 | `suweiaitongmeng_4` | 皮肤4 | **缠丝审讯** ⚠同船重名(2) |
+| 苏维埃同盟 | `suweiaitongmeng_4` | 皮肤4 | **缠丝审讯** |
 | 苏维埃同盟 | `suweiaitongmeng_4_n` | 皮肤4·无背景版 | **缠丝审讯·无背景版** |
 | 苏维埃同盟 | `suweiaitongmeng_dark` | dark | **？？？** ⚠像垃圾串:全问号 |
-| 苏维埃同盟 | `suweiaitongmeng_wjz` | wjz | **苏维埃同盟** ⚠名字塌了(==船名) 同船重名(2) |
+| 苏维埃同盟 | `suweiaitongmeng_wjz` | wjz | **苏维埃同盟** ⚠名字塌了(==船名) |
 | 塔尔图 | `taertu_2` | 皮肤2 | **多虑的盛夏** |
 | 塔尔图 | `taertu_2_hx` | 皮肤2·和谐版 | **多虑的盛夏·和谐版** |
 | 塔尔图 | `taertu_2_n` | 皮肤2·无背景版 | **多虑的盛夏·无背景版** |
@@ -3372,7 +3078,7 @@
 | 天城 | `tiancheng_2_n` | 皮肤2·无背景版 | **走水静莲·无背景版** |
 | 天城 | `tiancheng_3` | 皮肤3 | **红鸢的闲暇片刻** |
 | 天城 | `tiancheng_3_n` | 皮肤3·无背景版 | **红鸢的闲暇片刻·无背景版** |
-| 天城 | `tiancheng_cv` | cv | **天城** ⚠名字塌了(==船名) 同船重名(2) |
+| 天城 | `tiancheng_cv` | cv | **天城** ⚠名字塌了(==船名) |
 | 天城 | `tiancheng_cv_2` | cv·皮肤2 | **落于王座之花** |
 | 天城 | `tiancheng_cv_2_n` | cv·皮肤2·无背景版 | **落于王座之花·无背景版** |
 | 天城 | `tiancheng_cv_3` | cv·皮肤3 | **碧波绮尾** |
@@ -3381,9 +3087,9 @@
 | 天城 | `tiancheng_cv_h_n` | cv·h·无背景版 | **水月花烛·无背景版** |
 | 天后 | `tianhou_2` | 皮肤2 | **美味的祭典？** |
 | 天后 | `tianhou_2_n` | 皮肤2·无背景版 | **美味的祭典？·无背景版** |
-| 天津风 | `tianjinfeng_2` | 皮肤2 | **狐仙大人驾到** ⚠同船重名(2) |
+| 天津风 | `tianjinfeng_2` | 皮肤2 | **狐仙大人驾到** |
 | 天津风 | `tianjinfeng_2_n` | 皮肤2·无背景版 | **狐仙大人驾到·无背景版** |
-| 天津风 | `tianjinfeng_3` | 皮肤3 | **狐仙大人驾到** ⚠同船重名(2) |
+| 天津风 | `tianjinfeng_3` | 皮肤3 | **狐仙大人驾到** |
 | 天津风 | `tianjinfeng_3_n` | 皮肤3·无背景版 | **狐仙大人驾到·无背景版** |
 | 天狼星 | `tianlangxing_2` | 皮肤2 | **纯白蔷薇** |
 | 天狼星 | `tianlangxing_3` | 皮肤3 | **盛夏的Seirios ** |
@@ -3495,9 +3201,9 @@
 | 威尔士亲王 | `weiershiqinwang_4` | 皮肤4 | **皇家式风流** |
 | 威尔士亲王 | `weiershiqinwang_5` | 皮肤5 | **骑士旋律，少女星空** |
 | 威尔士亲王 | `weiershiqinwang_5_n` | 皮肤5·无背景版 | **骑士旋律，少女星空·无背景版** |
-| 维克斯堡 | `weikesibao_2` | 皮肤2 | **闪亮的赛车偶像** ⚠同船重名(2) |
+| 维克斯堡 | `weikesibao_2` | 皮肤2 | **闪亮的赛车偶像** |
 | 维克斯堡 | `weikesibao_2_n` | 皮肤2·无背景版 | **闪亮的赛车偶像·无背景版** |
-| 维克斯堡 | `weikesibao_3` | 皮肤3 | **闪亮的赛车偶像** ⚠同船重名(2) |
+| 维克斯堡 | `weikesibao_3` | 皮肤3 | **闪亮的赛车偶像** |
 | 维克斯堡 | `weikesibao_3_hx` | 皮肤3·和谐版 | **闪亮的赛车偶像·和谐版** |
 | 维托里奥·维内托 | `weineituo_2` | 皮肤2 | **拉斯佩齐亚之花** |
 | 维托里奥·维内托 | `weineituo_2_n` | 皮肤2·无背景版 | **拉斯佩齐亚之花·无背景版** |
@@ -3587,14 +3293,14 @@
 | 武藏 | `wuzang_h_hx` | h·和谐版 | **紫藤花的无瑕心意·和谐版** |
 | 武藏 | `wuzang_h_n` | h·无背景版 | **紫藤花的无瑕心意·无背景版** |
 | 武藏 | `wuzang_h_n_hx` | h·无背景版·和谐版 | **紫藤花的无瑕心意·和谐版·无背景版** |
-| 武藏 | `wuzang_s` | s | **武藏** ⚠名字塌了(==船名) 同船重名(2) |
+| 武藏 | `wuzang_s` | s | **武藏** ⚠名字塌了(==船名) |
 | 霞.改 | `xia_2` | 皮肤2 | **新年暖洋洋** |
 | 霞.改 | `xia_2_doa` | 皮肤2·doa | **水边的霞光** |
 | 霞.改 | `xia_2_doa_n` | 皮肤2·doa·无背景版 | **水边的霞光·无背景版** |
 | 霞.改 | `xia_3` | 皮肤3 | **开学晃悠悠** |
 | 霞.改 | `xia_3_n` | 皮肤3·无背景版 | **开学晃悠悠·无背景版** |
-| 霞.改 | `xia_doa` | doa | **霞** ⚠同船重名(3) |
-| 霞.改 | `xia_doa_wjz` | doa·wjz | **霞** ⚠同船重名(3) |
+| 霞.改 | `xia_doa` | doa | **霞** |
+| 霞.改 | `xia_doa_wjz` | doa·wjz | **霞** |
 | 霞.改 | `xia_g` | G | **霞.改** ⚠名字塌了(==船名) |
 | 霞飞-战斗天使 | `xiafei_2` | 皮肤2 | **笼中的白雪公主** |
 | 霞飞-战斗天使 | `xiafei_2_hx` | 皮肤2·和谐版 | **笼中的白雪公主·和谐版** |
@@ -3620,7 +3326,7 @@
 | 翔鹤 | `xianghe_4_n` | 皮肤4·无背景版 | **飞雪织缘·无背景版** |
 | 翔鹤 | `xianghe_h` | h | **鸣鹤衔禧** |
 | 翔鹤 | `xianghe_h_n` | h·无背景版 | **鸣鹤衔禧·无背景版** |
-| 翔鹤 | `xianghe_memory` | memory | **翔鹤** ⚠名字塌了(==船名) 同船重名(2) |
+| 翔鹤 | `xianghe_memory` | memory | **翔鹤** ⚠名字塌了(==船名) |
 | 晓 | `xiao_2` | 皮肤2 | **北极的迷途** |
 | 晓 | `xiao_3` | 皮肤3 | **摩托忍者，出击！** |
 | 晓 | `xiao_4` | 皮肤4 | **驯鹿忍者派送中！** |
@@ -3648,9 +3354,9 @@
 | 谢菲尔德 | `xiefeierde_5_n` | 皮肤5·无背景版 | **BulletBorne·无背景版** |
 | 谢菲尔德 | `xiefeierde_6` | 皮肤6 | **神秘决战** |
 | 谢菲尔德 | `xiefeierde_6_n` | 皮肤6·无背景版 | **神秘决战·无背景版** |
-| 谢菲尔德 | `xiefeierde_idol` | idol | **谢菲尔德(μ兵装)** ⚠同船重名(2) |
-| 谢菲尔德 | `xiefeierde_idolns` | idolns | **谢菲尔德(μ兵装)** ⚠同船重名(2) |
-| 西弗吉尼亚 | `xifujiniya_2` | 皮肤2 | **西弗吉尼亚** ⚠名字塌了(==船名) 同船重名(2) |
+| 谢菲尔德 | `xiefeierde_idol` | idol | **谢菲尔德(μ兵装)** |
+| 谢菲尔德 | `xiefeierde_idolns` | idolns | **谢菲尔德(μ兵装)** |
+| 西弗吉尼亚 | `xifujiniya_2` | 皮肤2 | **西弗吉尼亚** ⚠名字塌了(==船名) |
 | 西弗吉尼亚 | `xifujiniya_3` | 皮肤3 | **海色摇滚** |
 | 西弗吉尼亚 | `xifujiniya_3_hx` | 皮肤3·和谐版 | **海色摇滚·和谐版** |
 | 西弗吉尼亚 | `xifujiniya_3_n` | 皮肤3·无背景版 | **海色摇滚·无背景版** |
@@ -3701,7 +3407,7 @@
 | 信浓 | `xinnong_5_n` | 皮肤5·无背景版 | **幻梦奇术·无背景版** |
 | 信浓 | `xinnong_6` | 皮肤6 | **相融一梦** |
 | 新月 | `xinyue_g` | G | **新月.改** |
-| 新月 | `xinyue_jp` | jp | **新月** ⚠名字塌了(==船名) 同船重名(2) |
+| 新月 | `xinyue_jp` | jp | **新月** ⚠名字塌了(==船名) |
 | 新泽西 | `xinzexi_2` | 皮肤2 | **跃动的舞台时间！** |
 | 新泽西 | `xinzexi_2_hx` | 皮肤2·和谐版 | **跃动的舞台时间！·和谐版** |
 | 新泽西 | `xinzexi_2_n` | 皮肤2·无背景版 | **跃动的舞台时间！·无背景版** |
@@ -3720,8 +3426,8 @@
 | 熊野 | `xiongye_3` | 皮肤3 | **激斗☆抽鬼牌派对** |
 | 熊野 | `xiongye_3_n` | 皮肤3·无背景版 | **激斗☆抽鬼牌派对·无背景版** |
 | 熊野 | `xiongye_4` | 皮肤4 | **一千零一夜之愿** |
-| 希佩尔海军上将(μ兵装) | `xipeier_idol` | idol | **希佩尔海军上将(μ兵装)** ⚠名字塌了(==船名) 同船重名(2) |
-| 希佩尔海军上将(μ兵装) | `xipeier_idolns` | idolns | **希佩尔海军上将(μ兵装)** ⚠名字塌了(==船名) 同船重名(2) |
+| 希佩尔海军上将(μ兵装) | `xipeier_idol` | idol | **希佩尔海军上将(μ兵装)** ⚠名字塌了(==船名) |
+| 希佩尔海军上将(μ兵装) | `xipeier_idolns` | idolns | **希佩尔海军上将(μ兵装)** ⚠名字塌了(==船名) |
 | 希佩尔海军上将 | `xipeierhaijunshangjiang_3` | 皮肤3 | **阳光下的温泉街** |
 | 希佩尔海军上将 | `xipeierhaijunshangjiang_3_n` | 皮肤3·无背景版 | **阳光下的温泉街·无背景版** |
 | 希佩尔海军上将 | `xipeierhaijunshangjiang_g` | G | **希佩尔海军上将·改** |
@@ -3868,7 +3574,7 @@
 | 逸仙 | `yixian_4_n` | 皮肤4·无背景版 | **细浪扶风·无背景版** |
 | 逸仙 | `yixian_g` | G | **逸仙.改** |
 | 逸仙 | `yixian_h` | h | **凤冠霞帔** |
-| 逸仙 | `yixian_memory` | memory | **逸仙** ⚠名字塌了(==船名) 同船重名(2) |
+| 逸仙 | `yixian_memory` | memory | **逸仙** ⚠名字塌了(==船名) |
 | 水濑伊织 | `yizhi_2` | 皮肤2 | **黄昏的小秘密** |
 | 水濑伊织 | `yizhi_2_n` | 皮肤2·无背景版 | **黄昏的小秘密·无背景版** |
 | 勇敢 | `yonggan_g` | G | **勇敢·改** |
@@ -3881,7 +3587,7 @@
 | 有明 | `youming_g` | G | **有明.改** |
 | 优米雅·利斯菲尔德 | `youmiya_2` | 皮肤2 | **我们家的甜点师** |
 | 优米雅·利斯菲尔德 | `youmiya_2_n` | 皮肤2·无背景版 | **我们家的甜点师·无背景版** |
-| 优米雅·利斯菲尔德 | `youmiya_wjz` | wjz | **优米雅·利斯菲尔德** ⚠名字塌了(==船名) 同船重名(2) |
+| 优米雅·利斯菲尔德 | `youmiya_wjz` | wjz | **优米雅·利斯菲尔德** ⚠名字塌了(==船名) |
 | 怨仇 | `yuanchou_2` | 皮肤2 | **办公室的“意外”** |
 | 怨仇 | `yuanchou_2_hx` | 皮肤2·和谐版 | **办公室的“意外”·和谐版** |
 | 怨仇 | `yuanchou_2_n` | 皮肤2·无背景版 | **办公室的“意外”·无背景版** |
@@ -3895,7 +3601,7 @@
 | 约克 | `yueke_2` | 皮肤2 | **真理探寻者/truth seeker** |
 | 约克 | `yueke_3` | 皮肤3 | **碧波的召唤者** |
 | 约克 | `yueke_g` | G | **约克.改** |
-| 约克 | `yueke_ger` | ger | **约克** ⚠名字塌了(==船名) 同船重名(2) |
+| 约克 | `yueke_ger` | ger | **约克** ⚠名字塌了(==船名) |
 | 约克 | `yueke_ger_2` | ger·皮肤2 | **朱月的破坏者** |
 | 约克 | `yueke_ger_2_hx` | ger·皮肤2·和谐版 | **朱月的破坏者·和谐版** |
 | 约克 | `yueke_ger_3` | ger·皮肤3 | **相伴于泳池之夜** |
@@ -3913,9 +3619,9 @@
 | 约克城 | `yuekecheng_h_n` | h·无背景版 | **微风拂煦的未来·无背景版** |
 | 约克城 | `yuekechengii_2` | 皮肤2 | **白昼美人鱼** |
 | 约克城 | `yuekechengii_2_n` | 皮肤2·无背景版 | **白昼美人鱼·无背景版** |
-| 约克城 | `yuekechengii_3` | 皮肤3 | **交错的温柔时光** ⚠同船重名(2) |
+| 约克城 | `yuekechengii_3` | 皮肤3 | **交错的温柔时光** |
 | 约克城 | `yuekechengii_3_n` | 皮肤3·无背景版 | **交错的温柔时光·无背景版** |
-| 约克城 | `yuekechengii_4` | 皮肤4 | **交错的温柔时光** ⚠同船重名(2) |
+| 约克城 | `yuekechengii_4` | 皮肤4 | **交错的温柔时光** |
 | 约克城 | `yuekechengii_4_n` | 皮肤4·无背景版 | **交错的温柔时光·无背景版** |
 | 约克城 | `yuekechengii_n` | 无背景版 | **约克城II·无背景版** |
 | 约克公爵 | `yuekegongjue_2` | 皮肤2 | **盛誉的光荣方程** |
@@ -3924,11 +3630,11 @@
 | 约克公爵 | `yuekegongjue_4_n` | 皮肤4·无背景版 | **渊智的指路人·无背景版** |
 | 羽黑 | `yuhei_2` | 皮肤2 | **因祸得福？** |
 | 羽黑 | `yuhei_3` | 皮肤3 | **误入“笼”中** |
-| 云龙 | `yunlong_2` | 皮肤2 | **溶于重重夜色** ⚠同船重名(2) |
+| 云龙 | `yunlong_2` | 皮肤2 | **溶于重重夜色** |
 | 云龙 | `yunlong_2_hx` | 皮肤2·和谐版 | **溶于重重夜色·和谐版** |
 | 云龙 | `yunlong_2_n` | 皮肤2·无背景版 | **溶于重重夜色·无背景版** |
 | 云龙 | `yunlong_2_n_hx` | 皮肤2·无背景版·和谐版 | **溶于重重夜色·和谐版·无背景版** |
-| 云龙 | `yunlong_3` | 皮肤3 | **溶于重重夜色** ⚠同船重名(2) |
+| 云龙 | `yunlong_3` | 皮肤3 | **溶于重重夜色** |
 | 云龙 | `yunlong_3_n` | 皮肤3·无背景版 | **溶于重重夜色·无背景版** |
 | 云仙 | `yunxian_2` | 皮肤2 | **嬉水碧海** |
 | 云仙 | `yunxian_2_n` | 皮肤2·无背景版 | **嬉水碧海·无背景版** |
@@ -4061,8 +3767,8 @@
 | 鸢一折纸 | `zhezhi_2` | 皮肤2 | **司掌魅惑的精灵** |
 | 鸢一折纸 | `zhezhi_2_n` | 皮肤2·无背景版 | **司掌魅惑的精灵·无背景版** |
 | 凪咲 | `zhixiao_2_doa` | 皮肤2·doa | **蓝天好心情** |
-| 凪咲 | `zhixiao_doa` | doa | **凪咲** ⚠名字塌了(==船名) 同船重名(2) |
-| 凪咲 | `zhixiao_doa_wjz` | doa·wjz | **凪咲** ⚠名字塌了(==船名) 同船重名(2) |
+| 凪咲 | `zhixiao_doa` | doa | **凪咲** ⚠名字塌了(==船名) |
+| 凪咲 | `zhixiao_doa_wjz` | doa·wjz | **凪咲** ⚠名字塌了(==船名) |
 | 重剑 | `zhongjian_2` | 皮肤2 | **角落的小小骑士** |
 | 重剑 | `zhongjian_2_n` | 皮肤2·无背景版 | **角落的小小骑士·无背景版** |
 | 追风 | `zhuifeng_2` | 皮肤2 | **纸砚墨梅** |
