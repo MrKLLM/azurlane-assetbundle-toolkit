@@ -6101,6 +6101,34 @@ gain 均 ≤1.02x，几乎无视觉变化，且逐一核对 T 层都是特效不
 `scripts/export_assets.py`（Raw 的写方）、`scripts/organize.py`（Raw 的唯一读者，已写未跑）；
 `PROJECT_STATUS.md` §1 / §2.3 / §2.4 / §2.7 / 待办 5、8 就地更新；§80 那条"备份在 pipeline_20261001_2248"已就地订正（见上）。**本轮删除动作**：`Output/_OLD_bak/pipeline_20261001_2248/`（空目录）、`Output/_OLD_bak/darkfix_20261004/`（单文件，删前复核 md5 与线上一致）、源包 `dorm3d`+`island`+`char`+`ui`（除 `commonui_atlas`）21,286 个 / 7.53 GB。
 
+### 5. 2026-10-07 执行这条悬空项时改判两次：**「内容级唯一」不等于「有价值」**
+
+本条第 1 节留的处置是"要么补完 `organize.py`、要么承认它没用"。真去执行时定性翻了两次，过程本身就是判据：
+
+1. **第一版结论错在拿目录名当证据**：说"Raw 里非背景的 `live2d/metapainting/paintingface/shoppainting/paintings` 是 v1 残留、已被 v2 取代"。按文件名比对立刻否掉——`metapainting` 26 件、`shoppainting` 24 件在生产区**一个同名都没有**。
+2. **第二版结论错在把 md5 唯一当缺失**：改用内容级比对（先建生产区 size→paths 索引，只 stat 不读；同尺寸才 md5 实证，忽略文件名），得到"只有 `live2d` 7 张是真重复，其余 ~47 MB 内容级唯一"。看着像"背景之外还有一批漏掉的立绘"。**这一步仍然不够**——唯一性只回答"盘上还有没有第二份"，不回答"这份是不是产物"。
+3. **决定性证据是像素尺寸 + 类目语义**（这一步之前两轮都跳过了）：
+
+   | Raw 里的"唯一"文件 | 实测尺寸 | v2 同皮肤尺寸 | 判定 |
+   |---|---|---|---|
+   | `metapainting/970201.png` 等 14 张 | **2048×620 ~ 2048×964** | 立绘 ≈3600×3400 | META 关卡用的**横条**，不是立绘 |
+   | `shoppainting/aila_pt.png` 等 16 张 | **1024×580 / 904×698 / 1010×418** | 同上 | 商店**预览小图**（`_pt`/`_shop` 后缀） |
+   | `paintings/jinluhao_hx.png` | 2048×1266 | 同名 **3894×3473** | v1 **截断版**，v2 是还原后的完整版 |
+   | `paintings/MissD_shadow.png` | 1974×1303 | — | shadow 层，v2 已修好且不单独出图（§48/§52） |
+   | `paintingface/0..21.png` | 504×388 | 13,140 张 `<舰>_<皮肤>_<n>.png` | 数字索引名，18/26 与线上逐字节相同 |
+
+   ⇒ 这批是**低分辨率附属件**，画廊与管线都不消费；`_pt` 与 `97xxxx` 在 `ship_meta.json`(4,507 皮肤) 与 `Paintings_v2` 里**零收录**，所以准确说法不是"v2 已取代"，而是"**v2 有意不收这一类**"。
+4. **可再生性单独核实**（决定"删了能不能回来"）：五个类目的源包都在盘上（`live2d` 269 / `paintingface` 2,252 / `metapainting` 24 / `shoppainting` 34 / `paintings` 5），`export_assets.py` 可离线重导，不依赖设备。⚠️ 但 png 数 < 源包数（`metapainting` 14 图 / 24 包、`shoppainting` 16 图 / 34 包）⇒ **重导不等于逐件复原**，清单必须自己留：`.diag/cleanup/raw_v1_removed_20261007.json`（87 件逐份 name/bytes/md5/px）。
+5. **执行**：删 `Output/Raw/{live2d,metapainting,paintingface,shoppainting,paintings}` = **87 件 / 80.1 MB**。删前用 `os.path.commonpath` 做路径护栏——它在 Windows 下返回**反斜杠**形式，与正斜杠拼的根目录字符串 `!=`，于是**首批删除整体 abort（0 文件受损）**；这条坑与本文档多处记的 Windows 路径归一问题同源，护栏要 `os.path.normpath` 后再比。删后 Raw = 9 个背景目录 / **1,897 png**，与本节第 1 段"背景家族 1,897 张"的既有口径逐位吻合（顺带证删净了、没误伤背景）。
+6. **`organize.py` 判不补**（不是没跑完，是前提已经坏）：`organize_paintings` 找 `Raw/painting`（单数，现为 `paintings`）→ 立绘整段 no-op；`organize_backgrounds` 10 个背景类目只认 5 个，`backyardbg/newshipbg/worldhelpbg/lotterybg` 与 `Raw/{paintings,metapainting,shoppainting,paintingface}`（后四者在 `organize_others` 的 `processed` 名单里）会**静默丢弃**；`organize_live2d` 复制**全部扩展名**且不问落点，会把 7 张裸 `texture_0N.png` 塞进生产目录 `Output/Live2D/`（现 271 个模型目录）。⇒ 判据：**"补完一个旧脚本"之前先跑一次 dry 比对它的目录前提**，前提烂掉的脚本补完只会产出第二份错误副本。
+7. **背景侧真实缺口重定义**：不是"没导出"（1,302 张与源包 1:1 已导出、场景语义名就在文件名里），也**不需要"还原"**（1 包 1 张 Texture2D 直出，无多层可拼，与立绘的 v2 合成不同）。缺的是 ① 场景中文名映射 ② 画廊背景页。顺带查出 **2 个源包从未出图**：`bg_worldcruise_14` / `bg_worldcruise_14_tip`（`bg_port_ny_future` vs `bg_port_NY_future` 是 NTFS 大小写假差异，不是缺失）。
+
+**新增的判据（可迁移）**：删"看起来是旧副本"的资产层，要连问三层且顺序不能倒 —— **① 内容级唯一性**（size 索引 → 同尺寸才 md5，忽略文件名，跨全部生产目录）；**② 唯一的那些是不是产物**（量像素尺寸 / 与同名 v2 文件比尺寸 / 在权威皮肤表里有没有收录）；**③ 可再生性**（源包在不在盘上、重导能否逐件复原）。只做 ① 会把附属件当缺失，只做 ①+② 会漏"删了回不来"。
+
+**已排除的假设（追加）**：⑥ "`metapainting`/`shoppainting` 是 v2 漏掉的立绘，删了就没背景之外的图了" —— 尺寸 2048×6xx 与 ~1000×500 证明是 META 横条与商店预览小图，且 `ship_meta` 零收录；⑦ "内容级唯一 ⇒ 是缺失的产物" —— 唯一性只证"没有第二份"，不证"这份是终态"。
+
+**涉及文件（本追加）**：`Output/Raw/`（87 件删除，回收 80.1 MB）、`.diag/cleanup/raw_v1_removed_20261007.json`（删除清单 + 逐件 md5/px）、`PROJECT_STATUS.md` §2.3 / §2.8 / 待办 8 / 头部低优先行就地更新。
+
 相关：§46（CG 备份瘦身先例）、§78 / WF-15 第 9 步（台账与备份换入）、§80（纯新增的空备份）、§110（本轮查出缺口的换入）、WF-28。
 
 ---
@@ -6290,6 +6318,10 @@ ffmpeg 重新封装的 wav 头（chunk 顺序与长度）与源不同，样本�
 新增的是 `paintings_v2_alpha_canvas_20261006/`（16.1 GB，对应已提交的 4496 张重渲换前备份），
 `.diag/paintings_rerun_20261006/` 另有 16.5 GB。这些**不是本轮产物、一行没碰**；
 但它让 §111 第 2 节"备份目录约 3 GB"的规模结论过期——等那批跑完要重量一次再谈清理。
+✅ **已结案（2026-10-07 重量）**：那批的换入备份与中转目录都已被其归属会话删除，
+`Output/_OLD_bak/` 实测回到 **2.99 GB** ⇒ §111 的"约 3 GB"结论重新成立。
+`.diag/` 总量另测得 **24.94 GB**（分散在 `fix_gate` 3.42 / `pipeline` 1.09 / `l2d_new` 1.05 等多个
+历史批次目录，无单一巨项），需要单独一轮按批次清理——不在本节范围。
 
 **涉及文件（第三轮）**：`scripts/transcode_bgm.py`（`--codec` / `--roundtrip` / `--verify-only` /
 `--src` / 台账分 codec / 0 源文件防呆）、`gallery_src/_gallery_server.py`（`extensions_map` 钉 MIME）、
@@ -6413,8 +6445,9 @@ CAB→bundle / 世界框 / 绘制序），`parts.json` 加一类 `image` 层，v
 **最终验收**：4496/4496 重渲成功、失败 0、错误日志未生成；换入四道检查全绿
 （nlink 全为 1 / 4496 份备份 md5 全等 / 换入后与渲染 md5 全等 / **全目录快照清单外被动 0 个**）；
 缩略图重建 ok=4498 err=0；`index.json` 重建后**逐字节相同**、`gallery_index_diff_check` PASS；
-服务器实测 `/Paintings_v2/beier.png` 200 / 3,855,276 字节。备份
-`Output/_OLD_bak/paintings_v2_alpha_canvas_20261006/`（4496 份，15.74 GiB）。
+服务器实测 `/Paintings_v2/beier.png` 200 / 3,855,276 字节。当时的换入备份
+`Output/_OLD_bak/paintings_v2_alpha_canvas_20261006/`（4496 份，15.74 GiB）**已于 2026-10-07
+删除**——条件按下面的配方走齐了才删（用户在画廊实见、确认不回滚）。
 
 **这份备份是"可再生"的，不是不可复原数据**（与 `inputs/azdata` 那一类要分清）——
 旧管线在 git 里，实测 5/5 张（含最极端的 `jinluhao_2`）用旧正本重渲与备份 **md5 全等**：
@@ -6429,6 +6462,13 @@ git show 12eb0db^:scripts/compose_paintings_v2.py > .diag/oldpipe/compose_painti
 所以"删备份"要发生在**用户在画廊里看过、确认不回滚之后**，而不是换入当天。
 本轮另删掉 `.diag/paintings_rerun_20261006/`（16.11 GiB 渲染中转目录）——
 删前抽验 89 张（含 6 张症状主角）与正式区 md5 全等，它已是纯重复。
+
+**换入备份也已于 2026-10-07 删除**（用户在画廊实见后授权）。删前五项核对全过：
+目录条目 4496 且全为 `.png`（非 png 0，即没顺手带走别人的东西）/ 文件名集合 == 渲染清单 +`.png` /
+正式区抽验 15 张无缺失无空文件 / 备份与正式区已无硬链共享（nlink 全 1）/ 中转目录已先行删除。
+删后 `Output/_OLD_bak/` 回到 **2.99 GB**（与 §111 的量一致），D 盘可用 265.15 GB。
+⇒ 这批立绘此后**唯一的回滚路径就是上面的 `git show 12eb0db^` 重渲配方**（≈2.2 小时机器时间，
+且依赖 Pillow / UnityPy 版本不变）。
 
 **涉及文件**：`scripts/compose_paintings_v2.py`（新增 `canvas_frame()` / `over()` /
 `LAST_CANVAS`，`render()` 拆出 `place()`，`FACE_MAD_MAX` 注释记否证）、
