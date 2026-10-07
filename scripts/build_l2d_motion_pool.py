@@ -122,12 +122,72 @@ def pool_for_model(key):
     return pool, note
 
 
+def clip_weight(key, group, cap=40.0):
+    """返回 (运动量, 时长)。运动量 = 每个被非常值驱动的参数的 |max-min| 之和 / 时长。
+    ⚠️ 单个参数的位移要**封顶**（默认 40）：moc3 合法量程多在 [-30,30]/[0,10]/[0,1]，
+       而曲线写 0→2000 的那种会被 Cubism 钳位（实测 `Paramfh` 恒读 10），不封顶就会让
+       一条根本不动的斜坡把权重顶上天。这个量只用来**排轮播概率**，不是保真判据。
+    ⚠️ 权重取**每秒位移**（这条 clip 有多活），但前端必须配一个**最短驻留**：gezi_2 池里
+       idle13 只有 3.72 秒、idle5 3.35 秒，按每秒算它们 748/734 霸榜，不压住就是每 3 秒一切，
+       比不切还像抽搐。总位移（idle 2650 / home 3440 / main_1 4600）实测会把画面压回
+       均值 32.6‰，追不上游戏录像的 72.9‰ —— 长慢镜并不"活"，只是"长"。
+       时长是给前端的：轮播要"在当前 clip 还在循环时提前淡入下一条"，否则旧 clip 先淡出
+       塌回基准姿态、新 clip 才淡入 —— 实测那一帧是 8‰ 骤停接 201‰ 暴跳，观感就是抽搐。"""
+    f = os.path.join(L2D, key, "motion", "%s.motion3.json" % group)
+    if not os.path.exists(f):
+        return 0.0, 0.0
+    j = json.load(open(f, encoding="utf-8"))
+    dur = float((j.get("Meta", {}) or {}).get("Duration") or 0.0)
+    tot = 0.0
+    for c in j.get("Curves", []):
+        if c.get("Target") != "Parameter":
+            continue
+        s = c.get("Segments") or []
+        vals = [s[1]] if len(s) > 1 else []
+        i = 2
+        while i < len(s):
+            if s[i] == 0:
+                vals.append(s[i + 2]); i += 3
+            elif s[i] == 1:
+                vals.append(s[i + 6]); i += 7
+            else:
+                break
+        if len(vals) < 2:
+            continue
+        d = max(vals) - min(vals)
+        if d > 1e-6:
+            tot += min(d, cap)
+    w = round(tot / dur, 1) if dur > 0 else 0.0
+    return w, round(dur, 2)
+
+
+def reweight(path):
+    """只重算权重：读旧的 {key:[组名]} 或 {key:{组:权重}}，写 {key:{组:权重}}。
+    不碰成员判定（那要扫 269 个源包，5 分钟；权重只读导出产物，几秒）。"""
+    old = json.load(open(path, encoding="utf-8"))
+    out = {}
+    for k, v in old.items():
+        groups = v if isinstance(v, list) else list(v.keys())
+        out[k] = {g: list(clip_weight(k, g)) for g in groups}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, sort_keys=True)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keys", default="", help="逗号分隔，默认扫全部 Output/Live2D 下的模型")
     ap.add_argument("--out", default=OUT)
     ap.add_argument("--print", dest="do_print", action="store_true")
+    ap.add_argument("--reweight", default="",
+                    help="只给既有的池文件补权重（不重扫源包），传池 json 路径")
     a = ap.parse_args()
+
+    if a.reweight:
+        out = reweight(a.reweight)
+        sample = out.get("gezi_2") or next(iter(out.values()))
+        print("已就地补权重：%d 个模型；样例 gezi_2 = %s" % (len(out), json.dumps(sample, ensure_ascii=False)))
+        return 0
 
     keys = [k for k in a.keys.split(",") if k] if a.keys else sorted(
         d for d in os.listdir(L2D)
@@ -139,7 +199,7 @@ def main():
         pool, note = pool_for_model(k)
         stats[note.split("；")[0].split(" ")[0]] = stats.get(note.split("；")[0].split(" ")[0], 0) + 1
         if pool:
-            out[k] = pool
+            out[k] = {g: list(clip_weight(k, g)) for g in pool}
         if a.do_print:
             print("%-22s %-6s %s" % (k, len(pool or []), note))
         if i % 25 == 0:

@@ -331,6 +331,21 @@ def main():
             # 影响（斜率过零点的参数会在某一侧漏判），所以只断言"关掉后仍该动"这一侧。
             if len(ir.get("moved") or []) < len(idle_ids) // 2:
                 print("  [FAIL] 关掉环境层后 idle 参数几乎不动 ⇒ 此前是环境层在替 pose 层驱动"); ok = False
+            # ⑤ 环境层**不许改变 pose 轨迹**：同一批参数开/关逐点比，最大偏离必须≈0。
+            #    上一版没有这条，环境层逐帧硬写 52 个与 idle 重叠的参数 ⇒ 换 clip 瞬间被拽到
+            #    越量程极值，用户看到的"抽搐 + 僵硬"就是它。
+            sa, sb = ip.get("series") or [], ir.get("series") or []
+            worst = 0.0; worst_id = ""
+            for i, idn in enumerate(idle_ids):
+                if i >= len(sa) or i >= len(sb):
+                    continue
+                for x, y in zip(sa[i], sb[i]):
+                    if isinstance(x, (int, float)) and isinstance(y, (int, float)) \
+                            and abs(x - y) > worst:
+                        worst, worst_id = abs(x - y), idn
+            print("  ⑤ pose 轨迹不被改动：开/关逐点最大偏离 %.4f（%s，要求 <0.01）" % (worst, worst_id or "-"))
+            if worst >= 0.01:
+                print("  [FAIL] 环境层在抢 pose 参数"); ok = False
         for tag, flag in (("on", False), ("off", True)):
             sample(ids[:1], flag)
             r = cmd("Page.captureScreenshot", {"format": "png"})

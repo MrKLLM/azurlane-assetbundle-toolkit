@@ -287,8 +287,15 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
      （整层覆盖会把 15 个模型里 idle 正在动的参数钉死，`mingji_2` 达 70 个）。验收两条链：
      `l2d_ambient_probe` 开 7/10 动 / `__ambOff` 后 **0**/10 / 零回退 40-38，
      `l2d_rotation_probe` gezi_2 与 antu_2 各 4~5 次换组 —— 均 **PASS**；重建池
-     `py -3 scripts/build_l2d_motion_pool.py`（产物不入库）。⏳ 挑条概率与间隔**无权威依据**
-     （游戏侧在 C#/Lua），现为等概率+播完即换，`main_*/home` 只占 4/20 ⇒ 要不要加权待你拍板。
+     `py -3 scripts/build_l2d_motion_pool.py`（产物不入库）。
+     ⏳→✅ **用户实见"抽搐 + 僵硬"后第二轮已修（同日，§117 第二轮）**：抽搐是**交接塌帧**
+     （等 motionFinish 才起下一条 ⇒ 旧 clip 淡出退回基准，8‰ 骤停紧接 201‰ 暴跳），改成
+     "当前 clip 保持循环 + 提前 1.2 秒交叉淡入下一条"并加 8 秒最短驻留；僵硬是我把"环境层别抢
+     pose 参数"做过头，源包那层本是 Override 权重 1.0，实测 35.6‰ → 45.5‰ 翻回覆盖。
+     轮播权重改用**裁过 moc3 量程的可见位移**并在页面里算（"每秒原始位移"是代理指标，
+     会被 0→2000 那种钳位假斜坡顶榜）。量法 `l2d_gallery_capture.py` + `l2d_motion_energy.py`
+     与游戏录像走同一把尺子。**仍差一截**：游戏角色区 125.8‰ vs 我们 45.5‰，
+     且调度器的挑条概率/间隔无权威依据（在 C#/Lua 里）。
 
 34. ⏳ **Spine 提取丢了 `MeshImage` 背景层 —— 14 个皮肤的 Spine 场景与 CG 缺背景（2026-10-06 查出，§114）**：
      `extract_spine_v2.py` 的 `skel_layers()` 只收 `SkeletonGraphic`，而游戏运行时这张 Spine 场景
