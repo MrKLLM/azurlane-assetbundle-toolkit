@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
 description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.6.1
+version: 1.7.0
 ---
 
 # Live2D 网页运行时集成
@@ -420,3 +420,32 @@ after **53（与 before 相等）**，且位移 >0.3 的判定区数 = **0**。
    造假。分开它要用**两条互相独立的事实**：表里那一行的主键（→ 包号）逐号去源包目录与已解码目录各查一次。
    ⚠️ 两个代理指标都不许当证据：`voice_actor=-1` 在剧情/变体实体上是哨兵值（不等于无 CV）；"整个号段都不在"是
    按前缀归纳，同一个大段里往往有别的号是下发的 ⇒ 只能**逐包号**判。
+
+## 10. 播放策略层：常驻环境层叠加 + 主界面轮播池（2026-10-07 补）
+
+"某部件在游戏里动、在这里不动"多数**不是数据问题，是播什么的问题**。两条通用做法：
+
+- **环境层叠加**：源包 AnimatorController 里 `effect` 常是**独立一层的默认状态**（权重 1.0、
+  Override、Loop），与 pose 层并行常驻。Web 端只播一条 clip 就会把它整个丢掉。做法是在
+  `internalModel.on('afterMotionUpdate')` 里按墙钟 `%duration` 自己求值写参数——
+  **不要进队列管理器**（进了队列，播一次别的动作就把环境层挤到末位，回落后又被盖住）。
+  覆盖范围建议只取"非常值曲线"：整层覆盖会把基础动作正在动的参数钉死（实测 15/224 个模型受影响）。
+- **轮播池**：池成员按控制器自己的分组抽（子状态机名如 `idle_list` + 顶层 `idle`/`home`/`main_*`），
+  不要按名字正则猜。轮播用 `mm.on('motionFinish')` 挑下一条**真实组名**。
+
+**四个必踩的坑（每个都烧一轮取证）**：
+1. **别造合成动作组**：只往 `motionManager.definitions` 里塞一个假组，`loadMotion` 会**永不
+   settle**（URL 解析要过 settings），结果是 `reservedGroup` 挂着、`currentGroup` 恒 undefined，
+   一条都不播。
+2. **装池之前先 `groups.idle=null`**：否则库的自动回落会抢先把带 Loop 的单条 idle 起播，
+   那条永不收尾 ⇒ 之后所有请求被 `reservePriority >= priority` 判成重复预约。装不上再恢复。
+3. **`motionFinish` 要延一拍再发请求**：它是在 `state.complete()` **之前** emit 的，当场发 IDLE
+   会被 `state.start()` 以 "another motion is playing" 拒掉。`setTimeout(...,0)` 即可。
+4. **关掉 Loop**：轮播期间基础动作若带 Loop 就永不 `motionFinish`。注意预加载好的 motion
+   对象要回头 `setIsLoop(false)`，只在 createMotion 里判条件来不及。
+
+**量程这一层不在 motion 文件里**：Cubism 会把参数钳进 moc3 声明的 [min,max]，所以
+"曲线 0→2000"可能对应"部件纹丝不动"（实测某参数量程 [0,10]，起播 0.45 秒即饱和）。
+判"动没动"必须读 `getParameterValueByIndex` 并配 `getParameterMinimumValue/MaximumValue`
+（这个 build 只有 index 版，`…ById` 版不存在），而且**采样窗要盖过整条 clip**——有的部件
+要到第 8 秒才动，采 3 秒会得到假阴性。

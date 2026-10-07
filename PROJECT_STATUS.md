@@ -268,15 +268,19 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
        "游戏在这里要不要换掉底图"——`yunlong_3`(该换，face 槽是 1924×2048 全身正面图、底图是背面)
        与 `xinzexi_h`(不该换，叠了切出矩形硬边) MAD 都是 32~34，这个量在原理上分不开，
        **抬阈值已否证**。要真修得去找 face 槽激活态的权威字段（`sharecfg` 侧？）。
-     ③ **`gezi_2` Live2D 花瓣固定不动 —— 立绘侧已排除，Live2D 侧未结案（§114）**。
-       排除依据：两张 4096² 贴图与源 `Texture2D` 上下翻转后 **0 像素差**；
-       `l2d_motion_audit.py gezi_2 idle` 判 `ok`（源绑定 189 / 磁盘 681 = 189 真曲线 + 钉住的填充曲线，
-       `unresolved=0`、时长 22.0 与源一致）；立绘三层全 active、零层被过滤。
-       ⚠ 我上一版写的"Part 曲线 0 条"是**探针读错字段名**（真名 `PartOpacity`，idle 实有 150 条），
-       且两次段值解析互相矛盾 ⇒ 现有测量不足以定案。**头号嫌疑 = `physics3.json` 的
-       Inputs/Outputs 我读出来是空**（8 个 setting 组在，绑定读不出）——飘落类通常走物理不走曲线。
-       下轮从这条接：先把 physics3 的键路径读对（拿一个已知会动的模型当阳性对照），
-       再用自测过的解码器判"某参数值域是否真的不变"。
+     ③ ~~`gezi_2` Live2D 花瓣固定不动~~ **已结案（2026-10-07，§117 / WF-31）**：不是丢曲线，是
+       **画廊只播 `idle` 一条 clip**（`idle` 里 14 个花瓣参数 0 个会动；`main_1` 里 10 个会动，
+       要到第 8.12 秒才开始）。上一轮两条嫌疑都被证据收回，见 §117 开头。
+
+35. ✅ **Live2D 播放策略补齐：`effect` 常驻环境层 + 主界面轮播池（2026-10-07，§117 / WF-31）**：
+     源包 AnimatorController 实测 `effect` 是**独立一层的默认状态**（权重 1.0、Override、Loop），
+     全库 **224/224** 带该组的模型皆如此；轮播池按控制器自己的分组抽（`idle_list` +
+     `idle`/`home`/`main_<n>`），269/269 都有、最小 5 条。前端按 P2 只叠**非常值**曲线
+     （整层覆盖会把 15 个模型里 idle 正在动的参数钉死，`mingji_2` 达 70 个）。验收两条链：
+     `l2d_ambient_probe` 开 7/10 动 / `__ambOff` 后 **0**/10 / 零回退 40-38，
+     `l2d_rotation_probe` gezi_2 与 antu_2 各 4~5 次换组 —— 均 **PASS**；重建池
+     `py -3 scripts/build_l2d_motion_pool.py`（产物不入库）。⏳ 挑条概率与间隔**无权威依据**
+     （游戏侧在 C#/Lua），现为等概率+播完即换，`main_*/home` 只占 4/20 ⇒ 要不要加权待你拍板。
 
 34. ⏳ **Spine 提取丢了 `MeshImage` 背景层 —— 14 个皮肤的 Spine 场景与 CG 缺背景（2026-10-06 查出，§114）**：
      `extract_spine_v2.py` 的 `skel_layers()` 只收 `SkeletonGraphic`，而游戏运行时这张 Spine 场景

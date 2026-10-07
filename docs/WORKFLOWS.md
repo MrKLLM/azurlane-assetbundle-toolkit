@@ -2833,3 +2833,42 @@ PSD/SVG 图层、前端多层 canvas），出现「某个部件整块看不见 /
 `scripts/diag/bg_page_probe.py`、`scripts/deploy_gallery.py`（`FILES`）、`gallery_src/index.html`（入口）。
 相关：**§115**（本轮取证与否证全文）、WF-15（承重白名单与换入闸门）、WF-16（画廊前端回归六件套）、
 §111（`Output/Raw` 定性为纯背景层）。
+### WF-31: 判「Live2D 某个部件为什么不动」——三层归因（源包控制器 → 参数轨迹+量程 → 运行时开关对照）
+
+适用于"游戏里会动、我们这里冻着"这一类报告（花瓣、飘带、光量、尾巴）。**不要从参数名猜语义。**
+
+**第 1 层｜源包 AnimatorController 才是"该播什么"的权威**（`scripts/diag/l2d_effect_layer_scan.py`
+的读法）：层数、每层 `m_DefaultWeight` 与 `m_LayerBlendingMode`（0=Override）、每层状态机
+`m_DefaultState` 解析到哪个 clip（`StateConstant` → BlendTree 根 `m_ClipID` → `m_AnimationClips`），
+以及状态名走 `m_FullPathID` ↔ `m_TOS` 实例号。UnityPy 的字段都包在 `OffsetPtr` 里，统一 `.data` 解包。
+判据：**只有"某层默认状态 = 该 clip 且 Loop"才允许说"游戏里它常驻播"**；clip 名字像不算证据。
+子状态机的名字（`idle_list` / `touch_idle_list` / `touch_drag` / `ex`）就是游戏自己的分组，
+轮播池按它抽，不要自己按 `idle\d+` 正则猜。
+
+**第 2 层｜参数轨迹 + 合法量程**（`scripts/diag/l2d_motion_param_probe.py`）：在真实运行时逐条 clip
+采样 `getParameterValueByIndex`，同时用 `getParameterIndex` / `getParameterMinimumValue` /
+`getParameterMaximumValue` 把量程一起打出来。三条硬规矩：
+- **采样窗必须盖过整条 clip**（gezi_1 的 `hxhb` 到第 8.12 秒才动，采 3 秒会得假阴性）；
+- **`motion3.json` 的段格式**：首点 `(t0,v0)`，其后每段 `[type,...]`，`type=0` 线性 3 值 `[0,t,v]`、
+  `type=1` 贝塞尔 7 值 `[1,c1x,c1y,c2x,c2y,t,v]`，**终点在最后**。以正本 `scripts/extract_motions.py`
+  第 263-268 行的自述为准，别照"每 3 个数取第 3 个"这类想当然的步长——同一个错本项目已犯三次；
+- **越出 moc3 量程的曲线会被 Cubism 钳死**（`Paramfh` 0→2000 撞 [0,10]）。所以"曲线幅度大"
+  ≠"部件位移大"，量程只能问运行时。
+
+**第 3 层｜改播放策略要有开关对照**（`scripts/diag/l2d_ambient_probe.py`）：判据落在
+**"只有新机制会驱动、原 clip 从不动"的差集**上——全集做阴性对照必然假红灯（gezi_2 环境层 62 个
+参数里 52 个 idle 也在动）。开关用 `window.__ambOff`（前端留钩子、UI 不暴露），
+断言 = 开时差集在动 **且** 关时差集一动不动 **且** idle 自驱动的参数两侧都在动。
+
+**踩坑记录**：① 造合成动作组（`mm.definitions['__pool']`）会让 `loadMotion` 永不 settle，
+`reservedGroup` 挂着、`currentGroup` 恒 undefined——只用真实组名；② 装池前不掐 `groups.idle`，
+库会先把带 Loop 的单条 idle 起播，之后所有请求被 `reservePriority >= priority` 挡成重复预约；
+③ `motionFinish` 在 `state.complete()` **之前** emit，当场发 IDLE 请求必被拒，要 `setTimeout(0)`；
+④ 该 build 的 manager 上只有复数 `stopAllMotions()`，单数 `stopAllMotion` 是队列管理器的；
+⑤ 无头 Chrome 里 rAF 被节流，采样循环必须手动 `PIXI.Ticker.shared.tick(now)` + `app.render()`，
+否则参数轨迹与帧哈希双双假阴性；⑥ 页面就绪判据不能只看 `typeof GALLERY`（它来自 index.js，
+早于内联脚本），要等 `typeof openShip==='function'`，否则同一份代码一次成一次败。
+
+**涉及文件**：`gallery_src/index.html`（`afterMotionUpdate` 环境层叠加、`motionFinish` 轮播、
+`#l2Pool` 计数）、`scripts/build_l2d_motion_pool.py`、上面三个 `scripts/diag/l2d_*` 探针。
+真实结论与收回的两条错判见 **§117**。

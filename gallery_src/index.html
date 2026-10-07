@@ -1305,12 +1305,54 @@ async function renderLive2D(s, sk){
     const curveId=(c)=>{ const i=c&&c.Id; return typeof i==='string'? i : (i&&i.string)||null; };
     const origCreateMotion=mm.createMotion.bind(mm);
     mm.createMotion=(json,group,def)=>{ const m=origCreateMotion(json,group,def);
-      if(group===idleGroup&&json&&json.Meta&&json.Meta.Loop&&m.setIsLoop){
+      /* 打 Meta.Loop 只给"不轮播"的情况：轮播开着时 idle 必须**播完就结束**，
+         否则 22 秒一轮永不收尾，motionFinish 不触发，池里其它 clip 永远轮不到。 */
+      if(group===idleGroup&&!poolOn&&json&&json.Meta&&json.Meta.Loop&&m.setIsLoop){
         m.setIsLoop(true); if(m.setIsLoopFadeIn) m.setIsLoopFadeIn(false); }
       try{ if(json&&json.Curves){ const s=paramSets[group]||(paramSets[group]=new Set());
-          for(const c of json.Curves) if(c.Target==='Parameter'){ const id=curveId(c); if(id) s.add(id); } } }catch(e){}
+          for(const c of json.Curves) if(c.Target==='Parameter'){ const id=curveId(c); if(id){ s.add(id);
+              if(poolGroups.includes(group)) poolUnion.add(id); } } } }catch(e){}
       return m; };
     mm.groups.idle=idleGroup;
+    /* ---------- 主界面轮播池（治"永远停在 idle"）----------
+       画廊此前把 Live2D 钉在 `idle` 一条 clip 上循环。游戏侧不是这样：源包 AnimatorController
+       里有一条子状态机就叫 `idle_list`，成员是 idle1..N + 顶层的 `home`/`main_1..3`。
+       gezi_2 实测（scripts/diag/l2d_motion_param_probe.py，采样窗必须盖过整条 clip）：
+         idle   22 秒播满 → 14 个花瓣参数 **0 个**会动
+         main_1 → **10 个**会动，而且要等到第 8.12 秒才开始
+         home   → 会动
+       ⇒ 用户看到的"花瓣一直冻着"不是导出丢曲线，是**只播一条 clip**。
+       池清单由 `scripts/build_l2d_motion_pool.py` 从控制器状态机的命名里抽（269/269 都有，
+       最小 5 条），产在 `Output/Live2D/motion_pool.json`，只保留 model3.json 里真有的组。
+       做法是**造一个合成组当 idle 回落组**：库自己的 `shouldRequestIdleMotion() →
+       startRandomMotion(groups.idle)` 会在每条 clip 播完后从该组随机挑一条 —— 轮播与回落
+       全交回运行时，前端不挂任何定时器（§21 的教训：定时器与运行时抢 currentGroup，
+       实测 9.1s 播放后冻 9.2s）。 */
+    let poolOn=false, poolGroups=[], poolUnion=new Set();
+    /* 主界面轮播池（治"永远停在 idle"）。源包 AnimatorController 里有一条子状态机就叫
+       `idle_list`，成员是 idle1..N，再并上顶层的 `home`/`main_1..3` —— 游戏侧是**多条 clip 轮播**的。
+       gezi_2 实测：单播 idle 22 秒，14 个花瓣参数 0 个会动；播 main_1 有 10 个会动（且要到第
+       8.12 秒才开始）。池清单由 scripts/build_l2d_motion_pool.py 从控制器命名里抽，产在
+       L2D/motion_pool.json（269/269 都有，最小 5 条）。
+       ⚠️ 不要造合成组：`mm.definitions['__pool']` 喂进去后 `startMotion` 只留下
+       reservedGroup='__pool'，`loadMotion` 对这个不在 settings 里的组**永不 settle**，
+       currentGroup 恒 undefined（实测卡满 60 秒一条都不播）。只用真实组名轮播。
+       ⚠️ 轮播期间必须关掉 ① 的 Loop：带 Loop 的 idle 永不收尾，motionFinish 永远不触发。
+       ⚠️ 装池之前先把库的自动回落掐掉（groups.idle=null），否则库会在 fetch 回来前
+       就把单条 idle 起播，之后所有请求都被 `reservePriority>=priority` 挡成重复预约。 */
+    mm.groups.idle=null;
+    const poolReady=(async()=>{ let j=null;
+      try{ const r=await fetch(P+'Live2D/motion_pool.json'); if(!r.ok) return; j=await r.json(); }
+      catch(e){ return; }
+      const members=((j||{})[sk.key]||[]).filter(g=>(mm.definitions||{})[g]);
+      if(members.length<2) return;                    // 只有一条 ⇒ 与不轮播等价
+      poolGroups=members; poolOn=true;
+      /* 已经预加载好的 idle 带着 Loop 标记（① 在装池之前就打了），不抹掉它就永不收尾。 */
+      for(const g of poolGroups) for(const m0 of (mm.motionGroups[g]||[]))
+        if(m0&&m0.setIsLoop){ m0.setIsLoop(false); if(m0.setIsLoopFadeIn) m0.setIsLoopFadeIn(false); }
+      const pill=document.getElementById('l2Pool');
+      if(pill) pill.textContent='轮播 '+members.length+' 条';
+    })().finally(()=>{ if(!poolOn) mm.groups.idle=idleGroup; });   // 装不上就退回原行为，别留空组
     mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }catch(e){}
       return mm.queueManager.startMotion(m,false,performance.now()); };
     /* idle 若在挂上 ① 之前就被预加载了（库的 motionPreload 默认就是 'idle'，createMotion 补丁
@@ -1339,6 +1381,18 @@ async function renderLive2D(s, sk){
       try{ playVoice(g);
         mm.startMotion(g,0,MP.FORCE);
         if(g!==idleGroup) played.add(g); return true; }catch(e){ return false; } };
+    /* 一条 clip 收尾 ⇒ 从池里随机挑下一条（排除刚播的那条）。
+       用 IDLE 优先级：用户点出来的动作一律 FORCE，永远能盖掉轮播；轮播自己不打自己。
+       ⚠️ 必须延一拍：`motionFinish` 是在 update() 里 `state.complete()` **之前** emit 的，
+         当场请求会撞上 `state.start()` 的 "Cannot start idle motion because another motion
+         is playing"（currentPriority 还是 3），实测 currentGroup 从此恒为 None。 */
+    mm.on('motionFinish',()=>{ if(!poolOn||my.cancelled||seq!==_l2seq) return;
+      setTimeout(()=>{ if(!poolOn||my.cancelled||seq!==_l2seq) return;
+        const cur=mm.state&&mm.state.currentGroup;
+        const cand=poolGroups.filter(g=>g!==cur);
+        if(!cand.length) return;
+        try{ mm.startMotion(cand[Math.floor(Math.random()*cand.length)],0,MP.IDLE); }catch(e){}
+      },0); });
     /* ---------- 非 idle 动作的参数残留复位（docs/TROUBLESHOOTING.md §21 末段） ----------
        touch_idle1（安土「午夜的瑰色电梯」）动画 252 条曲线，其中 15 条 idle 从不驱动；clip 播完
        没有任何曲线把它们写回去 → 整体位移停在末帧 → 57 个判定区全部被甩出画布，用户「进去就出不来」。
@@ -1347,14 +1401,18 @@ async function renderLive2D(s, sk){
        两条约束防止误伤：① 只碰播过的 clip 驱动过的参数，物理/眨眼/口型等 clip 无关参数一律不动；
        ② 只在回到 idle（或队列空）时才复位，且先等 REST_DELAY 让上一条 clip 的淡出跑完，再线性渐变过去。 */
     const REST_DELAY=400, REST_MS=700, cm=im.coreModel;
+    const ambIdx=new Set();          // 环境层持有的参数下标，复位时要跳过（见下方「环境层」）
     let rest=null;
     const restTick=()=>{ const cg=mm.state&&mm.state.currentGroup;
       if(cg&&cg!==idleGroup){ rest=null; return; }
-      if(!rest){ const idleS=paramSets[idleGroup]; if(!idleS||!played.size) return;
+      if(!rest){ const idleS=poolUnion.size? poolUnion : paramSets[idleGroup];  // 轮播开着时基线是整个池
+        if(!idleS||!played.size) return;
         const want=new Set(); played.forEach(g=>{ (paramSets[g]||new Set()).forEach(p=>{ if(!idleS.has(p)) want.add(p); }); });
         played.clear();
         const items=[];
-        want.forEach(p=>{ let i=-1; try{ i=cm.getParameterIndex(p); }catch(e){}
+        want.forEach(p=>{ if(ambIdx.size){ let probe=-1; try{ probe=cm.getParameterIndex(p); }catch(e){}
+            if(ambIdx.has(probe)) return; }                          // 用户手动播过 effect 之后也别把它复位掉
+          let i=-1; try{ i=cm.getParameterIndex(p); }catch(e){}
           if(i>=0) try{ items.push([i, cm.getParameterValueByIndex(i), cm.getParameterDefaultValue(i)]); }catch(e){} });
         if(!items.length) return;
         rest={items, t0:performance.now()+REST_DELAY}; return; }
@@ -1363,8 +1421,64 @@ async function renderLive2D(s, sk){
       for(const it of rest.items) try{ cm.setParameterValueByIndex(it[0], it[1]+(it[2]-it[1])*k); }catch(e){}
       if(k>=1) rest=null; };
     app.ticker.add(restTick);
+    /* ---------- 环境层（effect）常驻叠加 ----------
+       源包 AnimatorController 里 `effect` 不是「一条可选动作」，而是**独立一层的默认状态**：
+       层权重 1.0、Override、Loop=true，与 pose 层并行常驻（224/224 个带该组的模型全部如此，
+       判据与普查见 docs/TROUBLESHOOTING.md §115）。画廊此前只播 idle 这一条 clip，于是 gezi_2
+       的花瓣（`Paramfh` 是 0→2000 的 90 秒单向长坡）、光量 GL1~14、波纹全停在初始位。
+       只写 effect 的**非常值 Parameter 曲线**：常量曲线会把 idle 正在动的参数钉死，实测 15 个模型
+       受影响（mingji_2 达 70 个），而 209/224 本来就零冲突 ⇒ 少写常量既不毁那 15 个、也不动这 209 个
+       （与游戏逐字一致的"整层覆盖"是 P1，已按用户裁定放弃）。
+       写在 `afterMotionUpdate`（库在 motionManager.update 之后、coreModel.update 之前 emit），
+       并且**不进队列管理器**：进了队列，播一次 touch_* 就把环境层挤到末位，之后 idle 回落会重新
+       盖住它，花瓣又冻住。`window.__ambOff=true` 是给无头取证用的 A/B 开关，UI 上没有入口。 */
+    const AMB='effect';
+    const motionSegs=(s)=>{   /* motion3.json 段格式（正本 scripts/extract_motions.py 第 263-268 行）：
+        首点 (t0,v0)，其后每段 [type,...]，type=0 线性 3 值 [0,t,v]、type=1 贝塞尔 7 值
+        [1,c1x,c1y,c2x,c2y,t,v]，终点都在**最后**；type 非 0/1 判废，不猜。 */
+      const out=[]; let t0=s[0], v0=s[1], i=2;
+      while(i<s.length){ const ty=s[i];
+        if(ty===0){ if(i+3>s.length) return null;
+          out.push({t0,v0,t1:s[i+1],v1:s[i+2]}); t0=s[i+1]; v0=s[i+2]; i+=3; }
+        else if(ty===1){ if(i+7>s.length) return null;
+          out.push({t0,v0,t1:s[i+5],v1:s[i+6],c1x:s[i+1],c1y:s[i+2],c2x:s[i+3],c2y:s[i+4]});
+          t0=s[i+5]; v0=s[i+6]; i+=7; }
+        else return null; }
+      return out.length? out:null; };
+    const cubic=(a,b,c,d,u)=>{ const m=1-u; return m*m*m*a+3*m*m*u*b+3*m*u*u*c+u*u*u*d; };
+    const segValue=(x,t)=>{ if(t<=x.t0) return x.v0; if(t>=x.t1) return x.v1;
+      if(x.c1x===undefined){ const d=x.t1-x.t0; return d<=0? x.v1 : x.v0+(x.v1-x.v0)*(t-x.t0)/d; }
+      let lo=0, hi=1;                       // AreBeziersRestricted ⇒ 控制点 x 落在段内 ⇒ 单调，二分必收敛
+      for(let k=0;k<26;k++){ const mid=(lo+hi)/2;
+        if(cubic(x.t0,x.c1x,x.c2x,x.t1,mid)<t) lo=mid; else hi=mid; }
+      return cubic(x.v0,x.c1y,x.c2y,x.v1,(lo+hi)/2); };
+    let amb=null, ambDur=0, ambT0=0;
+    (async()=>{ const defs=(mm.definitions||{})[AMB]; if(!defs||!defs.length) return;
+      let j=null;
+      try{ const r=await fetch(P+model+'/'+defs[0].File); if(!r.ok) return; j=await r.json(); }
+      catch(e){ return; }
+      const dur=j&&j.Meta&&+j.Meta.Duration; if(!(dur>0)||!j.Curves) return;
+      const list=[];
+      for(const c of j.Curves){
+        if(c.Target!=='Parameter') continue;
+        const id=curveId(c), s=c.Segments; if(!id||!s||s.length<4) continue;
+        const sg=motionSegs(s); if(!sg) continue;
+        let mn=sg[0].v0, mx=mn;
+        for(const x of sg) for(const v of [x.v0,x.v1]){ if(v<mn)mn=v; if(v>mx)mx=v; }
+        if(mx-mn<=1e-6) continue;                       // 常量曲线一律不写，见上
+        let idx=-1; try{ idx=cm.getParameterIndex(id); }catch(e){}
+        if(idx<0) continue;
+        list.push({idx,sg}); ambIdx.add(idx); }
+      if(!list.length) return;
+      amb=list; ambDur=dur; ambT0=performance.now();
+      im.on('afterMotionUpdate',()=>{ if(!amb||window.__ambOff) return;
+        const t=((performance.now()-ambT0)/1000)%ambDur;
+        for(const c of amb){ const sg=c.sg; let v=sg[0].v0;
+          for(const x of sg){ if(t<=x.t1){ v=segValue(x,t); break; } v=x.v1; }
+          try{ cm.setParameterValueByIndex(c.idx,v); }catch(e){} } });
+    })();
     const bar=document.getElementById('l2bar');
-    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill" id="l2Pool"></span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     const fillSel=()=>{ const cur=sel.value;
       sel.innerHTML=groups.map(g=>`<option value="${g}">${g}${voice[g]?'（语音）':''}</option>`).join('');
@@ -1574,14 +1688,18 @@ async function renderLive2D(s, sk){
       wrap.removeEventListener('pointercancel',onCancel);
       window.removeEventListener('pointercancel',onCancel); window.removeEventListener('blur',onCancel);
       window.removeEventListener('pointermove',onMove); window.removeEventListener('pointerup',onUp); };
-    const def=idleGroup;
+    const def=idleGroup;               /* 下拉仍显示 idle：合成组不列进选项 */
     if(sel.value!==def) sel.value=def||'';
     /* 语音表回填之前先别开播：否则模型刚就绪那一瞬播的动作（含 idle）拿不到 Sound，
        表现成「第一个动作没声音，之后才有」。表是本地小文件，通常几毫秒就到。
-       台词正文要一起等：只等到语音表会出现「有声没字幕」的第一下。 */
-    Promise.all([loadVoiceMap(), loadWords()]).then(()=>{ if(my.cancelled||seq!==_l2seq) return;
-      if(!played.size && !(mm.state&&mm.state.currentGroup)) play(def); });
-    /* 循环与「播完回 idle」全部交给运行时（见上方补丁 ①②），前端不再挂任何定时器 */
+       台词正文要一起等：只等到语音表会出现「有声没字幕」的第一下。
+       轮播池也要一起等：池没装好就开播，会钉在**单条** idle 上循环到永远（它带 Loop），
+       运行时便永远不会去挑下一条。 */
+    Promise.all([loadVoiceMap(), loadWords(), poolReady]).then(()=>{ if(my.cancelled||seq!==_l2seq) return;
+      if(played.size) return;
+      const cg=mm.state&&mm.state.currentGroup;
+      if(!cg||cg===idleGroup) play(def); });
+    /* 轮播的"下一条"由上面的 motionFinish 处理器挑，前端不挂任何定时器 */
   }catch(e){ if(my.cancelled||seq!==_l2seq)return;
     viewEl.innerHTML=`<div class="note">Live2D 加载失败：${e&&(e.stack||e.message||e)}</div>`; return; }
 }
