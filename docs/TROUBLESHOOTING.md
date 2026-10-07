@@ -6994,3 +6994,27 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
 本身就是错的；② 花瓣是**场景侧的粒子/序列帧**，不属于 Live2D 模型；③ 下落由某个循环锯齿参数
 驱动，其值域在 [min,max] 内且回绕，我们把它当常量钉住了。
 先做①：拿 `getParameterMaximumValue` 与 Unity 侧 `CubismParameter` 的 Range 字段对一次。
+
+### 第五轮：找到下落花瓣的载体——它是**独立的粒子特效包**，不在 Live2D 模型里
+
+用户坚持"游戏内花瓣就是不固定"，于是把最后三条模型内假设逐条判死，再往外找：
+
+| 假设 | 判据 | 结论 |
+|---|---|---|
+| Unity 侧参数量程比 moc3 宽 | 遍历 `live2d/gezi_2` 全部 MonoBehaviour，**没有任何**带 `Id`+`Min/Max` 的组件 | ✗ 量程只在 moc3，钳位成立 |
+| `m_DenseClip` 里有被丢的逐帧曲线 | gezi_2 idle `Dense curveCount=0`、antu_2 同样 0；Streamed 189 条我们全导出 | ✗ 没丢东西 |
+| 轮播/环境层能补出花瓣运动 | 用户确认游戏默认态不换动作；`hxhb` 在 `idle` 里本就是 0 | ✗ 前提就错了 |
+
+**正面发现**：`files/AssetBundles/effect/gezi_jiguang` 里有 **17 个 `ParticleSystem` +
+17 个 `ParticleSystemRenderer` + 3 张 `Texture2D` + 18 个 GameObject/Transform**。
+即"下落的花瓣"是**场景侧粒子特效**，与 Live2D 模型无关 ⇒ 我们的管线（只走 `live2d/*` 与
+`painting/*`）**从来没提取过 effect 类目**，所以画廊里永远不会有下落花瓣，而模型侧无论怎么调
+参数都不可能补出来。
+
+**下一轮的接手顺序**（别再从模型里找）：
+1. 读 `effect/gezi_jiguang` 的 17 个粒子系统：发射器形状/速度/生命周期 + 那 3 张贴图是不是花瓣
+   （目视一眼即可定生死），并确认它挂在 Live2D 界面还是战斗/获得界面；
+2. 全库扫 `files/AssetBundles/effect/*`，统计多少皮肤有配套粒子包（决定值不值得做）；
+3. 若要复刻：Web 侧用 three.js 粒子或 sprite 序列近似 —— **新依赖、新功能**，需用户拍板；
+4. 顺带解释"动作僵硬"的另一半：游戏那一屏有会动的背景与粒子，我们只渲染模型，
+   热区实测游戏顶部/底栏格动度 9~133 而我们对应格精确为 0 —— 这不是模型参数能补的。
