@@ -683,7 +683,7 @@
 | `Output/WikiData/ship_data.json` | `build_gallery_index` 兜底 | ✅ 可再生：`scrape_wiki_fast.py`（需外网） |
 | `Output/Paintings_v2`、`Spine_v2`、`Live2D`、`CG_v2`、`Audio`、`gallery_v2/` | 画廊 | ✅ 全量可再生。**耗时按 2026-10-01 实测外推：立绘 4488 张 ≈ 1.5 小时（1.25 秒/张）、Spine 269 个 ≈ 8 分钟、CG 231 张 ≈ 5 分钟、Live2D ≈ 30 分钟、音频全量 ≈ 75 分钟 ⇒ 一把梭全量 4~6 小时，共约 41GB 写入**（旧版这里写的"数十小时"是老 AssetStudio 时代的数，已纠正）。正因为它不再是"跑不起"，**才更要把范围收窄成增量**——见步骤 5 与 §71 |
 | `Output/gallery_v2/vendor/`（4 个第三方 JS，1.3MB） | 画廊 Live2D/Spine 标签的运行时 | ✅ 可再生（2026-09-26 起）：台账 `gallery_src/vendor/MANIFEST.json`（版本+字节+sha256+来源）+ `py -3 scripts/fetch_gallery_vendor.py`。**库本体不入库**（含 Live2D 专有许可的 Redistributable Code）。⚠️ 唯 `spine/spine-all.js`(3.8.75) 无可按哈希校验的下载源（本机这份与上游官方构建不同），只能从 `tools/spine-viewer/spine-runtime/` 取——**它也在 gitignore，别清** |
-| `Output/Raw/`（背景层 1,897 png / 2.0 GB） | **画廊「背景库」页**（`backgrounds.html` 直链 `../Raw/<类目>/<名>.png`）+ `Output/gallery_v2/bg_meta.json` 的 `img` 字段 | ⚠️ **2026-10-07 起从"可删的悬空层"升级为页面依赖**：删它 = 背景库全空（缩略图 `bg_thumbs/` 还在，点进去才是空）。可再生：`py -3 scripts/export_assets.py`（`bg`/`helpbg`/`commonbg`/`loadingbg`/`loadingbg_hx`/`newshipbg`/`worldhelpbg`/`lotterybg`/`backyardbg` 九类源包都在 `files/AssetBundles/`，未进 `pruned.json`）。命名源不在这层里，在 `inputs/gamecfg/bg_scene_refs.json`。见 **§115 / WF-30** |
+| `Output/Raw/`（背景层 1,899 png / 2.0 GB） | **画廊「背景库」页**（`backgrounds.html` 直链 `../Raw/<类目>/<名>.png`）+ `Output/gallery_v2/bg_meta.json` 的 `img` 字段 | ⚠️ **2026-10-07 起从"可删的悬空层"升级为页面依赖**：删它 = 背景库全空（缩略图 `bg_thumbs/` 还在，点进去才是空）。可再生：`py -3 scripts/export_assets.py --target <类目>`；**只补个别包用 `--only <包名>`**（整类目重导会覆写已验证产物，为个别缺口不划算）。⚠️ 这层是**冻结导出层**，源包更新后不会自动跟上（实测两张 09-24 拉进来的包到 10-07 还没出图，见 §115 第 6 条）。命名源不在这层里，在 `inputs/gamecfg/bg_scene_refs.json`。见 **§115 / WF-30** |
 | `gallery_src/` 前端正本 ↔ `Output/gallery_v2/` 同名副本 | 画廊前端 | ✅ 同一份数据两个路径名（硬链）。**清单以 `scripts/deploy_gallery.py` 的 `FILES` 为准，别在这里抄数字**（2026-09-26 那版写死"4 个"，之后加 `bgm.html`、`backgrounds.html` 都没回来改，早就对不上了）。断链探测器：`py -3 scripts/deploy_gallery.py --check`；**新增子页必须同时进 `FILES`**，否则它既不被硬链也不被漂移检查看见（= 回到"改了忘部署"那个老静默失效，见 §115 第 5 条） |
 
 > `.diag/` 已写入 `.gitignore`，定位是「临时产物区」；**可复用工具一律放 `scripts/diag/`（入库）**。清理 `.diag` 前必须先跑上表白名单核对。
@@ -2594,6 +2594,8 @@ PSD/SVG 图层、前端多层 canvas），出现「某个部件整块看不见 /
    同尺寸 ⇒ 归档；大小 +1 ⇒ 真新版本要重拉；未登记的承重包 ⇒ 仍要拉（阴性对照）。
    ⚠️ 已知缺口：没有 `--revive`，想拉回被删类目**必须先撤销 `pruned.json` 里的对应条目**，
    否则 `--only ui --apply` 会把它们全判成"已归档"而静默跳过（撤销命令见 §111 第 5 节）。
+   **✅ 2026-10-07 首次真执行**（靶子 = `dorm3d` 5,989 条），带护栏的步骤见本节末「撤销归档闸」——
+   §111 那条手工一行流**别照抄**：它没有断言、没有并发写闸门、也没有回归判据。
 
 **有损转码这一档（第 3 步里"能再生"的那类才允许走；本轮 = BGM 12.6 GB → 1.06 GB）**：
 上限是**格式**给的，不是去重给的 —— 零引用的大产物导出（背景音乐 / 未压缩音频）往往一挡就回收九成。
@@ -2638,6 +2640,50 @@ PSD/SVG 图层、前端多层 canvas），出现「某个部件整块看不见 /
 `scripts/extract_spine_v2.py`、`scripts/diag/painting_swap_in.py`（备份闸正反两例）、
 `scripts/build_gallery_index.py`、`scripts/run_v2_full.py`（引导文案与批调用）。取证全过程 **§111**。
 相关：WF-15（第 9 步备份换入）、WF-16（回归六件套）、§78（台账）、§46（备份瘦身先例）、§110。
+
+#### 撤销归档闸拉回被删类目（2026-10-07 首次真执行，靶子 = `dorm3d` 5,989 条 / 3.44 GB）
+
+上面第 4 条那个"没有 `--revive`"的缺口，真要用时只有一条路：**撤台账登记**。§111 第 5 节留的手工一行流
+能跑，但它把三件必须的事都省了（断言 / 并发闸门 / 回归判据）。按下面五步走，顺序不能换：
+
+1. **先跑只读 `diff --only <类目>`，让 `已归档` 那行同时当"版本漂移体检"**：`split_archived()` 判归档的
+   条件是 `pruned[路径] == 设备上的大小`，所以 **`archived` 计数 = 设备上与删除时逐字节同尺寸的包数**。
+   `archived + added == 清单全量` 且 `added == 0` ⇒ 设备侧一个包都没更新过，重拉的 md5 校验才有希望通过；
+   一旦有包落进 `added`，那是**真版本漂移**，先停下核对，不要往下拉。
+2. **验 HEAD == 工作区**（`git diff --stat HEAD -- ledger/pruned.json` 必须为空）再动手。台账是 git 追踪文件，
+   HEAD 那份就是永久回滚锚点（`git checkout -- ledger/pruned.json` 一键关闸）；另存一份到 `.diag/` 只为当场对账。
+   写盘前**重取原文件 sha256 与读入时比对**——共享工作树里别的会话可能正在写它。
+3. **只撤一个前缀，且断言写在代码里、不靠眼睛**：撤前逐前缀计数并钉死（本次
+   `21,286 = dorm3d 5,989 + island 7,755 + char 3,264 + ui 4,278`），撤后必须
+   `被删键数 == 该前缀条数` 且 `其余每一条 value 全等`；格式要跟原文件一致（这份是
+   `ensure_ascii=False` + `separators=(',',':')` 单行，用默认分隔符会炸出整文件重写）。
+   落盘走 临时文件 → 回读断言 → `os.replace`。
+4. **进程内三分对照**（不连设备，`import mumu_sync` 喂合成 `r_files` 调 `split_archived`）：
+   目标类目同尺寸 ⇒ `KEEP`（闸开了）；**`island`/`char`/`ui` 同尺寸 ⇒ 仍 `ARCH`**（阴性对照，证明没多放闸）；
+   两类各自 size+1 ⇒ 都 `KEEP`（真新版本仍能拉）。少了第二条就是"我以为只撤了一个前缀"。
+5. **判据 = 重跑第 1 步那条只读 diff**：`已归档` 整行消失、`新增` 等于设备侧真实存量。
+
+⚠️ **窗口期副作用（这条最容易忘）**：闸门一开，任何**不带 `--only` 的** `sync --apply`
+（含资产更新台第 1 档 `pull`）就会开始把这批包当新增拉下来（dorm3d = 3.44 GB）。⇒ 窗口要短，
+期间别跑控制台拉取档；后续判据若判死，立刻按第 2 步关闸。
+
+**踩坑记录**：
+- **`--only` 只能选目录、选不到单个文件**：`set_only()` 无论传什么都补一个 `/`（`mumu_sync.py:291`），
+  传 `AssetBundles/dorm3d/character/tianlangxing_db/res/tianlangxing_noshoes` 会变成 `.../noshoes/`
+  ⇒ `wanted()` 的前缀匹配对**那个文件本身**恒为假。要单包粒度只能直接用 `mumu_sync.run(['pull','-a',远,近])`。
+  深前缀选目录是好用的：`--only <...>/prefabs,<...>/component` 实测精确命中 15 个文件 / 606 KB。
+- **"两份清单差 N 条"要先定方向、再定性**：`pruned.json` 的键带 `AssetBundles/` 前缀、
+  `files/hashes-dorm.csv` 不带，不归一直接比会报成"5,989 条全不同"（本次差点这么判）。归一后是
+  `csv ⊂ pruned`，差 8 条，逐个 `adb stat` 得 **0** ⇒ 是**游戏自己更新掉了这 8 个包**，不是台账记错。
+  判据：这类落差必须用设备侧实测区分"我没登记对"和"设备侧真没有"，光比两份盘上清单永远分不出来。
+- **台账独有项不会出现在 diff 的任何一行**：设备上既没有它、本地也没有 ⇒ `archived` 和 `新增` 都不含它。
+  所以"台账 5,989 / diff 5,981"这种落差**本身是信号**，不是噪声；可复原上限要按 diff 那个数报。
+- `--only` 的横幅打印按 `x.split('/')[1]` 取类目名，深前缀会显示成重复的 `dorm3d, dorm3d`——纯显示，别误判成过滤器生效了两次。
+
+**涉及文件**：`ledger/pruned.json`（唯一副本、已入库）、当场备份 `.diag/pruned_backup_step1_20261007/`、
+`scripts/mumu_sync.py:247-295`（`load_pruned` / `split_archived` / `wanted` / `set_only`）、
+`files/hashes-dorm.csv`（5,981 行逐包 md5，对可复原集是完备的）、`scripts/asset_ledger.py`（`prune-category` 是登记写方）。
+取证与数字 **`docs/archive/2026-10-07_3D宿舍复刻可行性取证.md` 追加一节**。
 
 ---
 
