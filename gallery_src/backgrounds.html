@@ -305,7 +305,14 @@ function buildSub(){
     for(const i of pool){const k=i.root||'';c[k]=(c[k]||0)+1}
     ROOT_BIG=new Set(Object.keys(c).filter(k=>k&&c[k]>=2));
     opts=[...ROOT_BIG].sort((a,b)=>c[b]-c[a])
-             .map(k=>({v:k,label:(META.roots[k]||{}).cn||k,n:c[k]}));
+             .map(k=>{
+               const r=META.roots[k]||{};
+               /* 三档可信度不能混着显示：pinyin=拼音整值回查到配置表原文；
+                  series=同词根别张图传播来的章节名，**会错**（实测 star_level 那组 265 张
+                  抽象底纹被传播成「响彻于天穹之音」）；root=只有英文/拼音标识，没编名字。 */
+               const tail=r.cn_from==='series'?'（未核实）':'';
+               return {v:k,label:(r.cn||k)+tail,n:c[k]};
+             });
     if(Object.keys(c).some(k=>k&&c[k]<2))
       opts.push({v:'__rest',label:'其余单张系列',n:Object.keys(c).filter(k=>k&&c[k]<2).reduce((s,k)=>s+c[k],0)});
     if(c[''])opts.push({v:'__',label:'（词根取不到）',n:c['']});

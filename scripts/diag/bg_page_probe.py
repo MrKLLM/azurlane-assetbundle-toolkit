@@ -291,6 +291,7 @@ def main():
           pick('gTier','全部'); await t(500); const n1b=N();
           pick('gGroup','场景背景'); await t(600); const n2=N();
           const subShown=!document.getElementById('gSub').hidden;
+          const optTxt=[...document.querySelectorAll('#gSubSel option')].map(o=>o.textContent);
           pickSub('star_level'); await t(600); const n2s=N();
           pick('gGroup','其他'); await t(600); const nOther=N();
           const subN=document.querySelectorAll('#gSubSel option').length;
@@ -301,7 +302,7 @@ def main():
           const n3=N(); const ft=document.querySelector('.card .t1').textContent;
           q.value=''; q.dispatchEvent(new Event('input')); await t(500);
           const n4=N();
-          return {n0,n1,n1b,n2,n2s,nOther,nHelp,n2b,n3,n4,on1,ft,groups,subShown,subN};
+          return {n0,n1,n1b,n2,n2s,nOther,nHelp,n2b,n3,n4,on1,ft,groups,subShown,subN,optTxt};
         })()""")
         say(isinstance(d4, dict) and d4.get('n1') == META['counts']['exact']
             and str(d4.get('on1', '')).startswith('确定'),
@@ -322,6 +323,15 @@ def main():
         say(isinstance(d4, dict) and d4.get('n2') == META['groups']['scene']['count'],
             f"筛一级「场景背景」得 {d4.get('n2')} 张")
         say(isinstance(d4, dict) and d4.get('subShown'), "选中场景背景后二级下拉出现（词根细分）")
+        # 标签可信度分档必须**看得见**：series 传播档要带「（未核实）」，
+        # 否则 star_level 那 265 张抽象底纹会顶着「响彻于天穹之音」冒充核实过的名字
+        n_unver = len([1 for v in META['roots'].values() if v['cn_from'] == 'series'])
+        n_mark = len([t for t in (d4.get('optTxt') or []) if '未核实' in t])
+        say(n_mark == n_unver and n_mark > 0,
+            f"下拉里 {n_mark} 项标了「未核实」== 索引 series 档 {n_unver} 组（没和核实过的混在一起）")
+        say(any('（未核实）' not in t and any('一' <= ch <= '鿿' for ch in t)
+                for t in (d4.get('optTxt') or [])[1:]),
+            "下拉里存在不带标记的中文词根名（pinyin 档确实在生效）")
         say(isinstance(d4, dict) and d4.get('n2s') == META['roots']['star_level']['n'],
             f"下拉选词根 star_level 得 {d4.get('n2s')} 张（索引里该组 {META['roots']['star_level']['n']} 张）")
         say(isinstance(d4, dict) and d4.get('nOther') == META['groups']['other']['count'],

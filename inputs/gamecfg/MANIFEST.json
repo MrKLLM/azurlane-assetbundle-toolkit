@@ -21,6 +21,19 @@
  },
  "files": [
   {
+   "path": "bg_root_labels.json",
+   "bytes": 4512,
+   "sha256": "7e1af3517d4b036f25022addad6aede25fed80f4a58a9f30e2a1592b57bc3388",
+   "rows": 18,
+   "role": "场景背景**词根** → 中文名（lazy_pinyin 整值匹配 773 张 lua 表的中文短名，只发布唯一命中；多义如 yujin=余烬/浴巾 一律不发）",
+   "consumers": [
+    "scripts/build_bg_meta.py"
+   ],
+   "source": ".diag/sharecfg_re/lua_json/*.json（tools/sharecfg_re/41_export_lua_tables.py 产出）",
+   "produced_by": "tools/sharecfg_re/50_publish_bg_roots.py",
+   "coverage": "18/213 词根、150/1268 张 —— 英文与缩写词根（star_level/project_tb/bsmre/worldcruise）无自动路；已否证「词根作字段整值反查同行中文名」这条路（命中多为错配）"
+  },
+  {
    "path": "bg_scene_refs.json",
    "bytes": 139362,
    "sha256": "e4a7cb434b6ee7c51e45146c5fc08d9d042d88892d1ba058129facb301e131ed",

@@ -1,6 +1,6 @@
 # 碧蓝航线 AssetBundles 解包项目 — 进度总结
 
-> **生成时间**: 2026-10-07 20:20
+> **生成时间**: 2026-10-07 21:30
 > 历轮会话流水（2026-09-20 ~ 09-27）已**逐字**外迁 `docs/archive/2026-09-26_PROJECT_STATUS_外迁归档.md`（A1~A15 段），§6 里已闭环的待办条目（★块第 1/2/3/4/6 条 + 既有待办第 9/11/16/17/18/19 条）于 2026-10-02 逐字外迁 **A21 段**（原位各留一行桩，编号不动）；2026-10-05 又把头部执行快照与 §6 第 13/14/22/25/26 条逐字外迁 **A22 / A22b 段**（`docs/archive/PROJECT_STATUS_条目13-26_逐字外迁_2026-10-05.md`），本文回到 400 行红线以内；
 > 结论性知识在 `docs/TROUBLESHOOTING.md` §25~§67 与 `docs/WORKFLOWS.md` WF-14~WF-23。本文只留当前状态。
 > **最近三轮**：天津风皮肤2「少了空中那份」真根因 = **层绘制序按名字后缀猜**（**§110** / **WF-27**）｜磁盘盘点定口径 + 换入备份闸落地（**§111** / **WF-28**）｜**静态立绘两处系统性偏差：Pillow 把 alpha 缩放两次（全库柔边偏淡 + 白雪皮肤2 细缝 + `gezi_2` 发错表情）、画布只取 max 不减 min（≈90 张被裁掉一块）** —— 4496 张全量重渲换入、换入四道检查全绿、索引逐字节不变（**§114** / **WF-29**）。逐轮流水已逐字外迁 A22 / A22b 段。
@@ -323,7 +323,23 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
 当前主线: v2 数据驱动管线（§9）+ gallery_v2（§10）
 下一步: [具体任务]
 ```
-要点：**画廊视觉（Q 轮）的待用户拍板项与待办在 §6 顶部 ★ 块，接手先读它**。静态立绘 / Spine 已由 v2 全量收官，Live2D 动作层已于 2026-09-21 按权威映射重建完毕，**2026-09-23 网页交互层三个根因（命中包含判定 / idle 循环 / V-P 坐标系）已修并回归**。接手前先读 §9 理解「游戏数据自洽、不要猜坐标/不要按位置猜参数名」这一核心结论。**验动效一律看内容**（曲线条数、Id 是否命中参数表、值是否随时间变化），不要只看 `currentGroup`/组名标签——空壳也能"启动"，这个坑已踩过一次（`docs/TROUBLESHOOTING.md` §17、`docs/WORKFLOWS.md` WF-7）。**验交互一律用独立锚点**——合成点击若与被测映射同源会自洽闭环、全绿也说明不了对齐（§20、WF-16）。历史 v1 调试见 `docs/archive/`，一般无需再读。**背景库那条线（2026-10-07 交接，全文在 §115/§116 + WF-30）**：① **未决两件**——`*_tip` 同批 OCR 读到的奖励舰名 6 条里 3 条在 `ship_meta.json` 的 `cn` 查不到（读错 vs 译名口径不明 ⇒ 该字段故意不发布），以及 `exact > baked` 优先级**当前是空规则**（没有一张图同时有两种源，所以只打印不报绿，真出现冲突样本再升级为闸门）；② **别再走的路**——"把 OCR 铺到其余 1,190 张无名图"已抽样否证（48 张可用收益 **0/48**，那 4 条"像标题"全是奖励句子与机型名牌；工具 `scripts/diag/bg_ocr_yield_sample.py`），`helpbg` 那 364 张在 773 张表里**零引用**、连表 join 也没有 ⇒ 剩余唯一可行是人工词根词典（约 164 根），未开工；③ **换机器/清过盘之后要按序重跑**：`tools/sharecfg_re/41_export_lua_tables.py`（产 `.diag/sharecfg_re/lua_json/`）→ `49_publish_bg_scene.py` → `scripts/ocr_bg_tip_titles.py`（需 `rapidocr_onnxruntime`）→ `scripts/build_bg_meta.py` → `scripts/make_bg_thumbs.py`，然后 `deploy_gallery.py`；两份 `inputs/gamecfg/bg_*.json` 是 gitignore 的产物、**台账在 `MANIFEST.json`**，跑前先 `scripts/diag/check_inputs.py`；④ 页面依赖 `Output/Raw/`（已进 WF-15 承重白名单），个别包补导用 `export_assets.py --target <类目> --only <包名>`，别整类目重导覆写已验证产物；⑤ **部署状态待补**：`deploy_gallery.py --check` 现为 6/7 且 `index.html` **既断链又内容漂移**——那是另一会话正在写的 Live2D 在制品（本轮一行没碰、也没代提），他们提交后跑 `--relink` 再 `--check` 才会回到 7/7；在那之前改 `gallery_src/index.html` 正本不会自动传到运行目录（要用默认模式刷平）。
+要点：**画廊视觉（Q 轮）的待用户拍板项与待办在 §6 顶部 ★ 块，接手先读它**。静态立绘 / Spine 已由 v2 全量收官，Live2D 动作层已于 2026-09-21 按权威映射重建完毕，**2026-09-23 网页交互层三个根因（命中包含判定 / idle 循环 / V-P 坐标系）已修并回归**。接手前先读 §9 理解「游戏数据自洽、不要猜坐标/不要按位置猜参数名」这一核心结论。**验动效一律看内容**（曲线条数、Id 是否命中参数表、值是否随时间变化），不要只看 `currentGroup`/组名标签——空壳也能"启动"，这个坑已踩过一次（`docs/TROUBLESHOOTING.md` §17、`docs/WORKFLOWS.md` WF-7）。**验交互一律用独立锚点**——合成点击若与被测映射同源会自洽闭环、全绿也说明不了对齐（§20、WF-16）。历史 v1 调试见 `docs/archive/`，一般无需再读。**背景库那条线（2026-10-07 交接，全文在 §115/§116 + WF-30）**：① **未决两件**——`*_tip` 同批 OCR 读到的奖励舰名 6 条里 3 条在 `ship_meta.json` 的 `cn` 查不到（读错 vs 译名口径不明 ⇒ 该字段故意不发布），以及 `exact > baked` 优先级**当前是空规则**（没有一张图同时有两种源，所以只打印不报绿，真出现冲突样本再升级为闸门）；② **别再走的路**——"把 OCR 铺到其余 1,190 张无名图"已抽样否证（48 张可用收益 **0/48**，那 4 条"像标题"全是奖励句子与机型名牌；工具 `scripts/diag/bg_ocr_yield_sample.py`），`helpbg` 那 364 张在 773 张表里**零引用**、连表 join 也没有；**词根中文名的两条自动路本轮都跑到天花板**——
+      拼音整值（`lazy_pinyin` 比 773 张表的中文短名）✅ 已发布 `inputs/gamecfg/bg_root_labels.json`：
+      213 根里唯一命中 **18 组 / 150 张**，多义（`yujin` = 余烬/浴巾）一律不发；
+      把词根当字段整值反查同行中文名 ❌ 已否证（命中 12 组多为错配：`night`→「休息或其它」、`commander`→「装扮」），别再跑；
+      ⇒ 英文与缩写词根（`star_level`/`project_tb`/`bsmre`/`worldcruise`）**没有自动路**，剩下 92 组只能人工词典或接外部维基；③ **换机器/清过盘之后要按序重跑**：`tools/sharecfg_re/41_export_lua_tables.py`（产 `.diag/sharecfg_re/lua_json/`）→ `49_publish_bg_scene.py` → `50_publish_bg_roots.py`（词根中文词典）→ `scripts/ocr_bg_tip_titles.py`（需 `rapidocr_onnxruntime`）→ `scripts/build_bg_meta.py` → `scripts/make_bg_thumbs.py`，然后 `deploy_gallery.py`；两份 `inputs/gamecfg/bg_*.json` 是 gitignore 的产物、**台账在 `MANIFEST.json`**，跑前先 `scripts/diag/check_inputs.py`；④ 页面依赖 `Output/Raw/`（已进 WF-15 承重白名单），个别包补导用 `export_assets.py --target <类目> --only <包名>`，别整类目重导覆写已验证产物；⑤ **探针瞬时红要重跑再判**：本机同时压着多个后台标注代理、或别的会话正在写 `gallery_src/index.html` 时，
+     `原图真的解出像素`（等 2.5s 解码）与 `index.html 入口按钮` 会各红一次——实测三连跑 红/红/绿，
+     **别把瞬时红当回归**，更不要在它红着的时候去改判据。
+⑥ **背景库改造 P0/P1/P3/P4 已收官，只剩 P2（有角色筛选）在半程**：
+     已落四期的现状见 **§2.3**，取证 **§118**、流程 **WF-33**、技能分支 H（v1.44.9）。
+     **P2 接手点**：拼板 `.diag/bglabels/sheet_01..53.png`（5×5，每格**只印全局序号 `#N`、故意不印文件名**
+     —— 印了等于把 `_cg` 的答案写在考卷上，标注必须与先验独立）；`manifest.json` 是 序号→`bg/<名>`。
+     已完成 `labels_part1..5.json` = `#0..#1124`（1=525 / 0=586 / 2=14）；
+     **`labels_part6.json`（sheet 46–53，`#1125..#1304`）不一定落盘** —— 接手先查在不在，不在就重派 8 板。
+     之后：合并 → 断言「键集合 == manifest 全集且值 ∈{0,1,2}」→ 与 `prior_*.json`（`_cg` 规则）交叉核对
+     → 抽 48 张**全尺寸**复核（14 个 `2` 优先）→ 落 `inputs/gamecfg/bg_char_flags.json` + 登记 MANIFEST
+     → `build_bg_meta.py` 接 `has_char` → 页面默认只显示有角色 + 常驻「已隐藏 N 张 · 点此看全部」。
+     ⚠️ 用户已拍板"默认只显示有角色"，但**标注没过抽检就不许接默认值**（宁可退回全部）。
 
 ---
 

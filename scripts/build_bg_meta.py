@@ -39,6 +39,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, 'Output', 'Raw')
 REFS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_scene_refs.json')
 TITLES = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_tip_titles.json')
+# 词根→中文名的确定性词典（tools/sharecfg_re/50_publish_bg_roots.py 发布，可缺：缺了就退回 series）
+ROOT_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_root_labels.json')
 OUT = os.path.join(ROOT, 'Output', 'gallery_v2', 'bg_meta.json')
 SAMPLE_TXT = os.path.join(ROOT, '.diag', 'bgscan', 'sample.txt')
 
@@ -276,12 +278,44 @@ def build(sample=None):
         d, name = it['key'].split('/', 1)
         it['w'], it['h'] = px_size(os.path.join(RAW, d, name + '.png'))
 
+    # 一级分组与「场景背景」二级分组的展示数据：页面不许自己从目录名/词根现推中文
+    groups = {g: {'cn': GROUP_LABELS[g][0], 'via': GROUP_LABELS[g][1],
+                  'count': sum(1 for i in items if i['group'] == g)}
+              for g in ('scene', 'login', 'other')}
+    # 二级分组只给场景背景：按词根，词根中文名取该组里出现最多的 series（拿不到就留词根本身，
+    # 页面标 `cn_from:'root'` 让人看得出这条不是资产名）
+    roots = {}
+    for i in items:
+        if i['group'] != 'scene' or not i['root']:
+            continue
+        r = roots.setdefault(i['root'], {'n': 0, 'series': collections.Counter()})
+        r['n'] += 1
+        if i.get('series'):
+            r['series'][i['series']] += 1
+    # 词根中文名的**权威顺序**：拼音整值词典 > series 传播 > 词根原文。
+    # series 排第二是因为它会错：实测 `star_level`（264 张抽象底纹）被同词根的别张图
+    # 传播来一个「响彻于天穹之音」—— 名字看着像、其实与这组无关。词典有值时一律压过它。
+    RL = (json.load(open(ROOT_LABELS, encoding='utf-8'))['labels']
+          if os.path.isfile(ROOT_LABELS) else {})
+    named = {}
+    for k, v in roots.items():
+        if v['n'] < 2:
+            continue
+        d = RL.get(k)
+        if d:
+            named[k] = {'n': v['n'], 'cn': d['cn'], 'cn_from': 'pinyin'}
+        elif v['series']:
+            named[k] = {'n': v['n'], 'cn': v['series'].most_common(1)[0][0], 'cn_from': 'series'}
+        else:
+            named[k] = {'n': v['n'], 'cn': k, 'cn_from': 'root'}
+    roots = named
+
     if sample:
         want = set(sample)
         picked = [it for it in items
                   if it['name'] in want or it['key'] in want or it['dir'] in want]
-        return items, root_labels, picked, dropped_identical
-    return items, root_labels, None, dropped_identical
+        return items, root_labels, picked, dropped_identical, groups, roots
+    return items, root_labels, None, dropped_identical, groups, roots
 
 
 def stats(items):
@@ -346,7 +380,7 @@ def main():
     res = build(want)
     if res is None:
         return 2
-    items, root_labels, picked, dropped = res
+    items, root_labels, picked, dropped, groups, roots = res
     t, per = stats(items)
     n = len(items)
     print('背景图 %d 张 / 词根 %d 个已拿到中文标签' % (n, len(root_labels)))
@@ -388,6 +422,25 @@ def main():
                                                        if not any(it['name'] == w or it['key'] == w or it['dir'] == w for it in picked)])
         print('\n[样本] 写到 %s（%d 条）—— 未写正式产物' % (SAMPLE_TXT, len(picked)))
         return 0 if ok else 1
+    # 词根表闸门：必须排在 --check 的提前 return **之前**，否则 --check 模式压根不触发它
+    rl = (json.load(open(ROOT_LABELS, encoding='utf-8'))['labels']
+          if os.path.isfile(ROOT_LABELS) else {})
+    for desc, passed in [
+        # 下限断言：词典文件没了 / 被清空时，上面几条会**全部空转报绿**，
+        # 名字会静默退回 series —— 这条负责让它响。
+        ('词典在位且有 >=15 组（缺文件不许静默退回 series）', len(rl) >= 15),
+        ('词根表非空，且来源只有 pinyin/series/root 三档',
+         bool(roots) and all(v['cn_from'] in ('pinyin', 'series', 'root') for v in roots.values())),
+        ('pinyin 档逐字等于词典值（索引与页面都不许改写或自己升档）',
+         all(roots[k]['cn'] == rl[k]['cn'] for k in roots
+             if roots[k]['cn_from'] == 'pinyin' and k in rl)),
+        ('词典里 >=2 张的词根全部进了 pinyin 档（接了词典又静默漏用要能看见）',
+         all(k in roots and roots[k]['cn_from'] == 'pinyin' for k in rl if rl[k]['n'] >= 2)),
+        ('series 档不可能压过词典已有的词根（star_level 那种错传播就是这么来的）',
+         all(roots[k]['cn_from'] != 'series' or k not in rl for k in roots)),
+    ]:
+        print('%s %s' % ('OK ' if passed else 'FAIL', desc))
+        ok &= passed
     if not ok:
         print('\n闸门：红 —— 断言未全过，不写文件')
         return 1
@@ -395,24 +448,6 @@ def main():
         print('\n闸门：绿（--check 未写文件）')
         return 0
 
-    # 一级分组与「场景背景」二级分组的展示数据：页面不许自己从目录名/词根现推中文
-    groups = {g: {'cn': GROUP_LABELS[g][0], 'via': GROUP_LABELS[g][1],
-                  'count': sum(1 for i in items if i['group'] == g)}
-              for g in ('scene', 'login', 'other')}
-    # 二级分组只给场景背景：按词根，词根中文名取该组里出现最多的 series（拿不到就留词根本身，
-    # 页面标 `cn_from:'root'` 让人看得出这条不是资产名）
-    roots = {}
-    for i in items:
-        if i['group'] != 'scene' or not i['root']:
-            continue
-        r = roots.setdefault(i['root'], {'n': 0, 'series': collections.Counter()})
-        r['n'] += 1
-        if i.get('series'):
-            r['series'][i['series']] += 1
-    roots = {k: {'n': v['n'],
-                 'cn': (v['series'].most_common(1)[0][0] if v['series'] else k),
-                 'cn_from': ('series' if v['series'] else 'root')}
-             for k, v in roots.items() if v['n'] >= 2}
     doc = {'schema': 2,
            'groups': groups,
            'roots': roots,
