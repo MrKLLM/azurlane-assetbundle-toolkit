@@ -51,11 +51,6 @@ ROOT_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_root_labels.json')
 CHARS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_char_flags.json')
 OUT = os.path.join(ROOT, 'Output', 'gallery_v2', 'bg_meta.json')
 SAMPLE_TXT = os.path.join(ROOT, '.diag', 'bgscan', 'sample.txt')
-# AI 超分产物层（`scripts/upscale_bg_hd.py` 产出，派生内容、可整目录删掉重来）。
-# 它**不是**权威源：只有盘上确实存在、且尺寸正好是 Raw 的 4 倍时才发 `img_hd` 字段；
-# 对不上就宁可不发 —— 页面拿它当"点开大图"的目标，指错尺寸等于给用户一张错位图。
-HD = os.path.join(ROOT, 'Output', 'Raw_hd')
-HD_SCALE = 4
 
 TAIL = re.compile(r'(_?cg_?\d+|_cut\d+|_?\d+|_tip|_hx|_n|_bg|_new)$')
 # `X__2` 是导出层为「同一个包里两张**同名但内容不同**的画」补的后缀（见 export_assets
@@ -166,17 +161,6 @@ def px_size(path):
         return 0, 0
 
 
-def png_complete(path):
-    """PNG 尾部 IEND 在不在。超分层是**跑批产物**，中断会留下头部合法、内容截断的文件，
-    只看 px_size 会把坏文件当好的挂进索引。"""
-    try:
-        with open(path, 'rb') as f:
-            f.seek(-8, os.SEEK_END)      # IEND 是**最后 8 字节**，读在 -12 会永远 False
-            return f.read(8) == b'IEND\xaeB`\x82'
-    except Exception:
-        return False
-
-
 def labels_of(ref_rows):
     """把同一张图的多条引用压成中文标签列表（按出现次数降序，去重）。"""
     c = collections.Counter(r['cn'] for r in ref_rows if r['cn'])
@@ -186,7 +170,7 @@ def labels_of(ref_rows):
             for k, v in c.most_common()]
 
 
-def build(sample=None, with_hd=False):
+def build(sample=None):
     if not os.path.isfile(REFS):
         print('[FAIL] 缺 %s —— 先跑 py -3 tools/sharecfg_re/49_publish_bg_scene.py' % REFS)
         return None
@@ -310,29 +294,6 @@ def build(sample=None, with_hd=False):
         d, name = it['key'].split('/', 1)
         it['w'], it['h'] = px_size(os.path.join(RAW, d, name + '.png'))
 
-    # img_hd：**默认关闭**。用户 2026-10-07 看过成图后裁定「不要超分了」——anime 系超分模型会把
-    # 原画的细节改得不像（笔触被抹平、线稿被重画），这不是画质损失而是**内容被篡改**，
-    # 所以派生层不再默认挂进索引。要重新启用得显式加 `--with-hd`（见 §121）。
-    # 挂时逐张核对：文件在 ∧ 尺寸正好 4 倍 ∧ 尾部完整；任一不满足就**不发**该字段。
-    hd_mismatch = []
-    for it in (items if with_hd else []):
-        p = os.path.join(HD, it['key'].replace('/', os.sep) + '.png')
-        if not os.path.isfile(p):
-            continue
-        if not png_complete(p):                     # 超分批处理被中断时留下的半截文件
-            hd_mismatch.append('%s(截断)' % it['key'])
-            continue
-        hw, hh = px_size(p)
-        if (hw, hh) == (it['w'] * HD_SCALE, it['h'] * HD_SCALE):
-            it['img_hd'] = '../Raw_hd/%s.png' % it['key']
-            it['hd_bytes'] = os.path.getsize(p)
-        else:
-            hd_mismatch.append('%s(%dx%d≠%dx%d)' % (it['key'], hw, hh,
-                                                     it['w'] * HD_SCALE, it['h'] * HD_SCALE))
-    if hd_mismatch:
-        print('[WARN] Raw_hd 有 %d 张尺寸对不上号，本次不发 img_hd: %s'
-              % (len(hd_mismatch), hd_mismatch[:5]))
-
     # 一级分组与「场景背景」二级分组的展示数据：页面不许自己从目录名/词根现推中文
     groups = {g: {'cn': GROUP_LABELS[g][0], 'via': GROUP_LABELS[g][1],
                   'count': sum(1 for i in items if i['group'] == g)}
@@ -422,13 +383,6 @@ def selfcheck(items, t, dropped=None):
         ('被当重复丢掉的 _hx，其同内容主图确实在保留集里且逐字节相同（丢重复≠丢图）',
          all(any(i['key'] == d['same_as'] for i in items)
              and _sha_equal(d['key'], d['same_as']) for d in (dropped or []))),
-        ('img_hd 逐张回盘核对：文件在、尺寸正好是 Raw 的 4 倍（点开大图不许指到错位文件）',
-         all(os.path.isfile(os.path.join(ROOT, 'Output', i['img_hd'][3:]))
-             and px_size(os.path.join(ROOT, 'Output', i['img_hd'][3:]))
-             == (i['w'] * HD_SCALE, i['h'] * HD_SCALE)
-             for i in items if i.get('img_hd'))),
-        ('img_hd 只挂在低清子集上（原生宽 <=1280；源头已是 1920 的图不该有超分层）',
-         all(i['w'] <= 1280 for i in items if i.get('img_hd'))),
     ]
 
 
@@ -436,13 +390,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--sample', help='逗号分隔的图名或类目，只出这几条记录，不写正式产物')
     ap.add_argument('--check', action='store_true', help='只跑统计与断言，不写文件')
-    ap.add_argument('--with-hd', action='store_true',
-                    help='把 Output/Raw_hd/ 的 AI 超分层挂成 img_hd。**默认关**——用户已裁定超分'
-                         '「把细节改得不像原画」，见 §121')
     a = ap.parse_args()
 
     want = a.sample.split(',') if a.sample else None
-    res = build(want, a.with_hd)
+    res = build(want)
     if res is None:
         return 2
     items, root_labels, picked, dropped, groups, roots = res
@@ -466,11 +417,6 @@ def main():
     for desc, passed in selfcheck(items, t, dropped):
         print('%s %s' % ('✓' if passed else '✗', desc))
         ok &= passed
-    # 那两条 img_hd 闸门在**未启用**时是空转的（all(空)=True 会报绿），所以这里必须把
-    # "到底挂了几条"单独打印出来，否则看不出是"没挂"还是"挂对了"。
-    print('   （超分层 img_hd 已挂 %d 条；%s）'
-          % (sum(1 for i in items if i.get('img_hd')),
-             '默认关闭 —— 用户裁定超分把细节改得不像原画，见 §121' if not a.with_hd else '--with-hd 已启用'))
 
     if want is not None:
         os.makedirs(os.path.dirname(SAMPLE_TXT), exist_ok=True)
@@ -547,16 +493,10 @@ def main():
 
     n_has = sum(1 for i in items if i.get('has_char') == 1)
     n_no = sum(1 for i in items if i.get('has_char') == 0)
-    n_hd = sum(1 for i in items if i.get('img_hd'))
-    doc = {'schema': 4 if a.with_hd else 3,
+    doc = {'schema': 3,
            'groups': groups,
            'roots': roots,
            'dropped_identical': dropped,
-           'hd': ({'count': n_hd, 'scale': HD_SCALE,
-                   'source': 'Output/Raw_hd/（scripts/upscale_bg_hd.py 的 AI 超分产物，派生层可删）',
-                   'note': '带 img_hd 的条目，详情页/全屏/下载走高清版；没有该字段的仍用 Raw 原图。'
-                           '超分只覆盖"源头低清且（有角色 或 登录加载）"这一子集，不是全库'}
-                  if n_hd else None),
            'char': ({'has': n_has, 'none': n_no, 'unlabeled': n - n_has - n_no,
                      'source': 'inputs/gamecfg/bg_char_flags.json',
                      'note': '背景页默认视图只隐藏 has_char==0（人工逐格标注，仅覆盖场景背景）；'
@@ -566,13 +506,9 @@ def main():
            'source': 'inputs/gamecfg/bg_scene_refs.json',
            'note': 'tier=exact 是配置表逐张引用；baked 是图内烤字（OCR+目视双路径，见 inputs/gamecfg/bg_tip_titles.json）；'
                    'inferred 是同词根兄弟图传播（页面要标「推断」）；none 无中文名，页面显示英文原名，不得编造',
-           'sources': ({'exact': 'inputs/gamecfg/bg_scene_refs.json',
-                        'baked': 'inputs/gamecfg/bg_tip_titles.json',
-                        'has_char': 'inputs/gamecfg/bg_char_flags.json',
-                        'img_hd': 'Output/Raw_hd/'} if a.with_hd else
-                           {'exact': 'inputs/gamecfg/bg_scene_refs.json',
-                            'baked': 'inputs/gamecfg/bg_tip_titles.json',
-                            'has_char': 'inputs/gamecfg/bg_char_flags.json'}),
+           'sources': {'exact': 'inputs/gamecfg/bg_scene_refs.json',
+                       'baked': 'inputs/gamecfg/bg_tip_titles.json',
+                       'has_char': 'inputs/gamecfg/bg_char_flags.json'},
            'dirs': {d: {'cn': lbl, 'via': via, 'count': per[d]['total']}
                     for d, (lbl, via) in DIR_LABELS.items() if d in per},
            'counts': dict(t),

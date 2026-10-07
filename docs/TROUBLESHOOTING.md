@@ -7118,8 +7118,9 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
 （像素多 2.5 倍，计算量线性跟上）。⇒ 估时要用**第 30 条之后**的稳态中位数，且按尺寸分组看；
 用首张耗时乘总数会把 31 分钟估成 2 小时。详见 **WF-35** 与 `windows-long-running-batch-detach` 规则 1。
 
-**涉及文件**：`scripts/diag/check_bg_hd.py`（四条判据 + `selftest()` 双向对照）、
-`scripts/upscale_bg_hd.py`、`scripts/build_bg_meta.py`（同一判据的另两份副本）。
+**涉及文件**（⚠️ 前两个脚本 2026-10-08 已随超分整体停用删除，取回见 `git show b86825b:...`）：
+`scripts/diag/check_bg_hd.py`（四条判据 + `selftest()` 双向对照）、`scripts/upscale_bg_hd.py`、
+`scripts/build_bg_meta.py`（同一判据的第三份副本——**这份仍在仓库里，现已连 HD 逻辑一起移除**）。
 流程侧：**WF-35**（超分层落地），上一条同源踩坑：**§118**（"模糊"的三层归因）。
 
 ## §121. AI 超分被用户否掉：不是"不够清晰"，是"细节被改得不像原画"（2026-10-08 背景库 P5 撤销）
@@ -7176,9 +7177,11 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
   是**净损失**。
 - 「库里还有更高清的同名图」——按名字找只有 4 条跨类目同名，且都是不同画；**按内容**找才有上面那 8 对。
 
-**涉及文件**：`scripts/build_bg_meta.py`（`--with-hd` 默认关 + 空转闸门要单独打印挂了几条）、
-`scripts/upscale_bg_hd.py` 与 `scripts/diag/check_bg_hd.py`（保留，产物可重生成，31 分钟）、
-`Output/Raw_hd/`（2.1 GB，已停用未删，删掉即可回收）。
+**涉及文件**（终态，2026-10-08 清理后）：`scripts/build_bg_meta.py` 里**整套 HD 逻辑已删除**
+（`--with-hd` 开关、`img_hd` 挂载、两条闸门、`hd` 顶层键、`png_complete` 副本一并撤走，
+索引顶层键回到 P2 时期的 12 键形状）；`scripts/upscale_bg_hd.py`、`scripts/diag/check_bg_hd.py`、
+`scripts/diag/bg_hd_model_cmp.py` 三个脚本与 `tools/upscale/`（310 MB venv+权重）已删；
+`Output/Raw_hd/`（2.1 GB）与 `.diag/hd_test/`（18 MB 对比图）已删。保留的只有本条与 WF-35 的记录。
 流程侧：**WF-35**（第 9 条"何时不该做超分"）、**§118**（"模糊"的三层归因）。
 
 ## §122. 「天津风」在两条线里是两艘船：改错标只能按语境过滤，全局替换会改坏其余 34 处正确记录（2026-10-08）
@@ -7222,3 +7225,90 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
 **涉及文件**：`docs/archive/2026-10-07_3D宿舍复刻可行性取证.md`（追加-III 新增「名册」小节 = 唯一正本）、
 `PROJECT_STATUS.md` 待办 5、`docs/archive/2026-10-07_3D宿舍_交接给下一轮.md`、`files/hashes-dorm.csv`、
 `Output/ship_meta.json`。做法侧已并进技能 `project-doc-governance` v1.3.3「错标修复」。
+
+## §123. Live2D「花瓣不下落 / 动作后半段冻住」的真因：vendored Cubism framework 不读 moc3 的 `repeat` 回绕标志（2026-10-08 第六轮，含对第五轮结论的推翻）
+
+**症状**：`gezi_2`（安土）在画廊里下落花瓣不出现，整体「动作僵硬」。第五轮曾结案为
+「花瓣是场景侧粒子特效（`effect/gezi_jiguang` 的 17 个 ParticleSystem），模型侧不可能补出来」。
+
+### 一、第五轮结论被推翻的判据（先做否证，再谈新假设）
+
+- 那 17 个粒子系统挂的 3 张贴图导出后是**纯白 alpha 遮罩**，命名 `wave01 / mask01 / line09`；
+  子物体名 `BombGlow / BombLine / iceParticles`；包内 `externals` 为空 ⇒ 与玫瑰花瓣无关。
+  取证件：`.diag/effect_scan/gezi_jiguang_meta.json` + 同目录三张导出图。
+- 「idle 里 14 个花瓣参数 0 个会动」是**探针正则漏测**：`l2d_motion_param_probe.py` 的 `--params`
+  默认 `^(hxhb|uibh|Paramfh)` 不含 `MB_` 下落一族。换成 `^(MB_|hxhb)` 后 idle 有 11 个参数会动。
+  ⇒ **通用形状：探针的筛选正则必须与"待否证的假设"同范围，否则"0 命中"只是没测。**
+
+### 二、真因链条（每一环都有独立测量）
+
+1. 载体是模型内参数 `MB_wutixialuoxunhuangz`（物体下落循环值）与 `MB_[ABC]wutijiaodugz` 一族。
+2. **曲线形状**：idle 里这条曲线只有 2 个键——`0s→0`、`22s→5.867`，一条直线；home 18.25s→4.867、
+   effect 90s→24.0，三者斜率完全相同（0.2667 单位/秒）。解析 `Segments` 的正确步长是
+   **三元组 `[t,v,type]`，贝塞尔再跟 4 个控制点，最后一个键只有 `(t,v)` 没有 type**
+   （按固定步长 3 整除去解会越界或错位）。
+3. **moc3 声明**：该参数量程 `[0, 3]`，且 `csmGetParameterRepeats` 读回 **repeat=1**
+   （本皮肤 532 个参数中 52 个带此标志）。Cubism 官方语义 = 值超出 `[min,max]` 按量程**取模回绕**
+   （Unity 原生 framework 走 `CubismMath::ModF`），所以「单调爬升远超 max」是美术刻意的循环相位。
+4. **越界分布自带阴性对照**：57 条 clip 的 27865 条参数曲线中越界 580 条，
+   **580 条全部落在 repeat=1 的参数上；repeat=0 的越界 0 条** ⇒ 排除「美术写错量程」这一竞争解释。
+5. **库这一层根本不认这个标志**：`vendor/live2d/pixi-live2d-display-cubism4.min.js`
+   （119,922 字节）里字符串 `repeat` 命中 **0 次**；`setParameterValueByIndex` 的实现只有两行硬钳
+   `maximumValues[t]<e&&(e=maximumValues[t])` / `minimumValues[t]>e&&…`。
+6. 结果：值在 11.25s 触到 3 后**钉死**，idle 一个循环（22s）里后 10.75s 花瓣完全不动。
+   改前实测平台 11.1s（占窗口 44%），`MB_Awutijiaodugz`（量程 [-1,1]，曲线到 6.11）平台 15.6s。
+
+### 三、修法（`gallery_src/index.html` 运行时补丁 ⑤，紧跟既有补丁 ④ 之后）
+
+在 `CubismModel` 原型上把 `setParameterValueByIndex` 包一层：`repeat[ix]` 为真且**严格越界**时
+`val = mn + ((val-mn) % sp + sp) % sp`，其余原样交给原实现。要点三条：
+
+- **必须打在 `setParameterValueByIndex`**，不是 Core：实测 `Live2DCubismCore` 的 Model
+  **没有 `setParameterValue`**（只有 `getParameterValues` 等只读绑定 + `parameters.values` 这个
+  wasm 视图），写值的路径就是 framework 那一层；而动作求值**不预先钳**（`getParameterMaximumValue`
+  在整个 bundle 里只出现 1 次 = 它自己的定义），所以越界值一定会送到 setter。
+- **只在严格越界时折，`val == max` 不折**：官方 ModF 会把「刚好等于 max」折成 min，但本皮肤有
+  75 个键点是刻意钉在 max 上的（`effect` 里 `Param81` 整段 =1.0、`complete` 里 `hxhb5`=10.0），
+  折过去就是让这些部件瞬间消失。这条是**量程内恒等自检**抓出来的（52 个 repeat 参数 × 5 档
+  共 260 次写入，第一版有 52 处失配，全在 max 端点；收紧后 0 失配）。
+- 原型上包装时**必须用 `this._model.parameters`** 而不是闭包捕获某个实例的引用——标志表是逐模型的，
+  捕错实例就会拿别人的量程去折这条值。
+
+### 四、验收判据（改后）
+
+| 判据 | 改前 | 改后 |
+|---|---|---|
+| 直写 setter 3.5 / 4.5 读回 | 3.0 / 3.0（硬钳） | 0.5 / 1.5（回绕） |
+| 真实播放里交给 setter 的原始值 | —（未见） | 289 次调用、107 次越界、最大 5.848 |
+| 接缝处 传入→存值 | 3.0 后一直 3.0 | 3.0483 → 0.0216（随后继续爬） |
+| 量程内恒等（52 参数 × 5 档） | 基准 | 失配 0 |
+
+### 五、这轮踩到的仪器坑（每一条都会单独造出假结论）
+
+1. **无头里动作时间跑得比墙钟慢**：`Ticker` 对 `dt` 有上限，实测约 3 帧/秒 ⇒ 11.25s 的运动相位
+   要 ~49s 墙钟才走到。**采样窗口按墙钟算，第一次"改后探针"25.5s 没越过接缝，被读成"补丁没用"**。
+   用 `PIXI.Ticker.shared.tick(sim)` 推合成时钟同样无效（推不动）；只能拉长墙钟窗口。
+2. **两次独立抓帧不能逐像素对照**：改前/改后各 144 帧在 t=0 就有 2.7 万像素差（起播相位与物理
+   积分步数不同）⇒ 这种对比只能证"不同"，不能定位改动面。要定位改动面用**参数级**判据。
+3. **探针连的是死服务器**：`.diag` 脚本写死 `127.0.0.1:8777`，服务器一停就报
+   「GALLERY is not defined / window.__S undefined」，看起来像"页面被我改坏了"。⇒ 探针必须自带
+   服务器并在启动 Chrome 前轮询 200；失败时要打印 `location.href` 与 `document.body.innerText`。
+4. **同 `--user-data-dir` 的残留 Chrome** 会让新实例「开完标签就退出」，DevTools 端口永远等不到。
+5. `Object.getPrototypeOf(coreModel)` 挂监视器前先存原始引用：第二次运行会套套逻辑地
+   把**监视器本身**当基类实现，`return base.call(...)` 立刻自递归（本轮撞到过一次）。
+
+### 六、已排除的假设（别重跑）
+
+- 花瓣在 `effect/*` 粒子包里（贴图是纯白遮罩，见一）。
+- Unity 侧声明了更宽的量程 / `m_DenseClip` 有被丢的逐帧曲线 / 轮播或环境层能补出来（第五轮已否证，
+  判据在 §117；本轮进一步确认曲线就是 2 键直线）。
+- 导出的 motion3.json 把值写坏了：`Output/Live2D/gezi_2/motion/idle.motion3.json` 里
+  `MB_wutixialuoxunhuangz` 的 Segments 是 `[0,0,0,22,5.867]`，与 Unity 侧一致。
+- Core 会替我们回绕：直写 `parameters.values[i]=3.5` 后 `raw.update()` 读回仍是 3.5（Core 不归一）。
+
+**涉及文件**：`gallery_src/index.html`（补丁 ⑤，与运行目录硬链）、
+`scripts/diag/l2d_motion_param_probe.py`（加 `--dump` 逐样本轨迹落盘 + 「平台时长/下降次数」判据，
+替代原来只看「触到量程」的弱判据）、`scripts/diag/l2d_curve_shape.py`（曲线形状与越界统计）、
+`scripts/diag/l2d_param_meta_probe.py`（repeat 标志读取 + 扫值 + 量程内恒等自检）、
+`.diag/_param_meta_gezi_2.json`（532 参数 [min,max,default,repeat] 全表）、
+`.diag/effect_scan/`（粒子包取证、扫值截图、改前轨迹）。
