@@ -184,7 +184,7 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
 **截图里模型站着、贴图完整、无炸面、是无鞋版**；剩下的 Y/Z 换轴经定性是**我判据口径写错**
 （CPU 重算漏了 three.js 的 bindMatrix），下一轮改用 `applyBoneTransform`。
 归档闸已关（`7e592d0`，sha256 回到 `f4ecc164…` 基准，diff 复验已归档 5,965）。定案过程 **取证追加 X**、两条通用坑 **WF-32 追加**。
-**step 5 静态部分 ✅ 通过（17:20，探针 exit 0）**：判据换成**逐顶点偏差** `max|applyBoneTransform(i,v)−v| = 1.2e-06~1.9e-06`（5/5 网格），几何盒 vs 顶点实算盒 5/5、29,702 三角落笔、四张截图有模型；转置版对照 10/10 爆开 ⇒ 矩阵约定是被验证过的。过程中又抓到两处**判据自身写错**（变异样本不改变被测物理量 / 谓词极性写反）。 **动画定案**：48/48 个 clip 的六类曲线数组全为 0 而 `m_MuscleClipSize` 合计 592,064 B ⇒ 是 Humanoid **肌肉优化格式**，不是读失败；要出动画需三段新工作（解采样 → `m_Binding` 映射 → 用 `Avatar`+`m_DeltaPose` 还原骨骼 TRS），属**独立子项目**，且样本 `m_Binding=None` ⇒ 开工前先做可行性实测。**静态通路已完整证明；动画与房间/家具摆位同级，需单独定优先级。** 细节 **取证追加 XI**、判据设计 **WF-32 追加**。
+**step 5 静态部分 ✅ 通过（17:20，探针 exit 0）**：判据换成**逐顶点偏差** `max|applyBoneTransform(i,v)−v| = 1.2e-06~1.9e-06`（5/5 网格），几何盒 vs 顶点实算盒 5/5、29,702 三角落笔、四张截图有模型；转置版对照 10/10 爆开 ⇒ 矩阵约定是被验证过的。过程中又抓到两处**判据自身写错**（变异样本不改变被测物理量 / 谓词极性写反）。 **动画定案**：48/48 个 clip 的六类曲线数组全为 0 而 `m_MuscleClipSize` 合计 592,064 B ⇒ 是 Humanoid **肌肉优化格式**，不是读失败；要出动画需三段新工作（解采样 → `m_Binding` 映射 → 用 `Avatar`+`m_DeltaPose` 还原骨骼 TRS），属**独立子项目**，且样本 `m_Binding=None` ⇒ 开工前先做可行性实测。**静态通路已完整证明；动画与房间/家具摆位同级，需单独定优先级。** 细节 **取证追加 XI**、判据设计 **WF-32 追加**。 **房间 1 已定界并拉完（17:55，取证追加 XII）**：摆位数据**就在场景包里**（623 个带名字 Transform + 348 MeshRenderer + 21 盏灯 + 16 张内嵌贴图 16/16 解码 OK）⇒ 不用猜坐标；闭包 464 个里 `scenesres` 只 **436 / 95.8 MB**（那 349 MB 是 base 场景摆了角色才拽进来的，房间阶段不要）；新增 `scripts/diag/mumu_pull_closure.py` 按闭包定向 `adb pull`（**不碰台账、归档闸保持关闭**），实拉 453 个 / 89.9 MB **md5 453/453 全等**、幻影包 0。⚠️ 该房间**没有 shadowmap**（只有公共房间才有）⇒ §D-4 的烘焙光照对房间 1 不适用，先用 21 盏实时灯近似。**未打通 = 下一轮第一件事**：跨包 PPtr 解析（一个 bundle 里有多个 SerializedFile 含 `.sharedAssets`、`ObjectReader.assetsfile` 为 None、`deref()` 按同目录 CAB 名找文件）；CAB→包索引已建（474 包 / 4.4 秒，缓存 `.diag/dorm3d_cab_index.json`）。
 6. ✅→⏳ **声优中文姓名补全（答案表已到手，回填待放行；2026-09-25）**：用新解析出的 `voice_actor_cn` 已拿到 **525 条 `code → 中文声优`**（`.diag/sharecfg_re/voice_actor_cn.json`）；对 `ship_skin_template` 实际用到的 499 个 `voice_actor` 值，**只缺哨兵 `-1`/`0`，真实 id 覆盖率 100%** ⇒ "CV 姓名表未缓存"这个前提作废。**已完成并写盘（2026-09-25 E1）**：`Output/ship_meta.json` 重写，逐字段比对 **既有值变化 0 / 字段消失 0**，**4041/4495 条带 `voice_actor_name`**（库尔斯克→衣川里佳、泛用型布里→下田麻美）；无名 454 = 427 剧情角色 + 27 个 voice_actor 为 0/-1。备份 `Output/_OLD_bak/ship_meta_pre_25.json`。见 §36。
 7. ✅ **阵营「晶环联盟」= nationality 12 已定（2026-09-25）**；`12/99/101/104/117` 五个码已定名并写进 NATIONALITY。
    顺带把 `sharecfgdata` 整条线打通：**容器 = 记录帧 `ULEB(len)` + 假 LuaJIT BC 头 + 平铺 kgc 常量流；
@@ -281,7 +281,7 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
        **画廊只播 `idle` 一条 clip**（`idle` 里 14 个花瓣参数 0 个会动；`main_1` 里 10 个会动，
        要到第 8.12 秒才开始）。上一轮两条嫌疑都被证据收回，见 §117 开头。
 
-35. ✅ **Live2D 播放策略补齐：`effect` 常驻环境层 + 主界面轮播池（2026-10-07，§117 / WF-31）**：
+35. ⛔ **Live2D「环境层 + 轮播池」已整体撤销（2026-10-07 第四轮，§117 第四轮）**——前提错了：
      源包 AnimatorController 实测 `effect` 是**独立一层的默认状态**（权重 1.0、Override、Loop），
      全库 **224/224** 带该组的模型皆如此；轮播池按控制器自己的分组抽（`idle_list` +
      `idle`/`home`/`main_<n>`），269/269 都有、最小 5 条。前端按 P2 只叠**非常值**曲线
