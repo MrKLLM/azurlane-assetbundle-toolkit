@@ -1,7 +1,7 @@
 ---
 name: unity-assetbundle-painting-restore 触发词（3D 侧）：m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.13.2
+version: 1.13.3
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -293,6 +293,16 @@ MAD 分不开"该替换/不该替换"，两者数值重叠。这条写进了常�
 - ⚠️ **UnityPy 不给你 stream 数组**：`m_Streams` 恒空 list、`m_Streams_0_..3_` 全 `None`，**整块顶点字节在 `m_VertexData.m_DataSize` 里**（名字像整数，其实是 `bytes`）。各 stream 块按序首尾相接：`base[s] = Σ stride[s']*n (s'<s)`。
 - **布局不要猜，反解 + 三重自证**：每流只有最后一个通道的元素宽度未知（其余由 `next_offset - offset` 整除推出），枚举 ∈{1,2,4}，要求同时满足 ① `Σ stride == len(data)//n`（并允许 `tail = len % n` 的 padding 落在**末段流起点之前**，不是只有整块尾部）；② **每个**顶点权重和恰为 `1.0000`（UNorm16 走 `/65535`、Float32 直读）；③ `max(boneIndex) < len(m_BindPose)`。只有真布局能三条全过——**错布局会自己报出来，所以这套判据同时也是回归闸门**。
 - **每顶点骨数逐网格变，不是一个模型一个常量**：实测同一角色 body=4、face/neck=2、单骨部件（脸红/装饰）**压根没有 BlendWeight 通道、权重恒 1**。装配器按"通道存在与否 + 维度"分支，别按角色配表写死。
+- ⚠️ **Humanoid 角色的动画不在曲线列表里**。`AnimationClip` 的
+  `m_PositionCurves/m_RotationCurves/m_ScaleCurves/m_FloatCurves/m_EulerCurves/m_PPtrCurves`
+  可以**全为 0 条而数据完好**——Unity 对 Humanoid 一律存**肌肉空间优化格式**：
+  真数据在 `m_MuscleClip`（`ClipMuscleConstant` → `Clip(m_DenseClip/m_StreamedClip/m_ConstantClip/m_Binding)`
+  + `m_DeltaPose=HumanPose` + `m_IndexArray`），量级看 `m_MuscleClipSize`。
+  ⇒ 判"动画读不出"之前必须先查 `m_MuscleClipSize>0`；要还原骨骼 TRS 需 Avatar 的 muscle→bone 映射，
+  是独立子项目，不是"再拉一个包"。
+- ⚠️ **静止态蒙皮的判据要逐顶点**：`max|applyBoneTransform(i,v) − v| ≈ 0`（实测 1e-6 量级）
+  能同时验位置/骨号/权重/bind 矩阵/节点层；包围盒只反映范围，两个不同的错误可给出同样的盒子。
+  ⚠️ 也别用 `Box3.setFromObject(skinnedMesh)`（走未蒙皮的 geometry 盒，恒真）。
 - ⚠️ **元素宽 2 字节 ≠ float16**：UV 是半精度、**BlendWeight 是 UNorm16**、**BlendIndices 是 uint16**。
   按宽度统一取 dtype 会让整数骨号 `1` 变成次正规数 6e-8（`int()` 后归零 ⇒ 全模型挂到 0 号骨），
   让权重 `32767`/`32768` 直接读成 **NaN / -Inf**。dtype 必须**按通道号**决定。

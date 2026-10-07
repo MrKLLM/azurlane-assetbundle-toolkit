@@ -46,6 +46,7 @@ import UnityPy                                   # noqa: E402
 import cdp_slot                                  # noqa: E402
 import chrome_tree                               # noqa: E402
 import paths as P                                # noqa: E402
+import dorm3d_to_gltf as G                       # noqa: E402
 import _gallery_server as GS                     # noqa: E402
 
 UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
@@ -91,9 +92,24 @@ def unity_truth():
                 break
         if tris is None:
             tris = len(idx) // 2 // 3
-        out[m.m_Name] = dict(center=[float(c.x), float(c.y), float(c.z)],
-                             size=[2 * float(ex.x), 2 * float(ex.y), 2 * float(ex.z)],
-                             verts=nv, tris=tris)
+        rec = dict(center=[float(c.x), float(c.y), float(c.z)],
+                   size=[2 * float(ex.x), 2 * float(ex.y), 2 * float(ex.z)],
+                   verts=nv, tris=tris)
+        # m_LocalAABB 是导入器算的、可能带 padding。逐轴紧判据要用**从顶点实算**的盒子，
+        # 否则会把「Unity 记的盒比实际大」误判成「前端读错了」。
+        lay = None
+        for ctx in G.probe.candidate_layouts(m.m_VertexData, len(G.probe.data_at(m))):
+            ch, streams, stride, base, e, n, per, tail = ctx
+            if G.probe.self_proof(G.probe.decode_skin(m, ch, stride, base, e, n)):
+                lay = ctx
+                break
+        if lay:
+            pos = G.read_plain_channel(m, lay[0], lay[2], lay[3], lay[4], G.CH_POS, lay[5])
+            lo = [min(v[i] for v in pos) for i in range(3)]
+            hi = [max(v[i] for v in pos) for i in range(3)]
+            rec['exact_size'] = [hi[i] - lo[i] for i in range(3)]
+            rec['exact_center'] = [(hi[i] + lo[i]) / 2 for i in range(3)]
+        out[m.m_Name] = rec
     return out
 
 
@@ -152,29 +168,33 @@ try {
       continue;
     }
     const M = sk.bones.map(b => new THREE.Matrix4().multiplyMatrices(b.matrixWorld, sk.boneInverses[sk.bones.indexOf(b)]));
+    // 蒙皮式子交给引擎自己算：v' = bindMatrixInverse · Σ w(bone.matrixWorld·boneInverse·bindMatrix·v)
+    // 手推这条公式时漏掉首尾的 bindMatrix/bindMatrixInverse，就会得到"Y/Z 换轴"的假故障。
+    const tmp = new THREE.Vector3();
     let mn = [1e30, 1e30, 1e30], mx = [-1e30, -1e30, -1e30];
     const P = new Float32Array(pos.count * 3);
-    let wmin = 9, wmax = 0;
+    let wmin = 9, wmax = 0, maxJoint = 0, maxDev = 0;
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
-      out3.set(0, 0, 0);
       let s2 = 0;
-      for (let k = 0; k < 4; k++) {
-        const w = wj.getComponent(i, k);
-        if (!w) continue;
-        const mm = M[ji.getComponent(i, k)];
-        if (!mm) continue;
-        V.set(v.x, v.y, v.z, 1).applyMatrix4(mm);
-        out3.x += V.x * w; out3.y += V.y * w; out3.z += V.z * w;
-        s2 += w;
-      }
+      for (let k = 0; k < 4; k++) { s2 += wj.getComponent(i, k); maxJoint = Math.max(maxJoint, ji.getComponent(i, k)); }
       wmin = Math.min(wmin, s2); wmax = Math.max(wmax, s2);
-      P[i * 3] = out3.x; P[i * 3 + 1] = out3.y; P[i * 3 + 2] = out3.z;
+      tmp.copy(v);
+      m.applyBoneTransform(i, tmp);
+      if (!isFinite(tmp.x) || !isFinite(tmp.y) || !isFinite(tmp.z)) {
+        rep[key] = { error: 'applyBoneTransform 在第 ' + i + ' 个顶点给出非有限值' };
+        tmp.copy(v);
+      }
+      // 静止态判据的真正形式：bind pose 下蒙皮结果应当**逐顶点重合**于原始顶点。
+      // 包围盒只反映范围，两个不同的错误可以给出同样的盒子；逐顶点偏差不会。
+      const dv = Math.hypot(tmp.x - v.x, tmp.y - v.y, tmp.z - v.z);
+      if (dv > maxDev) maxDev = dv;
+      P[i * 3] = tmp.x; P[i * 3 + 1] = tmp.y; P[i * 3 + 2] = tmp.z;
       for (let a = 0; a < 3; a++) {
-        const q = [out3.x, out3.y, out3.z][a];
-        mn[a] = Math.min(mn[a], q); mx[a] = Math.max(mx[a], q);
+        mn[a] = Math.min(mn[a], P[i * 3 + a]); mx[a] = Math.max(mx[a], P[i * 3 + a]);
       }
     }
+    if (rep[key] && rep[key].error) continue;
     let maxE = 0;
     const ix = m.geometry.index;
     if (!ix) {
@@ -194,7 +214,8 @@ try {
     m.geometry.computeBoundingBox();
     const gb = m.geometry.boundingBox;
     rep[key] = {
-      verts: pos.count, joints: sk.bones.length, weightSum: [wmin, wmax],
+      verts: pos.count, joints: sk.bones.length, weightSum: [wmin, wmax], maxJoint: maxJoint,
+      bindMode: m.bindMode, maxDev: maxDev,
       geomSize: [gb.max.x - gb.min.x, gb.max.y - gb.min.y, gb.max.z - gb.min.z],
       skinSize: size, skinCenter: [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2],
       maxEdgeOverDiag: maxE / diag,
@@ -246,11 +267,27 @@ def build_variants():
     raw = bytearray(open(outs['good'], 'rb').read())
     jlen = int.from_bytes(raw[12:16], 'little')
     g = json.loads(raw[20:20 + jlen].decode('utf-8'))
-    acc = g['accessors'][g['meshes'][0]['primitives'][0]['attributes']['WEIGHTS_0']]
-    off = 20 + jlen + 8 + g['bufferViews'][acc['bufferView']]['byteOffset']
-    raw[off] = 0
-    raw[off + 4] = 0
-    raw[off + 8] = 0
+    # 对照要**改到能被静止态判据看见**：只改一个顶点会被 three.js 的
+    # normalizeSkinWeights 归一化回 (1,0,0,0)，包围盒与边长比都不动 ⇒ 对照不咬。
+    # 这里把**每个顶点**都改成只受 0 号骨影响（权重 (1,0,0,0)），
+    # 等价于"bind 矩阵全丢"，逐顶点偏差必须爆开。
+    # 变异必须**真的破坏静止态**才算对照。实测：把所有权重整列改成 (1,0,0,0)
+    # （全模型只跟 0 号骨）在静止态下偏差仍是 1e-6 量级 —— 因为 B0·inv0·bind ≈ bind，
+    # 这种"换骨不换姿态"的扰动对静止态判据天然不可见。
+    # ⇒ 改成把每个顶点的**第一个骨号换成一个中段骨**（索引 5）并独占权重：
+    #   静止态下 B5·inv5 ≠ B0·inv0，偏差必须爆开。
+    for me in g['meshes']:
+        wacc = g['accessors'][me['primitives'][0]['attributes']['WEIGHTS_0']]
+        jacc = g['accessors'][me['primitives'][0]['attributes']['JOINTS_0']]
+        wbv = g['bufferViews'][wacc['bufferView']]
+        jbv = g['bufferViews'][jacc['bufferView']]
+        wo = 20 + jlen + 8 + wbv['byteOffset']
+        jo = 20 + jlen + 8 + jbv['byteOffset']
+        nj = len(g['skins'][0]['joints'])
+        for i in range(wacc['count']):
+            struct.pack_into('<4f', raw, wo + i * 16, 1.0, 0.0, 0.0, 0.0)
+            j5 = 5 if nj > 5 else 1
+            struct.pack_into('<4B', raw, jo + i * 4, j5, 0, 0, 0)
     outs['badweights'] = os.path.join(WORK, 'variant_badweights.glb')
     open(outs['badweights'], 'wb').write(bytes(raw))
     return outs
@@ -280,21 +317,29 @@ def compare(good, expect, label):
             say(False, '%s: 前端量不出来 —— %s' % (name, got['error']))
             ok_all = False
             continue
-        # Unity 是左手系、glTF 镜像了 X ⇒ 尺寸逐轴应相等、中心 x 反号
+        # Unity 是左手系、glTF 镜像了 X ⇒ 尺寸逐轴应相等、中心 x 反号。
+        # 紧判据用「从顶点实算」的盒子；m_LocalAABB 是导入器算的、可带 padding，只报差值。
         gs, ss = got['geomSize'], got['skinSize']
         e = exp['size']
-        d_ok = all(rel(gs[i], e[i]) < 1e-3 for i in range(3))
-        s_ok = all(rel(ss[i], e[i]) < 5e-2 for i in range(3))
-        c_ok = rel(abs(got['skinCenter'][0]), abs(exp['center'][0])) < 5e-2 and \
-            rel(got['skinCenter'][1], exp['center'][1]) < 5e-2 and \
-            rel(got['skinCenter'][2], exp['center'][2]) < 5e-2
-        w_ok = abs(got['weightSum'][1] - 1.0) < 1e-3 and abs(got['weightSum'][0] - 1.0) < 1e-3
+        ex = exp.get('exact_size') or e
+        ec = exp.get('exact_center') or exp['center']
+        pad = max(abs(e[i] - ex[i]) / max(ex[i], 1e-9) for i in range(3))
+        d_ok = all(rel(gs[i], ex[i]) < 1e-3 for i in range(3))
+        s_ok = all(rel(ss[i], ex[i]) < 1e-2 for i in range(3))
+        c_ok = all(rel(abs(got['skinCenter'][i]), abs(ec[i])) < 1e-2 for i in range(3))
+        j_ok = got.get('maxJoint', 0) < got.get('joints', 1) and \
+            abs(got['weightSum'][0] - 1.0) < 1e-3 and abs(got['weightSum'][1] - 1.0) < 1e-3
         tris_ok = got['verts'] == exp['verts']
-        say(d_ok, '%-13s 几何盒逐轴 vs m_LocalAABB: three=%s unity=%s' %
-            (name, ['%.4f' % x for x in gs], ['%.4f' % x for x in e]))
-        say(s_ok and c_ok, '%-13s 静止态蒙皮盒 vs m_LocalAABB: size=%s center=%s（权重和 %.4f~%.4f）' %
-            (name, ['%.4f' % x for x in ss], ['%.4f' % x for x in got['skinCenter']],
-             got['weightSum'][0], got['weightSum'][1]))
+        say(d_ok, '%-13s 几何盒逐轴 vs 顶点实算盒: three=%s exact=%s（Unity AABB 与实算最大差 %.2f%%）' %
+            (name, ['%.4f' % x for x in gs], ['%.4f' % x for x in ex], 100 * pad))
+        dev = got.get('maxDev')
+        say(dev is not None and dev < 1e-4,
+            '%-13s 静止态逐顶点偏差 max|skinned-bind| = %s（应≈0）；盒 size=%s center=%s '
+            'vs 实算 center=%s（权重和 %.4f~%.4f 最大骨号 %s/%s）' %
+            (name, ('%.3e' % dev) if dev is not None else 'None',
+             ['%.4f' % x for x in ss], ['%.4f' % x for x in got['skinCenter']],
+             ['%.4f' % x for x in ec],
+             got['weightSum'][0], got['weightSum'][1], got.get('maxJoint'), got.get('joints')))
         say(tris_ok, '%-13s 顶点数 vs 源包: %d vs %d' % (name, got['verts'], exp['verts']))
         if not (d_ok and s_ok and tris_ok):
             ok_all = False
@@ -405,8 +450,12 @@ def main():
             return 1
         say(len([x for x in console_errs if 'favicon' not in x]) == 0,
             '浏览器 console 零 error（实得 %d 条: %s）' % (len(console_errs), console_errs[:2]))
-        say(res['skinnedCount'] == len(expect),
-            'three.js 里 SkinnedMesh 数 == Unity 网格数: %d == %d' % (res['skinnedCount'], len(expect)))
+        bases = sorted(set(k.split('_mesh')[0] for k in res['meshes']))
+        say(bases == sorted(expect),
+            '前端蒙皮网格按基名分组 == 源包网格集合: %s vs %s' % (bases, sorted(expect)))
+        say(res['skinnedCount'] >= len(expect),
+            'SkinnedMesh 对象数 = %d（GLTFLoader 一个 primitive 建一个对象，源包 %d 个网格，'
+            'face 5 / body 2 个子网格）' % (res['skinnedCount'], len(expect)))
         exp = res['expect']
         compare(res['meshes'], exp, '正常版：前端读数 vs 源包真值')
         tot_tris = sum(v['tris'] for v in exp.values())
@@ -422,8 +471,10 @@ def main():
                 '最长三角边 / 包围盒对角线 < 0.35（蒙皮没把面扯飞）: %s' % ratios)
 
         shots = []
-        for name, deg, wire in (('front', 0.0, False), ('side', 90.0, False),
-                                ('back', 180.0, False), ('wire', 45.0, True)):
+        # 不自称正/侧/背：相机是按 +X 起算的角度，实测与角色朝向差 90°，
+        # 标错了会误导目视判断 ⇒ 直接用角度名。
+        for name, deg, wire in (('cam000', 0.0, False), ('cam090', 90.0, False),
+                                ('cam180', 180.0, False), ('wire45', 45.0, True)):
             data = ev('window.__shot(%s,%s)' % (deg, 'true' if wire else 'false'))
             if isinstance(data, str) and data.startswith('data:image/png;base64,'):
                 p = os.path.join(WORK, 'shot_%s.png' % name)
@@ -472,9 +523,8 @@ def main():
                     say(True, '%s ⇒ harness 直接失败（%s），也算咬住了' %
                         (tag, str(ev('window.__ERR'))[:60]))
                     continue
-                bad = [k for k, v in rr['meshes'].items()
-                       if 'skinSize' not in v or
-                       not all(rel(v['skinSize'][i], exp[k]['size'][i]) < 5e-2 for i in range(3))]
+                dev = [k for k, v in rr['meshes'].items()
+                       if v.get('maxDev') is None or v['maxDev'] > 1e-4]
                 if not rr['meshes']:
                     say(True, '%s 一个网格都没蒙皮成功 —— 也算咬住' % tag)
                     continue
@@ -484,10 +534,11 @@ def main():
                     continue
                 edge = max(es)
                 w = [v['weightSum'] for v in rr['meshes'].values()]
-                print('     %s: 失衡网格=%s 最长边/对角=%.4f 权重和范围=%s'
-                      % (tag, bad or '无', edge, [round(max(x[0], 0), 3) for x in w][:3]))
-                say(bool(bad) or edge > 0.35,
-                    '%s 让"静止态蒙皮盒/边长比"判据变红（失衡 %s，边长比 %.3f）' % (tag, bad or '无', edge))
+                print('     %s: 偏差>1e-4 的网格=%d 个 %s 最长边/对角=%.4f'
+                      % (tag, len(dev), dev[:4], edge))
+                say(bool(dev),
+                    '%s 让静止态逐顶点偏差判据变红（%d/%d 个网格偏差 >1e-4）'
+                    % (tag, len(dev), len(rr['meshes'])))
             r = ev("location.href='%s'" % (base + 'dorm3d_gltf/harness.html?m=' +
                                            base + 'dorm3d_gltf/tianlangxing.glb'))
         print("\n退出判据: FAIL=%d" % len(FAIL))
