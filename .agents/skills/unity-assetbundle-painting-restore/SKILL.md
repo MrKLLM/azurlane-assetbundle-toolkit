@@ -1,7 +1,7 @@
 ---
-name: unity-assetbundle-painting-restore 触发词（3D 侧）：蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
+name: unity-assetbundle-painting-restore 触发词（3D 侧）：m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.12.0
+version: 1.13.0
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -294,6 +294,30 @@ MAD 分不开"该替换/不该替换"，两者数值重叠。这条写进了常�
 - **布局不要猜，反解 + 三重自证**：每流只有最后一个通道的元素宽度未知（其余由 `next_offset - offset` 整除推出），枚举 ∈{1,2,4}，要求同时满足 ① `Σ stride == len(data)//n`（并允许 `tail = len % n` 的 padding 落在**末段流起点之前**，不是只有整块尾部）；② **每个**顶点权重和恰为 `1.0000`（UNorm16 走 `/65535`、Float32 直读）；③ `max(boneIndex) < len(m_BindPose)`。只有真布局能三条全过——**错布局会自己报出来，所以这套判据同时也是回归闸门**。
 - **每顶点骨数逐网格变，不是一个模型一个常量**：实测同一角色 body=4、face/neck=2、单骨部件（脸红/装饰）**压根没有 BlendWeight 通道、权重恒 1**。装配器按"通道存在与否 + 维度"分支，别按角色配表写死。
 - ⚠️ `Mesh.m_CompressedMesh` 在 TypeTree 里**恒存在**，`if obj.m_CompressedMesh: 判"压缩网格"` 会得到永远为真的假信号——要看到里面 `m_Vertices/m_BoneWeights` 的 `m_NumItems>0` 才算数据存在。**"字段读得出来"不等于"里面有数据"**，探针一律量内部计数。
+
+**从蒙皮包出 glTF（`.glb`）的四条硬事实**（`export()` 只给无骨骼 OBJ，装配层必须自己写）：
+
+- **真材质常常不在网格包里**：Unity 的 FBX 导入件在 `res` 包里只挂占位材质（`Lit`），真材质虽**住在**该包，
+  却是由 **prefab 包的 `SkinnedMeshRenderer.m_Materials` 以外链 PPtr** 引用的。落点判定用现成规则：
+  `prefab 的 SerializedFile.externals[i].name == 目标包的内层 CAB` ⇒ `file_id == i+1` 的 PPtr 其 `path_id`
+  就在那包里。**不要按材质名猜**（名字匹配会把眼睑/眉毛贴到皮肤上）。
+- **一个网格可有多 submesh**（实测脸部 5 个、身体 2 个；`m_SubMeshes` 的 `firstByte/indexCount`，
+  各段 `vertexCount` 之和恰等于顶点总数）。只出一个 primitive 会整块贴错材质；
+  ⚠️ **换绕序必须在按 submesh 切分之后做**，否则 `firstByte` 的字节偏移对不上。
+- **`UnityPropertySheet` 的贴图槽在这个版本叫 `m_TexEnvs`**（另有 `m_Floats/m_Colors/m_Ints`），
+  **没有 `m_Textures`**。按 `getattr(sp,'m_Textures',[])` 读会得到**每个材质都 `texRefs=0`** 的恒 0 假读数——
+  与 `compressedMesh` 同族：**读出的 0 要先问"字段名对不对"，再问"值是不是真 0"**。
+- **自写二进制产物必须被"独立回读 + 变异红路径"验收**，否则等于没验：
+  ① 重新打开自己写的文件，断言全部落在**文件字节**上（GLB 声明长度==实际字节、accessor 的
+  `count×type×componentType` 落在 bufferView 内、从 BIN 读回每顶点权重和==1、bind 矩阵条数==关节数
+  且**不含单位阵**、image 前 8 字节是 PNG 魔数、索引被 3 整除且 < 顶点数、没有 mesh 未挂在节点上）；
+  ② 再**故意改坏两处**（把一个权重字节置 0、把长度声明改短 4B），两次都必须非零退出并点名缺陷——
+  闸门不红就等于闸门是空的。装配期就加一条**长度不变式** `len(values)==count×ITEMS[type]`
+  （`MAT4` 的 `count` 是矩阵个数不是浮点个数），能把这类错在生成时炸掉而不是留给浏览器。
+  ③ GLB 的块数据从**偏移 20** 起（12B 全局头 + 8B 块头），按 16 读会拿到带 `"JSON"` 前串的坏 JSON。
+  ④ 坐标系镜像要**处处一致**：顶点/法线 x 取反 + 三角形换绕序 + 矩阵 `C·M·C` 共轭 +
+  四元数 `(x,y,z,w)→(x,-y,-z,w)` + UV 的 V 翻一次；少做任何一处会得到"镜像但 inside-out"。
+  其中"矩阵要不要转置"与"V 要不要翻"只能目视定案 ⇒ 做成**开关**，不要偷偷改数据。
 
 **踩坑**：
 - **目录名不可信**：`shipmodels/` 实测只有 `Sprite`+`Texture2D`（2,547 个包全是 2D 舰船贴图）。判类型必须看对象类型分布。

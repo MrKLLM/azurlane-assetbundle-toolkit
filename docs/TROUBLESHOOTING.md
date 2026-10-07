@@ -6625,6 +6625,35 @@ D 盘可用 **268.64 GB**。
 `Mesh` 上没有解析好的权重数组，必须自己按字节解（`export()` 只给不含骨骼的 OBJ）；
 ④ "`--only` 能给到单个文件粒度"——`set_only()` 恒补 `/`，只能选目录（见 WF-28 撤销归档闸）。
 
+### 追加（同日 step 4）：第三个恒 0 假读数在材质上，而且真材质根本不在 res 包里
+
+`probe_material_shader` 打的 `texRefs=0` **对每一个材质都成立**——这不是"这些材质没贴图集"，
+是又一个"用错字段名 ⇒ 恒空 ⇒ 看起来像读数"的例子：
+
+- **`UnityPropertySheet` 在这个版本里只有 `m_Floats / m_Colors / m_Ints / m_TexEnvs`**，
+  没有 `m_Textures`。`getattr(sp, "m_Textures", [])` 永远返回默认空表，于是 `texRefs` 恒 0。
+  实测 `Lit` 材质的 `m_TexEnvs` 有 **14** 个槽（`_BaseMap` 等）。
+  ⇒ 与上面第 1 条同一个判据：**读出来的 0 要先问"字段名对不对"，再问"值是不是真 0"**。
+- **res 包里的 SMR 只指着占位材质 `Lit`**（`m_Materials` 五项全是同一个 path_id），
+  真材质（`body01` / `face` / `hair` / `sirus_eye_highlight`…共 13 个）虽然**住在 res 包内**，
+  却是由 **prefab 包的 SMR** 以**外链 PPtr** 引用的。
+  ⇒ 落点判定不靠名字：prefab 的 `SerializedFile.externals[2].name` 恰等于 res 包的内层 CAB
+  `CAB-607eed9a…` ⇒ prefab SMR 里 `file_id==3` 的材质 PPtr，其 `path_id` 就在 res 包中。
+  这是 §8「FileID=N → `externals[N-1]`」那条规则在 3D 侧的第一次复用。
+- **一个网格的 submesh 数 ≠ 1**：`face` 有 **5 个 submesh**（indexCount 348/930/8034/528/360，
+  `vertexCount` 93/318/1637/120/92 加起来正好 2,260），`body` 有 2 个。
+  ⇒ 只出一个 primitive 会把眼睑/眉毛等部位整块贴错材质；必须按 `m_SubMeshes`
+  的 `firstByte/indexCount` 切。⚠️ 换绕序要**在切完之后做**，否则 `firstByte` 的字节偏移会对不上。
+- 单骨部件（`mesh_cheek_m`）**没有 BlendWeight 通道**，权重恒 1，只有一条 BlendIndices——
+  探针与装配器都要按"通道存在与否"分支，不能假设四路权重恒定存在。
+
+**探针修订（同日落地）**：`probe_mesh` 的 `compressedMesh=Y/N` 换成 `compressedItems=<内部最大 NumItems>`
+并注明"0 = 空壳"；新增 `probe_weights` 段做**反解 + 三重自证**（每顶点权重和恰为 1、
+`maxBoneIndex < len(m_BindPose)`、覆盖率 100%），且每条通过都附一条
+**"把末段流起点偏移 1 字节必须判不出来"**的反向对照——否则判据可能是恒真的空断言。
+`m_Skin 字段不存在` 那句提示改为"2022.3 已搬进 Mesh.m_VertexData，不是失败"。
+
+
 **涉及文件**：`scripts/diag/probe_3d_capability.py`（`probe_mesh` 的 `compressedMesh` 判据、`probe_skin`
 整段只会喊不会读 —— 待改成上面的反解 + 三重自证）；靶子
 `files/AssetBundles/dorm3d/character/tianlangxing_db/res/tianlangxing_noshoes`；

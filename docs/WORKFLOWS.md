@@ -2872,3 +2872,66 @@ PSD/SVG 图层、前端多层 canvas），出现「某个部件整块看不见 /
 **涉及文件**：`gallery_src/index.html`（`afterMotionUpdate` 环境层叠加、`motionFinish` 轮播、
 `#l2Pool` 计数）、`scripts/build_l2d_motion_pool.py`、上面三个 `scripts/diag/l2d_*` 探针。
 真实结论与收回的两条错判见 **§117**。
+
+---
+
+### WF-32: Unity 蒙皮包 → glTF（手搓 GLB）怎么装配、怎么验到能在浏览器里播（2026-10-07）
+
+适用：要把 Unity AssetBundle 里的**带骨架蒙皮网格**（`Mesh` + `SkinnedMeshRenderer` + `Transform` 层 +
+`Material`/`Texture2D`）变成前端能加载的 `.glb`。前提已经证完：**权重读得出来**（§116），
+`UnityPy.export()` 只给不含骨骼的 OBJ，所以装配层必须自己写。
+
+**第 0 步：先决定要不要引库。** 本条走的是**不装 `pygltflib`、手写 GLB 容器**：
+GLB = 12B 头（magic/version/totalLength）+ 8B 块头 + JSON 块 + 8B 块头 + BIN 块，
+只需要 `nodes/skins/meshes/accessors/bufferViews/images/textures/materials` 八段。
+装库省不了多少事，却多一个 pip 依赖与版本面。**两条硬坑先记下**：
+- ⚠️ **块数据从偏移 20 开始，不是 16**：12B 全局头 **加** 8B 块头 = 20。
+  按 16 读会拿到 `"JSON{...` 这种带块头的串，`json.loads` 直接抛 `Expecting value: line 1 column 1`。
+- 所有 bufferView 4 字节对齐（JSON 补空格、BIN 补 `\0`），否则 three.js 的 `Float32Array` 视图会错。
+
+**五步，顺序不能换（每步都有判据）**：
+
+1. **节点层用 `path_id` 建，不用对象 `id()`**：UnityPy 每次 `read()` 可能新建对象，
+   按 `id()` 比对会**静默匹不上**（表现为骨骼全掉到根节点、蒙皮不炸但姿势散）。
+   要 `by = {o.path_id: o}`，父子用 `m_Father.path_id`，GameObject 名用 `Transform.m_GameObject.path_id` 反查。
+2. **顶点布局复用 §116 的反解 + 三重自证**，不要在装配器里再写一套宽度常量。
+   解不成立就 `die`，**拒绝出图**——硬凑出来的模型在浏览器里"能显示"，只是姿势是错的，比报错更坏。
+3. **材质按 PPtr 外链落回网格所在包**（`externals[i].name == 目标包内层 CAB` ⇒ `file_id == i+1` 的
+   PPtr 的 `path_id` 就在那包里），**不要按材质名猜**；res 包 SMR 自己引用的常是占位 `Lit`。
+   按 `m_SubMeshes` 的 `firstByte/indexCount` 切 primitive（一个网格可以有 5 个 submesh），
+   **换绕序要在切分之后做**。
+4. **左手系 → 右手系按镜像 X 处处一致地转**：顶点/法线 `x` 取反、三角形换绕序、
+   矩阵做 `C·M·C` 共轭（`C=diag(-1,1,1,1)`）、四元数 `(x,y,z,w)→(x,-y,-z,w)`、UV 的 `V` 翻一次。
+   ⚠️ 其中**矩阵元素序**与 **UV 翻转**这两处只能靠浏览器目视定案，所以装配器把它们做成
+   开关（`--transpose-ibm` / `--no-flipuv`）——**不要**为了"看起来对"去偷偷改数据。
+5. **产物必须被独立回读断言，并配红路径自测**（这一步才是"装配完成"的定义）：
+   `--verify <glb>` 重新打开自己写的文件，判据全部落在**文件字节**上，不看装配过程的中间变量：
+   GLB 声明长度 == 实际字节、每个 accessor 的 `count×type×componentType` 落在它的 bufferView 内、
+   **从 BIN 里读回**每个顶点权重和 == 1、最大关节索引 < `skins[j].joints` 数、
+   `inverseBindMatrices` 条数 == 关节数**且不含单位阵**（含单位阵 = 共轭没做或读错）、
+   image 起始 8 字节是 PNG 魔数、索引数被 3 整除且 < 顶点数、**没有 mesh 没挂在节点上**（orphan 不会被渲染）。
+   然后**必须做变异测试**：把一个权重字节改成 0、把 BIN 长度声明改短 4B ——
+   两次都要 `exit 1` 且点名缺陷。**闸门不红就等于闸门是空的。**
+   ⚠️ 量退出码时别让 shell 复合命令把它遮蔽（`... | tail` 拿到的永远是 `tail` 的 0；
+   要么单独跑一次重定向到 `/dev/null` 再取 `$?`）。
+
+**判据（什么才算通路成立）**：不是"three.js 加载没报错"，而是
+① 站姿对（头朝上、脸朝前、比例对）② **没有三角面炸开/翻面**（这是权重 + bind 矩阵正确的直接证据）
+③ 贴图不上下颠倒。①②③都要**截图目视**，无头 CDP 截图即可。
+
+**踩坑记录**：
+- `accessor.count` 对 `MAT4` 是**矩阵个数**，不是浮点个数——传 `len(扁平数组)` 会让 `count×16×4` 超出
+  bufferView，回读断言直接崩在越界上。修法：加一条**长度不变式**
+  `len(values) == count × ITEMS[type]`，任何 accessor 传错都在生成时当场 `die`，而不是留给浏览器。
+- 装配器的 `--check`（只装配不落盘）与 `--verify`（读回已落盘文件）是两件事：前者验**读得对**，
+  后者验**写得对**。只做前者会漏掉全部序列化 bug。
+- `roots` 要按节点序号去重排序（多个 Transform 的 `m_Father.path_id == 0`），只出一个会把
+  多余骨骼子树整个丢在场景外。
+
+**涉及文件**：新增 `scripts/dorm3d_to_gltf.py`（装配器 + `--verify` 回读闸门）；
+`scripts/diag/probe_3d_capability.py`（新增 `probe_weights`、`compressedItems` 真读数、`SKIN` 段改报骨名）；
+靶子 `files/AssetBundles/dorm3d/character/tianlangxing_db/{res/tianlangxing_noshoes,prefabs/tianlangxing_noshoes}`；
+产物试装区 `.diag/dorm3d_gltf/`（未进 `Output/`）。
+真材质外链落点与三个恒 0 假读数见 **§116 追加**，蒙皮权重数字与判据结论见
+**`docs/archive/2026-10-07_3D宿舍复刻可行性取证.md` 追加-VII**。
+相关：WF-28（撤销归档闸 / `--only` 粒度）、§8（PPtr/externals 规则）、WF-16（无头 CDP 验收）。

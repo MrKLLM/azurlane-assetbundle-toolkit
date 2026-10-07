@@ -5,7 +5,11 @@
 不认「别的管线当年还原不出来」这类外推。
 
     py -3 scripts/diag/probe_3d_capability.py files/AssetBundles/model/worldmap3d
-    py -3 scripts/diag/probe_3d_capability.py <某个 dorm3d 的 *_db 包>
+    py -3 scripts/diag/probe_3d_capability.py <某个 dorm3d 的 res 包>
+
+SKIN WEIGHTS 那段是整条 3D 路的生死判据：反解 m_VertexData 的流切分、读出每顶点的骨号与权重，
+并要求「每顶点权重和恰为 1 / 最大骨索引 < bindPose 数 / 覆盖率 100%」三条同时成立，
+另配一条"故意偏移 1 字节必须判不出来"的反向对照——防止判据写成恒真。
 
 退出码：0 = 探针跑完（不代表能力齐全，看打印）；2 = 文件读不开。
 """
@@ -40,9 +44,17 @@ def probe_mesh(env):
         bind = len(getattr(m, "m_BindPose", []) or [])
         bones = len(getattr(m, "m_BoneNameHashes", []) or [])
         comp = getattr(m, "m_CompressedMesh", None)
+        # m_CompressedMesh 这个**对象**在 TypeTree 里恒存在，判它有无没有信息量；
+        # 只有它内部各段的 m_NumItems>0 才说明数据真走了压缩网格那条路。
+        cmn = 0
+        if comp is not None:
+            for f in ("m_Vertices", "m_Normals", "m_Tangents", "m_UV", "m_Colors",
+                      "m_BoneIndices", "m_BoneWeights", "m_Triangles"):
+                cmn = max(cmn, int(getattr(getattr(comp, f, None), "m_NumItems", 0) or 0))
         idx = getattr(m, "m_IndexBuffer", b"") or b""
         print(f"  [{n}] {m.m_Name}: verts={vc} channels={ch} indexBytes={len(idx)} "
-              f"bindPose={bind} boneHashes={bones} compressedMesh={'Y' if comp else 'N'}")
+              f"bindPose={bind} boneHashes={bones} compressedItems={cmn}"
+              f"{'  (压缩网格是空壳，权重在 m_VertexData)' if comp is not None and cmn == 0 else ''}")
         if n == 1:
             try:
                 out = m.export()
@@ -55,8 +67,153 @@ def probe_mesh(env):
     return n
 
 
+def data_at(m):
+    """整块顶点缓冲。UnityPy 1.25.3 把它放在 m_VertexData.m_DataSize 里（名字会骗人）——
+    m_Streams 恒是空 list、m_Streams_0_..3_ 全是 None。"""
+    return bytes(m.m_VertexData.m_DataSize)
+
+
+# m_Channels 的数组下标就是 Unity 的着色器通道号：
+# 0=Position 1=Normal 2=Tangent 3=Color 4..11=UV0..UV7 12=BlendWeight 13=BlendIndices
+CH_BLEND_WEIGHT, CH_BLEND_INDICES = 12, 13
+
+
+def candidate_layouts(vd, total_bytes):
+    """反解打包顶点缓冲的流切分与各通道元素字节宽。
+
+    每流只有**最后一个通道**的宽度推不出来（其余可由 next_offset - offset 整除得），
+    未知数 = 流数，枚举属于 {1,2,4}，用"各流 stride 之和 == 每顶点字节数"筛掉错的。
+    ⚠️ 尾部 padding 不一定在整块末尾——实测 hair 的余量落在**末段流起点之前**。
+    """
+    import itertools
+    ch = sorted((c.stream, c.offset, c.dimension, i)
+                for i, c in enumerate(vd.m_Channels) if c.dimension)
+    n = vd.m_VertexCount
+    if not n:
+        return
+    per, tail = divmod(total_bytes, n)
+    streams = sorted({c[0] for c in ch})
+    groups = {s: [c for c in ch if c[0] == s] for s in streams}
+    derived = {}
+    for s, g in groups.items():
+        for k in range(len(g) - 1):
+            gap, dim = g[k + 1][1] - g[k][1], g[k][2]
+            if dim and gap % dim == 0 and gap // dim in (1, 2, 4):
+                derived[g[k][3]] = gap // dim
+    unk = [g[-1][3] for g in groups.values()]
+    for vals in itertools.product((1, 2, 4), repeat=len(unk)):
+        e = dict(derived)
+        e.update(dict(zip(unk, vals)))
+        stride = {s: max(t[1] + t[2] * e[t[3]] for t in g) for s, g in groups.items()}
+        if sum(stride.values()) != per:
+            continue
+        base, cur = {}, 0
+        for s in streams:
+            base[s] = cur + (tail if s == streams[-1] else 0)
+            cur += stride[s] * n
+        yield ch, streams, stride, base, e, n, per, tail
+
+
+def decode_skin(m, ch, stride, base, e, n, shift=0):
+    """按给定布局读每顶点的骨号与权重。**只读不修**——布局错了就该判不出来。"""
+    import struct
+    W = next((t for t in ch if t[3] == CH_BLEND_WEIGHT), None)
+    I = next((t for t in ch if t[3] == CH_BLEND_INDICES), None)
+    bp = len(getattr(m, "m_BindPose", None) or [])
+    if I is None or e.get(I[3]) not in (1, 2, 4):
+        return None
+    xs, xo, xd, xi = I
+    ifmt = "<%d%s" % (xd, {1: "B", 2: "H", 4: "I"}[e[xi]])
+    data = data_at(m)
+    if W is None:            # 单骨部件：Unity 不写权重通道，权重恒 1
+        wd = we = 0
+    else:
+        ws, wo, wd, wi = W
+        we = e.get(wi)
+        if we not in (2, 4):
+            return None
+        wfmt = "<%d%s" % (wd, {2: "H", 4: "f"}[we])
+    good, mn, mx, mbi = 0, 1.0, 1.0, -1
+    for v in range(n):
+        try:
+            if wd:
+                raw = struct.unpack_from(wfmt, data, base[ws] + shift + v * stride[ws] + wo)
+                s2 = sum(x / 65535.0 if we == 2 else x for x in raw)
+                mn, mx = min(mn, s2), max(mx, s2)
+                good += 1 if s2 > 0 else 0
+            else:
+                good += 1          # 单骨部件没有权重通道，权重恒 1，也算"已覆盖"
+            ii = struct.unpack_from(ifmt, data, base[xs] + shift + v * stride[xs] + xo)
+        except struct.error:
+            # 越界 = 这条布局根本不成立（反向对照靠它把自己顶出缓冲区）
+            return None
+        mbi = max(mbi, max(ii))
+    return dict(has_weight_chan=bool(wd), bones_per_vert=wd or 1, weight_bytes=we,
+                idx_bytes=e[xi], weighted=good, total=n, wmin=mn, wmax=mx,
+                max_bone_idx=mbi, bind_pose=bp)
+
+
+def self_proof(r):
+    """三重自证：权重和恰为 1（每个顶点）、最大骨索引 < bindPose 数、覆盖率 100%。"""
+    if not r:
+        return False
+    return (abs(r["wmin"] - 1.0) < 1e-3 and abs(r["wmax"] - 1.0) < 1e-3
+            and r["max_bone_idx"] < r["bind_pose"] and r["weighted"] == r["total"])
+
+
+def probe_weights(env):
+    """整条 3D 路的生死判据：每顶点的骨号 + 权重能不能**完整**读出来。
+
+    判据不是"读出了字节"而是三条同时成立——错布局不可能同时满足，所以这既是判据也是回归闸门。
+    每条 ✅ 配一条**反向对照**：末段流起点整体偏移 1 字节再解，必须判不出来；
+    若偏移后仍"通过"，说明判据太松（恒真），打印里会直接点名。
+    """
+    hdr("SKIN WEIGHTS (Mesh.m_VertexData 通道 12/13 —— 整条 3D 路的生死判据)")
+    passed = failed = skipped = 0
+    for o in env.objects:
+        if o.type.name != "Mesh":
+            continue
+        m = o.read()
+        vd = m.m_VertexData
+        if not getattr(vd, "m_VertexCount", 0):
+            continue
+        if not any(c.dimension and i in (CH_BLEND_WEIGHT, CH_BLEND_INDICES)
+                   for i, c in enumerate(vd.m_Channels)):
+            skipped += 1
+            print(f"  - {m.m_Name}: 无 BlendWeight/BlendIndices 通道（静态网格，不算失败）")
+            continue
+        hit = None
+        for ctx in candidate_layouts(vd, len(data_at(m))):
+            ch, streams, stride, base, e, n, per, tail = ctx
+            r = decode_skin(m, ch, stride, base, e, n)
+            if self_proof(r):
+                hit = (r, ctx)
+                break
+        if not hit:
+            failed += 1
+            print(f"  ✗ {m.m_Name}: verts={vd.m_VertexCount} —— 无自洽布局"
+                  f"（**判不出不等于读不出**，先怀疑枚举宽度集合）")
+            continue
+        r, ctx = hit
+        ch, streams, stride, base, e, n, per, tail = ctx
+        neg = decode_skin(m, ch, stride, base, e, n, shift=1)
+        bites = not self_proof(neg)
+        passed += 1
+        print(f"  ✓ {m.m_Name}: verts={n} 每顶点={per}B 流={[stride[s] for s in streams]} "
+              f"padding={tail} 权重={r['bones_per_vert']}×{r['weight_bytes'] or '隐式1.0'}B "
+              f"骨号={r['bones_per_vert']}×{r['idx_bytes']}B")
+        print(f"      weighted={r['weighted']}/{r['total']} 权重和=[{r['wmin']:.5f},{r['wmax']:.5f}] "
+              f"maxBoneIdx={r['max_bone_idx']} < bindPose={r['bind_pose']} "
+              f"| 反向对照(偏移1B)={'判不出来(判据是活的)' if bites else '仍然通过(判据太松!)'}")
+    print(f"  小结: 蒙皮可完整反解 {passed} / 解不出 {failed} / 无蒙皮通道 {skipped}")
+    if failed:
+        print("  ⚠️ 有网格解不出时，先确认它是不是压根走了 compressedItems>0 那条路，"
+              "再谈'读不出'")
+    return passed, failed
+
+
 def probe_skin(env):
-    """真正决定「宿舍 3D 能不能动」的一条：SkinnedMeshRenderer 的权重。"""
+    """SkinnedMeshRenderer 侧：骨数与骨名（权重在 Mesh 侧，见 SKIN WEIGHTS 段）。"""
     hdr("SKIN (SkinnedMeshRenderer)")
     found = 0
     for o in env.objects:
@@ -64,15 +221,20 @@ def probe_skin(env):
             continue
         s = o.read()
         found += 1
-        skin = getattr(s, "m_Skin", None)
-        if skin is None:
-            print("  m_Skin 字段不存在 —— 该 Unity 版本的网格把权重放在 Mesh.m_VertexData 流里，"
-                  "改读 m_StreamData 的 BlendWeight/BlendIndex 通道")
-            continue
-        cnt = len(getattr(skin, "boneWeights", []) or getattr(skin, "m_BoneWeights", []) or [])
-        paths = getattr(skin, "path", None) or getattr(skin, "bonePath", "") or ""
-        print(f"  [{found}] bonePaths={'Y' if paths else 'EMPTY'} weightedVerts={cnt} "
-              f"rootGameObj={getattr(s, 'm_rootBone', 'n/a') != ''}")
+        try:
+            name = s.m_GameObject.read().m_Name
+        except Exception:
+            name = "?"
+        bones = list(getattr(s, "m_Bones", None) or [])
+        names = []
+        for b in bones[:4]:
+            try:
+                names.append(b.read().m_GameObject.read().m_Name)
+            except Exception:
+                names.append("?")
+        print(f"  [{found}] {name}: bones={len(bones)} 前4骨名={names} "
+              f"rootBone={'Y' if getattr(s, 'm_RootBone', None) else 'N'} "
+              f"m_Skin={'有' if getattr(s, 'm_Skin', None) is not None else '无(2022.3 已搬进 Mesh.m_VertexData，不是失败)'}")
     if found == 0:
         print("  无 SkinnedMeshRenderer（静态网格包；不能据此推断蒙皮读不出来）")
     return found
@@ -181,6 +343,7 @@ def main(path):
     print("类型分布:", dict(hist.most_common(16)))
     probe_mesh(env)
     probe_skin(env)
+    probe_weights(env)
     probe_texture(env)
     probe_clip(env)
     probe_material_shader(env)
