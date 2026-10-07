@@ -171,7 +171,7 @@ def png_complete(path):
     只看 px_size 会把坏文件当好的挂进索引。"""
     try:
         with open(path, 'rb') as f:
-            f.seek(-12, os.SEEK_END)
+            f.seek(-8, os.SEEK_END)      # IEND 是**最后 8 字节**，读在 -12 会永远 False
             return f.read(8) == b'IEND\xaeB`\x82'
     except Exception:
         return False

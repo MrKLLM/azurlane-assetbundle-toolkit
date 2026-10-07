@@ -303,12 +303,16 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
      （默认视图、五档计数反向对照、"搜索撞上筛选不许说库里没有"），连跑两遍 **67 PASS / 0 FAIL**。
      ⚠️ **两条别再走的路**：`_cg` 文件名规则只能当预筛（先验=0 而人工=1 有 **164** 格）；拼板 300px 判不出
      「人物极小」的边界格，那类裁定权在人（工具 `scripts/diag/make_bg_adjudicate_sheet.py` 可按原图出裁定板）。
-⑦ **背景库 P5「源头低清子集 AI 超分」进行中（2026-10-07）**：取证确认糊在包里不在管线上（抽样 130/130
-     「导出即包内最大纹理」，源纹理 ASTC ≈3.5bpp）。目标 = 宽 ≤1280 ∧（有角色 ∨ 登录加载）**263/1909 张**
-     → `Output/Raw_hd/`（派生层，可整目录删）；anime6b ONNX + DirectML，~13s/张。⏳ **断电后重跑这条即可续**
-     （跳过判据含「尾部 IEND 完整」，半截文件自己删掉重来）：`tools/upscale/venv/Scripts/python.exe -u scripts/upscale_bg_hd.py`
-     （日志 `.diag/upscale_hd.log`）。索引 `img_hd` 已接（schema 4 + 两条新闸门，`--check` 绿）；⏳ **页面未改**
-     （详情/全屏/下载待优先走 `img_hd`）。判据 **WF-35**，选型工具 `scripts/diag/bg_hd_model_cmp.py`。
+⑦ **背景库 P5「源头低清子集 AI 超分」：数据层收官，页面接入未做（2026-10-07）**。
+     取证先立住「糊在包里不在管线上」：抽样 130/130「导出即包内最大纹理」、源纹理 ASTC ≈3.5bpp、
+     网格缩略图 720px 对 232px 卡片够用、详情/全屏本就走原生 PNG ⇒ 不是我们压的。
+     产物 `Output/Raw_hd/` = **263 张 / 2.1 GB / 4096×2304**（anime6b ONNX + DirectML，31 分钟，失败 0）；
+     独立复核 `py -3 scripts/diag/check_bg_hd.py` **四条全绿**（覆盖 / 尺寸正好 4 倍 / 尾部完整 / 无孤儿）。
+     索引已重建 **schema 4**：263 条带 `img_hd`，`bg_page_probe.py` 全绿无回归、`deploy_gallery.py --check` 7/7。
+     ⏳ **唯一未完成 = 页面**：`backgrounds.html` 的 `paint()`/`fsPaint()`/`fsDownload()` 三处仍写死 `it.img`，
+     改成 `it.img_hd||it.img` 即可（改完必须走完「deploy 刷平 → 提交 → --relink → --check」，别停在中间）。
+     判据 **WF-35**；⚠️ 本轮真实缺陷：IEND 完整性判据偏移写错（读在 `[-12:-4]` 永远 False），已修并给
+     校验器配了「判据自身双向对照」（完整必判 True、故意截断必判 False），见 **§120**。
 
 ---
 
