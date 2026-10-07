@@ -51,6 +51,11 @@ ROOT_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_root_labels.json')
 CHARS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_char_flags.json')
 OUT = os.path.join(ROOT, 'Output', 'gallery_v2', 'bg_meta.json')
 SAMPLE_TXT = os.path.join(ROOT, '.diag', 'bgscan', 'sample.txt')
+# AI 超分产物层（`scripts/upscale_bg_hd.py` 产出，派生内容、可整目录删掉重来）。
+# 它**不是**权威源：只有盘上确实存在、且尺寸正好是 Raw 的 4 倍时才发 `img_hd` 字段；
+# 对不上就宁可不发 —— 页面拿它当"点开大图"的目标，指错尺寸等于给用户一张错位图。
+HD = os.path.join(ROOT, 'Output', 'Raw_hd')
+HD_SCALE = 4
 
 TAIL = re.compile(r'(_?cg_?\d+|_cut\d+|_?\d+|_tip|_hx|_n|_bg|_new)$')
 # `X__2` 是导出层为「同一个包里两张**同名但内容不同**的画」补的后缀（见 export_assets
@@ -159,6 +164,17 @@ def px_size(path):
         return struct.unpack('>II', head[16:24])
     except Exception:
         return 0, 0
+
+
+def png_complete(path):
+    """PNG 尾部 IEND 在不在。超分层是**跑批产物**，中断会留下头部合法、内容截断的文件，
+    只看 px_size 会把坏文件当好的挂进索引。"""
+    try:
+        with open(path, 'rb') as f:
+            f.seek(-12, os.SEEK_END)
+            return f.read(8) == b'IEND\xaeB`\x82'
+    except Exception:
+        return False
 
 
 def labels_of(ref_rows):
@@ -294,6 +310,28 @@ def build(sample=None):
         d, name = it['key'].split('/', 1)
         it['w'], it['h'] = px_size(os.path.join(RAW, d, name + '.png'))
 
+    # img_hd：逐张核对尺寸正好是 Raw 的 4 倍才发字段。跑批中途重导时可能读到写了一半的
+    # PNG（px_size 拿不到 4 倍值），那种情况**跳过不发**并打印出来 —— 宁可这张继续用原图，
+    # 也不许把一张尺寸对不上的文件挂到"点开大图"上。
+    hd_mismatch = []
+    for it in items:
+        p = os.path.join(HD, it['key'].replace('/', os.sep) + '.png')
+        if not os.path.isfile(p):
+            continue
+        if not png_complete(p):                     # 超分批处理被中断时留下的半截文件
+            hd_mismatch.append('%s(截断)' % it['key'])
+            continue
+        hw, hh = px_size(p)
+        if (hw, hh) == (it['w'] * HD_SCALE, it['h'] * HD_SCALE):
+            it['img_hd'] = '../Raw_hd/%s.png' % it['key']
+            it['hd_bytes'] = os.path.getsize(p)
+        else:
+            hd_mismatch.append('%s(%dx%d≠%dx%d)' % (it['key'], hw, hh,
+                                                     it['w'] * HD_SCALE, it['h'] * HD_SCALE))
+    if hd_mismatch:
+        print('[WARN] Raw_hd 有 %d 张尺寸对不上号，本次不发 img_hd: %s'
+              % (len(hd_mismatch), hd_mismatch[:5]))
+
     # 一级分组与「场景背景」二级分组的展示数据：页面不许自己从目录名/词根现推中文
     groups = {g: {'cn': GROUP_LABELS[g][0], 'via': GROUP_LABELS[g][1],
                   'count': sum(1 for i in items if i['group'] == g)}
@@ -383,6 +421,13 @@ def selfcheck(items, t, dropped=None):
         ('被当重复丢掉的 _hx，其同内容主图确实在保留集里且逐字节相同（丢重复≠丢图）',
          all(any(i['key'] == d['same_as'] for i in items)
              and _sha_equal(d['key'], d['same_as']) for d in (dropped or []))),
+        ('img_hd 逐张回盘核对：文件在、尺寸正好是 Raw 的 4 倍（点开大图不许指到错位文件）',
+         all(os.path.isfile(os.path.join(ROOT, 'Output', i['img_hd'][3:]))
+             and px_size(os.path.join(ROOT, 'Output', i['img_hd'][3:]))
+             == (i['w'] * HD_SCALE, i['h'] * HD_SCALE)
+             for i in items if i.get('img_hd'))),
+        ('img_hd 只挂在低清子集上（原生宽 <=1280；源头已是 1920 的图不该有超分层）',
+         all(i['w'] <= 1280 for i in items if i.get('img_hd'))),
     ]
 
 
@@ -493,10 +538,16 @@ def main():
 
     n_has = sum(1 for i in items if i.get('has_char') == 1)
     n_no = sum(1 for i in items if i.get('has_char') == 0)
-    doc = {'schema': 3,
+    n_hd = sum(1 for i in items if i.get('img_hd'))
+    doc = {'schema': 4,
            'groups': groups,
            'roots': roots,
            'dropped_identical': dropped,
+           'hd': ({'count': n_hd, 'scale': HD_SCALE,
+                   'source': 'Output/Raw_hd/（scripts/upscale_bg_hd.py 的 AI 超分产物，派生层可删）',
+                   'note': '带 img_hd 的条目，详情页/全屏/下载走高清版；没有该字段的仍用 Raw 原图。'
+                           '超分只覆盖"源头低清且（有角色 或 登录加载）"这一子集，不是全库'}
+                  if n_hd else None),
            'char': ({'has': n_has, 'none': n_no, 'unlabeled': n - n_has - n_no,
                      'source': 'inputs/gamecfg/bg_char_flags.json',
                      'note': '背景页默认视图只隐藏 has_char==0（人工逐格标注，仅覆盖场景背景）；'
@@ -508,7 +559,8 @@ def main():
                    'inferred 是同词根兄弟图传播（页面要标「推断」）；none 无中文名，页面显示英文原名，不得编造',
            'sources': {'exact': 'inputs/gamecfg/bg_scene_refs.json',
                        'baked': 'inputs/gamecfg/bg_tip_titles.json',
-                       'has_char': 'inputs/gamecfg/bg_char_flags.json'},
+                       'has_char': 'inputs/gamecfg/bg_char_flags.json',
+                       'img_hd': 'Output/Raw_hd/'},
            'dirs': {d: {'cn': lbl, 'via': via, 'count': per[d]['total']}
                     for d, (lbl, via) in DIR_LABELS.items() if d in per},
            'counts': dict(t),
