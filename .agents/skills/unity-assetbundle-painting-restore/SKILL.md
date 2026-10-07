@@ -1,7 +1,7 @@
 ---
 name: unity-assetbundle-painting-restore 触发词（3D 侧）：m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.13.0
+version: 1.13.1
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -304,6 +304,18 @@ MAD 分不开"该替换/不该替换"，两者数值重叠。这条写进了常�
 - **一个网格可有多 submesh**（实测脸部 5 个、身体 2 个；`m_SubMeshes` 的 `firstByte/indexCount`，
   各段 `vertexCount` 之和恰等于顶点总数）。只出一个 primitive 会整块贴错材质；
   ⚠️ **换绕序必须在按 submesh 切分之后做**，否则 `firstByte` 的字节偏移对不上。
+- ⚠️ **`skin` 挂在 node 上，不是挂在 mesh 上**：只写 `meshes`+`skins` 两段而不在宿主节点点名 `skin`，
+  three.js **照样画得出来**，但当成普通 Mesh —— **蒙皮静默失效**，且没有任何报错。
+- ⚠️ **权重属性名是 `WEIGHTS_0`（复数）**，骨号是 `JOINTS_0`。写成 `WEIGHT_0` 会被 GLTFLoader 的
+  映射表静默忽略，最后在建 SkinnedMesh 时抛 `reading 'count'`。
+  ⇒ **自写产物的回读断言要按规范白名单查属性名**（`POSITION/NORMAL/TANGENT/COLOR_n/TEXCOORD_n/JOINTS_n/WEIGHTS_n`），
+  **不许按"我自己写了什么键"查** —— 那样会出现"闸门全绿、前端根本加载不了"。
+  配套：变异样本必须**等长**（改键名顺手改了长度，闸门会先炸在长度上，证明不了你想验的那条）。
+- ⚠️ **验蒙皮不许用 `Box3.setFromObject(skinnedMesh)`**：它取的是**未蒙皮**的 `geometry.boundingBox`，
+  蒙皮炸了它也不动 —— 恒真判据。要量蒙皮就在页面里**用 CPU 逐顶点重算**
+  `Σ w·(bone.matrixWorld ∘ boneInverse)·v`；且"全零权重行"要回落成原顶点，否则顶点塌到原点，
+  包围盒和边长比一起被污染。另：GLTFLoader **一个 primitive 建一个 SkinnedMesh**，
+  比"前端网格数 == 源包网格数"要按名字分组，不能直接数对象。
 - **`UnityPropertySheet` 的贴图槽在这个版本叫 `m_TexEnvs`**（另有 `m_Floats/m_Colors/m_Ints`），
   **没有 `m_Textures`**。按 `getattr(sp,'m_Textures',[])` 读会得到**每个材质都 `texRefs=0`** 的恒 0 假读数——
   与 `compressedMesh` 同族：**读出的 0 要先问"字段名对不对"，再问"值是不是真 0"**。

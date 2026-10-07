@@ -2920,6 +2920,24 @@ GLB = 12B 头（magic/version/totalLength）+ 8B 块头 + JSON 块 + 8B 块头 +
 ③ 贴图不上下颠倒。①②③都要**截图目视**，无头 CDP 截图即可。
 
 **踩坑记录**：
+- ⚠️ **glTF 的 `skin` 挂在 node 上，不是挂在 mesh 上**。只写 `meshes` + `skins` 两段而不在节点上点名
+  `skin`，three.js **照样画得出来**，但当成普通 Mesh —— 蒙皮静默失效。回读断言必须有这一条：
+  "每个 mesh 的宿主节点都写了 skin"。
+- ⚠️ **蒙皮权重属性名是 `WEIGHTS_0`（复数）**，`JOINTS_0` 才是单数前缀。写成 `WEIGHT_0` 时
+  GLTFLoader 的映射表（`WEIGHTS_0:'skinWeight'` / `JOINTS_0:'skinIndex'`）**静默忽略**它，
+  最后建 SkinnedMesh 时抛 `reading 'count'`。
+  ⇒ **回读断言不许按"我自己写了什么键"查，要按规范白名单查键名**
+  （`POSITION/NORMAL/TANGENT/COLOR_n/TEXCOORD_n/JOINTS_n/WEIGHTS_n`）——
+  本轮就是 `--verify` 全绿而前端根本加载不了，因为它查的就是那个错键。
+- ⚠️ 验蒙皮**不许用 `Box3.setFromObject(skinnedMesh)`**：它取的是**未蒙皮**的 `geometry.boundingBox`，
+  蒙皮炸了它也不动，是条恒真判据。要量蒙皮就得在页面里**用 CPU 逐顶点重算**
+  `Σ w·(bone.matrixWorld ∘ boneInverse)·v`；且"全零权重行"必须回落成原顶点，
+  否则顶点塌到原点，包围盒与边长比一起被污染。
+- GLTFLoader **一个 primitive 建一个 SkinnedMesh**（共享同一套 attributes）⇒
+  "前端网格数 == Unity 网格数"这条判据要按网格名分组，不能按对象数直接比。
+- 变异样本要**等长**：直接改 JSON 里的键名会顺带改掉长度，于是闸门先炸在
+  "声明长度 != 实际字节"上，**证明不了你想验的那条判据**。正确做法：解析 → 改对象 →
+  用同一个 writer 重新落盘。
 - `accessor.count` 对 `MAT4` 是**矩阵个数**，不是浮点个数——传 `len(扁平数组)` 会让 `count×16×4` 超出
   bufferView，回读断言直接崩在越界上。修法：加一条**长度不变式**
   `len(values) == count × ITEMS[type]`，任何 accessor 传错都在生成时当场 `die`，而不是留给浏览器。

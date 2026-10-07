@@ -389,7 +389,7 @@ def build(res_path, only=None, out_path=None, check_only=False,
         if nj > 255:
             die(f"{gname}: 骨数 {nj} > 255，JOINTS_0 需改 ushort（本包未覆盖，先报错不出错图）")
         attrs["JOINTS_0"] = add_accessor(gltf, buf, "B", joints, n, "VEC4", ARRAY_BUFFER)
-        attrs["WEIGHT_0"] = add_accessor(gltf, buf, "f", weights, n, "VEC4", ARRAY_BUFFER)
+        attrs["WEIGHTS_0"] = add_accessor(gltf, buf, "f", weights, n, "VEC4", ARRAY_BUFFER)
 
         code, idx = index_buffer(mesh)
         width = 2 if code == "H" else 4
@@ -446,7 +446,11 @@ def build(res_path, only=None, out_path=None, check_only=False,
         host = node_of_go.get(gpid)
         if host is None:
             die(f"{gname}: 找不到承载该网格的节点（该 GameObject 没有 Transform？）")
-        gltf["nodes"][host]["mesh"] = len(gltf["meshes"]) - 1
+        # ⚠️ glTF 的 skin 挂在 **node** 上，不是挂在 mesh 上。只写 meshes/skins 两段而不在节点上
+        #    点名 skin，three.js 会当成普通 Mesh 画出来——蒙皮静默失效，画面还"正常"。
+        node = gltf["nodes"][host]
+        node["mesh"] = len(gltf["meshes"]) - 1
+        node["skin"] = len(gltf["skins"]) - 1
         sk = gltf["skins"][-1]
         rows_out.append((gname, mesh.m_Name, n, tri, len(sk["joints"]), len(prims),
                          sum(1 for p in prims if "material" in p)))
@@ -494,6 +498,8 @@ def write_glb(path, gltf, bindata):
         f.write(bindata)
 
 
+LEGAL_ATTRS = {"POSITION", "NORMAL", "TANGENT", "COLOR_0", "COLOR_1",
+                 "TEXCOORD_0", "TEXCOORD_1", "TEXCOORD_2", "JOINTS_0", "WEIGHTS_0"}
 CSIZE = {5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4}
 
 
@@ -576,16 +582,20 @@ def verify(path):
     for mi, me in enumerate(g.get("meshes", [])):
         pr = me["primitives"][0]
         at = pr["attributes"]
-        for need in ("POSITION", "JOINTS_0", "WEIGHT_0"):
+        for need in ("POSITION", "JOINTS_0", "WEIGHTS_0"):
             if need not in at:
                 bad.append("mesh %d 缺 %s" % (mi, need))
         if any(x.startswith("mesh %d 缺" % mi) for x in bad):
             continue
+        for k in at:
+            if k not in LEGAL_ATTRS:
+                bad.append("mesh %d 属性名 %s 不是 glTF 合法名 —— 前端会**静默忽略**它"
+                           "（WEIGHT_0 少个 S 就是这一类）" % (mi, k))
         npos = g["accessors"][at["POSITION"]]["count"]
-        for k in ("JOINTS_0", "WEIGHT_0"):
+        for k in ("JOINTS_0", "WEIGHTS_0"):
             if g["accessors"][at[k]]["count"] != npos:
                 bad.append("mesh %d: %s 条数 != 顶点数" % (mi, k))
-        _, wt = read_acc(g, raw, bin_off, at["WEIGHT_0"])
+        _, wt = read_acc(g, raw, bin_off, at["WEIGHTS_0"])
         off = [i for i, w in enumerate(wt) if abs(sum(w) - 1.0) > 1e-3]
         if off:
             bad.append("mesh %d: %d 个顶点权重和 != 1（第一个在 %d）" % (mi, len(off), off[0]))
@@ -617,12 +627,17 @@ def verify(path):
             bad.append("mesh %d: POSITION 缺 min/max（glTF 硬要求）" % mi)
 
     referenced = set()
+    skinned = set()
     for ni, nd in enumerate(g["nodes"]):
         if "mesh" in nd and not (0 <= nd["mesh"] < len(g["meshes"])):
             bad.append("node %d mesh 索引越界" % ni)
         else:
             if "mesh" in nd:
                 referenced.add(nd["mesh"])
+                if "skin" in nd:
+                    skinned.add(nd["mesh"])
+        if "skin" in nd and not (0 <= nd["skin"] < len(g["skins"])):
+            bad.append("node %d skin 索引越界" % ni)
         for c in nd.get("children", []):
             if not (0 <= c < len(g["nodes"])):
                 bad.append("node %d 子索引越界" % ni)
@@ -630,6 +645,11 @@ def verify(path):
     if orphan:
         bad.append("有 %d 个 mesh 没挂在任何节点上（three.js 不会画它）: %s"
                    % (len(orphan), orphan))
+    noskin = [i for i in range(len(g["meshes"])) if i not in skinned]
+    if noskin:
+        bad.append("有 %d 个 mesh 的宿主节点没写 skin：%s —— glTF 的 skin 挂在 **node** 上而不是 mesh 上，"
+                   "漏了它 three.js 照样画得出来，但当成普通 Mesh，**蒙皮静默失效**"
+                   % (len(noskin), [g["meshes"][i]["name"] for i in noskin]))
     for nd_i in g["scenes"][0]["nodes"]:
         if not (0 <= nd_i < len(g["nodes"])):
             bad.append("scene 根节点索引越界")
