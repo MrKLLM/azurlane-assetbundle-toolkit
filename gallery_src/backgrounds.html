@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>背景库 · 碧蓝航线资产浏览器</title>
+<script>/* 与 index.html 同一条规则：先定主题再渲染，否则刷新闪一下默认色 */try{document.documentElement.dataset.theme=localStorage.getItem('gallery.theme')||'light'}catch(e){document.documentElement.dataset.theme='light'}</script>
+<!-- 配色/圆角/弹性只有正本 theme.css（与 index.html、bgm.html 共用）。
+     ⚠️ 本文件的组件规则里不许出现字面颜色：所有透明层都用 color-mix() 从 token 派生，
+        这样「昼/夜」两套主题会一起动，不会只有一边对。 -->
+<link rel="stylesheet" href="theme.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{font-family:'Segoe UI',"Microsoft YaHei",system-ui,sans-serif;color:var(--txt);
+  min-height:100vh;overflow-x:hidden;
+  background:linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%) fixed}
+
+/* ── 环境光：与音乐库同一条规则，只有透明度在动 ── */
+.amb{position:fixed;inset:-20% -10%;z-index:-1;pointer-events:none;overflow:hidden}
+.amb i{position:absolute;display:block;border-radius:50%;filter:blur(70px);opacity:.45;
+  animation:drift 52s var(--ease-ios) infinite alternate}
+.amb i:nth-child(1){width:50vw;height:50vw;left:-8vw;top:-12vw;
+  background:radial-gradient(circle at 40% 40%,color-mix(in srgb,var(--brand) 38%,transparent),transparent 68%)}
+.amb i:nth-child(2){width:42vw;height:42vw;right:-6vw;top:24vh;animation-duration:67s;animation-delay:-16s;
+  background:radial-gradient(circle at 60% 45%,color-mix(in srgb,var(--pop) 26%,transparent),transparent 66%)}
+@keyframes drift{from{transform:translate3d(0,0,0) scale(1)}to{transform:translate3d(4vw,-3vh,0) scale(1.12)}}
+
+header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:14px 22px;background:var(--nav-bg);border-bottom:1px solid var(--nav-line);
+  backdrop-filter:blur(var(--nav-blur)) saturate(1.5);-webkit-backdrop-filter:blur(var(--nav-blur)) saturate(1.5)}
+header h1{font-size:19px;font-weight:650;color:var(--title);letter-spacing:.4px}
+header .back{font-size:13px;color:var(--txt2);text-decoration:none;padding:6px 12px;border-radius:var(--r-chip);
+  border:1px solid var(--chip-line);background:var(--chip);transition:color var(--t-col) var(--ease-ios),
+  transform .16s var(--ease-ios)}
+header .back:hover{color:var(--on-txt)}
+header .back:active{transform:scale(.97)}
+header .sub{font-size:12.5px;color:var(--dim)}
+header .sp{flex:1}
+
+.opt{display:inline-flex;background:var(--chip);border:1px solid var(--chip-line);border-radius:var(--r-chip);
+  padding:3px;gap:2px}
+.opt button{border:0;background:transparent;color:var(--txt2);font-size:12.5px;padding:5px 12px;
+  border-radius:var(--r-chip);cursor:pointer;transition:all var(--t-col) var(--ease-ios)}
+.opt button.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+
+.wrap{max-width:1560px;margin:0 auto;padding:18px 22px 56px}
+.tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.q{flex:1;min-width:240px;font-size:14px;color:var(--txt);background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r-in);padding:10px 14px;outline:none;
+  transition:box-shadow var(--t-col) var(--ease-ios),border-color var(--t-col) var(--ease-ios)}
+.q:focus{border-color:var(--on-ring);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 16%,transparent)}
+.grp{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
+.grp>span{font-size:12px;color:var(--dim);margin-right:2px}
+.chip{font-size:12.5px;color:var(--txt2);background:var(--chip);border:1px solid var(--chip-line);
+  border-radius:var(--r-chip);padding:5px 12px;cursor:pointer;
+  transition:all var(--t-col) var(--ease-ios)}
+.chip:hover{color:var(--txt)}
+.chip:active{transform:scale(.97)}
+.chip.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+.chip b{font-weight:600;opacity:.7;margin-left:5px;font-variant-numeric:tabular-nums}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:14px}
+.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
+  overflow:hidden;cursor:pointer;content-visibility:auto;contain-intrinsic-size:auto 190px;
+  box-shadow:var(--sh1);transition:transform .2s var(--ease-ios),box-shadow .2s var(--ease-ios)}
+.card:hover{transform:translateY(-2px);box-shadow:var(--sh2)}
+.card .ph{width:100%;aspect-ratio:16/9;background:var(--panel2);display:block;overflow:hidden}
+.card .ph img{width:100%;height:100%;object-fit:cover;display:block}
+/* 缩略图缺失要**看得见**：画一条斜纹底 + 一行字，不留"格子在但空着"的静默失败 */
+.card.miss .ph{background:var(--stage)}
+.card.miss .ph::after{content:'缩略图缺失';display:block;padding:14px;font-size:11px;color:var(--dim)}
+.card.miss .ph img{display:none}
+.card .nm{padding:9px 11px 10px}
+.card .t1{font-size:13.5px;font-weight:600;color:var(--txt);line-height:1.35;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:18px}
+.card .t2{font-size:11px;color:var(--dim);margin-top:3px;font-family:ui-monospace,Consolas,monospace;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{position:absolute;top:8px;left:8px;font-size:10.5px;font-weight:600;padding:3px 8px;
+  border-radius:var(--r-chip);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.badge.exact{background:color-mix(in srgb,var(--ok) 78%,transparent);color:var(--panel)}
+.badge.inferred{background:color-mix(in srgb,var(--brand) 74%,transparent);color:var(--panel)}
+.badge.none{background:color-mix(in srgb,var(--dim) 62%,transparent);color:var(--panel)}
+
+/* ── 详情层 ── */
+.ov{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
+  background:var(--mask);padding:24px}
+.ov.open{display:flex}
+.sheet{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-panel);
+  box-shadow:var(--sh3);max-width:1180px;width:100%;max-height:92vh;overflow:auto;
+  display:grid;grid-template-columns:1fr 320px;gap:0}
+.sheet .imgbox{background:var(--stage);display:flex;align-items:center;justify-content:center;min-height:320px}
+.sheet .imgbox img{max-width:100%;max-height:88vh;display:block}
+.sheet .side{padding:20px;border-left:1px solid var(--line)}
+.sheet h2{font-size:17px;color:var(--title);margin-bottom:4px;line-height:1.35}
+.sheet .en{font-size:12px;color:var(--dim);font-family:ui-monospace,Consolas,monospace;word-break:break-all}
+.kv{margin:16px 0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12.5px}
+.kv dt{color:var(--dim)}.kv dd{color:var(--txt2)}
+.ev{margin-top:14px}
+.ev h3{font-size:12px;color:var(--dim);font-weight:600;margin-bottom:8px;letter-spacing:.4px}
+.ev .row{font-size:12px;color:var(--txt2);padding:7px 10px;background:var(--panel2);
+  border-radius:var(--r-in);margin-bottom:6px;line-height:1.45}
+.ev .row .src{display:block;color:var(--dim);font-size:10.5px;font-family:ui-monospace,Consolas,monospace;
+  margin-top:2px;word-break:break-all}
+.nav{display:flex;gap:8px;margin-top:18px}
+.nav button{flex:1;font-size:12.5px;color:var(--txt2);background:var(--chip);border:1px solid var(--chip-line);
+  border-radius:var(--r-in);padding:9px;cursor:pointer;transition:all var(--t-col) var(--ease-ios)}
+.nav button:hover{color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+.nav button:active{transform:scale(.97)}
+.warn{margin-top:14px;font-size:11.5px;color:var(--dim);line-height:1.6;
+  border-left:2px solid var(--line);padding-left:10px}
+.empty{text-align:center;color:var(--dim);padding:60px 0;font-size:13px}
+@media (max-width:900px){.sheet{grid-template-columns:1fr}.sheet .side{border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div class="amb"><i></i><i></i></div>
+<header>
+  <a class="back" href="index.html">← 资产浏览器</a>
+  <h1>背景库</h1>
+  <span class="sub" id="sub">载入中…</span>
+  <span class="sp"></span>
+  <div class="opt" id="gTheme" title="昼 / 夜配色（状态会记住）">
+    <button data-t="light">昼</button><button data-t="dark">夜</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="tools"><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"></div>
+  <div class="grp" id="gTier"><span>命名档</span></div>
+  <div class="grp" id="gDir"><span>类目</span></div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none">没有符合条件的背景图</div>
+</div>
+
+<div class="ov" id="ov">
+  <div class="sheet">
+    <div class="imgbox"><img id="ovimg" alt=""></div>
+    <div class="side">
+      <h2 id="ovname"></h2>
+      <div class="en" id="oven"></div>
+      <dl class="kv" id="ovkv"></dl>
+      <div class="ev"><h3>配置表里的出处</h3><div id="ovev"></div></div>
+      <div class="warn" id="ovwarn"></div>
+      <div class="nav">
+        <button id="ovprev">← 上一张</button>
+        <button id="ovnext">下一张 →</button>
+        <button id="ovclose">关闭（Esc）</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* 命名三档的语义（与 scripts/build_bg_meta.py 一致，页面不许自己升档）：
+   exact    这张图自己被配置表的背景字段整值引用，且那行有中文名 → 中文关卡名
+   inferred 这张图自己没有引用，同词根兄弟图有 → 只给「系列名」，不冒充具体关卡
+   none     两档都没有 → 显示类目的中文说明。⚠️ 类目说明是**我对目录名的归类描述**，
+            不是这张图的资产名，所以徽章单列一档，页面上也必须写出来 */
+const $=id=>document.getElementById(id);
+const REDUCE=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const mb=b=>b>=2**20?(b/2**20).toFixed(1)+' MB':(b/2**10).toFixed(0)+' KB';
+/* 游戏里写的是「起舞于天原之上·下篇|| ||CHAPTER EX||E.X.」——`||` 之后是排版串，不是名字 */
+const clean=s=>(s||'').split('||')[0].trim();
+const TIER={exact:'确定',inferred:'推断',none:'类目说明'};
+
+let ALL=[],view=[],fTier='',fDir='',q='',cur=-1,META=null;
+
+/* 懒加载交给浏览器原生两件套：卡片 `content-visibility:auto`（屏幕外不解码）+ 图 `loading="lazy"`。
+   这里**不再挂 IntersectionObserver** —— 实测连着的应用内浏览器页 `innerHeight=0`，
+   IO 于是永远不判相交，靠 IO 出图的网格会整页空白（2026-10-07 抓到）。
+   直接写 src 就没有"探针不触发就没画面"这条失效路径，省内存的活由 content-visibility 做。
+   缩略图缺失时给 `.miss` 标记，不留"看着有格子其实点不开"的伪装成功。 */
+
+function title(it){
+  if(it.tier==='exact') return clean(it.cn[0] && it.cn[0].cn) || it.name;
+  if(it.tier==='inferred') return it.series || ('同系列 ' + (it.root || it.name));
+  return (META.dirs[it.dir] && META.dirs[it.dir].cn) || it.dir;
+}
+function hay(it){
+  return [it.name,it.root,it.series,it.dir,title(it),
+          (META.dirs[it.dir]||{}).cn||'',
+          (it.cn||[]).map(x=>clean(x.cn)).join(' ')].join(' ').toLowerCase();
+}
+function apply(){
+  const kw=q.trim().toLowerCase();
+  view=ALL.filter(it=>(!fTier||it.tier===fTier)&&(!fDir||it.dir===fDir)&&(!kw||hay(it).includes(kw)));
+  const g=$('grid'); g.innerHTML='';
+  const frag=document.createDocumentFragment();
+  for(const it of view){
+    const c=document.createElement('div'); c.className='card'; c.dataset.k=it.key;
+    const ar=(it.w&&it.h)?(it.w+'/'+it.h):'16/9';
+    c.innerHTML='<span class="badge '+it.tier+'">'+TIER[it.tier]+'</span>'+
+      '<div class="ph" style="aspect-ratio:'+ar+'"><img src="'+it.thumb+'" alt="" loading="lazy"></div>'+
+      '<div class="nm"><div class="t1">'+esc(title(it))+'</div>'+
+      '<div class="t2">'+esc(it.name)+' · '+mb(it.bytes)+'</div></div>';
+    c.addEventListener('click',()=>open(it.key));
+    const im=c.querySelector('img');
+    im.addEventListener('error',()=>{c.classList.add('miss');
+      c.title='缩略图取不到: '+it.thumb;},{once:true});
+    frag.appendChild(c);
+  }
+  g.appendChild(frag);
+  $('empty').style.display=view.length?'none':'';
+  $('sub').textContent=view.length+' / '+ALL.length+' 张 · '
+    +['exact','inferred','none'].map(t=>TIER[t]+' '+(META.counts[t]||0)).join(' · ');
+}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
+
+/* chip **只建一次**，之后就地改 `.on`。
+   原来每次点击都 `renderFilters()` 重建整组节点，后果有两个：
+   ① 焦点/滚动位置丢，② 任何持旧节点引用的调用（键盘、自动化验收）点到的是
+      已脱离 DOM 的按钮 —— 表现为"筛选叠着没解开"，看着像产品的过滤 bug。 */
+function buildChips(host,items,onPick){
+  const h=$(host);
+  for(const it of items){
+    const b=document.createElement('button'); b.className='chip'; b.dataset.v=it.v;
+    b.innerHTML=esc(it.label)+(it.n!=null?'<b>'+it.n+'</b>':'');
+    b.addEventListener('click',()=>onPick(it.v));
+    h.appendChild(b);
+  }
+}
+function syncChips(host,val){
+  for(const b of $(host).querySelectorAll('.chip')) b.classList.toggle('on',b.dataset.v===val);
+}
+function initFilters(){
+  buildChips('gTier',[{v:'',label:'全部'},{v:'exact',label:'确定'},{v:'inferred',label:'推断'},{v:'none',label:'类目说明'}],
+             v=>{fTier=v;syncChips('gTier',v);apply()});
+  const ds=Object.entries(META.dirs).sort((a,b)=>b[1].count-a[1].count);
+  buildChips('gDir',[{v:'',label:'全部'}].concat(ds.map(([k,d])=>({v:k,label:d.cn,n:d.count}))),
+             v=>{fDir=v;syncChips('gDir',v);apply()});
+}
+
+function open(key){
+  const i=view.findIndex(x=>x.key===key); if(i<0) return; cur=i; paint();
+  $('ov').classList.add('open');
+}
+function paint(){
+  const it=view[cur]; if(!it) return;
+  $('ovimg').src=it.img; $('oven').textContent=it.key+' · '+it.name;
+  $('ovname').textContent=title(it);
+  const rows=[['命名档',TIER[it.tier]+(it.tier==='inferred'?'（继承自同词根「'+it.inferred_from+'」）':'')],
+              ['类目',(META.dirs[it.dir]||{}).cn+' ('+it.dir+')'],
+              ['尺寸',it.w+' × '+it.h],['原图体积',mb(it.bytes)],
+              ['词根',it.root||'（无）']];
+  if(it.series) rows.splice(1,0,['系列名',it.series]);
+  $('ovkv').innerHTML=rows.map(r=>'<dt>'+esc(r[0])+'</dt><dd>'+esc(r[1])+'</dd>').join('');
+  const ev=[];
+  for(const c of (it.cn||[])){
+    const srcs=(c.src||[]).map(s=>s.t+'.'+s.f+' 行 '+s.id).join(' ｜ ');
+    ev.push('<div class="row">'+esc(clean(c.cn))+(c.n>1?' <span style="opacity:.6">×'+c.n+'</span>':'')+
+      (srcs?'<span class="src">'+esc(srcs)+'</span>':'')+'</div>');
+  }
+  if(it.refs&&it.refs.length&&!ev.length)
+    ev.push('<div class="row">配置表引用了这张图，但那几行没有中文字段<span class="src">'+
+      esc(it.refs.map(s=>s.t+'.'+s.f+' 行 '+s.id).join(' ｜ '))+'</span></div>');
+  if(!ev.length) ev.push('<div class="row">配置表里没有这张图的引用</div>');
+  $('ovev').innerHTML=ev.join('');
+  $('ovwarn').textContent = it.tier==='exact'
+    ? '「确定」= 配置表某张表的背景字段整值等于这张图的文件名，名字取自那一行的中文字段。点出处可回指到表与行。'
+    : it.tier==='inferred'
+    ? '「推断」= 这张图自己没有被引用，只有同词根的兄弟图被引用过。所以这里只给系列名（章节名），不给具体关卡 —— 我们不知道它究竟用在哪一小节。'
+    : '「类目说明」是按下图所在目录给出的归类描述（依据写在下方），不是这张图的资产名；配置表里查不到它的中文名，页面不编。';
+}
+function close(){ $('ov').classList.remove('open'); cur=-1; $('ovimg').removeAttribute('src'); }
+
+async function boot(){
+  try{
+    const r=await fetch('bg_meta.json',{cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    META=await r.json();
+  }catch(e){ $('sub').textContent='bg_meta.json 读不到：'+e.message+'（先跑 py -3 scripts/build_bg_meta.py）'; return; }
+  ALL=META.items; initFilters(); apply();
+  const th=$('gTheme');
+  th.querySelector('[data-t="'+(document.documentElement.dataset.theme||'light')+'"]')
+    &&th.querySelector('[data-t="'+(document.documentElement.dataset.theme||'light')+'"]').classList.add('on');
+}
+$('q').addEventListener('input',e=>{q=e.target.value;apply()});
+$('gTheme').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  document.documentElement.dataset.theme=b.dataset.t;
+  try{localStorage.setItem('gallery.theme',b.dataset.t)}catch(_){}
+  $('gTheme').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));});
+$('ov').addEventListener('click',e=>{if(e.target===$('ov'))close()});
+$('ovclose').addEventListener('click',close);
+$('ovprev').addEventListener('click',()=>{if(cur>0){cur--;paint()}});
+$('ovnext').addEventListener('click',()=>{if(cur<view.length-1){cur++;paint()}});
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&cur>=0){close();return}
+  if(e.key==='/'&&cur<0){e.preventDefault();$('q').focus();return}
+  if(cur>=0&&e.key==='ArrowLeft'){cur--;paint()}
+  if(cur>=0&&e.key==='ArrowRight'&&cur<view.length-1){cur++;paint()}
+});
+if(!REDUCE){/* 动效本身已由 token 收在 0.2~0.34s，这里只是给"减少动效"偏好留一个钩子 */}
+boot();
+</script>
+</body>
+</html>

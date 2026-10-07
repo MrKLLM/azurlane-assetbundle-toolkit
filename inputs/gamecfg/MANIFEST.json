@@ -13,11 +13,24 @@
    "tools/sharecfg_re/45_publish_npc_painting.py",
    "tools/sharecfg_re/46_publish_name_code.py",
    "tools/sharecfg_re/47_publish_npc_voice.py",
-   "tools/sharecfg_re/48_publish_meta_group_bridge.py"
+   "tools/sharecfg_re/48_publish_meta_group_bridge.py",
+   "tools/sharecfg_re/49_publish_bg_scene.py"
   ],
-  "landed_at": "2026-10-05"
+  "landed_at": "2026-10-07"
  },
  "files": [
+  {
+   "path": "bg_scene_refs.json",
+   "bytes": 139362,
+   "sha256": "e4a7cb434b6ee7c51e45146c5fc08d9d042d88892d1ba058129facb301e131ed",
+   "rows": 406,
+   "role": "背景图（Output/Raw/*.png 的资源名）→ 逐张的中文关卡名/章节名 + 出处(表/字段/行标识)，只认\"某表背景语义字段整值 == png 名\"这种精确引用；同组兄弟图的推断由 build_bg_meta.py 负责",
+   "consumers": [
+    "scripts/build_bg_meta.py"
+   ],
+   "source": ".diag/sharecfg_re/lua_json/*.json（773 张表全扫，只收背景语义字段的整值引用）",
+   "coverage": "精确中文名 284/1875 png (15.1%)"
+  },
   {
    "path": "character_voice.json",
    "bytes": 12505,

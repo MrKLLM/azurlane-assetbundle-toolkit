@@ -683,7 +683,8 @@
 | `Output/WikiData/ship_data.json` | `build_gallery_index` 兜底 | ✅ 可再生：`scrape_wiki_fast.py`（需外网） |
 | `Output/Paintings_v2`、`Spine_v2`、`Live2D`、`CG_v2`、`Audio`、`gallery_v2/` | 画廊 | ✅ 全量可再生。**耗时按 2026-10-01 实测外推：立绘 4488 张 ≈ 1.5 小时（1.25 秒/张）、Spine 269 个 ≈ 8 分钟、CG 231 张 ≈ 5 分钟、Live2D ≈ 30 分钟、音频全量 ≈ 75 分钟 ⇒ 一把梭全量 4~6 小时，共约 41GB 写入**（旧版这里写的"数十小时"是老 AssetStudio 时代的数，已纠正）。正因为它不再是"跑不起"，**才更要把范围收窄成增量**——见步骤 5 与 §71 |
 | `Output/gallery_v2/vendor/`（4 个第三方 JS，1.3MB） | 画廊 Live2D/Spine 标签的运行时 | ✅ 可再生（2026-09-26 起）：台账 `gallery_src/vendor/MANIFEST.json`（版本+字节+sha256+来源）+ `py -3 scripts/fetch_gallery_vendor.py`。**库本体不入库**（含 Live2D 专有许可的 Redistributable Code）。⚠️ 唯 `spine/spine-all.js`(3.8.75) 无可按哈希校验的下载源（本机这份与上游官方构建不同），只能从 `tools/spine-viewer/spine-runtime/` 取——**它也在 gitignore，别清** |
-| `gallery_src/` 4 个前端正本 ↔ `Output/gallery_v2/` 同名 4 文件 | 画廊前端 | ✅ 同一份数据两个路径名（硬链，2026-09-26 起 4/4）。断链探测器：`py -3 scripts/deploy_gallery.py --check` |
+| `Output/Raw/`（背景层 1,897 png / 2.0 GB） | **画廊「背景库」页**（`backgrounds.html` 直链 `../Raw/<类目>/<名>.png`）+ `Output/gallery_v2/bg_meta.json` 的 `img` 字段 | ⚠️ **2026-10-07 起从"可删的悬空层"升级为页面依赖**：删它 = 背景库全空（缩略图 `bg_thumbs/` 还在，点进去才是空）。可再生：`py -3 scripts/export_assets.py`（`bg`/`helpbg`/`commonbg`/`loadingbg`/`loadingbg_hx`/`newshipbg`/`worldhelpbg`/`lotterybg`/`backyardbg` 九类源包都在 `files/AssetBundles/`，未进 `pruned.json`）。命名源不在这层里，在 `inputs/gamecfg/bg_scene_refs.json`。见 **§115 / WF-30** |
+| `gallery_src/` 前端正本 ↔ `Output/gallery_v2/` 同名副本 | 画廊前端 | ✅ 同一份数据两个路径名（硬链）。**清单以 `scripts/deploy_gallery.py` 的 `FILES` 为准，别在这里抄数字**（2026-09-26 那版写死"4 个"，之后加 `bgm.html`、`backgrounds.html` 都没回来改，早就对不上了）。断链探测器：`py -3 scripts/deploy_gallery.py --check`；**新增子页必须同时进 `FILES`**，否则它既不被硬链也不被漂移检查看见（= 回到"改了忘部署"那个老静默失效，见 §115 第 5 条） |
 
 > `.diag/` 已写入 `.gitignore`，定位是「临时产物区」；**可复用工具一律放 `scripts/diag/`（入库）**。清理 `.diag` 前必须先跑上表白名单核对。
 > **权威外部输入一律不得放进 `.diag/`**——2026-09-24 起它们住在 `inputs/<来源>/`（数据本体不入库、只入 `MANIFEST.json` 台账），
@@ -2714,3 +2715,69 @@ PSD/SVG 图层、前端多层 canvas），出现「某个部件整块看不见 /
 `face_gate_flip_scan` / `face_overlay_cmp` / `painting_swap_in`。
 相关：**§114**（本轮取证全过程）、WF-15（备份换入 runbook）、WF-27（层序取引擎层级）、
 §48（判据演进必须配带标签回归集）、§85（两份语义必然漂移）。
+
+---
+
+### WF-30: 给画廊加一个「带权威命名的资产浏览子页」（数据 json + 页面 + 部署清单 + CDP 探针）
+
+**日期**: 2026-10-07
+**目标**: 把一类"已经导出、但没人消费"的资产（本轮是 `Output/Raw/` 的 1,897 张背景图）
+变成能看、能搜、能回指到配置表出处的画廊子页，且**中文名是可核对的事实而不是猜的**。
+**适用场景**: 用户说"这堆图/表能不能做个页面看"、"给它加个中文名"、"背景/场景/图鉴类资产想留档"。
+不适用于 Live2D/Spine 那种要运行时渲染的页（那些走 WF-16 与对应技能）。
+
+#### 步骤（顺序是硬的，每步都有"不绿就不许进下一步"的判据）
+
+1. **先量"名字取不取得到"，再决定做不做页面**。检索面要写死成**字段整值相等**：
+   某表的背景语义字段（`*_bg` / `*background*` / `pic` / `illustration` / `login_static` / `scene` /
+   `image` / `banner`）整值 == 资产文件名，中文标签取同一行的 `name`/`title`。
+   **判据**：报出"有引用的资产数 / 其中那行真带中文名的资产数"两个数，别只报一个百分比。
+   **踩坑**：`icon` / `battle_character` / `prefab` / `ani_*` / `*suffix` 这类字段也可能装资源名，
+   但语义不是"这张图用在哪"，一律排除；本轮为 15 张图放宽过一次，判否后收回。
+2. **权威输入落 `inputs/`，配 `MANIFEST.json` 台账**，脚本**不读 `.diag/`**。
+   发布器照 `tools/sharecfg_re/48_publish_meta_group_bridge.py` 的形状写：
+   断言不全过就 `exit 1` 且**不写文件**；二进制写产物（文本模式在 Windows 会把 `n` 变 CRLF，台账哈希对不上）。
+   跑完必须 `py -3 scripts/diag/check_inputs.py` 绿。
+3. **建索引脚本**：三档口径（确定 / 推断 / 无）写进产物，每条带 `src`（表/字段/行标识）；
+   断言里必须有一条**"页面上不许出现查不到的名字"**（本轮：系列名必须逐字出现在该图证据里，
+   否则把那条出处补进证据，而不是把断言放宽）。
+   **判据**：记录键用 `<类目>/<名>`，**同名跨类目实测会撞**（`bg_1` 在 3 个类目里且内容不同）。
+4. **缩略图按类目分目录**（`bg_thumbs/<类目>/<名>.webp`），扁平目录会让同名互相覆盖；
+   先 `--limit 30` 小样本估时间与体积，再全量；收尾 `--check` 要求"索引里每条都有缩略图"。
+5. **页面**：配色/圆角/动效只引用 `theme.css` 的 token（组件规则里不许出现字面颜色，否则昼夜只有一边对）；
+   懒加载**不要挂 IntersectionObserver**（见踩坑）；缺图要打可见标记，不许留空格子伪装成功。
+6. **接线两处，漏一处就是静默失效**：
+   `scripts/deploy_gallery.py` 的 `FILES` 加新页（否则硬链与漂移检查永远看不见它）；
+   `docs/WORKFLOWS.md` WF-15 承重白名单登记新依赖的资产目录（页面一上线，那层就从"可删"变成"在用"）。
+7. **验收按顺序**：`py -3 scripts/deploy_gallery.py` → `py -3 scripts/diag/<新页>_probe.py` →
+   提交 → `deploy_gallery.py --relink` → `deploy_gallery.py --check`（要求 FILES 全部同 inode）→
+   动过 `index.html` 就要跑 `py -3 scripts/diag/wf16_regression.py --skip hit_verify`。
+
+#### 判据（这一轮真正立住的几条）
+
+- **视觉页的第一条判据是"图片对象解出像素"**：`img.complete && naturalWidth>0`，
+  不是"卡片数量对不对"。本轮第一版 1897 个卡片全在、全空，只量 DOM 会报绿。
+- **反向对照必须有**：故意请求一张不存在的缩略图，看缺失标记会不会亮。不亮 ⇒ 上面那条 ✅ 是空集给的。
+- **浏览器视口尺寸要先量**（`innerHeight>400` 才继续判懒加载类断言）。
+  连着的应用内浏览器页在侧边栏未展开时是 **0×0**，此时 IO 与原生懒加载都不触发，是**假红灯**；
+  无头 Chrome 必须带 `--window-size=1440,1000`。
+- **量字节用 `arrayBuffer().byteLength`**，`text().length` 是 UTF-16 单元数，中文页会自造假红灯。
+- **筛选控件要就地改状态**：每次点击重建整组节点会让调用方的旧引用变死节点，
+  表现为"上一个筛选没解开"，而且真用户点的是活节点、测不出来。
+
+#### 踩坑记录
+
+- 覆盖率三个数混报：任何字段命中 432 / 收窄到背景字段 406 / **那行带中文名 284（15.1%）**，
+  我中途拿 432 说过"23% 有中文名"，差一倍。
+- `bgm` 名模板（`story-<root>-stageN`）反推章节：99 行里只有 16 行是这个形状、只剩 4 个词根能用 ⇒ 否。
+- 详情层没关就拍网格图、`.grid` 特写夹了 39 万像素高的整张网格 ⇒ 截图判据要"先复位再拍"，
+  clip 高度要夹到视口。
+- 探针假设"再点一次取消筛选"，而这页 chip 是单选组 ⇒ 产品没错、判据错（先证探针再定罪，同 WF-16）。
+
+#### 涉及文件
+
+`tools/sharecfg_re/49_publish_bg_scene.py`、`inputs/gamecfg/bg_scene_refs.json`（+ `MANIFEST.json` 台账）、
+`scripts/build_bg_meta.py`、`scripts/make_bg_thumbs.py`、`gallery_src/backgrounds.html`、
+`scripts/diag/bg_page_probe.py`、`scripts/deploy_gallery.py`（`FILES`）、`gallery_src/index.html`（入口）。
+相关：**§115**（本轮取证与否证全文）、WF-15（承重白名单与换入闸门）、WF-16（画廊前端回归六件套）、
+§111（`Output/Raw` 定性为纯背景层）。
