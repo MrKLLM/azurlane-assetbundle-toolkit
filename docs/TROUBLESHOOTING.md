@@ -6320,8 +6320,10 @@ ffmpeg 重新封装的 wav 头（chunk 顺序与长度）与源不同，样本�
 但它让 §111 第 2 节"备份目录约 3 GB"的规模结论过期——等那批跑完要重量一次再谈清理。
 ✅ **已结案（2026-10-07 重量）**：那批的换入备份与中转目录都已被其归属会话删除，
 `Output/_OLD_bak/` 实测回到 **2.99 GB** ⇒ §111 的"约 3 GB"结论重新成立。
-`.diag/` 总量另测得 **24.94 GB**（分散在 `fix_gate` 3.42 / `pipeline` 1.09 / `l2d_new` 1.05 等多个
-历史批次目录，无单一巨项），需要单独一轮按批次清理——不在本节范围。
+`.diag/` 总量另测得 **21.52 GB**：`fix_gate`（3.42 GB，本轮回归闸门的双侧渲染）已随本批一起删除，
+剩下分散在 `pipeline` 1.09 / `l2d_new` 1.05 / `inactivefix_*` 1.12 / `sharecfg_re` 0.50 等 **235 个
+历史批次目录**（236 个目录合计 21.32 GB，顶层 1496 个文件仅 0.20 GB）——无单一巨项、全是跨会话积压，
+需要单独一轮按批次清理，不在本节范围。
 
 **涉及文件（第三轮）**：`scripts/transcode_bgm.py`（`--codec` / `--roundtrip` / `--verify-only` /
 `--src` / 台账分 codec / 0 源文件防呆）、`gallery_src/_gallery_server.py`（`extensions_map` 钉 MIME）、
@@ -6466,7 +6468,9 @@ git show 12eb0db^:scripts/compose_paintings_v2.py > .diag/oldpipe/compose_painti
 **换入备份也已于 2026-10-07 删除**（用户在画廊实见后授权）。删前五项核对全过：
 目录条目 4496 且全为 `.png`（非 png 0，即没顺手带走别人的东西）/ 文件名集合 == 渲染清单 +`.png` /
 正式区抽验 15 张无缺失无空文件 / 备份与正式区已无硬链共享（nlink 全 1）/ 中转目录已先行删除。
-删后 `Output/_OLD_bak/` 回到 **2.99 GB**（与 §111 的量一致），D 盘可用 265.15 GB。
+删后 `Output/_OLD_bak/` 回到 **2.99 GB**（与 §111 的量一致），本轮另删掉闸门双侧渲染 scratch
+`.diag/fix_gate/`（3.42 GB，997 个文件全部是 2026-10-06 本轮产物，随时可用 `painting_fix_gate.py` 重生成），
+D 盘可用 **268.64 GB**。
 ⇒ 这批立绘此后**唯一的回滚路径就是上面的 `git show 12eb0db^` 重渲配方**（≈2.2 小时机器时间，
 且依赖 Pillow / UnityPy 版本不变）。
 
