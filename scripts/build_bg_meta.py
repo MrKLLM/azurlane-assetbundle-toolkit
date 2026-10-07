@@ -186,7 +186,7 @@ def labels_of(ref_rows):
             for k, v in c.most_common()]
 
 
-def build(sample=None):
+def build(sample=None, with_hd=False):
     if not os.path.isfile(REFS):
         print('[FAIL] 缺 %s —— 先跑 py -3 tools/sharecfg_re/49_publish_bg_scene.py' % REFS)
         return None
@@ -310,11 +310,12 @@ def build(sample=None):
         d, name = it['key'].split('/', 1)
         it['w'], it['h'] = px_size(os.path.join(RAW, d, name + '.png'))
 
-    # img_hd：逐张核对尺寸正好是 Raw 的 4 倍才发字段。跑批中途重导时可能读到写了一半的
-    # PNG（px_size 拿不到 4 倍值），那种情况**跳过不发**并打印出来 —— 宁可这张继续用原图，
-    # 也不许把一张尺寸对不上的文件挂到"点开大图"上。
+    # img_hd：**默认关闭**。用户 2026-10-07 看过成图后裁定「不要超分了」——anime 系超分模型会把
+    # 原画的细节改得不像（笔触被抹平、线稿被重画），这不是画质损失而是**内容被篡改**，
+    # 所以派生层不再默认挂进索引。要重新启用得显式加 `--with-hd`（见 §121）。
+    # 挂时逐张核对：文件在 ∧ 尺寸正好 4 倍 ∧ 尾部完整；任一不满足就**不发**该字段。
     hd_mismatch = []
-    for it in items:
+    for it in (items if with_hd else []):
         p = os.path.join(HD, it['key'].replace('/', os.sep) + '.png')
         if not os.path.isfile(p):
             continue
@@ -435,10 +436,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--sample', help='逗号分隔的图名或类目，只出这几条记录，不写正式产物')
     ap.add_argument('--check', action='store_true', help='只跑统计与断言，不写文件')
+    ap.add_argument('--with-hd', action='store_true',
+                    help='把 Output/Raw_hd/ 的 AI 超分层挂成 img_hd。**默认关**——用户已裁定超分'
+                         '「把细节改得不像原画」，见 §121')
     a = ap.parse_args()
 
     want = a.sample.split(',') if a.sample else None
-    res = build(want)
+    res = build(want, a.with_hd)
     if res is None:
         return 2
     items, root_labels, picked, dropped, groups, roots = res
@@ -462,6 +466,11 @@ def main():
     for desc, passed in selfcheck(items, t, dropped):
         print('%s %s' % ('✓' if passed else '✗', desc))
         ok &= passed
+    # 那两条 img_hd 闸门在**未启用**时是空转的（all(空)=True 会报绿），所以这里必须把
+    # "到底挂了几条"单独打印出来，否则看不出是"没挂"还是"挂对了"。
+    print('   （超分层 img_hd 已挂 %d 条；%s）'
+          % (sum(1 for i in items if i.get('img_hd')),
+             '默认关闭 —— 用户裁定超分把细节改得不像原画，见 §121' if not a.with_hd else '--with-hd 已启用'))
 
     if want is not None:
         os.makedirs(os.path.dirname(SAMPLE_TXT), exist_ok=True)
@@ -539,7 +548,7 @@ def main():
     n_has = sum(1 for i in items if i.get('has_char') == 1)
     n_no = sum(1 for i in items if i.get('has_char') == 0)
     n_hd = sum(1 for i in items if i.get('img_hd'))
-    doc = {'schema': 4,
+    doc = {'schema': 4 if a.with_hd else 3,
            'groups': groups,
            'roots': roots,
            'dropped_identical': dropped,
@@ -557,10 +566,13 @@ def main():
            'source': 'inputs/gamecfg/bg_scene_refs.json',
            'note': 'tier=exact 是配置表逐张引用；baked 是图内烤字（OCR+目视双路径，见 inputs/gamecfg/bg_tip_titles.json）；'
                    'inferred 是同词根兄弟图传播（页面要标「推断」）；none 无中文名，页面显示英文原名，不得编造',
-           'sources': {'exact': 'inputs/gamecfg/bg_scene_refs.json',
-                       'baked': 'inputs/gamecfg/bg_tip_titles.json',
-                       'has_char': 'inputs/gamecfg/bg_char_flags.json',
-                       'img_hd': 'Output/Raw_hd/'},
+           'sources': ({'exact': 'inputs/gamecfg/bg_scene_refs.json',
+                        'baked': 'inputs/gamecfg/bg_tip_titles.json',
+                        'has_char': 'inputs/gamecfg/bg_char_flags.json',
+                        'img_hd': 'Output/Raw_hd/'} if a.with_hd else
+                           {'exact': 'inputs/gamecfg/bg_scene_refs.json',
+                            'baked': 'inputs/gamecfg/bg_tip_titles.json',
+                            'has_char': 'inputs/gamecfg/bg_char_flags.json'}),
            'dirs': {d: {'cn': lbl, 'via': via, 'count': per[d]['total']}
                     for d, (lbl, via) in DIR_LABELS.items() if d in per},
            'counts': dict(t),
