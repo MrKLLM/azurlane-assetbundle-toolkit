@@ -21,6 +21,7 @@ UnityPy 的 `Mesh.export()` 只给不含骨骼的 OBJ，蒙皮这条路**必须�
 import argparse
 import io
 import json
+import math
 import os
 import struct
 import sys
@@ -36,7 +37,7 @@ UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
 
 GLB_MAGIC, GLB_VERSION = 0x46546C67, 2
 CHUNK_JSON, CHUNK_BIN = 0x4E4F534A, 0x004E4942
-CH_POS, CH_NORMAL, CH_UV0 = 0, 1, 4
+CH_POS, CH_NORMAL, CH_TANGENT, CH_COLOR, CH_UV0 = 0, 1, 2, 3, 4
 ELEMTYPE = {1: ("B", 5121), 2: ("e", 5122), 4: ("f", 5126)}
 ARR_BUFFER, ARRAY_BUFFER = 34962, 34963
 ITEMS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
@@ -85,20 +86,39 @@ def comp_of(fmt):
     return {"B": 5121, "e": 5122, "H": 5123, "f": 5126, "I": 5125}[fmt]
 
 
+def channel_dtype(cid, width):
+    """同一个"2 字节宽"在不同通道上含义完全不同，不能一律按 float16 读。
+
+    实测踩坑：按半精度读 uint16 骨号，`1` 变成次正规数 6e-8，`int()` 之后**全部归零**
+    —— 每个顶点都挂到 0 号骨，模型塌成一团；按半精度读 UNorm16 权重，
+    `32767` 直接是 NaN、`32768` 是 -Inf。
+    """
+    if cid == probe.CH_BLEND_WEIGHT:
+        return ('H', False) if width == 2 else ('f', False)     # UNorm16 或 Float32
+    if cid == probe.CH_BLEND_INDICES:
+        return {1: ('B', False), 2: ('H', False), 4: ('I', False)}[width]
+    if cid == CH_COLOR:
+        return ('B', True)                                       # 归一化 ubyte
+    return {4: ('f', False), 2: ('e', False)}.get(width, (None, False))
+
+
 def read_plain_channel(mesh, ch, stride, base, e, cid, n):
-    """按通道读原始数值（不做任何归一化——权重由调用方自己处理）。"""
+    """按通道读数值；权重按 UNorm16 归一到 0..1，骨号保持整数。"""
     rec = next((t for t in ch if t[3] == cid), None)
     if rec is None:
         return None
     s, off, dim, idx = rec
-    width = e.get(idx)
-    if width not in ELEMTYPE:
-        die(f"通道 {cid} 的元素宽度 {width}B 不支持")
+    code, normalized = channel_dtype(cid, e.get(idx))
+    if code is None:
+        die(f"通道 {cid} 的元素宽度 {e.get(idx)}B 不支持")
     data = probe.data_at(mesh)
-    fmt = "<%d%s" % (dim, ELEMTYPE[width][0])
+    fmt = "<%d%s" % (dim, code)
+    scale = (1.0 / 65535.0) if (cid == probe.CH_BLEND_WEIGHT and code == 'H') else \
+        (1.0 / 255.0 if normalized else 1.0)
     out = []
     for v in range(n):
-        out.append(list(struct.unpack_from(fmt, data, base[s] + v * stride[s] + off)))
+        raw = struct.unpack_from(fmt, data, base[s] + v * stride[s] + off)
+        out.append([x * scale for x in raw] if scale != 1.0 else list(raw))
     return out
 
 
@@ -596,7 +616,13 @@ def verify(path):
             if g["accessors"][at[k]]["count"] != npos:
                 bad.append("mesh %d: %s 条数 != 顶点数" % (mi, k))
         _, wt = read_acc(g, raw, bin_off, at["WEIGHTS_0"])
-        off = [i for i, w in enumerate(wt) if abs(sum(w) - 1.0) > 1e-3]
+        nonfinite = [i for i, w in enumerate(wt) if not all(math.isfinite(x) for x in w)]
+        if nonfinite:
+            bad.append("mesh %d: %d 个顶点权重含 NaN/Inf（第一个在 %d）—— NaN 会让"
+                       "\"权重和 != 1\"这类比较恒为 False，所以必须单独查"
+                       % (mi, len(nonfinite), nonfinite[0]))
+        off = [i for i, w in enumerate(wt)
+               if not all(math.isfinite(x) for x in w) or abs(sum(w) - 1.0) > 1e-3]
         if off:
             bad.append("mesh %d: %d 个顶点权重和 != 1（第一个在 %d）" % (mi, len(off), off[0]))
         _, jt = read_acc(g, raw, bin_off, at["JOINTS_0"])
@@ -662,6 +688,61 @@ def verify(path):
     return not bad
 
 
+def cross_check_against_source(glb_path, res_path, rows=200):
+    """把 GLB 里的权重/骨号与**源包重读值**逐行比对。
+
+    为什么必须有这条：内部不变式（权重和==1）挡不住"系统性读错"——
+    把 UNorm16 当 float16 读会得到另一组自洽的数，除以自身和之后照样和为 1。
+    只有拿第二个来源逐行比，才能发现整列被读错了。
+    """
+    raw = open(glb_path, "rb").read()
+    jlen = struct.unpack_from("<I", raw, 12)[0]
+    g = json.loads(raw[20:20 + jlen].decode("utf-8"))
+    bin_off = 20 + jlen + 8
+    env = UnityPy.load(res_path)
+    bad = []
+    for me in g["meshes"]:
+        nm = me["extras"]["unityMesh"]
+        src = next((o.read() for o in env.objects
+                    if o.type.name == "Mesh" and o.read().m_Name == nm), None)
+        if src is None:
+            bad.append("%s: 源包里找不到同名网格" % nm)
+            continue
+        lay = None
+        for ctx in probe.candidate_layouts(src.m_VertexData, len(probe.data_at(src))):
+            if probe.self_proof(probe.decode_skin(src, ctx[0], ctx[2], ctx[3], ctx[4], ctx[5])):
+                lay = ctx
+                break
+        if not lay:
+            bad.append("%s: 源包布局反解失败" % nm)
+            continue
+        ch, streams, stride, base, e, n = lay[0], lay[1], lay[2], lay[3], lay[4], lay[5]
+        w_src = read_plain_channel(src, ch, stride, base, e, probe.CH_BLEND_WEIGHT, n)
+        if w_src is None:
+            w_src = [[1.0]] * n        # 单骨部件源包无权重通道，装配器按隐式 1 填，比对要同口径
+        j_src = read_plain_channel(src, ch, stride, base, e, probe.CH_BLEND_INDICES, n)
+        at = me["primitives"][0]["attributes"]
+        _, w_g = read_acc(g, raw, bin_off, at["WEIGHTS_0"])
+        _, j_g = read_acc(g, raw, bin_off, at["JOINTS_0"])
+        k = min(rows, n)
+        wbad = [i for i in range(k)
+                if max(abs(w_g[i][t] - (w_src[i][t] if t < len(w_src[i]) else 0.0))
+                       for t in range(4)) > 1e-4]
+        jbad = [i for i in range(k)
+                if list(j_g[i][:len(j_src[i])]) != list(j_src[i])]
+        if wbad:
+            bad.append("%s: 前 %d 行里 %d 行权重与源包不符（首例 行%d GLB=%s 源=%s）"
+                       % (nm, k, len(wbad), wbad[0],
+                          [round(x, 5) for x in w_g[wbad[0]]],
+                          [round(x, 5) for x in w_src[wbad[0]]]))
+        if jbad:
+            bad.append("%s: 前 %d 行里 %d 行骨号与源包不符（首例 行%d GLB=%s 源=%s）"
+                       % (nm, k, len(jbad), jbad[0], list(j_g[jbad[0]]), list(j_src[jbad[0]])))
+        print("  逐行比对 %-14s 前 %d 行: 权重%s 骨号%s"
+              % (nm, k, "全等" if not wbad else "不符", "全等" if not jbad else "不符"))
+    return bad
+
+
 def main():
     ap = argparse.ArgumentParser(description="dorm3d 蒙皮包 -> .glb")
     ap.add_argument("res", help="含 Mesh + SkinnedMeshRenderer 的包路径")
@@ -669,13 +750,22 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--check", action="store_true", help="只装配，不落盘")
     ap.add_argument("--verify", metavar="GLB", default=None, help="读回一个 glb 做独立断言")
+    ap.add_argument("--against", default=None,
+                    help="逐行比对源包（--verify 时给出 res 包路径）；权重和==1 这种内部不变式"
+                         "挡不住系统性读错，必须有第二条来源")
     ap.add_argument("--prefab", default=None,
                     help="对应的 prefab 包（真材质由它以外链 PPtr 引用；不给则退化为包内占位材质）")
     ap.add_argument("--transpose-ibm", action="store_true", help="inverseBindMatrices 不按列主序转置")
     ap.add_argument("--no-flipuv", action="store_true", help="不翻转 UV 的 V")
     a = ap.parse_args()
     if a.verify:
-        return 0 if verify(a.verify) else 1
+        ok = verify(a.verify)
+        if a.against:
+            cb = cross_check_against_source(a.verify, a.against)
+            for c in cb:
+                print("    [FAIL] " + c)
+            ok = ok and not cb
+        return 0 if ok else 1
     if not os.path.isfile(a.res):
         die("文件不存在: " + a.res, 2)
     if a.prefab and not os.path.isfile(a.prefab):
