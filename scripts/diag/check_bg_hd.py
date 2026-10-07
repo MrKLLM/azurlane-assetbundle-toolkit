@@ -76,6 +76,12 @@ def selftest():
 
 
 def main():
+    if not os.path.isdir(HD):
+        # 超分层已按 §121 停用并删除（2026-10-08）。这里必须**显式说明**而不是报一堆"缺失"，
+        # 否则下一个人会以为产物坏了去重跑批处理。
+        print('SKIP  %s 不存在 —— AI 超分层已按 §121 停用并删除，本校验不适用'
+              % os.path.relpath(HD, ROOT).replace(os.sep, '/'))
+        return 0
     if not selftest():
         print('结论：红 —— 完整性判据自身失效，后面的数字都不可信')
         return 2
