@@ -22,6 +22,11 @@ import os
 
 import UnityPy
 
+# 与 export_assets.py 同一行设置：这批 bundle 的头部把 unity_version 伪装成 `5.x.x`，
+# 不设 fallback 时**场景类包会直接读不开**（`No valid Unity version found`），
+# 而模型/贴图包能读开——症状看起来像"只有场景包坏了"，其实是这里没设。
+UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+
 # Unity TextureFormat 里 ASTC/ETC 这些必须靠 texture2ddecoder 才解得开
 BLOCKED_FMT_HINT = "解不开就先确认 texture2ddecoder 是否可用，别当成包坏了"
 

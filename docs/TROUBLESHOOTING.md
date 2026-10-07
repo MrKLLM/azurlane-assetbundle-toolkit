@@ -6653,6 +6653,12 @@ D 盘可用 **268.64 GB**。
 **"把末段流起点偏移 1 字节必须判不出来"**的反向对照——否则判据可能是恒真的空断言。
 `m_Skin 字段不存在` 那句提示改为"2022.3 已搬进 Mesh.m_VertexData，不是失败"。
 
+**第四个坑（同日 step 5 场景定界时撞上）**：探针原来**不设** `UnityPy.config.FALLBACK_UNITY_VERSION`。
+模型/贴图包能正常读，而**场景包直接 `读不开: No valid Unity version found`** ——
+因为 §9.1 记过的那件事（这批 bundle 的头部把 `unity_version` 伪装成 `5.x.x`）
+只在**部分包**上触发。症状是"只有场景包坏了"，极易被当成资产问题。
+⇒ 任何新写的 UnityPy 读取脚本，开头就要按项目既有写法设这个常量（`export_assets.py` 等 8 个脚本都是这么做的）。
+
 
 **涉及文件**：`scripts/diag/probe_3d_capability.py`（`probe_mesh` 的 `compressedMesh` 判据、`probe_skin`
 整段只会喊不会读 —— 待改成上面的反解 + 三重自证）；靶子
