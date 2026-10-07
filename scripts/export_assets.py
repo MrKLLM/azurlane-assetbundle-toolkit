@@ -501,6 +501,9 @@ def main():
                         default="all", help="导出目标")
     parser.add_argument("--dry-run", action="store_true",
                         help="预览模式，不实际导出")
+    parser.add_argument("--only", metavar="包名[,包名...]",
+                        help="只导这几个包（按源包文件名精确匹配）。用于「源包比导出层新」的定点补导，"
+                             "避免 --target 整目录重导覆写已验证的产物；任一名字找不到就直接退出")
     args = parser.parse_args()
 
     target = EXPORT_TARGETS[args.target]
@@ -523,6 +526,21 @@ def main():
 
     # 收集文件
     bundles = collect_files(target_dirs)
+
+    # --only：定点补导。任一名字不存在就整体退出，绝不"少导一半还报成功"
+    if args.only:
+        want = {w.strip() for w in args.only.split(',') if w.strip()}
+        bundles = {d: [f for f in fs if os.path.basename(f) in want] for d, fs in bundles.items()}
+        bundles = {d: fs for d, fs in bundles.items() if fs}
+        got = {os.path.basename(f) for fs in bundles.values() for f in fs}
+        missing = sorted(want - got)
+        print(f"[+] --only 命中 {len(got)} / 请求 {len(want)} 个包")
+        if missing:
+            print(f"[ERROR] 这些名字在源目录里不存在（或小于 1KB 被 collect_files 滤掉）: {missing}")
+            return
+        for d, fs in bundles.items():
+            print(f"      [{d}] {[os.path.basename(f) for f in fs]}")
+
     total = sum(len(f) for f in bundles.values())
     print(f"[+] 待导出文件: {total}")
 

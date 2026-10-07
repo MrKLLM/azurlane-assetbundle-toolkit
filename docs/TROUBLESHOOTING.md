@@ -6552,9 +6552,27 @@ D 盘可用 **268.64 GB**。
 同理 `docs/WORKFLOWS.md` WF-15 承重白名单要补 `Output/Raw/`：背景页一旦上线，Raw 从"可删的悬空层"
 变成**页面依赖**（删它 = 背景页全空，可 `export_assets.py` 重导，但必须写明）。
 
+### 6. 同日追加：两张"从未出图"的根因是**导出层比源包旧**，不是解析失败
+
+上面写的 1,897 / `none 1,194` 是当时的量。补查 `bg_worldcruise_14` / `bg_worldcruise_14_tip` 时发现：
+两个源包的 mtime 是 **2026-09-24 12:47**，而同系列其余包都是 06-18 / 07-30 —— 而 `Output/Raw/` 整层
+停在 **09-16** 那轮。⇒ 它们不是"解不出来"，是**导出之后源包又更新过**，那轮自然没导到。
+（这正是 §111 第 1 段"Raw 是冻结层、mtime 停在 09-16 而源包 09-24/25 还在更新"的具体代价。）
+
+**补法上的取舍**：`export_assets.py --target bg` 会把 9 个类目**整目录重导**，覆写 1,897 张已验证产物——
+为了 2 张图拿全部去冒回退风险，不做。⇒ 给脚本加 `--only <包名[,包名]>` 定点补导：
+① 只过 `collect_files` 后的白名单；② **任一名字找不到就整体退出**（宁可不跑，也不"少导一半还报成功"）；
+③ 配一条阴性对照（塞一个不存在的包名，确认它在落盘前就 return）。
+补完两张 2048×1260 / 684×156，与同系列 `bg_worldcruise_13`(2048×1260) / `_tip`(779×156) 形状一致；
+`build_bg_meta.py` + `make_bg_thumbs.py` 增量重建（后者 skip 1897 / ok 2），索引 **1,897 → 1,899**，
+`none` 档 1,194 → **1,196（63.0%）**，`bg_page_probe` 判据数自适应后仍全绿。
+两张图配置表里**没有引用**（`battlepass_event_pt.bg` 只到 13），所以页面落在「类目说明」档显示「场景背景」——
+补图不等于补名，这两件事分开记。
+
 **涉及文件**：`tools/sharecfg_re/49_publish_bg_scene.py`（发布权威引用表 + 台账，闸门红不写盘）、
 `inputs/gamecfg/bg_scene_refs.json`（406 条精确引用，不入库）、`scripts/build_bg_meta.py`（三档命名 + 7 条断言）、
-`scripts/make_bg_thumbs.py`（按类目分目录出 webp，1,897 张 / 32 MB）、`gallery_src/backgrounds.html`（新子页）、
+`scripts/make_bg_thumbs.py`（按类目分目录出 webp，1,899 张 / 32 MB）、`gallery_src/backgrounds.html`（新子页）、
+`scripts/export_assets.py`（新增 `--only` 定点补导，含"名字不存在即整体退出"的闸）、
 `scripts/diag/bg_page_probe.py`（24 条判据，含反向对照与两套主题截图）、
 `scripts/deploy_gallery.py`（`FILES` +`backgrounds.html`）、`gallery_src/index.html`（「背景库」入口）。
 相关：**WF-30**（这类"给画廊加一个带权威命名的子页"怎么做怎么验）、§111（Raw 定性）、
