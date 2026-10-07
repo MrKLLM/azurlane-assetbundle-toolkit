@@ -28,6 +28,7 @@
 import argparse
 import collections
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -63,6 +64,20 @@ DIR_LABELS = {
     'worldhelpbg': ('世界地图说明底图', '配置表无引用（按类目名归类）'),
     'lotterybg':   ('建造/抽卡底图', '配置表无引用（按类目名归类）'),
     'backyardbg':  ('后宅底图', '配置表无引用（按类目名归类）'),
+}
+
+# 一级分组：页面只出这三个类目 chip，`other` 组点开才展开子类目（用户 2026-10-07 定的折叠）。
+# 折叠的依据不是"张数少"，是**这 6 类在配置表里零引用** —— 它们和 bg/loadingbg 不在同一个证据面上。
+GROUP_OF_DIR = {
+    'bg': 'scene',
+    'loadingbg': 'login', 'loadingbg_hx': 'login',
+    'helpbg': 'other', 'commonbg': 'other', 'worldhelpbg': 'other',
+    'newshipbg': 'other', 'lotterybg': 'other', 'backyardbg': 'other',
+}
+GROUP_LABELS = {
+    'scene': ('场景背景', '游戏内场景/关卡/活动 CG 底图，配置表有逐张引用'),
+    'login': ('登录/加载底图', '登录界面与加载图；`_hx` 是和谐版，合并进同一类目'),
+    'other': ('其他', '帮助/通用/世界地图说明/新舰登场/建造抽卡/后宅底图 —— 配置表零引用的界面底图'),
 }
 
 
@@ -167,8 +182,13 @@ def build(sample=None):
             tier, labels = 'baked', [{'cn': t['cn'], 'n': 1, 'src': [], 'via': t['via']}]
         else:
             tier, labels = 'none', []
+        # `_hx` 与主目录合并成一个类目：`dir` 是**展示类目**，`root_dir` 才是盘上真目录
+        # （img/thumb 仍按 root_dir 走，key 也不变 —— 同名跨类目会互相吞，见文件头）。
+        disp = 'loadingbg' if d == 'loadingbg_hx' else d
         it = {
-            'key': key, 'dir': d, 'name': name,
+            'key': key, 'dir': disp, 'root_dir': d, 'name': name,
+            'group': GROUP_OF_DIR.get(d, 'other'),
+            'variant': 'hx' if d == 'loadingbg_hx' else '',
             'img': '../Raw/%s/%s.png' % (d, name),
             'thumb': 'bg_thumbs/%s/%s.webp' % (d, name),
             'bytes': size,
@@ -193,6 +213,30 @@ def build(sample=None):
             it['baked'] = {'ocr_raw': t['ocr_raw'], 'ocr_conf': t['ocr_conf'],
                            'overlap': t['overlap'], 'via': t['via']}
         items.append(it)
+
+    # 合并 `_hx` 后类目内会出现**逐字节相同**的重复卡（那张本来就不需要和谐处理，
+    # 或它的内容正好等于 P0 补回来的 `__N` 那张）。留着就是重复卡，但"丢重复"必须先证
+    # "同内容那张确实在保留集里"——否则就是 §118 那一类静默少图。
+    def _sha(it):
+        p = os.path.join(RAW, it['root_dir'], it['name'] + '.png')
+        h = hashlib.sha256()
+        with open(p, 'rb') as f:
+            for chunk in iter(lambda: f.read(1 << 20), b''):
+                h.update(chunk)
+        return h.hexdigest()
+
+    # 去重范围 = **整个登录类目**，不是"hx vs 同名主图"：P0 把主图换成大图之后，
+    # `_hx` 那张小的现在和 `bg_1__2` 同内容了 —— 只按同名配对会漏，合并类目就多出重复卡。
+    # 保留优先级：非 _hx > 非 __N > 名字序；被丢的每条都记 `same_as`，可回溯、可复原。
+    login = [i for i in items if i['dir'] == 'loadingbg']
+    rank = lambda i: (1 if i.get('variant') else 0, '__' in i['name'], i['name'])
+    first = {}
+    for it in sorted(login, key=rank):
+        first.setdefault(_sha(it), it)
+    keep_id = {id(first[k]) for k in first}
+    dropped_identical = [{'key': i['key'], 'same_as': first[_sha(i)]['key']}
+                         for i in login if id(i) not in keep_id]
+    items = [i for i in items if i['dir'] != 'loadingbg' or id(i) in keep_id]
 
     # 组内传播：同词根的 exact 标签给没有自己引用的兄弟图
     by_root = collections.defaultdict(list)
@@ -236,8 +280,8 @@ def build(sample=None):
         want = set(sample)
         picked = [it for it in items
                   if it['name'] in want or it['key'] in want or it['dir'] in want]
-        return items, root_labels, picked
-    return items, root_labels, None
+        return items, root_labels, picked, dropped_identical
+    return items, root_labels, None, dropped_identical
 
 
 def stats(items):
@@ -249,7 +293,16 @@ def stats(items):
     return t, d
 
 
-def selfcheck(items, t):
+def _sha_equal(k1, k2):
+    """两个 <目录>/<名> 键指向的文件是否逐字节相同。"""
+    def h(k):
+        d, n = k.split('/', 1)
+        import hashlib
+        return hashlib.sha256(open(os.path.join(RAW, d, n + '.png'), 'rb').read()).hexdigest()
+    return h(k1) == h(k2)
+
+
+def selfcheck(items, t, dropped=None):
     return [
         ('每张 item 的 key 唯一（同名跨类目没被吞）',
          len({i['key'] for i in items}) == len(items)),
@@ -272,6 +325,14 @@ def selfcheck(items, t):
              for i in items if i['series'])),
         ('尺寸读数没塌（w/h 为 0 的图不超过 1%）',
          sum(1 for i in items if not i['w']) <= len(items) // 100),
+        ('每张 item 都有一级分组，且只有 scene/login/other 三档',
+         all(i.get('group') in ('scene', 'login', 'other') for i in items)),
+        ('_hx 已并进 loadingbg 类目、但 root_dir 仍可回溯到盘上真目录（img/thumb 不会指错）',
+         all(i['root_dir'] == 'loadingbg_hx' and os.path.isfile(os.path.join(RAW, 'loadingbg_hx', i['name'] + '.png'))
+             for i in items if i.get('variant') == 'hx')),
+        ('被当重复丢掉的 _hx，其同内容主图确实在保留集里且逐字节相同（丢重复≠丢图）',
+         all(any(i['key'] == d['same_as'] for i in items)
+             and _sha_equal(d['key'], d['same_as']) for d in (dropped or []))),
     ]
 
 
@@ -285,7 +346,7 @@ def main():
     res = build(want)
     if res is None:
         return 2
-    items, root_labels, picked = res
+    items, root_labels, picked, dropped = res
     t, per = stats(items)
     n = len(items)
     print('背景图 %d 张 / 词根 %d 个已拿到中文标签' % (n, len(root_labels)))
@@ -303,7 +364,7 @@ def main():
                  DIR_LABELS.get(d, ('?', ''))[0]))
 
     ok = True
-    for desc, passed in selfcheck(items, t):
+    for desc, passed in selfcheck(items, t, dropped):
         print('%s %s' % ('✓' if passed else '✗', desc))
         ok &= passed
 
@@ -334,7 +395,28 @@ def main():
         print('\n闸门：绿（--check 未写文件）')
         return 0
 
-    doc = {'schema': 1,
+    # 一级分组与「场景背景」二级分组的展示数据：页面不许自己从目录名/词根现推中文
+    groups = {g: {'cn': GROUP_LABELS[g][0], 'via': GROUP_LABELS[g][1],
+                  'count': sum(1 for i in items if i['group'] == g)}
+              for g in ('scene', 'login', 'other')}
+    # 二级分组只给场景背景：按词根，词根中文名取该组里出现最多的 series（拿不到就留词根本身，
+    # 页面标 `cn_from:'root'` 让人看得出这条不是资产名）
+    roots = {}
+    for i in items:
+        if i['group'] != 'scene' or not i['root']:
+            continue
+        r = roots.setdefault(i['root'], {'n': 0, 'series': collections.Counter()})
+        r['n'] += 1
+        if i.get('series'):
+            r['series'][i['series']] += 1
+    roots = {k: {'n': v['n'],
+                 'cn': (v['series'].most_common(1)[0][0] if v['series'] else k),
+                 'cn_from': ('series' if v['series'] else 'root')}
+             for k, v in roots.items() if v['n'] >= 2}
+    doc = {'schema': 2,
+           'groups': groups,
+           'roots': roots,
+           'dropped_identical': dropped,
            'generated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
            'source': 'inputs/gamecfg/bg_scene_refs.json',
            'note': 'tier=exact 是配置表逐张引用；baked 是图内烤字（OCR+目视双路径，见 inputs/gamecfg/bg_tip_titles.json）；'
@@ -344,7 +426,11 @@ def main():
            'dirs': {d: {'cn': lbl, 'via': via, 'count': per[d]['total']}
                     for d, (lbl, via) in DIR_LABELS.items() if d in per},
            'counts': dict(t),
-           'items': sorted(items, key=lambda i: (i['dir'], i['name']))}
+           # 排序走**一级组**而不是目录名：按 dir 排的话「全部」视图开头两张是
+           # backyardbg（b 打头），用户第一眼看到的是全库最小的类目而不是主力场景背景
+           'items': sorted(items, key=lambda i: (
+               {'scene': 0, 'login': 1, 'other': 2}.get(i['group'], 3),
+               i['dir'], i['name']))}
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, 'w', encoding='utf-8') as f:
         json.dump(doc, f, ensure_ascii=False, separators=(',', ':'))

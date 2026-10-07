@@ -82,6 +82,29 @@ header .sp{flex:1}
 .badge.baked{background:color-mix(in srgb,var(--pop) 78%,transparent);color:var(--panel)}
 .badge.inferred{background:color-mix(in srgb,var(--brand) 74%,transparent);color:var(--panel)}
 .badge.none{background:color-mix(in srgb,var(--dim) 62%,transparent);color:var(--panel)}
+/* 变体角标与命名档徽章同位但不同色：`_hx` 是和谐版、`__N` 是同名另一张，都不是"另一档名字" */
+.badge.var{top:auto;bottom:8px;left:8px;background:color-mix(in srgb,var(--pop) 70%,transparent);color:var(--panel)}
+
+/* ── 二级下拉（「其他」展开成子类目 / 场景背景按词根细分）── */
+.sel{font:inherit;font-size:12.5px;color:var(--txt);background:var(--chip);border:1px solid var(--chip-line);
+  border-radius:var(--r-chip);padding:5px 10px;cursor:pointer;max-width:340px;
+  transition:box-shadow var(--t-col) var(--ease-ios)}
+.sel:focus{outline:none;border-color:var(--on-ring);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 16%,transparent)}
+.grp[hidden]{display:none}
+
+/* ── 全屏壁纸模式：只留图，UI 全隐 ── */
+.fs{position:fixed;inset:0;z-index:90;display:none;background:var(--stage)}
+.fs.on{display:block}
+.fs img{width:100%;height:100%;object-fit:contain;display:block}
+.fs .cap{position:absolute;left:0;right:0;bottom:0;padding:14px 20px;font-size:13px;color:var(--on-txt);
+  background:linear-gradient(0deg,color-mix(in srgb,var(--stage) 82%,transparent),transparent);
+  display:flex;gap:14px;align-items:center}
+.fs .cap b{font-weight:600}
+.fs .cap .sp{flex:1}
+.fs button{font:inherit;font-size:12.5px;color:var(--on-txt);cursor:pointer;
+  background:color-mix(in srgb,var(--stage) 55%,transparent);border:1px solid color-mix(in srgb,var(--txt) 22%,transparent);
+  border-radius:var(--r-chip);padding:6px 12px}
 
 /* ── 详情层 ── */
 .ov{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
@@ -104,9 +127,10 @@ header .sp{flex:1}
 .ev .row .src{display:block;color:var(--dim);font-size:10.5px;font-family:ui-monospace,Consolas,monospace;
   margin-top:2px;word-break:break-all}
 .nav{display:flex;gap:8px;margin-top:18px}
-.nav button{flex:1;font-size:12.5px;color:var(--txt2);background:var(--chip);border:1px solid var(--chip-line);
+.nav button,.nav a.dl{flex:1;font-size:12.5px;color:var(--txt2);background:var(--chip);
+  border:1px solid var(--chip-line);text-decoration:none;text-align:center;
   border-radius:var(--r-in);padding:9px;cursor:pointer;transition:all var(--t-col) var(--ease-ios)}
-.nav button:hover{color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+.nav button:hover,.nav a.dl:hover{color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
 .nav button:active{transform:scale(.97)}
 .warn{margin-top:14px;font-size:11.5px;color:var(--dim);line-height:1.6;
   border-left:2px solid var(--line);padding-left:10px}
@@ -129,9 +153,17 @@ header .sp{flex:1}
 <div class="wrap">
   <div class="tools"><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"></div>
   <div class="grp" id="gTier"><span>命名档</span></div>
-  <div class="grp" id="gDir"><span>类目</span></div>
+  <div class="grp" id="gGroup"><span>类目</span></div>
+  <div class="grp" id="gSub" hidden><span id="gSubLab">细分</span><select class="sel" id="gSubSel"></select></div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" style="display:none">没有符合条件的背景图</div>
+</div>
+
+<div class="fs" id="fs">
+  <img id="fsimg" alt="">
+  <div class="cap"><b id="fsname"></b><span id="fsen"></span><span class="sp"></span>
+    <button id="fsprev">← 上一张</button><button id="fsnext">下一张 →</button>
+    <button id="fsdl">下载原图</button><button id="fsclose">退出全屏（Esc）</button></div>
 </div>
 
 <div class="ov" id="ov">
@@ -146,6 +178,8 @@ header .sp{flex:1}
       <div class="nav">
         <button id="ovprev">← 上一张</button>
         <button id="ovnext">下一张 →</button>
+        <button id="ovfs">全屏看壁纸</button>
+        <a class="dl" id="ovdl" download>下载原图</a>
         <button id="ovclose">关闭（Esc）</button>
       </div>
     </div>
@@ -167,7 +201,11 @@ const mb=b=>b>=2**20?(b/2**20).toFixed(1)+' MB':(b/2**10).toFixed(0)+' KB';
 const clean=s=>(s||'').split('||')[0].trim();
 const TIER={exact:'确定',baked:'图内文字',inferred:'推断',none:'类目说明'};
 
-let ALL=[],view=[],fTier='',fDir='',q='',cur=-1,META=null;
+let ALL=[],view=[],fTier='',fGroup='',fSub='',q='',cur=-1,META=null;
+/* 一级只剩 3 个类目（scene/login/other），二级用下拉：
+   other → 6 个子类目；scene → 词根分组（`META.roots`，中文名来自 P3 词典，拿不到就是词根原文）。
+   下拉而不是平铺 chip：other 的 6 类与 scene 的 117 个词根铺出来会把网格挤出首屏。 */
+const SUB_LABELS={other:'子类目',scene:'系列（词根）'};
 
 /* 懒加载交给浏览器原生两件套：卡片 `content-visibility:auto`（屏幕外不解码）+ 图 `loading="lazy"`。
    这里**不再挂 IntersectionObserver** —— 实测连着的应用内浏览器页 `innerHeight=0`，
@@ -176,24 +214,38 @@ let ALL=[],view=[],fTier='',fDir='',q='',cur=-1,META=null;
    缩略图缺失时给 `.miss` 标记，不留"看着有格子其实点不开"的伪装成功。 */
 
 function title(it){
+  /* `X__2` 是「同一个包里另一张同名但内容不同的画」（见 export_assets 的 dedupe=distinct）。
+     它没有自己的资产名 —— 配置表按名字引用，同一个名字对应两张画时分不清是哪一张，
+     所以这里只报"同名另一张"，不冒充有名字。 */
+  if(it.same_name_of) return it.same_name_of+'（同名另一张）';
   if(it.tier==='exact'||it.tier==='baked') return clean(it.cn[0] && it.cn[0].cn) || it.name;
   if(it.tier==='inferred') return it.series || ('同系列 ' + (it.root || it.name));
   return (META.dirs[it.dir] && META.dirs[it.dir].cn) || it.dir;
 }
 function hay(it){
-  return [it.name,it.root,it.series,it.dir,title(it),
-          (META.dirs[it.dir]||{}).cn||'',
+  return [it.name,it.root,it.series,it.dir,it.group,title(it),
+          (META.dirs[it.dir]||{}).cn||'',(META.roots[it.root]||{}).cn||'',
           (it.cn||[]).map(x=>clean(x.cn)).join(' ')].join(' ').toLowerCase();
+}
+let ROOT_BIG=new Set();
+function subVal(it){
+  if(it.group==='other')return it.dir;
+  if(it.group!=='scene')return '';
+  const r=it.root||'';
+  return r?(ROOT_BIG.has(r)?r:'__rest'):'__';
 }
 function apply(){
   const kw=q.trim().toLowerCase();
-  view=ALL.filter(it=>(!fTier||it.tier===fTier)&&(!fDir||it.dir===fDir)&&(!kw||hay(it).includes(kw)));
+  view=ALL.filter(it=>(!fTier||it.tier===fTier)&&(!fGroup||it.group===fGroup)
+                       &&(!fSub||subVal(it)===fSub)&&(!kw||hay(it).includes(kw)));
   const g=$('grid'); g.innerHTML='';
   const frag=document.createDocumentFragment();
   for(const it of view){
     const c=document.createElement('div'); c.className='card'; c.dataset.k=it.key;
     const ar=(it.w&&it.h)?(it.w+'/'+it.h):'16/9';
+    const vt=it.variant==='hx'?'和谐版':(it.same_name_of?'同名另一张':'');
     c.innerHTML='<span class="badge '+it.tier+'">'+TIER[it.tier]+'</span>'+
+      (vt?'<span class="badge var">'+vt+'</span>':'')+
       '<div class="ph" style="aspect-ratio:'+ar+'"><img src="'+it.thumb+'" alt="" loading="lazy"></div>'+
       '<div class="nm"><div class="t1">'+esc(title(it))+'</div>'+
       '<div class="t2">'+esc(it.name)+' · '+mb(it.bytes)+'</div></div>';
@@ -230,9 +282,40 @@ function initFilters(){
   buildChips('gTier',[{v:'',label:'全部'},{v:'exact',label:'确定'},{v:'baked',label:'图内文字'},
                       {v:'inferred',label:'推断'},{v:'none',label:'类目说明'}],
              v=>{fTier=v;syncChips('gTier',v);apply()});
-  const ds=Object.entries(META.dirs).sort((a,b)=>b[1].count-a[1].count);
-  buildChips('gDir',[{v:'',label:'全部'}].concat(ds.map(([k,d])=>({v:k,label:d.cn,n:d.count}))),
-             v=>{fDir=v;syncChips('gDir',v);apply()});
+  buildChips('gGroup',[{v:'',label:'全部'}].concat(
+      ['scene','login','other'].map(g=>({v:g,label:META.groups[g].cn,n:META.groups[g].count}))),
+             v=>{fGroup=v;fSub='';syncChips('gGroup',v);buildSub();apply()});
+  $('gSubSel').addEventListener('change',e=>{fSub=e.target.value;apply()});
+}
+/* 二级下拉：只在下钻到「其他」或「场景背景」时出现。
+   选项数按**当前一级组内**实数算，不写死阈值 —— 词根表(P3)以后补全只会变好，不该改这里。 */
+function buildSub(){
+  const h=$('gSub'),sel=$('gSubSel');
+  sel.innerHTML='';
+  if(fGroup!=='other'&&fGroup!=='scene'){h.hidden=true;fSub='';return}
+  h.hidden=false;$('gSubLab').textContent=SUB_LABELS[fGroup];
+  const pool=ALL.filter(i=>i.group===fGroup);
+  let opts;
+  if(fGroup==='other'){
+    const c={};for(const i of pool)c[i.dir]=(c[i.dir]||0)+1;
+    opts=Object.keys(c).sort((a,b)=>c[b]-c[a])
+             .map(k=>({v:k,label:(META.dirs[k]||{}).cn||k,n:c[k]}));
+  }else{
+    const c={};
+    for(const i of pool){const k=i.root||'';c[k]=(c[k]||0)+1}
+    ROOT_BIG=new Set(Object.keys(c).filter(k=>k&&c[k]>=2));
+    opts=[...ROOT_BIG].sort((a,b)=>c[b]-c[a])
+             .map(k=>({v:k,label:(META.roots[k]||{}).cn||k,n:c[k]}));
+    if(Object.keys(c).some(k=>k&&c[k]<2))
+      opts.push({v:'__rest',label:'其余单张系列',n:Object.keys(c).filter(k=>k&&c[k]<2).reduce((s,k)=>s+c[k],0)});
+    if(c[''])opts.push({v:'__',label:'（词根取不到）',n:c['']});
+  }
+  const o0=document.createElement('option');o0.value='';o0.textContent='全部（'+pool.length+'）';
+  sel.appendChild(o0);
+  for(const o of opts){
+    const e=document.createElement('option');e.value=o.v;
+    e.textContent=o.label+'（'+o.n+'）';sel.appendChild(e);
+  }
 }
 
 function open(key){
@@ -242,9 +325,15 @@ function open(key){
 function paint(){
   const it=view[cur]; if(!it) return;
   $('ovimg').src=it.img; $('oven').textContent=it.key+' · '+it.name;
+  $('ovdl').href=it.img; $('ovdl').download=it.name+'.png';
+  if($('fs').classList.contains('on')) fsPaint();
   $('ovname').textContent=title(it);
+  const grp=(META.groups[it.group]||{}).cn||it.group;
   const rows=[['命名档',TIER[it.tier]+(it.tier==='inferred'?'（继承自同词根「'+it.inferred_from+'」）':'')],
-              ['类目',(META.dirs[it.dir]||{}).cn+' ('+it.dir+')'],
+              ['类目',grp+' / '+((META.dirs[it.dir]||{}).cn||it.dir)
+                      +(it.root_dir&&it.root_dir!==it.dir?('（源目录 '+it.root_dir+'）'):'')],
+              ['变体',it.variant==='hx'?'和谐版（_hx）'
+                      :(it.same_name_of?('同名另一张，主图 '+it.same_name_of):'—')],
               ['尺寸',it.w+' × '+it.h],['原图体积',mb(it.bytes)],
               ['词根',it.root||'（无）']];
   if(it.baked) rows.push(['OCR 原文',it.baked.ocr_raw+'（置信 '+it.baked.ocr_conf+'，与定稿重合 '+it.baked.overlap+'）']);
@@ -274,6 +363,32 @@ function paint(){
 }
 function close(){ $('ov').classList.remove('open'); cur=-1; $('ovimg').removeAttribute('src'); }
 
+/* ── 全屏看壁纸 ──
+   `.fs` 遮罩层自己就铺满视口，所以 `requestFullscreen()` 失败（内嵌浏览器/无头环境
+   常常没有这个权限）也只是少了"真进系统全屏"，图照样铺满、键盘照样能用 ——
+   不能把"能不能全屏"当成这层的前提。 */
+function fsPaint(){
+  const it=view[cur]; if(!it) return;
+  $('fsimg').src=it.img; $('fsname').textContent=title(it);
+  $('fsen').textContent=it.key+' · '+it.w+'×'+it.h+' · '+mb(it.bytes);
+}
+function fsOpen(){
+  if(cur<0) return;
+  $('fs').classList.add('on'); fsPaint();
+  const el=$('fs');
+  if(el.requestFullscreen) el.requestFullscreen().catch(()=>{
+    $('fsclose').textContent='退出（Esc）';});
+}
+function fsClose(){
+  $('fs').classList.remove('on'); $('fsimg').removeAttribute('src');
+  if(document.fullscreenElement&&document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+}
+function fsDownload(){
+  const it=view[cur]; if(!it) return;
+  const a=document.createElement('a'); a.href=it.img;
+  a.download=it.name+'.png'; document.body.appendChild(a); a.click(); a.remove();
+}
+
 async function boot(){
   try{
     const r=await fetch('bg_meta.json',{cache:'no-store'});
@@ -292,9 +407,15 @@ $('gTheme').addEventListener('click',e=>{const b=e.target.closest('button');if(!
   $('gTheme').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));});
 $('ov').addEventListener('click',e=>{if(e.target===$('ov'))close()});
 $('ovclose').addEventListener('click',close);
-$('ovprev').addEventListener('click',()=>{if(cur>0){cur--;paint()}});
-$('ovnext').addEventListener('click',()=>{if(cur<view.length-1){cur++;paint()}});
+$('ovfs').addEventListener('click',fsOpen);
+$('fsclose').addEventListener('click',fsClose);
+$('fsdl').addEventListener('click',fsDownload);
+$('fsprev').addEventListener('click',()=>{if(cur>0){cur--;paint()}});
+$('fsnext').addEventListener('click',()=>{if(cur<view.length-1){cur++;paint()}});
+/* 用系统方式退出全屏（Esc 被浏览器吃掉 / F11）时，遮罩层不能留在屏幕上 */
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)$('fs').classList.remove('on')});
 addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&$('fs').classList.contains('on')){fsClose();return}
   if(e.key==='Escape'&&cur>=0){close();return}
   if(e.key==='/'&&cur<0){e.preventDefault();$('q').focus();return}
   if(cur>=0&&e.key==='ArrowLeft'){cur--;paint()}

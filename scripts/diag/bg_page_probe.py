@@ -278,31 +278,113 @@ def main():
           const N=()=>document.querySelectorAll('.card').length;
           const pick=(host,label)=>{const c=[...document.querySelectorAll('#'+host+' .chip')]
               .find(x=>x.textContent.startsWith(label)); c.click(); return c;};
+          /* 二级下拉按 **value** 选，不按可见文本：词根的中文标签来自 series 猜测
+             （star_level 那组现在显示的是「响彻于天穹之音」），按文本匹配会把"标签取错"
+             误判成"筛选没生效"。 */
+          const pickSub=(v)=>{const s=document.getElementById('gSubSel');
+              const o=[...s.options].find(x=>x.value===v); if(!o)return null;
+              s.value=v; s.dispatchEvent(new Event('change')); return o;};
           const n0=N();
+          const groups=[...document.querySelectorAll('#gGroup .chip')].map(x=>x.textContent.trim());
           pick('gTier','确定'); await t(500); const n1=N();
           const on1=document.querySelector('#gTier .chip.on').textContent;
           pick('gTier','全部'); await t(500); const n1b=N();
-          pick('gDir','场景背景'); await t(600); const n2=N();
-          const onlyBg=[...document.querySelectorAll('.card')].every(c=>
-              (document.getElementById('sub').textContent||'').length>0);
-          pick('gDir','全部'); await t(500); const n2b=N();
+          pick('gGroup','场景背景'); await t(600); const n2=N();
+          const subShown=!document.getElementById('gSub').hidden;
+          pickSub('star_level'); await t(600); const n2s=N();
+          pick('gGroup','其他'); await t(600); const nOther=N();
+          const subN=document.querySelectorAll('#gSubSel option').length;
+          pickSub('helpbg'); await t(600); const nHelp=N();
+          pick('gGroup','全部'); await t(500); const n2b=N();
           const q=document.getElementById('q'); q.value='起舞于天原之上';
           q.dispatchEvent(new Event('input')); await t(600);
           const n3=N(); const ft=document.querySelector('.card .t1').textContent;
           q.value=''; q.dispatchEvent(new Event('input')); await t(500);
           const n4=N();
-          return {n0,n1,n1b,n2,n2b,n3,n4,on1,ft,onlyBg};
+          return {n0,n1,n1b,n2,n2s,nOther,nHelp,n2b,n3,n4,on1,ft,groups,subShown,subN};
         })()""")
         say(isinstance(d4, dict) and d4.get('n1') == META['counts']['exact']
             and str(d4.get('on1', '')).startswith('确定'),
             f"筛「确定」得 {d4.get('n1')} 张，选中态停在「{d4.get('on1')}」")
         say(isinstance(d4, dict) and d4.get('n1b') == d4.get('n0'), f"点「全部」解开档位筛，恢复 {d4.get('n1b')} 张")
-        say(isinstance(d4, dict) and d4.get('n2') == META['dirs']['bg']['count'],
-            f"筛类目「场景背景」得 {d4.get('n2')} 张")
+        # P1 折叠：一级只剩 3 组 + 全部，且 6 个子类目**不该**再出现在这一层
+        say(isinstance(d4, dict) and len(d4.get('groups') or []) == 4
+            and not any('帮助说明' in g or '通用底图' in g for g in d4.get('groups', [])),
+            f"一级类目折叠成 {len(d4.get('groups') or [])} 个 chip：{d4.get('groups')!r}")
+        # 交叉核对：`group` 字段是 GROUP_OF_DIR 映射出来的，`root_dir` 是盘上真目录 ——
+        # 两条码路不同源，写歪归类映射时这条会红（只比"页面数 == 索引数"是抓不到的）
+        indep = {'scene': 'bg', 'login': 'loadingbg'}
+        for g, d0 in indep.items():
+            n_g = META['groups'][g]['count']
+            n_d = sum(1 for i in META['items']
+                      if i['root_dir'] == d0 or (g == 'login' and i['root_dir'] == 'loadingbg_hx'))
+            say(n_g == n_d, f"分组 {g} 的 {n_g} 张与按盘上目录数出的 {n_d} 张一致（归类映射没写歪）")
+        say(isinstance(d4, dict) and d4.get('n2') == META['groups']['scene']['count'],
+            f"筛一级「场景背景」得 {d4.get('n2')} 张")
+        say(isinstance(d4, dict) and d4.get('subShown'), "选中场景背景后二级下拉出现（词根细分）")
+        say(isinstance(d4, dict) and d4.get('n2s') == META['roots']['star_level']['n'],
+            f"下拉选词根 star_level 得 {d4.get('n2s')} 张（索引里该组 {META['roots']['star_level']['n']} 张）")
+        say(isinstance(d4, dict) and d4.get('nOther') == META['groups']['other']['count'],
+            f"一级「其他」折叠了 6 类共 {d4.get('nOther')} 张")
+        say(isinstance(d4, dict) and d4.get('subN') == 7,
+            f"「其他」的二级下拉有 {d4.get('subN')} 项（全部 + 6 子类目）")
+        say(isinstance(d4, dict) and d4.get('nHelp') == META['dirs']['helpbg']['count'],
+            f"下拉选「帮助说明底图」得 {d4.get('nHelp')} 张")
         say(isinstance(d4, dict) and d4.get('n2b') == d4.get('n0'), f"类目解开后恢复 {d4.get('n2b')} 张")
         say(isinstance(d4, dict) and 0 < d4.get('n3', 0) < d4.get('n0'),
             f"搜中文系列名「起舞于天原之上」得 {d4.get('n3')} 张，首张标题 {d4.get('ft')!r}")
         say(isinstance(d4, dict) and d4.get('n4') == d4.get('n0'), f"清空搜索后恢复 {d4.get('n4')} 张")
+
+        # ===== 4b) P1 变体合并 + P4 全屏/下载 =====
+        d4b = ev(r"""(async()=>{
+          const t=ms=>new Promise(r=>setTimeout(r,ms));
+          const pick=(host,label)=>[...document.querySelectorAll('#'+host+' .chip')]
+              .find(x=>x.textContent.startsWith(label));
+          pick('gGroup','登录/加载').click(); await t(600);
+          const hx=[...document.querySelectorAll('.card')].filter(c=>
+              [...c.querySelectorAll('.badge')].some(b=>b.textContent==='和谐版'));
+          const same=[...document.querySelectorAll('.card')].filter(c=>
+              [...c.querySelectorAll('.badge')].some(b=>b.textContent==='同名另一张'));
+          let srcDir='';
+          if(hx.length){hx[0].click(); await t(700);
+            srcDir=(document.getElementById('ovkv').textContent||''); }
+          const ovOpen=document.getElementById('ov').classList.contains('open');
+          document.getElementById('ovfs').click(); await t(900);
+          const fs=document.getElementById('fs');
+          const im=document.getElementById('fsimg');
+          const fsOn=fs.classList.contains('on');
+          const fsPx=im.naturalWidth;
+          const dl=document.getElementById('ovdl');
+          const dlHref=dl.getAttribute('href'), dlName=dl.getAttribute('download');
+          let dlOk=false, dlBytes=0;
+          try{const r=await fetch(dlHref); dlBytes=(await r.arrayBuffer()).byteLength; dlOk=r.ok;}catch(e){}
+          document.getElementById('fsclose').click(); await t(400);
+          const fsClosed=!fs.classList.contains('on') && !im.getAttribute('src');
+          document.getElementById('ovclose').click(); await t(300);
+          pick('gGroup','全部').click(); await t(400);
+          return {hx:hx.length, same:same.length, ovOpen, srcDir, fsOn, fsPx,
+                  dlHref, dlName, dlOk, dlBytes, fsClosed};
+        })()""")
+        # 此刻停在「登录/加载」筛选态，所以只能和**该组内**的 __N 条数比 ——
+        # 拿全量条数比会把 bg 里那 1 张算进来，报出一条假红。
+        n_hx = sum(1 for i in META['items'] if i.get('variant') == 'hx')
+        n_same_login = sum(1 for i in META['items']
+                           if i.get('same_name_of') and i.get('group') == 'login')
+        n_same_all = sum(1 for i in META['items'] if i.get('same_name_of'))
+        say(isinstance(d4b, dict) and d4b.get('hx') == n_hx,
+            f"登录类目里 {d4b.get('hx')} 张带「和谐版」角标（索引里 _hx 去重后 {n_hx} 张）")
+        say(isinstance(d4b, dict) and d4b.get('ovOpen') and 'loadingbg_hx' in str(d4b.get('srcDir')),
+            "和谐版详情层的类目标了源目录 loadingbg_hx（并进一类目≠抹掉来源）")
+        say(isinstance(d4b, dict) and d4b.get('same') == n_same_login,
+            f"「同名另一张」角标 {d4b.get('same')} 张 == 登录组内 __N {n_same_login} 张"
+            f"（全量 {n_same_all} 张，余下在场景背景组）")
+        say(isinstance(d4b, dict) and d4b.get('fsOn') and d4b.get('fsPx', 0) > 0,
+            f"全屏层打开且原图真解出像素 {d4b.get('fsPx')}px（不是只换了个 class）")
+        say(isinstance(d4b, dict) and d4b.get('dlOk') and d4b.get('dlBytes', 0) > 10000
+            and str(d4b.get('dlHref', '')).startswith('../Raw/'),
+            f"下载链接真取得到原图 {d4b.get('dlBytes')} 字节 / 文件名 {d4b.get('dlName')!r}")
+        say(isinstance(d4b, dict) and d4b.get('fsClosed'),
+            "退出全屏后遮罩与 img 都清掉（反向对照：不退干净就是下一张串图）")
 
         print('== 5) 详情层：原图真解码 + 出处可回指 ==')
         d5 = ev(r"""(async()=>{
