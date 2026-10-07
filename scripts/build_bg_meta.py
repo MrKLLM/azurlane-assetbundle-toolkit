@@ -6,9 +6,12 @@
 
 三档命名口径（**页面必须如实分档，不许把推断当确定名**）：
   exact    —— 本图自己被某表的背景语义字段整值引用，且该行有中文 name/title ⇒ 直接给中文关卡名
+  baked    —— 配置表查不到，但**名字烤在图像素里**（`*_tip` 横幅那一族）⇒ 由
+              `scripts/ocr_bg_tip_titles.py` 走「OCR 模板位 + 3× 放大目视」双路径发布，
+              证据强度与"表字段整值"不同源，页面要单列一档，不与 exact 混
   inferred —— 本图自己没有引用，但同**词根**（剥掉 `bg_` 前缀与 `_cgN/_N/_cutN/_tip/_hx/_n` 等尾缀）
               的兄弟图有 ⇒ 继承该词根的中文标签众数，页面标「推断」并显示"同组 N 张已确定"
-  none     —— 两档都没有 ⇒ 显示英文原名，**不编中文名**
+  none     —— 三档都没有 ⇒ 显示英文原名，**不编中文名**
 
 数据源：`inputs/gamecfg/bg_scene_refs.json`（由 `tools/sharecfg_re/49_publish_bg_scene.py` 发布，
 台账 `inputs/gamecfg/MANIFEST.json`）。⚠️ 不读 `.diag/`（权威输入不得住临时区，AGENTS.md）。
@@ -34,6 +37,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, 'Output', 'Raw')
 REFS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_scene_refs.json')
+TITLES = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_tip_titles.json')
 OUT = os.path.join(ROOT, 'Output', 'gallery_v2', 'bg_meta.json')
 SAMPLE_TXT = os.path.join(ROOT, '.diag', 'bgscan', 'sample.txt')
 
@@ -142,17 +146,23 @@ def build(sample=None):
         print('[FAIL] 缺 %s —— 先跑 py -3 tools/sharecfg_re/49_publish_bg_scene.py' % REFS)
         return None
     exact = json.load(open(REFS, encoding='utf-8'))['exact']
+    # 图内烤字是**第二条命名源**（OCR + 目视双路径），文件可以不存在（那就没有 baked 档）
+    titles = (json.load(open(TITLES, encoding='utf-8'))['titles']
+              if os.path.isfile(TITLES) else {})
 
     items = []
     for d, name, fp, size in disk_items():
         key = '%s/%s' % (d, name)
         rows = exact.get(name, [])
         own = labels_of(rows)
+        t = titles.get(name)
         if own:
             tier, labels = 'exact', own
+        elif t:
+            tier, labels = 'baked', [{'cn': t['cn'], 'n': 1, 'src': [], 'via': t['via']}]
         else:
             tier, labels = 'none', []
-        items.append({
+        it = {
             'key': key, 'dir': d, 'name': name,
             'img': '../Raw/%s/%s.png' % (d, name),
             'thumb': 'bg_thumbs/%s/%s.webp' % (d, name),
@@ -162,7 +172,12 @@ def build(sample=None):
             'tier': tier,
             'cn': labels,
             'refs': [{'t': r['t'], 'f': r['f'], 'id': r['id']} for r in rows][:6],
-        })
+        }
+        if t and tier == 'baked':
+            # 保留机器读到的原文与重合度：定稿与 OCR 不一致时（`_11` 丢了「醺」）要能查是谁改的
+            it['baked'] = {'ocr_raw': t['ocr_raw'], 'ocr_conf': t['ocr_conf'],
+                           'overlap': t['overlap'], 'via': t['via']}
+        items.append(it)
 
     # 组内传播：同词根的 exact 标签给没有自己引用的兄弟图
     by_root = collections.defaultdict(list)
@@ -225,9 +240,12 @@ def selfcheck(items, t):
          len({i['key'] for i in items}) == len(items)),
         ('img 路径都指向盘上真实文件',
          all(os.path.isfile(os.path.join(ROOT, 'Output', i['img'][3:])) for i in items)),
-        ('tier 三档穷尽（没有其它值，且 none 之外都必须有 cn）',
-         set(t) <= {'exact', 'inferred', 'none'}
+        ('tier 四档穷尽（没有其它值，且 none 之外都必须有 cn）',
+         set(t) <= {'exact', 'baked', 'inferred', 'none'}
          and all(i['cn'] for i in items if i['tier'] != 'none')),
+        ('baked 档都带 via，且带 OCR 原文与重合度（图内文字这条源要可回溯）',
+         all(i.get('baked', {}).get('via') and i['baked']['ocr_raw'] and 'overlap' in i['baked']
+             for i in items if i['tier'] == 'baked')),
         ('exact 的每条 cn 都能回指出处 (表/字段/行标识)',
          all(r.get('t') and r.get('f') and r.get('id') is not None
              for i in items if i['tier'] == 'exact' for r in i['refs'])),
@@ -256,12 +274,18 @@ def main():
     t, per = stats(items)
     n = len(items)
     print('背景图 %d 张 / 词根 %d 个已拿到中文标签' % (n, len(root_labels)))
-    for tier in ('exact', 'inferred', 'none'):
+    for tier in ('exact', 'baked', 'inferred', 'none'):
         print('  %-9s %5d (%4.1f%%)' % (tier, t[tier], 100 * t[tier] / max(1, n)))
+    # 优先级（exact > baked）在当前数据上是**空规则**：没有一张图同时有两种源。
+    # 空转的判据不能报绿，所以这里只把它当观察量打印出来。
+    both = [i['key'] for i in items if i.get('baked') and i['tier'] == 'exact']
+    print('  同时有"表精确引用"和"图内烤字"的图: %d 张 %s'
+          % (len(both), '(优先级规则当前未被触发)' if not both else both[:5]))
     print('\n按类目:')
     for d, c in sorted(per.items(), key=lambda kv: -kv[1]['total']):
-        print('  %-13s 总 %4d  exact %3d  inferred %4d  none %4d   %s'
-              % (d, c['total'], c['exact'], c['inferred'], c['none'], DIR_LABELS.get(d, ('?', ''))[0]))
+        print('  %-13s 总 %4d  exact %3d  baked %2d  inferred %4d  none %4d   %s'
+              % (d, c['total'], c['exact'], c['baked'], c['inferred'], c['none'],
+                 DIR_LABELS.get(d, ('?', ''))[0]))
 
     ok = True
     for desc, passed in selfcheck(items, t):
@@ -298,8 +322,10 @@ def main():
     doc = {'schema': 1,
            'generated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
            'source': 'inputs/gamecfg/bg_scene_refs.json',
-           'note': 'tier=exact 是配置表逐张引用；inferred 是同词根兄弟图传播（页面要标「推断」）；'
-                   'none 无中文名，页面显示英文原名，不得编造',
+           'note': 'tier=exact 是配置表逐张引用；baked 是图内烤字（OCR+目视双路径，见 inputs/gamecfg/bg_tip_titles.json）；'
+                   'inferred 是同词根兄弟图传播（页面要标「推断」）；none 无中文名，页面显示英文原名，不得编造',
+           'sources': {'exact': 'inputs/gamecfg/bg_scene_refs.json',
+                       'baked': 'inputs/gamecfg/bg_tip_titles.json'},
            'dirs': {d: {'cn': lbl, 'via': via, 'count': per[d]['total']}
                     for d, (lbl, via) in DIR_LABELS.items() if d in per},
            'counts': dict(t),

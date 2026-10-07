@@ -6686,3 +6686,80 @@ OCR 结果里根本没有 `「`（`击球手★全垒打」`、`甜蜜的意外�
 `scripts/build_bg_meta.py`（四档 + `baked` 字段 + 空规则只打印）、`gallery_src/backgrounds.html`（「图内文字」档）、
 `scripts/diag/bg_page_probe.py`（3b/3c 两组判据 + markdown 星号通用检查，共 28 条）。
 相关：**§115**（第一条命名源与三档口径）、**WF-30**、§108（"宁可留空也不兜底"先例）、WF-16（先证探针再定罪）。
+---
+
+## §117. Live2D「花瓣一直不动」：不是丢曲线，是画廊只播一条 clip；顺手挖出常驻环境层与三个优先级死局（2026-10-07 用户拿游戏内截图对证）
+
+**症状**：`gezi_2 · L2D` 里有几片花瓣钉死在原地（用户举"绿色眼睛旁边那一片"），而游戏内的 Live2D
+花瓣不会一直不动。用户这句按"领域真值"处理——即默认我上一轮的结论是错的。
+
+### 上一轮的两条错判，本轮各自配了证据收回
+
+1. **「`physics3.json` 的 Inputs/Outputs 读出来是空」** —— 错。键名是 `PhysicsSettings` /
+   `Input` / `Output`（不是 `Groups`/`Inputs`/`Outputs`），8 组 13 入 28 出全在，名字是中文的
+   `胸部Y / 大腿肉 / 刘海 / 手环`。**花瓣根本不走物理。** 这是同一个坑第二次踩（上一轮把曲线
+   字段读成 `Part` 而非 `PartOpacity`）⇒ 判"某个字段是空的"之前，必须先把这个对象**自己写出来的
+   键名**打出来看，不能只查自己猜的那两个。
+2. **「`Paramfh` 0→2000 的 90 秒长坡就是花瓣漂移」** —— 错，那是从参数名 + 曲线形状推的。
+   实测 moc3 给 `Paramfh` 的合法量程是 **[0,10]**，运行时恒读 10 = 起播 0.45 秒就饱和钳位。
+   同批被钳掉的还有 `bowen`[0,1]、`MB_Awutijiaodugz2`[-1,1]、`MB_wutixialuoxunhuangz2`[0,3]。
+   ⇒ "曲线幅度大"不等于"部件位移大"，**量程这一层不在 motion 文件里，只能问运行时**。
+
+### 真因（两条，都是播放策略，不是数据）
+
+源包 `files/AssetBundles/live2d/gezi_2` 的 AnimatorController 实测（工具
+`scripts/diag/l2d_effect_layer_scan.py`）：层 0 = pose 层（462 状态、`AnyState ->` 全覆盖、
+默认状态 `idle`）；层 1 = **权重 1.0、Override、默认状态 `effect`、Loop**。
+
+- **① 画廊把模型钉在 `idle` 一条 clip 上循环**，而花瓣（`hxhb` 一族 10 个参数）只有
+  `home` / `main_1..3` / `login` / `mail` / `mission` / `wedding` / `touch_head` 会驱动。
+  真实运行时逐条量（`scripts/diag/l2d_motion_param_probe.py`，14 个花瓣参数）：
+  `idle` → **0 个会动**；`main_1` → **10 个会动**（且要到第 **8.12 秒**才开始）；`home` → 会动。
+  ⚠️ 采样窗必须盖过整条 clip：第一版只采前 3 秒，得出"`main_1` 也不动花瓣"的**假结论**。
+- **② `effect` 是独立一层的常驻循环动画**，画廊从不播它。全库普查：**224/224** 个带 `effect`
+  组的模型都是"某层默认状态 = effect、Loop、权重 1.0"——不是 gezi_2 个案。
+
+### 落地：环境层叠加（P2）+ 主界面轮播池
+
+- **P2 = 只叠加 `effect` 的"非常值" Parameter 曲线**（用户裁定，非默认整层覆盖）。理由：整层覆盖
+  （P1，最贴近 Unity 语义）会把 `idle` 正在动的参数钉死，实测 15 个模型受影响、`mingji_2` 达 70 个；
+  而 209/224 本来就零冲突 ⇒ 少写常量既不毁那 15 个也不动这 209 个。
+  全库 7579 条环境层非常值曲线**没有一条是贝塞尔**（纯线性），所以前端的贝塞尔分支在真实数据上是
+  **未走到的代码**——记着这条，别拿"它没出错"当"它被验证过"。
+  接缝：`im.on('afterMotionUpdate')`（库在 `motionManager.update` 之后、`coreModel.update()` 之前
+  emit），**不进队列管理器**——进队列的话播一次 `touch_*` 就把环境层挤到末位，回落 idle 后又被盖住。
+- **轮播池**：`scripts/build_l2d_motion_pool.py` 从控制器状态机命名里抽（子状态机 `idle_list`
+  的成员 + 顶层 `idle`/`home`/`main_<n>`），只保留 model3.json 里真有的组，产
+  `Output/Live2D/motion_pool.json`（269/269 都有，最小 5 条，全部含 `main_*`）。
+
+### 三个把改动卡死的运行时陷阱（每个都烧了一轮取证）
+
+1. **合成动作组走不通**：往 `mm.definitions['__pool']` 塞一组 `File` 之后，
+   `startMotion('__pool',0,FORCE)` 只留下 `reservedGroup='__pool'`，`loadMotion` 对这个不在
+   settings 里的组**永不 settle** ⇒ `currentGroup` 恒 undefined、一条都不播（实测卡满 60 秒）。
+   ⇒ 只用真实组名轮播。
+2. **库的自动回落会抢在池装好之前起播单条 idle**：那条带 Loop ⇒ 永不收尾 ⇒ 之后所有请求被
+   `reservePriority >= priority` 判成重复预约。解法：装池之前先 `mm.groups.idle=null` 掐掉自动回落，
+   `finally` 里按结果恢复。
+3. **`motionFinish` 里当场挑下一条会被拒**：该事件是在 `state.complete()` **之前** emit 的，
+   当场发 IDLE 请求撞上 `state.start()` 的 "Cannot start idle motion because another motion
+   is playing"（`currentPriority` 还是 3）。⇒ `setTimeout(...,0)` 延一拍。
+   另：这个 build 的 manager 上**没有** `stopAllMotion`（单数是队列管理器的名字），复数版
+   `stopAllMotions()` 才存在——两个名字各踩一次。
+
+### 验收（全部跑在真实运行时，headless Chrome + CDP）
+
+- `scripts/diag/l2d_ambient_probe.py gezi_2`：**PASS**。① 环境层开 7/10 个"只有环境层会驱动"的
+  参数在动；② **阴性对照**：`window.__ambOff=true` 后 **0/10** 在动；③ 零回退：idle 自驱动的
+  40 个参数开=40 / 关=38 都动；④ 速率对表：5 条单段线性斜坡全判"越量程被钳位"，量程内必须对表
+  的 0 条错 0 条。对照模型 `biaoqiang`（无 effect 组）加载不报错。
+- `scripts/diag/l2d_rotation_probe.py`：`gezi_2` 60 秒 `idle → idle6 → idle1 → idle12`（4 次变化）
+  **PASS**；`antu_2`（38 条池）`idle → idle41 → idle38 → main_4`（5 次变化）**PASS**。
+- 判据为什么拆成两条链：**"轮播会换条"由 rotation 探针证，"换到的那条动不动花瓣"由 param 探针逐条证**。
+  随机 20 条里 `main_*/home` 只占 4 条，60 秒窗口内没轮到属正常——把它写成硬断言会得到假红灯。
+
+**涉及文件**：`gallery_src/index.html`（环境层叠加 + 轮播池 + motionFinish 处理器 + `#l2Pool` 计数 pill）、
+`scripts/build_l2d_motion_pool.py`（产 `Output/Live2D/motion_pool.json`，产物不入库、由脚本重建）、
+`scripts/diag/l2d_effect_layer_scan.py` / `l2d_ambient_probe.py` / `l2d_motion_param_probe.py` /
+`l2d_rotation_probe.py`。相关：**§114**（同族"探针自己骗人"）、**§116**（同族"把字段存在当数据存在"）、
+**WF-16**（画廊前端回归六件套）、**WF-31**（"某部件不动"的三层归因）。

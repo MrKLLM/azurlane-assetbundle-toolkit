@@ -216,6 +216,60 @@ def main():
         say(isinstance(d3, dict) and any('\u4e00' <= ch <= '\u9fff' for ch in str(d3.get('exact', ''))),
             f"确定档示例: {d3.get('exact')!r} / 推断档: {d3.get('inferred')!r} / 类目说明档: {d3.get('none')!r}")
 
+        print('== 3b) 图内烤字档：页面标题必须逐字等于发布表（不是 OCR 原文）==')
+        TJ = json.load(open(os.path.join(P.ROOT, 'inputs', 'gamecfg', 'bg_tip_titles.json'), encoding='utf-8'))['titles']
+        expect = {'bg/' + k: v['cn'] for k, v in TJ.items()}
+        d3b = ev(r"""(()=>{
+          const out={};
+          for(const c of document.querySelectorAll('.card')){
+            const b=c.querySelector('.badge');
+            if((b.className||'').includes('baked')) out[c.dataset.k]=c.querySelector('.t1').textContent;
+          }
+          return out;
+        })()""")
+        say(isinstance(d3b, dict) and len(d3b) == len(expect),
+            f"图内文字档卡片 {len(d3b) if isinstance(d3b, dict) else d3b} 张 == 发布表 {len(expect)} 条")
+        diff = {k: (d3b.get(k), expect[k]) for k in expect if isinstance(d3b, dict) and d3b.get(k) != expect[k]}
+        say(not diff, f"6 条标题逐字一致（不一致: {diff}）")
+        say(isinstance(d3b, dict) and all('醺' in str(d3b.get('bg/bg_worldcruise_11_tip', '')) for _ in [0]),
+            f"`_11` 用的是目视定稿「微醺的海风」而不是 OCR 残文「微的海风e」: "
+            f"{d3b.get('bg/bg_worldcruise_11_tip') if isinstance(d3b, dict) else d3b}")
+
+        print('== 3c) 筛「图内文字」只剩这 6 张，且详情层写明取证方式 ==')
+        d3c = ev(r"""(async()=>{
+          const t=ms=>new Promise(r=>setTimeout(r,ms));
+          [...document.querySelectorAll('#gTier .chip')].find(x=>x.textContent==='图内文字').click();
+          await t(600);
+          const cards=[...document.querySelectorAll('.card')];
+          const n=cards.length;
+          cards[0].click(); await t(2200);
+          const r={n, first:cards[0].querySelector('.t1').textContent,
+                   open:document.getElementById('ov').classList.contains('open'),
+                   warn:document.getElementById('ovwarn').textContent,
+                   kv:document.getElementById('ovkv').textContent,
+                   ev:(document.getElementById('ovev').textContent||'')};
+          document.getElementById('ovclose').click();
+          [...document.querySelectorAll('#gTier .chip')][0].click(); await t(400);
+          return r;
+        })()""")
+        say(isinstance(d3c, dict) and d3c.get('n') == len(expect), f"筛「图内文字」得 {d3c.get('n') if isinstance(d3c,dict) else d3c} 张")
+        say(isinstance(d3c, dict) and '图内文字' in str(d3c.get('warn', ''))
+            and '烤' in str(d3c.get('warn', '')),
+            f"详情层写明这是第二条源: {str(d3c.get('warn'))[:56]!r}")
+        # 上一版这里断言的字面串与页面文案不一致（页面写「图内文字」、判据找「图内烤字」）——
+        # 判据自己写错也会造红。顺手补一条通用检查：**不许把 markdown 星号当富文本用**，
+        # 详情层是 textContent，`**加粗**` 会原样出现在界面上。
+        stars = ev(r"""(()=>{
+          const t=[...document.querySelectorAll('.card .t1,.card .t2,#ovwarn,#ovkv,#ovev,.badge')]
+            .map(e=>e.textContent).filter(x=>x.includes('**'));
+          return t.slice(0,3);
+        })()""")
+        say(isinstance(stars, list) and not stars, f"界面上没有漏出的 markdown 星号: {stars}")
+        say(isinstance(d3c, dict) and 'OCR 原文' in str(d3c.get('kv', '')),
+            "详情层列出 OCR 原文/置信/重合度（改判时能查是谁改的）")
+        say(isinstance(d3c, dict) and '图内烤字' in str(d3c.get('ev', '')),
+            "出处区写的是取证方式，而不是伪造一条表引用")
+
         print('== 4) 筛选与搜索 ==')
         # ⚠️ 这页的 chip 是**单选组**（要回到不限就点「全部」那颗），不是"再点同一颗取消"的开关。
         # 上一版照抄音乐库 usage chip 的"再点一次取消"写法，把产品没错的行为打成了红。
@@ -308,6 +362,11 @@ def main():
         time.sleep(1.0)
         p2b = shot('inferred')
         say(os.path.getsize(p2b) > 20000, f"推断档网格：{p2b}")
+        ev("""(()=>{const c=[...document.querySelectorAll('#gTier .chip')].find(x=>x.textContent==='图内文字');
+              c.click();scrollTo(0,0);return 1})()""")
+        time.sleep(1.0)
+        p2a = shot('baked_tier')
+        say(os.path.getsize(p2a) > 20000, f"图内文字档网格：{p2a}")
         ev("""(()=>{const c=[...document.querySelectorAll('#gTier .chip')].find(x=>x.textContent==='类目说明');
               c.click();scrollTo(0,0);return 1})()""")
         time.sleep(1.0)

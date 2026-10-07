@@ -79,6 +79,7 @@ header .sp{flex:1}
 .badge{position:absolute;top:8px;left:8px;font-size:10.5px;font-weight:600;padding:3px 8px;
   border-radius:var(--r-chip);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .badge.exact{background:color-mix(in srgb,var(--ok) 78%,transparent);color:var(--panel)}
+.badge.baked{background:color-mix(in srgb,var(--pop) 78%,transparent);color:var(--panel)}
 .badge.inferred{background:color-mix(in srgb,var(--brand) 74%,transparent);color:var(--panel)}
 .badge.none{background:color-mix(in srgb,var(--dim) 62%,transparent);color:var(--panel)}
 
@@ -152,17 +153,19 @@ header .sp{flex:1}
 </div>
 
 <script>
-/* 命名三档的语义（与 scripts/build_bg_meta.py 一致，页面不许自己升档）：
+/* 命名四档的语义（与 scripts/build_bg_meta.py 一致，页面不许自己升档）：
    exact    这张图自己被配置表的背景字段整值引用，且那行有中文名 → 中文关卡名
    inferred 这张图自己没有引用，同词根兄弟图有 → 只给「系列名」，不冒充具体关卡
-   none     两档都没有 → 显示类目的中文说明。⚠️ 类目说明是**我对目录名的归类描述**，
+   baked    配置表查不到、但名字烤在横幅像素里（`*_tip` 那一族）→ 单列一档，
+            它是**第二条源**（OCR + 目视双路径），证据强度与"表字段整值"不同，不许并进「确定」
+   none     三档都没有 → 显示类目的中文说明。⚠️ 类目说明是**我对目录名的归类描述**，
             不是这张图的资产名，所以徽章单列一档，页面上也必须写出来 */
 const $=id=>document.getElementById(id);
 const REDUCE=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const mb=b=>b>=2**20?(b/2**20).toFixed(1)+' MB':(b/2**10).toFixed(0)+' KB';
 /* 游戏里写的是「起舞于天原之上·下篇|| ||CHAPTER EX||E.X.」——`||` 之后是排版串，不是名字 */
 const clean=s=>(s||'').split('||')[0].trim();
-const TIER={exact:'确定',inferred:'推断',none:'类目说明'};
+const TIER={exact:'确定',baked:'图内文字',inferred:'推断',none:'类目说明'};
 
 let ALL=[],view=[],fTier='',fDir='',q='',cur=-1,META=null;
 
@@ -173,7 +176,7 @@ let ALL=[],view=[],fTier='',fDir='',q='',cur=-1,META=null;
    缩略图缺失时给 `.miss` 标记，不留"看着有格子其实点不开"的伪装成功。 */
 
 function title(it){
-  if(it.tier==='exact') return clean(it.cn[0] && it.cn[0].cn) || it.name;
+  if(it.tier==='exact'||it.tier==='baked') return clean(it.cn[0] && it.cn[0].cn) || it.name;
   if(it.tier==='inferred') return it.series || ('同系列 ' + (it.root || it.name));
   return (META.dirs[it.dir] && META.dirs[it.dir].cn) || it.dir;
 }
@@ -203,7 +206,7 @@ function apply(){
   g.appendChild(frag);
   $('empty').style.display=view.length?'none':'';
   $('sub').textContent=view.length+' / '+ALL.length+' 张 · '
-    +['exact','inferred','none'].map(t=>TIER[t]+' '+(META.counts[t]||0)).join(' · ');
+    +['exact','baked','inferred','none'].map(t=>TIER[t]+' '+(META.counts[t]||0)).join(' · ');
 }
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
 
@@ -224,7 +227,8 @@ function syncChips(host,val){
   for(const b of $(host).querySelectorAll('.chip')) b.classList.toggle('on',b.dataset.v===val);
 }
 function initFilters(){
-  buildChips('gTier',[{v:'',label:'全部'},{v:'exact',label:'确定'},{v:'inferred',label:'推断'},{v:'none',label:'类目说明'}],
+  buildChips('gTier',[{v:'',label:'全部'},{v:'exact',label:'确定'},{v:'baked',label:'图内文字'},
+                      {v:'inferred',label:'推断'},{v:'none',label:'类目说明'}],
              v=>{fTier=v;syncChips('gTier',v);apply()});
   const ds=Object.entries(META.dirs).sort((a,b)=>b[1].count-a[1].count);
   buildChips('gDir',[{v:'',label:'全部'}].concat(ds.map(([k,d])=>({v:k,label:d.cn,n:d.count}))),
@@ -243,13 +247,15 @@ function paint(){
               ['类目',(META.dirs[it.dir]||{}).cn+' ('+it.dir+')'],
               ['尺寸',it.w+' × '+it.h],['原图体积',mb(it.bytes)],
               ['词根',it.root||'（无）']];
+  if(it.baked) rows.push(['OCR 原文',it.baked.ocr_raw+'（置信 '+it.baked.ocr_conf+'，与定稿重合 '+it.baked.overlap+'）']);
   if(it.series) rows.splice(1,0,['系列名',it.series]);
   $('ovkv').innerHTML=rows.map(r=>'<dt>'+esc(r[0])+'</dt><dd>'+esc(r[1])+'</dd>').join('');
   const ev=[];
   for(const c of (it.cn||[])){
     const srcs=(c.src||[]).map(s=>s.t+'.'+s.f+' 行 '+s.id).join(' ｜ ');
+    const via=c.via?('图内烤字 · '+c.via):'';
     ev.push('<div class="row">'+esc(clean(c.cn))+(c.n>1?' <span style="opacity:.6">×'+c.n+'</span>':'')+
-      (srcs?'<span class="src">'+esc(srcs)+'</span>':'')+'</div>');
+      ((srcs||via)?'<span class="src">'+esc(srcs||via)+'</span>':'')+'</div>');
   }
   if(it.refs&&it.refs.length&&!ev.length)
     ev.push('<div class="row">配置表引用了这张图，但那几行没有中文字段<span class="src">'+
@@ -258,6 +264,10 @@ function paint(){
   $('ovev').innerHTML=ev.join('');
   $('ovwarn').textContent = it.tier==='exact'
     ? '「确定」= 配置表某张表的背景字段整值等于这张图的文件名，名字取自那一行的中文字段。点出处可回指到表与行。'
+    : it.tier==='baked'
+    ? '「图内文字」= 配置表里查不到这张图，名字是游戏自己烤在横幅像素里的。'
+      + (it.baked ? '取证方式：' + it.baked.via : '')
+      + '。这是与"表字段整值"独立的第二条源，所以单列一档，不与「确定」混。'
     : it.tier==='inferred'
     ? '「推断」= 这张图自己没有被引用，只有同词根的兄弟图被引用过。所以这里只给系列名（章节名），不给具体关卡 —— 我们不知道它究竟用在哪一小节。'
     : '「类目说明」是按下图所在目录给出的归类描述（依据写在下方），不是这张图的资产名；配置表里查不到它的中文名，页面不编。';
