@@ -6569,6 +6569,13 @@ D 盘可用 **268.64 GB**。
 两张图配置表里**没有引用**（`battlepass_event_pt.bg` 只到 13），所以页面落在「类目说明」档显示「场景背景」——
 补图不等于补名，这两件事分开记。
 
+**顺带发现（未据此改名，只记事实）**：目视两张新图时发现 `bg_worldcruise_<N>_tip` 这一族
+**把中文活动名直接烤在图里** —— `..._14_tip` = 「漫游微缩世界」（奖励含灵敏·META）、
+`..._13_tip` = 「放学后的补习时间」（奖励含诺菈·META），左上角统一是 `AZUR LANE-OUTFIT` 条。
+⇒ 这类图的中文名**在像素里而不在配置表里**（配置表对它们零引用，所以 §115 第 1 节的精确引用面拿不到它们）。
+要接这条线只能走 OCR / 人工读图，属于**另一条命名源**，与"表字段整值"那条不能混用；
+现存 6 张同族图（`bg_worldcruise_{9,10,11,12,13,14}_tip`）都在 `Output/Raw/bg/`。
+
 **涉及文件**：`tools/sharecfg_re/49_publish_bg_scene.py`（发布权威引用表 + 台账，闸门红不写盘）、
 `inputs/gamecfg/bg_scene_refs.json`（406 条精确引用，不入库）、`scripts/build_bg_meta.py`（三档命名 + 7 条断言）、
 `scripts/make_bg_thumbs.py`（按类目分目录出 webp，1,899 张 / 32 MB）、`gallery_src/backgrounds.html`（新子页）、
