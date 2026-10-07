@@ -16,6 +16,11 @@
 数据源：`inputs/gamecfg/bg_scene_refs.json`（由 `tools/sharecfg_re/49_publish_bg_scene.py` 发布，
 台账 `inputs/gamecfg/MANIFEST.json`）。⚠️ 不读 `.diag/`（权威输入不得住临时区，AGENTS.md）。
 
+另一个维度 `has_char`（画面里有没有角色）来自 `inputs/gamecfg/bg_char_flags.json`
+（`scripts/publish_bg_char_flags.py` 发布的人工逐格标注），背景页的**默认视图**靠它筛。
+⚠️ 该文件只覆盖场景背景：登录/其他类目从没判过，所以那些条目**不带这个字段**，
+页面必须把"没字段"和"字段=0"区分开——否则 604 张没判过的图会被静默藏掉。
+
 同名 png 会跨类目重复（实测 `bg_1` 同时在 loadingbg / loadingbg_hx / newshipbg），
 所以**记录键是 `<dir>/<name>`**，按 name 去重会把 22 张图吞掉。
 
@@ -41,6 +46,9 @@ REFS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_scene_refs.json')
 TITLES = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_tip_titles.json')
 # 词根→中文名的确定性词典（tools/sharecfg_re/50_publish_bg_roots.py 发布，可缺：缺了就退回 series）
 ROOT_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_root_labels.json')
+# 场景背景「画面里有没有角色」的人工逐格标注（scripts/publish_bg_char_flags.py 发布，可缺：
+# 缺了页面就没有筛选依据，会退回「全部」并显式说明——不许静默降级）
+CHARS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_char_flags.json')
 OUT = os.path.join(ROOT, 'Output', 'gallery_v2', 'bg_meta.json')
 SAMPLE_TXT = os.path.join(ROOT, '.diag', 'bgscan', 'sample.txt')
 
@@ -274,6 +282,14 @@ def build(sample=None):
             # 否则卡片上会出现一个在这张图自己的证据里查不到的系列名。
             it['cn'] = it['cn'][:2] + [{'cn': it['series_src'], 'n': 0, 'src': [], 'via': 'group'}]
 
+    # has_char：**只有标注覆盖到的键才带这个字段**。登录/其他类目从没判过，
+    # 给它们补 0 会让默认视图把 604 张没判过的图静默藏掉（页面要区分"没字段"与"字段=0"）。
+    cmap = (json.load(open(CHARS, encoding='utf-8')).get('labels', {})
+            if os.path.isfile(CHARS) else {})
+    for it in items:
+        if it['key'] in cmap:
+            it['has_char'] = int(cmap[it['key']])
+
     for it in items:
         d, name = it['key'].split('/', 1)
         it['w'], it['h'] = px_size(os.path.join(RAW, d, name + '.png'))
@@ -441,6 +457,33 @@ def main():
     ]:
         print('%s %s' % ('OK ' if passed else 'FAIL', desc))
         ok &= passed
+
+    # 「画面里有没有角色」这一维：发布件**可以缺**（缺了背景页退回「全部」并写明原因），
+    # 但在位时必须逐字透传，且不许越界标到从没标注过的类目。
+    cf = json.load(open(CHARS, encoding='utf-8')) if os.path.isfile(CHARS) else None
+    marked = [i for i in items if 'has_char' in i]
+    print('%s 标注发布件在位（缺了则背景页默认视图退回「全部」，不静默改判）'
+          % ('OK ' if cf else 'WARN'))
+    if cf:
+        for desc, passed in [
+            ('场景背景每张都带 has_char（默认视图不许藏掉"没判过"的场景图）',
+             all('has_char' in i for i in items if i['group'] == 'scene')),
+            ('has_char 值域只有 0/1（裁定没收敛就不该有这份发布件）',
+             set(i['has_char'] for i in marked) <= {0, 1}),
+            ('非场景类目不带 has_char（没判过 ≠ 无角色，不许被默认视图隐藏）',
+             not any(i['group'] != 'scene' for i in marked)),
+            ('逐字等于发布件的值（索引不许自己改判）',
+             all(i['has_char'] == cf['labels'][i['key']] for i in marked)),
+            ('条数与有角色数同发布件 counts 一致',
+             len(marked) == len(cf['labels'])
+             and sum(i['has_char'] for i in marked) == cf['counts']['has']),
+        ]:
+            print('%s %s' % ('OK ' if passed else 'FAIL', desc))
+            ok &= passed
+        print('  画面: 有角色 %d / 无角色 %d / 未标注 %d（默认视图只隐藏"无角色"）'
+              % (sum(1 for i in marked if i['has_char']),
+                 len(marked) - sum(1 for i in marked if i['has_char']),
+                 n - len(marked)))
     if not ok:
         print('\n闸门：红 —— 断言未全过，不写文件')
         return 1
@@ -448,16 +491,24 @@ def main():
         print('\n闸门：绿（--check 未写文件）')
         return 0
 
-    doc = {'schema': 2,
+    n_has = sum(1 for i in items if i.get('has_char') == 1)
+    n_no = sum(1 for i in items if i.get('has_char') == 0)
+    doc = {'schema': 3,
            'groups': groups,
            'roots': roots,
            'dropped_identical': dropped,
+           'char': ({'has': n_has, 'none': n_no, 'unlabeled': n - n_has - n_no,
+                     'source': 'inputs/gamecfg/bg_char_flags.json',
+                     'note': '背景页默认视图只隐藏 has_char==0（人工逐格标注，仅覆盖场景背景）；'
+                             'unlabeled 的 %d 张从没判过，照常显示，不许当成"无角色"藏掉'
+                             % (n - n_has - n_no)} if cf else None),
            'generated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
            'source': 'inputs/gamecfg/bg_scene_refs.json',
            'note': 'tier=exact 是配置表逐张引用；baked 是图内烤字（OCR+目视双路径，见 inputs/gamecfg/bg_tip_titles.json）；'
                    'inferred 是同词根兄弟图传播（页面要标「推断」）；none 无中文名，页面显示英文原名，不得编造',
            'sources': {'exact': 'inputs/gamecfg/bg_scene_refs.json',
-                       'baked': 'inputs/gamecfg/bg_tip_titles.json'},
+                       'baked': 'inputs/gamecfg/bg_tip_titles.json',
+                       'has_char': 'inputs/gamecfg/bg_char_flags.json'},
            'dirs': {d: {'cn': lbl, 'via': via, 'count': per[d]['total']}
                     for d, (lbl, via) in DIR_LABELS.items() if d in per},
            'counts': dict(t),

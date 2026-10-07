@@ -93,6 +93,18 @@ header .sp{flex:1}
   box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 16%,transparent)}
 .grp[hidden]{display:none}
 
+/* ── 「默认藏了多少」必须常驻可见 ──
+   筛选把图藏起来而页面上没有任何痕迹，是这类图库最恶性的失效：用户会以为库里有 1,139 张。
+   所以隐藏条数不是一句 toast，而是与 chip 同区的常驻行，且**按当前搜索范围**算
+   （搜"温泉"结果空了，得能看出是被「画面」筛掉的，而不是"库里没有"）。 */
+.hint{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--txt2);
+  background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-in);
+  padding:8px 12px;margin:0 0 12px}
+.hint[hidden]{display:none}
+.hint b{font-weight:600;color:var(--txt);font-variant-numeric:tabular-nums}
+.hint button{font:inherit;font-size:12px;color:var(--on-txt);background:var(--chip);
+  border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:4px 10px;cursor:pointer}
+
 /* ── 全屏壁纸模式：只留图，UI 全隐 ── */
 .fs{position:fixed;inset:0;z-index:90;display:none;background:var(--stage)}
 .fs.on{display:block}
@@ -153,8 +165,10 @@ header .sp{flex:1}
 <div class="wrap">
   <div class="tools"><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"></div>
   <div class="grp" id="gTier"><span>命名档</span></div>
+  <div class="grp" id="gChar" hidden><span>画面</span></div>
   <div class="grp" id="gGroup"><span>类目</span></div>
   <div class="grp" id="gSub" hidden><span id="gSubLab">细分</span><select class="sel" id="gSubSel"></select></div>
+  <div class="hint" id="gHint" hidden></div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" style="display:none">没有符合条件的背景图</div>
 </div>
@@ -201,7 +215,25 @@ const mb=b=>b>=2**20?(b/2**20).toFixed(1)+' MB':(b/2**10).toFixed(0)+' KB';
 const clean=s=>(s||'').split('||')[0].trim();
 const TIER={exact:'确定',baked:'图内文字',inferred:'推断',none:'类目说明'};
 
-let ALL=[],view=[],fTier='',fGroup='',fSub='',q='',cur=-1,META=null;
+let ALL=[],view=[],fTier='',fGroup='',fSub='',fChar='shown',q='',cur=-1,META=null;
+/* 「画面」这一维是**人工逐格标注**（inputs/gamecfg/bg_char_flags.json，经 build_bg_meta 透传）。
+   默认 `shown` = 只藏起明确判过「无角色」的，**没判过的照常显示**（用户 2026-10-07 定的口径）：
+   标注只覆盖 1,305 张场景背景，登录/其他类目共 604 张从没判过，把"没字段"当 0 就是静默藏图。
+   索引缺这个字段时（发布件没跑）整组 chip 不建、fChar 退回 ''，页面显示全部 —— 不假装在筛。 */
+function charOk(it){
+  if(fChar==='shown')return it.has_char!==0;
+  if(fChar==='has')return it.has_char===1;
+  if(fChar==='no')return it.has_char===0;
+  if(fChar==='unk')return it.has_char==null;
+  return true;
+}
+/* 隐藏条数按**其余筛选都作用之后**的池子算：搜「温泉」搜空了，要能看出是「画面」筛挡的 */
+function charHidden(){
+  const kw=q.trim().toLowerCase();
+  const pool=ALL.filter(it=>(!fTier||it.tier===fTier)&&(!fGroup||it.group===fGroup)
+                            &&(!fSub||subVal(it)===fSub)&&(!kw||hay(it).includes(kw)));
+  return pool.length-pool.filter(charOk).length;
+}
 /* 一级只剩 3 个类目（scene/login/other），二级用下拉：
    other → 6 个子类目；scene → 词根分组（`META.roots`，中文名来自 P3 词典，拿不到就是词根原文）。
    下拉而不是平铺 chip：other 的 6 类与 scene 的 117 个词根铺出来会把网格挤出首屏。 */
@@ -237,7 +269,7 @@ function subVal(it){
 function apply(){
   const kw=q.trim().toLowerCase();
   view=ALL.filter(it=>(!fTier||it.tier===fTier)&&(!fGroup||it.group===fGroup)
-                       &&(!fSub||subVal(it)===fSub)&&(!kw||hay(it).includes(kw)));
+                       &&(!fSub||subVal(it)===fSub)&&(!kw||hay(it).includes(kw))&&charOk(it));
   const g=$('grid'); g.innerHTML='';
   const frag=document.createDocumentFragment();
   for(const it of view){
@@ -259,7 +291,23 @@ function apply(){
   $('empty').style.display=view.length?'none':'';
   $('sub').textContent=view.length+' / '+ALL.length+' 张 · '
     +['exact','baked','inferred','none'].map(t=>TIER[t]+' '+(META.counts[t]||0)).join(' · ');
+  paintHint();
 }
+function paintHint(){
+  const h=$('gHint'), hid=META.char?charHidden():0;
+  if(!hid){ h.hidden=true; h.innerHTML=''; 
+    if(!view.length&&q.trim()) $('empty').textContent='没有符合条件的背景图';
+    return; }
+  h.hidden=false;
+  const why=fChar==='has'?'（仅确认有角色，未标注的也一并藏了）'
+          :(q.trim()?'（按当前搜索范围算）':'');
+  h.innerHTML='<span>「画面」筛选正藏着 <b>'+hid+'</b> 张'+why+(META.char.unlabeled
+      ?'；另有 <b>'+META.char.unlabeled+'</b> 张登录/其他类目从没标注，仍照常显示':'')
+    +'。</span><button id="hintAll">看全部</button>';
+  $('hintAll').addEventListener('click',()=>setChar(''));
+  if(!view.length) $('empty').textContent='这些条件下没有图 —— 但「画面」筛选还藏着 '+hid+' 张，点上方「看全部」';
+}
+function setChar(v){ fChar=v; syncChips('gChar',v); apply(); }
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
 
 /* chip **只建一次**，之后就地改 `.on`。
@@ -282,6 +330,18 @@ function initFilters(){
   buildChips('gTier',[{v:'',label:'全部'},{v:'exact',label:'确定'},{v:'baked',label:'图内文字'},
                       {v:'inferred',label:'推断'},{v:'none',label:'类目说明'}],
              v=>{fTier=v;syncChips('gTier',v);apply()});
+  if(META.char){
+    /* 默认态 = `shown`（只藏明确判过无角色的）。标注缺失时整组不建、fChar 退回 ''，
+       页面显示全部 —— 宁可少筛，也不许拿"没判过"当"无角色"藏图。 */
+    const c=META.char;
+    $('gChar').hidden=false;
+    buildChips('gChar',[{v:'shown',label:'隐藏无角色',n:c.has+c.unlabeled},
+                        {v:'',label:'全部',n:ALL.length},
+                        {v:'has',label:'仅确认有角色',n:c.has},
+                        {v:'no',label:'无角色',n:c.none},
+                        {v:'unk',label:'未标注',n:c.unlabeled}],setChar);
+    syncChips('gChar',fChar);
+  }else fChar='';
   buildChips('gGroup',[{v:'',label:'全部'}].concat(
       ['scene','login','other'].map(g=>({v:g,label:META.groups[g].cn,n:META.groups[g].count}))),
              v=>{fGroup=v;fSub='';syncChips('gGroup',v);buildSub();apply()});
@@ -341,6 +401,9 @@ function paint(){
                       +(it.root_dir&&it.root_dir!==it.dir?('（源目录 '+it.root_dir+'）'):'')],
               ['变体',it.variant==='hx'?'和谐版（_hx）'
                       :(it.same_name_of?('同名另一张，主图 '+it.same_name_of):'—')],
+              /* 「没判过」必须和「判过=无角色」分开写：前者是标注覆盖面，后者是结论 */
+              ['画面',it.has_char==null?'未标注（该类目没做过逐格目视标注）'
+                      :(it.has_char?'有角色':'无角色')+'（人工逐格标注，非文件名规则）'],
               ['尺寸',it.w+' × '+it.h],['原图体积',mb(it.bytes)],
               ['词根',it.root||'（无）']];
   if(it.baked) rows.push(['OCR 原文',it.baked.ocr_raw+'（置信 '+it.baked.ocr_conf+'，与定稿重合 '+it.baked.overlap+'）']);

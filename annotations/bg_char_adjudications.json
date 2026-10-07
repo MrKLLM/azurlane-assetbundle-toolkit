@@ -1,0 +1,25 @@
+{
+ "_note": "P2 视觉标注里判为「不确定」(`2`) 的 17 格的人工裁定。拼板每格只有 300px，这些格在全分辨率下逐格复核（7 格另做局部放大），裁定结论覆盖 labels_part*.json 里的 2。",
+ "_scale": "1 = 画面里有角色形象 / 0 = 没有",
+ "_decided_by": "逐格目视复核 + 用户 2026-10-07 拍板（#623/#624 判 1、#641 判 0）",
+ "_evidence": "复核图在 .diag/bglabels/adjudicate/（临时区，可由 scripts/diag/make_bg_adjudicate_sheet.py 重生成）",
+ "cells": {
+  "bg/bg_canghongzhiyan_cut2": { "v": 1, "why": "白衣躯干与手臂特写、火焰缠身（同系列分镜的局部身体）" },
+  "bg/bg_canghongzhiyan_cut3": { "v": 1, "why": "腿部与握刀的手（同系列分镜的局部身体）" },
+  "bg/bg_highschool_future": { "v": 1, "why": "教学楼前长椅上坐着一名极小人物，放大可辨黑发白衣坐姿" },
+  "bg/bg_shenguang_cg_10": { "v": 1, "why": "蓝发角色全身漂浮在漩涡前 —— 拼板 300px 才看着像「极小」" },
+  "bg/bg_shenguang_cg_7": { "v": 1, "why": "绿发角色躺卧（用户裁定，代理漏判）" },
+  "bg/bg_shenguang_cg_8": { "v": 1, "why": "绿发角色躺卧（用户裁定，代理漏判）" },
+  "bg/bg_ssss_4": { "v": 1, "why": "三名背视角色面对巨型敌人" },
+  "bg/bg_story_1": { "v": 1, "why": "戴帽角色开炮，右下方另有一名小角色" },
+  "bg/bg_story_4": { "v": 1, "why": "两名角色坐在燃烧废墟前，天空布满机群" },
+  "bg/bg_yuhui_cg_4": { "v": 1, "why": "白发角色持枪立于舰装之上" },
+  "bg/bg_story_11": { "v": 0, "why": "主体是飞鸟，只有两只戴手套的手入镜 —— 无可辨识角色形象（用户裁定判 0）" },
+  "bg/bg_yuhui_cg_3": { "v": 0, "why": "与 bg_yuhui_cg_4 同场景的纯背景层：漩涡 + 巨物，没画角色" },
+  "bg/bg_zhedie_11": { "v": 0, "why": "俯瞰环礁基地，只有建筑、光柱与海面纹章" },
+  "bg/star_level_bg_181": { "v": 0, "why": "游乐园空景，长椅与旋转木马均为器物" },
+  "bg/star_level_bg_551": { "v": 0, "why": "温泉屋；两个「形似坐姿人物」的深色形放大后是木桶 + 竹筒" },
+  "bg/star_level_bg_582": { "v": 0, "why": "雪山极光，右下的暗形是岩石" },
+  "bg/star_level_bg_704": { "v": 0, "why": "欧洲街道空景，长椅/电话亭均无人" }
+ }
+}

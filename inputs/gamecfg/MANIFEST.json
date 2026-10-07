@@ -15,11 +15,25 @@
    "tools/sharecfg_re/47_publish_npc_voice.py",
    "tools/sharecfg_re/48_publish_meta_group_bridge.py",
    "tools/sharecfg_re/49_publish_bg_scene.py",
-   "scripts/ocr_bg_tip_titles.py"
+   "scripts/ocr_bg_tip_titles.py",
+   "scripts/publish_bg_char_flags.py"
   ],
   "landed_at": "2026-10-07"
  },
  "files": [
+  {
+   "path": "bg_char_flags.json",
+   "bytes": 31701,
+   "sha256": "542d73aca9617ab30d6ee461544850166c3c730b0e98de33af811e902209bb8b",
+   "rows": 1305,
+   "role": "场景背景「画面里有没有角色」的人工视觉标注结论（1=有角色形象 / 0=没有）—— 背景页**默认视图**的筛选依据；文件名规则（含 `_cg`）精确率 86%/召回率 79%，不够当默认视图，故逐格目视标注",
+   "consumers": [
+    "scripts/build_bg_meta.py"
+   ],
+   "source": "annotations/bg_char_labels.json（= .diag/bglabels 5×5 拼板逐格标注 + annotations/bg_char_adjudications.json 的 17 格全分辨率裁定；两份裁定正本入库，拼板可重生成）",
+   "produced_by": "scripts/publish_bg_char_flags.py",
+   "coverage": "1,305/1,305 场景背景全覆盖（有角色 535 / 无角色 770）；⚠️ 登录与其他类目共 604 张**从未标注**，消费方不得把它们当「无角色」隐藏"
+  },
   {
    "path": "bg_root_labels.json",
    "bytes": 4512,
