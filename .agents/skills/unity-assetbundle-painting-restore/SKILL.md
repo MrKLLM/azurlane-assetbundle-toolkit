@@ -1,7 +1,7 @@
 ---
 name: unity-assetbundle-painting-restore
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.10.0
+version: 1.11.0
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -278,6 +278,21 @@ MAD 分不开"该替换/不该替换"，两者数值重叠。这条写进了常�
 3. **历史手调参数即"标准答案"**：v1 需要特殊参数才对的样本，v2 应零参数自动正确——若又需要调参就是解析回归了。
 4. 全量后随机抽样拼图质检（`scripts/make_contact_sheet.py`）+ 处理失败清单（ERRORS.log）。
 5. 样本通过后才清理旧错误产物（`mv` 到 `.trash/<说明>_<日期>/`，勿直接删），再重启全量。
+
+## 3D 类目开工前：先跑能力探针，别外推旧结论
+
+判**这台机器的工具链能把 3D 数据取到哪一层**时，找一个**盘上还活着的同类 3D 包**实测字段，而不是拿别的管线当年的天花板去推断（脚本：`scripts/diag/probe_3d_capability.py`，只读，打印类型分布 + Mesh/蒙皮/贴图/曲线/材质/着色器六段）：
+
+- **判据（按段看，缺一不能推断下一层）**：几何看 `m_VertexData.m_VertexCount` + `m_IndexBuffer`；蒙皮看 `Mesh.m_BindPose`/`m_BoneNameHashes` 与 `SkinnedMeshRenderer.m_Skin`（静态网格里为 0 属正常，**不能据此判"蒙皮读不出"**）；贴图解码以 `.image` 真产出 PIL `RGBA` 为准（ASTC 族靠 `texture2ddecoder`）；曲线看 `Keyframe` 是否含 `inSlope/outSlope`；外观参数看 `Material.m_SavedProperties` 的 floats/colors/texRefs + `m_ShaderKeywords` + `m_CustomRenderQueue`。
+- **着色器分三档，别一句"拿不回"糊过去**：① `Shader.m_ParsedForm.m_PropInfo.m_Props` = 参数表（名称/类型/默认值）**可读**；② CGPROGRAM 源码块在打包时被裁（`export()` 头部自述 "This is *not* a valid shader file"）；③ `compressedBlob` + `platforms`（如 `[9,18]` = DX9 VS SM20 / DX11 PS SM50）= 编译后字节码**在包里**，可走 DXBC→HLSL / SPIR-V→GLSL 反编译。⇒ 前端（three.js）重写材质是"照参数表施工"，只有**逐像素一致**那一档才是真近似。
+- **烘焙光照是一条正道不是fallback**：`scenesres/*.shadowmap`、`LightmapSettings`、`LightProbes` 是烘焙数据，当第二套 UV 贴上去比实时重算更接近原画面。
+
+**踩坑**：
+- **目录名不可信**：`shipmodels/` 实测只有 `Sprite`+`Texture2D`（2,547 个包全是 2D 舰船贴图）。判类型必须看对象类型分布。
+- **旧天花板不能外推**：Live2D 的"约 7% 贝塞尔段无法还原"是 moc3 **反解**的限制；3D 的 `Keyframe` 显式存 slope，是两种数据形态。同理"上次 Spine 少收了一类对象"也不能推成"这类对象读不出"。
+- **`UnityPy` 的 `Mesh.export()` 只给 OBJ，不含骨骼** ⇒ 蒙皮动画必须自己装配 glTF（`pygltflib` 常缺）。
+- `load()` 报 `No valid Unity version found` 时设 `UnityPy.config.FALLBACK_UNITY_VERSION`，不是包坏了。
+- 打印中文撞 GBK stdout 会显示成 `?????`，**那是显示不是数据**；脚本内 `sys.stdout.reconfigure(encoding='utf-8')`。
 
 ## 完成收尾
 
