@@ -42,6 +42,10 @@ OUT = os.path.join(ROOT, 'Output', 'gallery_v2', 'bg_meta.json')
 SAMPLE_TXT = os.path.join(ROOT, '.diag', 'bgscan', 'sample.txt')
 
 TAIL = re.compile(r'(_?cg_?\d+|_cut\d+|_?\d+|_tip|_hx|_n|_bg|_new)$')
+# `X__2` 是导出层为「同一个包里两张**同名但内容不同**的画」补的后缀（见 export_assets
+# 的 dedupe=distinct）。查配置表与取词根都要先剥掉它 —— 但**不能**因此把两张都发「确定」名：
+# 配置表按名字引用，同一个名字对应两张画时它分不清是哪一张，所以第 2 张起只给「推断」。
+DUP_SUFFIX = re.compile(r'__\d+$')
 # 中文标签清洗：游戏里写的是「起舞于天原之上·下篇|| ||CHAPTER EX||E.X.」，
 # `||` 之后是排版串，`·` 之后是该章的小节 —— 系列名只取 `·` 前那一段。
 GAME_SEP = re.compile(r'\|\|')
@@ -153,9 +157,10 @@ def build(sample=None):
     items = []
     for d, name, fp, size in disk_items():
         key = '%s/%s' % (d, name)
-        rows = exact.get(name, [])
+        base = DUP_SUFFIX.sub('', name)          # bg_1__2 -> bg_1
+        rows = exact.get(base, [])
         own = labels_of(rows)
-        t = titles.get(name)
+        t = titles.get(base)
         if own:
             tier, labels = 'exact', own
         elif t:
@@ -168,11 +173,21 @@ def build(sample=None):
             'thumb': 'bg_thumbs/%s/%s.webp' % (d, name),
             'bytes': size,
             'w': 0, 'h': 0,
-            'root': root_of(name),
+            'root': root_of(base),
             'tier': tier,
             'cn': labels,
             'refs': [{'t': r['t'], 'f': r['f'], 'id': r['id']} for r in rows][:6],
         }
+        if base != name:
+            # 同名多张：配置表只认名字，认不出是哪一张 ⇒ 第 2 张起不发「确定」，只发「推断」，
+            # 并把主图那条名字作为继承来源标出来（页面要显示「同名第 N 张」而不是冒充确定名）
+            if tier in ('exact', 'baked'):
+                it['same_name_of'] = base
+                it['why'] = '同一个包里有两张内容相同命名的画，配置表按名引用无法区分是哪一张'
+                it['tier'] = 'inferred'
+                it['inferred_from'] = '%s/%s' % (d, base)
+            else:
+                it['same_name_of'] = base
         if t and tier == 'baked':
             # 保留机器读到的原文与重合度：定稿与 OCR 不一致时（`_11` 丢了「醺」）要能查是谁改的
             it['baked'] = {'ocr_raw': t['ocr_raw'], 'ocr_conf': t['ocr_conf'],
