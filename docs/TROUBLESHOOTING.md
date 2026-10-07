@@ -6584,3 +6584,105 @@ D 盘可用 **268.64 GB**。
 `scripts/deploy_gallery.py`（`FILES` +`backgrounds.html`）、`gallery_src/index.html`（「背景库」入口）。
 相关：**WF-30**（这类"给画廊加一个带权威命名的子页"怎么做怎么验）、§111（Raw 定性）、
 §114（同族"探针单位写错"）、WF-16（画廊前端回归六件套）。
+
+---
+
+## §116. 读 Unity 蒙皮权重时的三个假信号：`compressedMesh=Y`、"m_Skin 字段不存在"、`m_Streams` 恒空（2026-10-07 3D 宿舍 step 3）
+
+**问题**：判定"dorm3d 的真·蒙皮权重到底读不读得出"。探针 `scripts/diag/probe_3d_capability.py` 对
+`dorm3d/character/tianlangxing_db/res/tianlangxing_noshoes` 打出 5 行
+`m_Skin 字段不存在 —— 改读 m_VertexData 的 BlendWeight/BlendIndex 通道`、又打 5 行 `compressedMesh=Y`，
+看起来像"两种路径都断了"。**实际是三个信号全读错**，权重一直好好在那儿。
+
+**三条根因**：
+
+1. **`compressedMesh=Y` 判的是"字段存在"，不是"数据存在"**。`Mesh.m_CompressedMesh` 这个对象在 TypeTree 里
+   恒存在，逐字段看下去 `m_Vertices / m_Normals / m_BoneIndices / m_BoneWeights` 的 `m_NumItems` **全是 0**
+   ⇒ 该网格走的是普通打包顶点缓冲，不是压缩网格。**"字段读得出来"不等于"里面有数据"**，
+   任何 `if obj.X: 判 Y` 的探针都要改成量 X 内部的**可观测计数**。
+2. **`SkinnedMeshRenderer.m_Skin` 在这个 Unity 版本（2022.3.62f3）就是不存在**——Unity 早就把权重搬到了
+   `Mesh.m_VertexData`。所以那 5 行提示**不是失败，是路标**：它指对了地方，只是探针自己没往下读。
+   真正的读法：`m_VertexData.m_Channels` 里 **索引 12 = BlendWeight、13 = BlendIndices**
+   （0=Position 1=Normal 2=Tangent 3=Color 4~11=UV0~UV7），二者同属最后一个 stream。
+3. **UnityPy 1.25.3 不给你 stream 数组**：`m_Streams` 恒为空 list、`m_Streams_0_..3_` 全是 `None`，
+   **整块顶点字节在 `m_DataSize` 这个字段里**（名字像整数，实际是 `bytes`，字段名是 TypeTree 的历史包袱）。
+   各 stream 的块**按 stream 顺序首尾相接**：`base[s] = Σ stride[s'] * n (s'<s)`。
+
+**由此得到的正确姿势**（**布局不要猜，要反解 + 三重自证**）：
+
+- 每流只有**最后一个通道**的元素宽度未知（其余可由 `next_offset - offset` 整除推出），枚举 ∈{1,2,4}；
+- 约束三条，同时成立才算数：① `Σ stride == len(data)//n`；② **每一个**顶点的权重和恰为 `1.0000`
+  （UNorm16 走 `/65535`，Float32 直读）；③ `max(boneIndex) < len(m_BindPose)`。
+- ⚠️ **padding 不一定在整块末尾**：`hair` 的数据 `len(data) % n == 8`，那 8 字节落在**最后一段流的起点之前**，
+  偏移不调对就整段解成乱码（权重和立刻不是 1 ⇒ 自证当场红，这是好事）。判据要写成
+  `len(data) == n*Σstride + tail` 且 tail 参与起点平移，别默认整除。
+- **每顶点骨骼数是逐网格变的**，不是一个角色一个常量：同一天津风 body=4 骨、face/neck=2 骨、
+  `mesh_cheek_m`=1 骨（**1 骨时压根没有 BlendWeight 通道，权重恒 1**，只有一条 BlendIndices）。
+  装配器按通道存在与否分支，不要按角色配表。
+
+**已排除的假设**：① "权重被裁掉了、只能近似"——探针读错字段所致，实际 5/5 网格 100% 顶点可解；
+② "先解 `m_CompressedMesh` 那条压缩路径"——那条路是空的；③ "UnityPy 会替我把 BlendWeight 递出来"——
+`Mesh` 上没有解析好的权重数组，必须自己按字节解（`export()` 只给不含骨骼的 OBJ）；
+④ "`--only` 能给到单个文件粒度"——`set_only()` 恒补 `/`，只能选目录（见 WF-28 撤销归档闸）。
+
+**涉及文件**：`scripts/diag/probe_3d_capability.py`（`probe_mesh` 的 `compressedMesh` 判据、`probe_skin`
+整段只会喊不会读 —— 待改成上面的反解 + 三重自证）；靶子
+`files/AssetBundles/dorm3d/character/tianlangxing_db/res/tianlangxing_noshoes`；
+骨骼/Prefab 侧 `…/prefabs/tianlangxing_noshoes`（SMR 的 `m_Bones` 指向同包 Transform，可当场解析出骨名）。
+完整数字与流程 **`docs/archive/2026-10-07_3D宿舍复刻可行性取证.md` 追加-VII**。
+相关：§114（同一族"探针把字段存在当数据存在"）、WF-28（撤销归档闸 / `--only` 粒度）。
+
+
+---
+
+## §116. 第二条命名源：`*_tip` 横幅的中文活动名烤在像素里，OCR 必须配目视双路径（2026-10-07）
+
+**问题**：§115 记下"`bg_worldcruise_<N>_tip` 把活动名烤在图里"之后，用户要把它 OCR 出来。
+这类图在配置表里**零引用**，精确引用面永远拿不到 —— 只能从像素取。
+
+### 1. 提取规则：引号匹配不通用，要用**模板位**
+
+第一版按 `「…」` 抓标题，6 张里只有 3 张命中 —— 因为**装饰引号是美术字形**，
+OCR 结果里根本没有 `「`（`击球手★全垒打」`、`甜蜜的意外序曲」` 只剩右半边，`微的海风e` 两边都没有）。
+⇒ 换成版式锚点法：这一族固定是 `AZUR LANE-OUTFIT` / `获得限定换装` / **<标题>** /
+`特许巡游奖励达到30级` / `完成任务累计` / `可获取` / `「<舰名>·META」` / `在内的丰富奖励`，
+把锚点段与含 `META` 的舰名段剔掉，剩下的中文段就是标题。6/6 命中。
+⚠️ OCR 把 `OUTFIT` 稳定读成 `OUTEIT`（0.976 置信）⇒ 锚点词表**两种拼法都要挡**，
+只写一种会让标题位被表头占了。
+
+### 2. OCR 单路会错，且错得很像对的
+
+`bg_worldcruise_11_tip` OCR = `微的海风e`（置信 0.899）—— **丢了「醺」字、尾部多噪声**，
+但它是那一行里唯一的中文段，所以"提取成功"、没有任何异常。3× 放大目视才读出「微醺的海风」。
+⇒ 定稿走 `CONFIRMED + via` 字典（照 48 号发布器的形状），并断言
+**定稿与 OCR 候选的字符重合度 ≥0.6**（以定稿字符集为分母，这样"OCR 丢字"会被量出来：本例 4/5=0.80）。
+这条断言是**双向**的：字典打错字、或 OCR 面漂了，都会红，而不是各说各话。
+判据落在页面上则是：卡片标题必须**逐字等于发布表**，且 `_11` 必须是「微醺的海风」而不是 OCR 残文。
+
+### 3. 不发布没核过的字段
+
+同一批 OCR 还读到奖励舰名（树城 / 龙骑兵 / 克劳迪亚 / 阿尔伯缇娜 / 诺菈 / 灵敏·META）。
+拿 `Output/ship_meta.json` 的 `cn` 集合互校：**6 条里 3 条查不到** ⇒ 无法判定是 OCR 读错还是译名口径不同。
+⇒ 舰名**不进产物**（只把原始段落在 `segs` 里留证据）。少一个字段比挂一个可能对不上号的名字好，
+同 §108 那次"稀有度宁可留空也不按中文名兜底"。
+
+### 4. 两条本轮自己的错（都不是产品错）
+
+- **判据字面串与页面文案不一致**：断言找「图内烤字」，页面写「图内文字」⇒ 造出一条红。
+  先证探针再定罪（WF-16 老规矩）。
+- **把 markdown 星号当富文本用**：`textContent` 不解析 `**加粗**`，星号会**原样印在界面上**。
+  修文案时顺手加了一条通用判据：扫一遍所有可见文本节点，出现 `**` 即红。
+
+### 5. 分档纪律
+
+`baked`（图内文字）是**独立第二条源**，证据强度与"表字段整值"不同 ⇒ 单列一档、单独徽章色、
+详情层写明取证方式（OCR 原文 / 置信 / 与定稿重合度 / via），**不许并进「确定」**。
+优先级 `exact > baked > inferred > none` 在当前数据上是**空规则**（没有一张图同时有两种源），
+所以脚本只把它当观察量打印（`同时有两种源的图: 0 张`），**不写成一条 ✅ 断言**——
+空转的判据比没有判据更坏。
+
+**涉及文件**：`scripts/ocr_bg_tip_titles.py`（模板位提取 + 5 条断言 + 双路径重合度，红则不写盘）、
+`inputs/gamecfg/bg_tip_titles.json`（6 条，含 `ocr_raw/ocr_conf/overlap/segs` 证据）+ `MANIFEST.json` 台账、
+`scripts/build_bg_meta.py`（四档 + `baked` 字段 + 空规则只打印）、`gallery_src/backgrounds.html`（「图内文字」档）、
+`scripts/diag/bg_page_probe.py`（3b/3c 两组判据 + markdown 星号通用检查，共 28 条）。
+相关：**§115**（第一条命名源与三档口径）、**WF-30**、§108（"宁可留空也不兜底"先例）、WF-16（先证探针再定罪）。

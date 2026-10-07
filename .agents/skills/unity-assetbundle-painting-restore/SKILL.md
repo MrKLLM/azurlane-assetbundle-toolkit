@@ -1,7 +1,7 @@
 ---
-name: unity-assetbundle-painting-restore
+name: unity-assetbundle-painting-restore 触发词（3D 侧）：蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.11.0
+version: 1.12.0
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -286,6 +286,14 @@ MAD 分不开"该替换/不该替换"，两者数值重叠。这条写进了常�
 - **判据（按段看，缺一不能推断下一层）**：几何看 `m_VertexData.m_VertexCount` + `m_IndexBuffer`；蒙皮看 `Mesh.m_BindPose`/`m_BoneNameHashes` 与 `SkinnedMeshRenderer.m_Skin`（静态网格里为 0 属正常，**不能据此判"蒙皮读不出"**）；贴图解码以 `.image` 真产出 PIL `RGBA` 为准（ASTC 族靠 `texture2ddecoder`）；曲线看 `Keyframe` 是否含 `inSlope/outSlope`；外观参数看 `Material.m_SavedProperties` 的 floats/colors/texRefs + `m_ShaderKeywords` + `m_CustomRenderQueue`。
 - **着色器分三档，别一句"拿不回"糊过去**：① `Shader.m_ParsedForm.m_PropInfo.m_Props` = 参数表（名称/类型/默认值）**可读**；② CGPROGRAM 源码块在打包时被裁（`export()` 头部自述 "This is *not* a valid shader file"）；③ `compressedBlob` + `platforms`（如 `[9,18]` = DX9 VS SM20 / DX11 PS SM50）= 编译后字节码**在包里**，可走 DXBC→HLSL / SPIR-V→GLSL 反编译。⇒ 前端（three.js）重写材质是"照参数表施工"，只有**逐像素一致**那一档才是真近似。
 - **烘焙光照是一条正道不是fallback**：`scenesres/*.shadowmap`、`LightmapSettings`、`LightProbes` 是烘焙数据，当第二套 UV 贴上去比实时重算更接近原画面。
+
+**蒙皮权重的真读法**（探针打印 `m_Skin 字段不存在` **是路标不是失败**——新版 Unity 早把权重搬进了网格）：
+
+- 位置：`Mesh.m_VertexData.m_Channels`，**索引 12 = BlendWeight、13 = BlendIndices**（0=Position 1=Normal 2=Tangent 3=Color 4~11=UV0~UV7），二者同属最后一个 stream。骨骼侧 `m_BindPose`/`m_BoneNameHashes`/`m_BonesAABB` **逐网格等长**，长度就是骨数；`SkinnedMeshRenderer.m_Bones` 在 prefab 包里指向同包 `Transform`，**可当场解析出骨名**（`Bip001 Head`、`bone_hair_03` 这类）。
+- ⚠️ **UnityPy 不给你 stream 数组**：`m_Streams` 恒空 list、`m_Streams_0_..3_` 全 `None`，**整块顶点字节在 `m_VertexData.m_DataSize` 里**（名字像整数，其实是 `bytes`）。各 stream 块按序首尾相接：`base[s] = Σ stride[s']*n (s'<s)`。
+- **布局不要猜，反解 + 三重自证**：每流只有最后一个通道的元素宽度未知（其余由 `next_offset - offset` 整除推出），枚举 ∈{1,2,4}，要求同时满足 ① `Σ stride == len(data)//n`（并允许 `tail = len % n` 的 padding 落在**末段流起点之前**，不是只有整块尾部）；② **每个**顶点权重和恰为 `1.0000`（UNorm16 走 `/65535`、Float32 直读）；③ `max(boneIndex) < len(m_BindPose)`。只有真布局能三条全过——**错布局会自己报出来，所以这套判据同时也是回归闸门**。
+- **每顶点骨数逐网格变，不是一个模型一个常量**：实测同一角色 body=4、face/neck=2、单骨部件（脸红/装饰）**压根没有 BlendWeight 通道、权重恒 1**。装配器按"通道存在与否 + 维度"分支，别按角色配表写死。
+- ⚠️ `Mesh.m_CompressedMesh` 在 TypeTree 里**恒存在**，`if obj.m_CompressedMesh: 判"压缩网格"` 会得到永远为真的假信号——要看到里面 `m_Vertices/m_BoneWeights` 的 `m_NumItems>0` 才算数据存在。**"字段读得出来"不等于"里面有数据"**，探针一律量内部计数。
 
 **踩坑**：
 - **目录名不可信**：`shipmodels/` 实测只有 `Sprite`+`Texture2D`（2,547 个包全是 2D 舰船贴图）。判类型必须看对象类型分布。
