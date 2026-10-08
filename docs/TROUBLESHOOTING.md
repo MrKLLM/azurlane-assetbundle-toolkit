@@ -7378,6 +7378,27 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
   `MB_wutixialuoxunhuangz` 的 Segments 是 `[0,0,0,22,5.867]`，与 Unity 侧一致。
 - Core 会替我们回绕：直写 `parameters.values[i]=3.5` 后 `raw.update()` 读回仍是 3.5（Core 不归一）。
 
+**§123 追加（第七轮：「部件闪一下」的 A/B，两条否证）**
+
+- **嫌疑一「动作播完把参数渐变回默认」那层补丁（`REST_DELAY`）无罪** —— 依据：新探针
+  `scripts/diag/l2d_part_flicker_probe.py` 逐帧采 part / drawable 不透明度，前端加了取证开关
+  `window.__noRest`（与 `__ambOff`/`__ambMask` 同类，默认行为不变）。同一序列两臂实测：
+  复位开 = 11 次闪没，复位关 = 12 次（同一批部件，只差零点几秒时机）；
+  而**不切任何动作、只让 idle 跑**的对照组 = **0 次** ⇒ 闪没绑的是"切换动作"这个事件，不是复位层。
+- **嫌疑二「台阶是 clip 自己写的曲线」也否证** —— 依据：`home.motion3.json` 里
+  `Target=="PartOpacity"` 的曲线**一条都没有**（0 条），也就是说这条 1.00 → 0.52 → 0.00 的
+  两级台阶不是动画师写的，是运行时在切动作那一刻造出来的。
+- 观察到的形状（`ArtMesh42`，60ms 采样，切到 `home` 那一刻起）：
+  `1.00 ×6 帧 → 0.52 ×6 帧（平台）→ 0.00 ×70 帧（平台）→ 切回 idle 后 0.21→0.60→0.83→0.98→1.00 平滑`。
+  去程是台阶、回程是平滑淡入 ⇒ 嫌疑集中在**部件组（PartGroup）在 motion 起播那一刻的
+  `reset()`/初始化**：它按 `i==e?1:0` 直接写 0/1，与交叉淡化的权重叠出了中间那一档 0.52。
+  ⚠️ 这一条**尚未判死**：要坐实需要顺着 `ArtMesh42` 反查它属于哪个 part group、该组的门控参数是谁，
+  再逐帧采那个参数（本轮时间用完，留给下一轮）。
+- ⚠️ 本轮有一条**没测成的对照要老实记着**：`CubismConfig.setOpacityFromMotion=true` 那一臂
+  跑出来台阶一模一样，但探针没能确认这个标志真的被赋值成功（打印行没带上它），
+  所以**不能**据此宣布"改这条配置没用"——下次先确认 `PIXI.live2d.CubismConfig` 可达再下结论。
+
+
 **涉及文件**：`gallery_src/index.html`（补丁 ⑤，与运行目录硬链）、
 `scripts/diag/l2d_motion_param_probe.py`（加 `--dump` 逐样本轨迹落盘 + 「平台时长/下降次数」判据，
 替代原来只看「触到量程」的弱判据）、`scripts/diag/l2d_curve_shape.py`（曲线形状与越界统计）、

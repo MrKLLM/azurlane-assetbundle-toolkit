@@ -1418,7 +1418,10 @@ async function renderLive2D(s, sk){
        ② 只在回到 idle（或队列空）时才复位，且先等 REST_DELAY 让上一条 clip 的淡出跑完，再线性渐变过去。 */
     const REST_DELAY=400, REST_MS=700, cm=im.coreModel;
     let rest=null;
-    const restTick=()=>{ const cg=mm.state&&mm.state.currentGroup;
+    /* window.__noRest=true 关掉这层复位（无头取证开关，与 __ambOff 同类）：
+       用来做「部件闪一下」的 A/B —— 见 scripts/diag/l2d_part_flicker_probe.py。 */
+    const restTick=()=>{ if(window.__noRest){ rest=null; return; }
+      const cg=mm.state&&mm.state.currentGroup;
       if(cg&&cg!==idleGroup){ rest=null; return; }
       if(!rest){ const idleS=paramSets[idleGroup]; if(!idleS||!played.size) return;
         const want=new Set(); played.forEach(g=>{ (paramSets[g]||new Set()).forEach(p=>{ if(!idleS.has(p)) want.add(p); }); });
