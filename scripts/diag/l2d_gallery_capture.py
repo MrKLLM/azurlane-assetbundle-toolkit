@@ -45,8 +45,9 @@ def main():
     ap.add_argument("--fps", type=int, default=6)
     ap.add_argument("--secs", type=int, default=10)
     ap.add_argument("--out", default="")
-    ap.add_argument("--no-mask", action="store_true",
-                    help="关掉环境层对 pose 参数的覆盖（A/B 用），默认按源包覆盖")
+    ap.add_argument("--amb", choices=["yield", "mask", "off"], default="yield",
+                    help="环境层三臂（A/B 对照用）：yield=只写 pose 不碰的参数（前端默认）；"
+                         "mask=照源包整层盖住 pose；off=完全关掉环境层")
     a = ap.parse_args()
     out = a.out or os.path.join(ROOT, ".diag", "gallery_vid", a.model)
     os.makedirs(out, exist_ok=True)
@@ -116,13 +117,14 @@ def main():
       await t(12000);
       const app=l2State&&l2State.app; if(!app) return JSON.stringify({fail:'无 l2State'});
       const m0=app.stage.children[0]; if(!m0) return JSON.stringify({fail:'无模型'});
-      window.__m=m0; window.__app=app; window.__ambNoMask=%s;
+      window.__m=m0; window.__app=app;
+      window.__ambOff=%s; window.__ambMask=%s;
       const cv=document.querySelector('#l2wrap canvas');
       const r=cv.getBoundingClientRect();
       window.__box=[Math.round(r.left),Math.round(r.top),Math.round(r.width),Math.round(r.height)];
       return JSON.stringify({ok:true, box:window.__box, pool:window.__poolDbg||null,
                              groups:Object.keys(m0.internalModel.motionManager.definitions||{}).length});
-    })()""" % (json.dumps(a.model), "true" if a.no_mask else "false")
+    })()""" % (json.dumps(a.model), json.dumps(a.amb == "off"), json.dumps(a.amb == "mask"))
     info = json.loads(ev(js) or "{}")
     print("装载:", {k: v for k, v in info.items() if k != "box"})
     pw = (info.get("pool") or {}).get("poolW") or []

@@ -3246,10 +3246,25 @@ WF-15（承重白名单：标注正本属于"丢了不可复原"那一类）、W
 ⚠️ **解析器只许有一份**：本轮在前端新写 `motionSegs` 时又按"每三元组第三个是 type"错过一次
 （后果是 effect 曲线全部解析失败、环境层静默不装载、探针读出"参数恒为 0"，看起来像"改法无效"）。
 同一个坑本项目已犯三次 ⇒ 前端与 `scripts/diag/*.py` 都各自只留一个解析函数，改步长先改注释里那句
-格式自述，再让所有调用方共用。
+格式自述，再让所有调用方共用（现在前端的 `markPhase` / `curveMoves` 都走同一个 `motionSegs`）。
+
+**三臂运动能量对照（2026-10-08 实测，用来定"让位还是盖住"）**：`l2d_gallery_capture.py --amb {off,yield,mask}` 各抓 12 秒 @6fps，再用 `l2d_motion_energy.py` 量。
+
+| 分带（只算画面中部） | off | yield（让位，默认） | mask（盖住） | 游戏录像 |
+|---|---|---|---|---|
+| 角色带 均值‰ / 峰值‰ | 101.7 / 146 | 107.4 / 137 | **129.5 / 231** | 93.7 / 167 |
+| 底部玫瑰带 | 15.4 | 15.4 | 17.2 | 53.0 |
+
+读出来的三件事：① **盖住把角色带推到游戏之上**（129.5 vs 游戏 93.7），且单帧峰值 231‰ ≈ 让位的 1.7 倍
+——大面积单帧突变正是"部件闪一下"的形状 ⇒ **默认保持让位**；② ⚠️ **全画面能量看不见花瓣**：花瓣是小面积
+物件，让位臂相对 off 臂只涨 5.6%，但 `Paramfh` 实际已经 17 次回绕 ⇒ 判"花瓣有没有掉"必须用**参数级**
+判据或局部放大，不能用能量 ‰；③ ⚠️ **我们的帧有上下黑边**（6x4 网格上下两行全 0），所以"上带 0.1‰
+vs 游戏 72.1‰"这类跨源比较**无效**——取景/缩放不同，绝对 ‰ 只能在同源三臂之间比，不能拿来跟游戏对表。
 
 **涉及文件**：`gallery_src/index.html`（运行时补丁 ⑤ + 环境层 + `motionSegs`/`poseDriven`/`markPhase`）、
 `scripts/diag/l2d_curve_shape.py`、`scripts/diag/l2d_param_meta_probe.py`、`scripts/diag/l2d_motion_param_probe.py`（`--dump` + 平台/下降判据 + `AMB=1`）、
+`scripts/diag/l2d_gallery_capture.py`（`--amb off|yield|mask` 三臂）、
+`scripts/diag/l2d_motion_energy.py`（分带/热区）、
 `scripts/diag/l2d_effect_layer_scan.py`（`--speeds` 逐层倍速/默认状态）、
 `.diag/_param_meta_<key>.json`（标志表产物）。相关：WF-31（三层归因，本 WF 是它的第四层）、
 WF-16 六件套（前端改动的回归闸门）。
