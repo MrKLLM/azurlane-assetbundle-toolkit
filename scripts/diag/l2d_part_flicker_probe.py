@@ -142,7 +142,7 @@ def main():
       for(let i=0;i<core.getDrawableCount();i++){ const x=Array.isArray(rawIds)?rawIds[i]:null;
         darr.push((typeof x==='string')?x:((x&&x.string)||('Drawable#'+i))); }
       window.__drawableIds=darr;
-      return JSON.stringify({ok:true, parts:core.getPartCount(), noRest:window.__noRest, ofm:window.__ofmReport,
+      return JSON.stringify({ok:true, parts:core.getPartCount(), noRest:window.__noRest, ofm:window.__ofmReport, cubismConfigReachable: !!(window.PIXI&&PIXI.live2d&&PIXI.live2d.CubismConfig),
                              groups:Object.keys(m0.internalModel.motionManager.definitions||{}).length});
     })(%s)""" % (json.dumps(norest), json.dumps([x for x in a.trace.split(",") if x]),
                        json.dumps(os.environ.get("OFM") == "1"), json.dumps(a.model))
@@ -162,12 +162,14 @@ def main():
       const m=window.__m, core=m.internalModel.coreModel;
       const mm=m.internalModel.motionManager;
       const idle=(['idle','main','home'].find(g=>(mm.definitions||{})[g]))||'idle';
+      const pg=(core._partGroups||[]).map(g=>g.parameterIndex).filter(i=>typeof i==='number'&&i>=0);
+      window.__pgIdx=[...new Set(pg)];
       const n=core.getPartCount(), nd=core.getDrawableCount();
-      const ser=[], dser=[], ts=[];
+      const ser=[], dser=[], gser=[], ts=[];
       const snap=()=>{ const row=[]; for(let i=0;i<n;i++) row.push(+core.getPartOpacityByIndex(i).toFixed(3));
                        const drow=[]; for(let i=0;i<nd;i++) drow.push(+core.getDrawableOpacity(i).toFixed(3));
-                       ts.push(+((performance.now()-t0)/1000).toFixed(2)); ser.push(row); dser.push(drow);
-                       (window.__traceGroups=window.__traceGroups||[]).push((mm.state&&mm.state.currentGroup)||null); };
+                       const grow=[]; for(const i of window.__pgIdx) grow.push(+core.getParameterValueByIndex(i).toFixed(3));
+                       ts.push(+((performance.now()-t0)/1000).toFixed(2)); ser.push(row); dser.push(drow); gser.push(grow); };
       const t0=performance.now();
       if(clip!=='__none__'){ try{ mm.startMotion(clip,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){} }
       const half=Math.max(1, Math.round(holdSec*1000/stepMs/2));
@@ -203,8 +205,19 @@ def main():
         let j=window.__drawableIds.indexOf(nm); if(j<0){ j=window.__partIds.indexOf(nm);
           return {name:nm, kind:'part', col:ser.map(r=>r[j]), groups:window.__traceGroups}; }
         return {name:nm, kind:'drawable', col:dser.map(r=>r[j]), groups:window.__traceGroups}; });
+      const gscan=[];
+      const list=window.__pgIdx;      // TODO(未做)：全参数逐帧版本还没接通，别当成「参数没跳变」
+      for(let j=0;j<list.length;j++){ const ix=list[j];
+        const col=gser.map(r=>r[ix]); if(col.length<3) continue;
+        const hi=Math.max(...col), lo=Math.min(...col);
+        if(hi-lo<1e-3) continue;
+        let steps=0, prev=col[0];
+        for(const x of col){ if(Math.abs(x-prev)>0.02) steps++; prev=x; }
+        gscan.push([(core._parameterIds[window.__pgIdx[j]]||("?"+window.__pgIdx[j])), +(hi).toFixed(2), +(lo).toFixed(2), steps, col]);
+      }
       return JSON.stringify({frames:ser.length, ts:[ts[0], ts[ts.length-1]], partCount:n, drawableCount:nd,
-        partsVaried:A.varying, drawablesVaried:B.varying,
+        partsVaried:A.varying, drawablesVaried:B.varying, groupParams:gscan.length,
+        groups:gscan.filter(g=>g[3]>=2).map(g=>[g[0],g[1],g[2],g[3],g[4]]),
         dips:A.dips.concat(B.dips).sort((x,y)=>x[5]-y[5]), trace:tr});
     })"""
     out = {"model": a.model, "norest": norest, "clips": {}}
