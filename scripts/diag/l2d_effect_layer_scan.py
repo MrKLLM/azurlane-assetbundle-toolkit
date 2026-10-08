@@ -109,11 +109,25 @@ def scan_model(key):
         if sm is not None:
             states = deref_list(getattr(sm, "m_StateConstantArray", None))
             dflt = getattr(sm, "m_DefaultState", 0) or 0
+            info["all_states"] = []
+            for si, st in enumerate(states):
+                cid = state_clip_name(st)
+                cn = names[cid] if (cid is not None and 0 <= cid < len(names)) else None
+                info["all_states"].append({
+                    "i": si, "clip": cn,
+                    "speed": getattr(st, "m_Speed", None),
+                    "speed_param_active": getattr(st, "m_SpeedParameterActive", None),
+                    "mirror_param_active": getattr(st, "m_MirrorParameterActive", None),
+                    "loop": bool(getattr(st, "m_Loop", False)),
+                    "write_default": getattr(st, "m_WriteDefaultValues", None),
+                    "default": si == dflt,
+                })
             if 0 <= dflt < len(states):
                 cid = state_clip_name(states[dflt])
                 if cid is not None and 0 <= cid < len(names):
                     info["default_clip"] = names[cid]
                     info["default_loop"] = bool(getattr(states[dflt], "m_Loop", False))
+                    info["default_speed"] = getattr(states[dflt], "m_Speed", None)
                     if names[cid] == "effect" and info["default_loop"]:
                         effect_default = True
         layers.append(info)
@@ -126,6 +140,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keys", default="", help="逗号分隔的模型号，默认扫全部有 effect.motion3.json 的")
     ap.add_argument("--out", default="")
+    ap.add_argument("--speeds", action="store_true",
+                    help="逐层打印每个状态的 clip 名 / m_Speed / Loop（查「我们比游戏快」是不是倍速）")
     args = ap.parse_args()
 
     if args.keys:
@@ -143,6 +159,17 @@ def main():
         out.append(r)
         if i % 10 == 0 or i == len(keys):
             print("  %d/%d %s" % (i, len(keys), r["verdict"]), flush=True)
+    if args.speeds:
+        for r in out:
+            print("\\n== %s  层数 %d ==" % (r["key"], len(r.get("layers") or [])))
+            for L in (r.get("layers") or []):
+                print('   层%s weight=%s blend=%s(0=Override) 默认=%s loop=%s speed=%s'
+                      % (L.get("layer"), L.get("weight"), L.get("blend_mode"),
+                         L.get("default_clip"), L.get("default_loop"), L.get("default_speed")))
+                for st in (L.get("all_states") or []):
+                    print('      %s %-16s speed=%-5s loop=%-5s writeDefault=%-5s speedParam=%s mirrorParam=%s'
+                          % ("*" if st["default"] else " ", st["clip"], st["speed"], st["loop"],
+                             st["write_default"], st["speed_param_active"], st["mirror_param_active"]))
     import collections
     c = collections.Counter(r["verdict"] for r in out)
     print("\n== 判定分布 ==")

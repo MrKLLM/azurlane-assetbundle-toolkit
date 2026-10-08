@@ -3226,8 +3226,31 @@ WF-15（承重白名单：标注正本属于"丢了不可复原"那一类）、W
 - 共享工作树里 `Edit` 改 `gallery_src/index.html` 必断硬链，收尾按 AGENTS.md 的四步顺序走
   （默认模式刷平 → 提交 → `--relink` → `--check`）。
 
-**涉及文件**：`gallery_src/index.html`（运行时补丁 ⑤）、`scripts/diag/l2d_curve_shape.py`、
-`scripts/diag/l2d_param_meta_probe.py`、`scripts/diag/l2d_motion_param_probe.py`（`--dump` + 平台/下降判据）、
+5. **如果"某个部件在任何动作里都不动"，先查它是不是属于**另一条常驻 clip**（源包 AnimatorController
+   的独立层），而不是继续在这条 clip 的曲线里找**。查法：`l2d_effect_layer_scan.py --keys <key> --speeds`
+   逐层打印 `weight / blend / 默认状态 clip / m_Speed / Loop`（本轮实测安土所有状态 `m_Speed=1.0`
+   ⇒ "我们比游戏快"不是倍速问题，这条排除项要留着别重猜）。落地成前端的**环境层**时三条硬约束：
+   - **默认让位**：环境层只写「自己非常值、且任何 pose clip 都不动」的参数（`poseDriven` 之外）。
+     上一版默认"照源包语义盖住 pose 层"，运动量是更接近游戏（47.7‰ vs 35.6‰，游戏 125.8‰），
+     但会把 pose 正在动的参数逐帧硬写到环境层的值上 ⇒ 用户症状"组件蠢蠢欲动/突然消失一下"。
+     盖住行为留 `window.__ambMask=true` 做反向 A/B。
+   - **常量曲线一律不写**（会把 pose 正在动的参数钉死，实测 15 个模型受影响、mingji_2 达 70 个）。
+   - **不进队列管理器**、写在 `afterMotionUpdate`：进了队列，播一次 `touch_*` 就把环境层挤到末位，
+     回落时反过来盖住它。`window.__ambOff=true` 是给无头探针的关闭开关（`l2d_motion_param_probe.py`
+     默认带着它，要测环境层得 `AMB=1`）。
+
+**判据（环境层这一支）**：装载后读 `window.__ambDbg()` 看 `loaded / held / yieldToPose`；
+再 `AMB=1 … --params '^(Paramfh|MB_wutixialuoxunhuangz2|bowen)$'`，要求这些"只有环境层会动"的参数
+出现**锯齿**（下降次数 ≥1、平台 0%），而不是常量 0。
+
+⚠️ **解析器只许有一份**：本轮在前端新写 `motionSegs` 时又按"每三元组第三个是 type"错过一次
+（后果是 effect 曲线全部解析失败、环境层静默不装载、探针读出"参数恒为 0"，看起来像"改法无效"）。
+同一个坑本项目已犯三次 ⇒ 前端与 `scripts/diag/*.py` 都各自只留一个解析函数，改步长先改注释里那句
+格式自述，再让所有调用方共用。
+
+**涉及文件**：`gallery_src/index.html`（运行时补丁 ⑤ + 环境层 + `motionSegs`/`poseDriven`/`markPhase`）、
+`scripts/diag/l2d_curve_shape.py`、`scripts/diag/l2d_param_meta_probe.py`、`scripts/diag/l2d_motion_param_probe.py`（`--dump` + 平台/下降判据 + `AMB=1`）、
+`scripts/diag/l2d_effect_layer_scan.py`（`--speeds` 逐层倍速/默认状态）、
 `.diag/_param_meta_<key>.json`（标志表产物）。相关：WF-31（三层归因，本 WF 是它的第四层）、
 WF-16 六件套（前端改动的回归闸门）。
 

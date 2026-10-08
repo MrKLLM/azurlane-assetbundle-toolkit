@@ -170,7 +170,7 @@ def main():
           const t=ms=>new Promise(r=>setTimeout(r,ms)); const CLIP=%s;
           const m=window.__m; const core=m.internalModel.coreModel;
           const mm=m.internalModel.motionManager;
-          window.__ambOff=true;                       // 只测这一条 clip 自己，别把环境层混进来
+          window.__ambOff=@KEEPAMB@;                          // 默认关掉环境层，只测这一条 clip 自己
           if(!(mm.definitions||{})[CLIP]) return JSON.stringify({skip:'无该组'});
           mm.startMotion(CLIP,0,PIXI.live2d.MotionPriority.FORCE);
           await t(1500);
@@ -194,6 +194,7 @@ def main():
           }
           return JSON.stringify({ids, series, meta, curGroup:(mm.state&&mm.state.currentGroup)||null});
         })()""" % (json.dumps(clip), json.dumps(ids), a.samples, a.step)
+        js = js.replace("@KEEPAMB@", "false" if os.environ.get("AMB") == "1" else "true")
         r = json.loads(ev(js) or "{}")
         if r.get("skip"):
             print("\n-- %s: %s" % (clip, r["skip"])); continue
