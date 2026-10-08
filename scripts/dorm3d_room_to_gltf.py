@@ -103,13 +103,34 @@ def mesh_from_handler(reader, mirror, flipuv):
         c, e = aabb.m_Center, aabb.m_Extent
         decl = ([float(c.x), float(c.y), float(c.z)], [float(e.x), float(e.y), float(e.z)])
     return {"name": m.m_Name, "verts": verts, "normals": normals, "uvs": uvs, "tris": tris,
+            "uvs1": [list(v[:2]) for v in (h.m_UV1 or [])] if h.m_UV1 else [],
             "declared_v": int(m.m_VertexData.m_VertexCount or 0), "aabb": decl,
             "declared_idx": int(sum(int(getattr(s, "indexCount", 0) or 0)
                                     for s in (getattr(m, "m_SubMeshes", None) or []))),
             "submesh_decl": len(getattr(m, "m_SubMeshes", None) or [])}
 
 
-def add_mesh(gltf, buf, rec, mats, placeholder=None):
+def bake_lightmap_uv(rec, st):
+    """把「每 renderer 的 lightmap 矩形」烘进第二套 UV：`uv1 * tiling + offset`。
+
+    Unity 侧网格里的 UV1 是 0..1 铺满的，真正的位置由 `Renderer.m_LightmapTilingOffset`
+    =(tilingX, tilingY, offsetX, offsetY) 决定（实测 uv1 范围 ~[0.004,0.993] 配
+    ST=(0.163,0.162,0.47,0.739)）。烘进几何而不是放进贴图 repeat/offset，是因为
+    同一张 lightmap 在 three.js 里只能有一份 `texture.matrix`，而本房间有 **196 个不同矩形**
+    ⇒ 按 ST 克隆贴图会变成 196 次 1024² 上传。代价：几何不能再按网格名跨对象复用
+    （所以去重键里带上了 ST）。
+    """
+    if not rec.get("uvs1"):
+        return rec, False
+    tx, ty, ox, oy = st
+    out = [[u[0] * tx + ox, u[1] * ty + oy] for u in rec["uvs1"]]
+    r2 = dict(rec)
+    r2["uvs1"] = out
+    r2["uvs1_baked"] = True
+    return r2, True
+
+
+def add_mesh(gltf, buf, rec, mats, placeholder=None, lm=None, src=None):
     """一个 (网格, 材质序列) 组合出一个 glTF mesh；每个 submesh 出一个 primitive。"""
     n = len(rec["verts"])
     if not n:
@@ -121,6 +142,11 @@ def add_mesh(gltf, buf, rec, mats, placeholder=None):
             if len(rec["normals"]) == n else None)
     uacc = (G.add_accessor(gltf, buf, "f", [x for v in rec["uvs"] for x in v], n, "VEC2", G.ARR_BUFFER)
             if len(rec["uvs"]) == n else None)
+    # 只有**烘进过 ST** 的第二套 UV 才发出去：没挂 lightmap 的对象留着满幅 UV1 只会让人以为
+    # 它参与烘焙（并且让"带 uv1 的几何数"这条判据变成混合母体）
+    u1acc = (G.add_accessor(gltf, buf, "f", [x for v in rec["uvs1"] for x in v], n, "VEC2",
+                            G.ARR_BUFFER)
+             if rec.get("uvs1_baked") and len(rec.get("uvs1") or []) == n else None)
     primitives = []
     for si, tri in enumerate(rec["tris"]):
         flat = [i for t in tri for i in t]
@@ -133,25 +159,40 @@ def add_mesh(gltf, buf, rec, mats, placeholder=None):
             attrs["NORMAL"] = nacc
         if uacc is not None:
             attrs["TEXCOORD_0"] = uacc
+        if u1acc is not None:
+            attrs["TEXCOORD_1"] = u1acc
         mat = mats[si] if si < len(mats) else (mats[-1] if mats else None)
         primitives.append({"attributes": attrs, "indices": iacc, "material": mat, "mode": 4})
     if not primitives:
         return None
     mesh = {"name": rec["name"], "primitives": primitives}
+    ex = {}
     if placeholder:
-        mesh["extras"] = {"placeholder": placeholder}
+        ex["placeholder"] = placeholder
+    if lm:
+        ex["unityLightmapPage"] = lm[0]
+        ex["unityLightmapST"] = [round(v, 6) for v in lm[1]]
+    if src:
+        # 回指源包网格（cab/path_id），让 --verify 能重读原始 UV1 逐点核对线性映射
+        ex["unitySrcMesh"] = "%s/%d" % (src[0], src[1])
+    if ex:
+        mesh["extras"] = ex
     gltf["meshes"].append(mesh)
     return len(gltf["meshes"]) - 1
 
 
-def material_of(gltf, buf, res, mat_reader, with_textures, tex_cache, texstat):
-    key = (P.cab_key(mat_reader.assets_file.name), mat_reader.path_id)
+def material_of(gltf, buf, res, mat_reader, with_textures, tex_cache, texstat, page=None):
+    key = (P.cab_key(mat_reader.assets_file.name), mat_reader.path_id, page)
     if key in gltf["_matkey"]:
         return gltf["_matkey"][key]
     mt = mat_reader.read()
     sp = getattr(mt, "m_SavedProperties", None)
     entry = {"name": mt.m_Name, "doubleSided": True,
              "pbrMetallicRoughness": {"metallicFactor": 0.0, "roughnessFactor": 0.9}}
+    if page is not None:
+        # glTF 核心没有"烘焙 GI / lightmap"这个概念（只有 occlusion/emissive），所以页号走 extras，
+        # 由查看端（dorm3d_room_probe.py 的 harness）按 sidecar 挂到 material.lightMap 上。
+        entry["extras"] = {"unityLightmapPage": page}
     colors = dict(list(getattr(sp, "m_Colors", None) or []))
     base = colors.get("_BaseColor") or colors.get("_Color")
     if base is not None:
@@ -262,13 +303,21 @@ def jobs_from_scene(env, res, own, trs, tr_of_go, rend_of_go, only, limit, inclu
             builtin_groups[(cab, pid)] = builtin_groups.get((cab, pid), 0) + 1
         rend = rend_of_go.get((sfn, goid))
         mats = []
+        lm = None
         if rend is not None:
-            for mp in (rend.read().m_Materials or []):
+            rr = rend.read()
+            li = int(getattr(rr, "m_LightmapIndex", 65535) or 65535)
+            if li != 65535:
+                v = getattr(rr, "m_LightmapTilingOffset", None)
+                if v is not None:
+                    lm = (li, (float(v.x), float(v.y), float(v.z), float(v.w)))
+            for mp in (rr.m_Materials or []):
                 b2, c2, p2 = res.classify(rend.assets_file, mp)
                 t2, _e2 = res.fetch(own, b2, c2, p2)
                 mats.append(t2 if (t2 is not None and t2.type.name == "Material") else None)
         jobs.append({"node": node_of[trp], "name": gname, "bucket": bucket, "cab": cab,
-                     "path_id": pid, "reader": rdr, "mats": mats, "builtin_key": (cab, pid) if rdr is None else None})
+                     "path_id": pid, "reader": rdr, "mats": mats, "lm": lm,
+                     "builtin_key": (cab, pid) if rdr is None else None})
         if limit and len(jobs) >= limit:
             break
     return jobs, node_of, name_of, skipped, builtin_groups, unresolved
@@ -312,7 +361,8 @@ def add_lights(env, own, gltf, nodes, tr_of_go, node_of):
 
 
 def build(scene, out=None, only=None, limit=None, with_textures=True,
-          include_inactive=False, mirror=True, flipuv=True, verbose=True, truth_out=None):
+          include_inactive=False, mirror=True, flipuv=True, verbose=True, truth_out=None,
+          bake_lm=True):
     t0 = time.time()
     deps, _k = P.dep_bundle_paths(scene, P.DEP_MANIFEST)
     index, scanned, isec, _dup = P.build_index([P.DEF_DIR], extra_bundles=deps)
@@ -333,7 +383,8 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
     texstat = {"hit": 0, "miss": [], "none": []}
     pos_total = tri_total = prim_total = wb_skipped = 0
     wmin = wmax = None
-    n_place = 0
+    n_place = lm_baked = lm_nouv1 = lm_prims = 0
+    lm_rows = []
     for j in jobs:
         if j.get("error"):
             errors.append(j)
@@ -344,20 +395,41 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
                    "uvs": uv, "tris": tris, "declared_v": len(pv), "declared_idx": 36,
                    "aabb": None, "submesh_decl": 1}
             ph = "cube-for-builtin(path_id=%s)" % j["builtin_key"][1]
+            mk = None
             n_place += 1
         else:
-            mk = (P.cab_key(j["cab"] or "self"), j["path_id"])
+            lmst = j.get("lm") if bake_lm else None
+            st = lmst[1] if lmst else None
+            mk = (P.cab_key(j["cab"] or "self"), j["path_id"], st)
             rec = mesh_cache.get(mk) or mesh_from_handler(j["reader"], mirror, flipuv)
-            mesh_cache[mk] = rec
+            if st is not None:
+                rec, baked = bake_lightmap_uv(rec, st)
+                if baked:
+                    lm_baked += 1
+                    lm_prims += len([t for t in rec["tris"] if t])
+                else:
+                    lm_nouv1 += 1
+                    lmst = None
+                    mk = (mk[0], mk[1], None)
             ph = None
-        mvals = [material_of(gltf, buf, res, mi, with_textures, tex_cache, texstat)
+            mesh_cache.setdefault(mk, rec)
+        page = lmst[0] if (mk is not None and mk[2] is not None) else None
+        mvals = [material_of(gltf, buf, res, mi, with_textures, tex_cache, texstat, page)
                  for mi in j["mats"] if mi is not None]
-        key = (mk_or_none(j), ph, tuple(mvals))
+        key = (mk, ph, tuple(mvals))
         if key in gltf["_meshkey"]:
             midx = gltf["_meshkey"][key]
         else:
-            midx = add_mesh(gltf, buf, rec, mvals, placeholder=ph)
+            midx = add_mesh(gltf, buf, rec, mvals, placeholder=ph,
+                            lm=(page, j["lm"][1]) if page is not None else None,
+                            src=mk[:2] if mk else None)
             gltf["_meshkey"][key] = midx
+        if page is not None and rec.get("uvs1"):
+            u1 = rec["uvs1"]
+            lm_rows.append({"object": j["name"], "page": page,
+                            "st": [round(v, 6) for v in (j["lm"][1])],
+                            "uv1_bbox": [[round(min(p[k] for p in u1), 5),
+                                          round(max(p[k] for p in u1), 5)] for k in (0, 1)]})
         if midx is None:
             errors.append({"name": j["name"], "error": "无有效 submesh"})
             continue
@@ -402,6 +474,17 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
                         wmax = [max(a, b) for a, b in zip(wmax, p)] if wmax else list(p)
         else:
             wb_skipped += 1
+    # 剪掉没有被任何 primitive 引用的材质：glTF 允许它存在，但 three.js 根本不会实例化，
+    # 于是"前端挂上 lightMap 的材质数"与 sidecar 声明数会差一个——母体必须先对齐。
+    used_mat = sorted({pr["material"] for m in gltf["meshes"] for pr in m["primitives"]
+                       if pr.get("material") is not None})
+    remap = {old: new for new, old in enumerate(used_mat)}
+    dropped = len(gltf["materials"]) - len(used_mat)
+    for m in gltf["meshes"]:
+        for pr in m["primitives"]:
+            if pr.get("material") is not None:
+                pr["material"] = remap[pr["material"]]
+    gltf["materials"] = [gltf["materials"][i] for i in used_mat]
     truth = {"scene": P.rel(scene), "nodes": len(nodes), "objects": len(anchors),
              "prim_total": prim_total, "pos_total": pos_total, "tri_total": tri_total,
              "world_box": [wmin, wmax], "world_box_skipped": wb_skipped,
@@ -416,8 +499,28 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
                              "center": a.get("center"), "size": a.get("size"),
                              "placeholder": bool(a["placeholder"])} for a in anchors]}
     lights, lskip = add_lights(env, own, gltf, nodes, tr_of_go, node_of)
+    lm_dir = os.path.join(os.path.dirname(os.path.abspath(out)), "lightmaps") if out else None
+    pages = lightmap_pages(env, res, own, lm_dir) if with_textures else []
+    mat_pages = {str(i): m["extras"]["unityLightmapPage"] for i, m in enumerate(gltf["materials"])
+                 if (m.get("extras") or {}).get("unityLightmapPage") is not None}
+    if out:
+        side = os.path.splitext(out)[0] + ".lightmaps.json"
+        json.dump({"pages": pages, "material_pages": mat_pages, "objects": lm_rows,
+                   "convention": "uv1_baked = 网格UV1 * m_LightmapTilingOffset.xy + .zw；"
+                                 "glTF 核心没有 lightmap，页号在 material.extras.unityLightmapPage，"
+                                 "由查看端挂 material.lightMap（three.js 用 uv1 属性）",
+                   "lm_objects": len(lm_rows), "lm_baked": lm_baked, "lm_no_uv1": lm_nouv1,
+                   "lm_prims": lm_prims, "lm_st_unique": len({tuple(r["st"]) for r in lm_rows})},
+                  open(side, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     truth["lights"] = len(lights)
     truth["lights_skipped"] = lskip
+    truth["lm_pages"] = len(pages)
+    truth["lm_objects"] = len(lm_rows)
+    truth["lm_baked"] = lm_baked
+    truth["lm_no_uv1"] = lm_nouv1
+    truth["lm_materials"] = len(mat_pages)
+    truth["dropped_materials"] = dropped
+    truth["lm_prims"] = lm_prims
     cam = None
     for o in env.objects:
         if o.type.name != "Camera":
@@ -479,6 +582,10 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
                                                 len(errors), len(orphans)))
         print("  材质贴图: 挂上 %d 张引用 / 解析失败 %d / 该材质本就无可解析贴图槽 %d"
               % (texstat["hit"], len(texstat["miss"]), len(texstat["none"])))
+        print("  烘焙光照: lightmap %d 页 / 烘进几何 UV1 的对象 %d / 有页号但网格无 UV1 %d / "
+              "带页号的材质 %d 个（未烘焙对象 %d，另有无引用材质被剪掉 %d 个）"
+              % (len(pages), lm_baked, lm_nouv1, len(mat_pages),
+                 len(jobs) - lm_baked - lm_nouv1, dropped))
         for s in texstat["miss"][:4]:
             print("    [贴图未解析] %s" % s)
         for e in errors[:6]:
@@ -517,6 +624,48 @@ def _apply(A, t, p):
     return [sum(A[i][k] * p[k] for k in range(3)) + t[i] for i in range(3)]
 
 
+def lightmap_pages(env, res, own, out_dir):
+    """把 `LightmapSettings.m_Lightmaps[i].m_Lightmap` 那几张烘焙图解成 PNG，返回页清单。"""
+    ls = [o for o in env.objects if o.type.name == "LightmapSettings"]
+    if not ls:
+        return []
+    lo = ls[0]
+    L = lo.read()
+    pages = []
+    for i, ld in enumerate(list(getattr(L, "m_Lightmaps", None) or [])):
+        pp = getattr(ld, "m_Lightmap", None)
+        if pp is None or not (getattr(pp, "path_id", 0) or 0):
+            continue
+        bucket, cab, pid = res.classify(lo.assets_file, pp)
+        t, err = res.fetch(own, bucket, cab, pid)
+        if t is None or t.type.name != "Texture2D":
+            print("      lightmap 页 %d 解析失败: %s" % (i, err))
+            continue
+        tx = t.read()
+        try:
+            img = tx.image
+        except Exception as ex:
+            print("      lightmap 页 %d(%s) 解码失败 %s" % (i, tx.m_Name, type(ex).__name__))
+            continue
+        fn = "lm%d_%s.png" % (i, tx.m_Name)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+            img.convert("RGBA").save(os.path.join(out_dir, fn), format="PNG")
+        pages.append({"index": i, "name": tx.m_Name, "file": fn,
+                      "size": [int(tx.m_Width), int(tx.m_Height)]})
+    return pages
+
+
+def scene_ctx(scene):
+    """一次装好源包上下文（env / 对象表 / Transform 列表 / CAB 索引 + 解析器），给两条跨源锚点共用。"""
+    env = UnityPy.load(scene)
+    own, trs, tr_of_go, rend_of_go = scene_tables(env)
+    deps, _k = P.dep_bundle_paths(scene, P.DEP_MANIFEST)
+    index, _n, _s, _d = P.build_index([P.DEF_DIR], extra_bundles=deps)
+    return {"env": env, "own": own, "trs": trs, "tr_of_go": tr_of_go,
+            "rend_of_go": rend_of_go, "res": P.Resolver(index), "index": index}
+
+
 def unity_world_mats(trs):
     """按源包的 Transform 链复算每个节点序号的世界矩阵（行主序 3x3 + 平移）。"""
     idx_of_pid = {o.path_id: i for i, o in enumerate(trs)}
@@ -549,21 +698,18 @@ def _mx(p):
     return [-p[0], p[1], p[2]]
 
 
-def mirror_anchor(g, bin_off, binraw, scene):
+def mirror_anchor(ctx, g):
     """跨源验镜像只做了一次：glTF 世界盒中心（全取自**文件字节**）应恰为
     Unity 世界盒中心（全取自**源包声明**：Transform 链 + Mesh.m_LocalAABB）的 x 反号、y/z 相等。
 
     两侧都由各自的 TRS 复算，所以「漏做一次镜像」和「做了两次」都会红；
     而只比我自己那套转换的断言对此是恒真的。
     """
-    env = UnityPy.load(scene)
-    own, trs, tr_of_go, _rend = scene_tables(env)
+    env, own, res = ctx["env"], ctx["own"], ctx["res"]
+    trs = ctx["trs"]
     if len(trs) != len(g["nodes"]):
         return ["镜像锚点前提不成立: 源包 Transform %d 个 vs 文件节点 %d 个"
                 % (len(trs), len(g["nodes"]))]
-    deps, _k = P.dep_bundle_paths(scene, P.DEP_MANIFEST)
-    index, _n, _s, _d = P.build_index([P.DEF_DIR], extra_bundles=deps)
-    res = P.Resolver(index)
     world = unity_world_mats(trs)
 
     kids = {}
@@ -653,6 +799,68 @@ def mirror_anchor(g, bin_off, binraw, scene):
     return bad
 
 
+def lightmap_anchor(ctx, g, raw, bin_off, binraw):
+    """逐点核对烘焙映射：文件里的 TEXCOORD_1 == 源包网格原始 UV1 * tiling + offset。
+
+    这条挡三种假绿灯：① ST 根本没乘；② 乘错（tiling/offset 顺序颠倒）；
+    ③ 页号与 ST 不配对。跨度类判据挡不住 ②（跨度只由 tiling 决定），
+    而"重读源包原始 UV1 再算一遍"是**跨源**的，与镜像锚点同一族。
+    """
+    from UnityPy.helpers.MeshHelper import MeshHandler
+    bad, tagged, checked, worst = [], 0, 0, 0.0
+    for mesh in g["meshes"]:
+        ex = mesh.get("extras") or {}
+        st, src = ex.get("unityLightmapST"), ex.get("unitySrcMesh")
+        if st is None:
+            continue
+        tagged += 1
+        if ex.get("unityLightmapPage") is None:
+            bad.append("网格 %s 带 ST 却没有页号" % mesh["name"])
+            continue
+        if not src:
+            bad.append("网格 %s 带 ST 但没有源网格回指" % mesh["name"])
+            continue
+        cab, pid = src.rsplit("/", 1)
+        t = None
+        bp = ctx["res"].bundle_of(cab)
+        if bp:
+            t = ctx["res"].table(bp).get((P.cab_key(cab), int(pid)))
+        if t is None:
+            t = ctx["own"].get((P.cab_key(cab), int(pid)))
+        if t is None or t.type.name != "Mesh":
+            bad.append("网格 %s 的回指 %s 在源包里找不到" % (mesh["name"], src))
+            continue
+        h = MeshHandler(t.read())
+        h.process()
+        raw1 = h.m_UV1 or []
+        pr = mesh["primitives"][0]
+        if "TEXCOORD_1" not in pr["attributes"]:
+            bad.append("网格 %s 声明了 ST 却没有 TEXCOORD_1" % mesh["name"])
+            continue
+        vals = G.read_acc(g, raw, bin_off, pr["attributes"]["TEXCOORD_1"])[1]
+        if len(vals) != len(raw1):
+            bad.append("网格 %s UV1 顶点数 %d != 源包 %d" % (mesh["name"], len(vals), len(raw1)))
+            continue
+        step = max(1, len(vals) // 32)
+        err = 0.0
+        for i in range(0, len(vals), step):
+            err = max(err, abs(vals[i][0] - (raw1[i][0] * st[0] + st[2])),
+                           abs(vals[i][1] - (raw1[i][1] * st[1] + st[3])))
+        worst = max(worst, err)
+        checked += 1
+        if err > 1e-4:
+            bad.append("网格 %s(page %s, ST %s) 烘焙映射逐点最大偏差 %.2e，样例 uv1=%s 源=%s"
+                       % (mesh["name"], ex.get("unityLightmapPage"), st, err,
+                          list(vals[0]), list(raw1[0])))
+    print("  lightmap 锚点（逐点核对 TEXCOORD_1 == 源包 UV1 * tiling + offset）: "
+          "带 ST 的网格 %d / 核对通过 %d / 最大偏差 %.2e" % (tagged, checked, worst))
+    if tagged == 0:
+        bad.append("没有任何网格带 lightmap ST —— 烘焙光照通路等于没做")
+    elif checked < tagged:
+        bad.append("带 ST 的网格 %d 个，只有 %d 个核对成功" % (tagged, checked))
+    return bad
+
+
 def verify_glb(path, scene=None):
     """从**文件字节**回读断言，不看装配过程的中间变量（WF-32 第 5 步）。"""
     raw = open(path, "rb").read()
@@ -716,7 +924,15 @@ def verify_glb(path, scene=None):
              len(g["materials"]), len(g["images"]), len(ext.get("lights", []))))
     print("  extras: %s" % json.dumps(g.get("extras", {}), ensure_ascii=False)[:400])
     if scene:
-        bad += mirror_anchor(g, bin_off, binraw, scene)
+        ctx = scene_ctx(scene)
+        bad += mirror_anchor(ctx, g)
+        side = os.path.splitext(path)[0] + ".lightmaps.json"
+        tagged_mat = sum(1 for m in g["materials"]
+                         if (m.get("extras") or {}).get("unityLightmapPage") is not None)
+        if not os.path.isfile(side) and tagged_mat:
+            bad.append("有 %d 个材质声明了 lightmap 页号，但 sidecar 不存在（%s）"
+                       % (tagged_mat, P.rel(side)))
+        bad += lightmap_anchor(ctx, g, raw, bin_off, binraw)
     if bad:
         for b in bad[:14]:
             print("  [FAIL] " + b)
@@ -736,13 +952,15 @@ def main():
     ap.add_argument("--no-mirror", action="store_true", help="反向对照：故意不做镜像 X")
     ap.add_argument("--no-flipuv", action="store_true")
     ap.add_argument("--verify")
+    ap.add_argument("--no-lightmap", action="store_true",
+                    help="反向对照：不烘 m_LightmapTilingOffset（lightmap 锚点必须判红）")
     ap.add_argument("--truth-out", help="Unity 侧口径真值 json（默认跟着 --out 落 <glb>.truth.json）")
     a = ap.parse_args()
     if a.verify:
         return verify_glb(a.verify, scene=a.scene)
     build(a.scene, a.out, only=a.only, limit=a.limit, with_textures=not a.no_textures,
           include_inactive=a.include_inactive, mirror=not a.no_mirror, flipuv=not a.no_flipuv,
-          truth_out=a.truth_out)
+          truth_out=a.truth_out, bake_lm=not a.no_lightmap)
     return 0
 
 

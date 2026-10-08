@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。
-version: 1.8.1
+version: 1.8.2
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -45,6 +45,12 @@ version: 1.8.1
 
 1. **断言要读运行时状态，别用画面代理指标**。判"动画/交互是否生效"要读引擎内部状态（如 Live2D 的 `motionManager.state.currentGroup`、Spine 的 `anim.getCurrent`）。帧哈希/`drawImage` 比对两头都骗人：无头环境 rAF 被节流 → **假阴性**；而 physics/眨眼等常驻动画让帧一直变化 → **假阳性**（曾据此误判"动画正常"）。
 2. **异步生效要等一拍再断言**。触发函数内部常含 `fetch`（如 Live2D 加载 motion JSON），调用后立刻读状态会拿到空值 → 误判失败。加 ~1.5s 等待再采样。另注意某些状态会**自动回落**（idle 播完 `currentGroup` 归 null），所以"值变了"才是被触发的证据。
+   - ⚠️ **"没等到"不会报错，它会伪装成一次成功的对照**（2026-10-08 实测）：给材质挂 lightmap 时用
+     不 `await` 的 `TextureLoader.load()`，返回的是**尚未解码的占位 Texture**——挂是挂上了、
+     `needsUpdate` 也设了，但截图与"根本没挂"的那一版**五个机位读数逐位相同**（0.546/0.367/…）。
+     ⇒ 凡是"应用 X 之后量画面/量像素"的判据，必须**同时**跑一版"不应用 X"并断言**两者必须不同**；
+     只断言"应用版的数达到阈值"抓不到这种失效。异步资源一律 `await`（`load(url, onLoad, _, onError)`
+     包成 Promise，`onError` 要 **reject**，不许静默降级）。
 3. **冷启动要先轮询等待页面全局变量**。删过 profile 后页面加载变慢，`/json` 有 tab、甚至 `evaluate` 能跑，都不代表数据脚本已执行；直接访问 `window.<DATA>` 会 `ReferenceError`。探针开头写 `for(let i=0;i<80 && !window.GALLERY;i++) await t(300)`。
    - ⚠️ **等全局变量还不够：第一处「数 DOM 结构」的断言前，要轮询页面自己渲染出来的选择器**（2026-10-07 实测）。页面常见形态是「`window.META` 早已赋值，但卡片是 `boot()` 里 `fetch(索引.json)` 回来才建的」⇒ 探针一连上就 `querySelectorAll('.card')` 得到 0，**一次假红能连带打红四五条**（默认视图张数、chip 数、常驻条文案、截图体积）。轮询谓词要落在**被断言的那个节点**上：`for(let i=0;i<150 && !document.querySelector('#gChar .chip');i++) await t(200)`。
      ⇒ 反向纪律：**假红没消净之前不许改判据**，先原样重跑一遍确认稳定（同一台机器同时压着多个后台代理时尤其容易复现）。

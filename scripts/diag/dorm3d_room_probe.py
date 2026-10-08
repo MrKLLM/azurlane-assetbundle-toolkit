@@ -67,7 +67,8 @@ const W=1280,H=960;
 const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
 renderer.setSize(W,H); renderer.setClearColor(0x101418,1); document.body.appendChild(renderer.domElement);
 const scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(60,W/H,0.02,3000);
-window.__ERR=null; window.__DONE=false; window.__RESULT=null; window.__VIEWS=[]; window.__cur=0;
+window.__ERR=null; window.__DONE=false;
+fetch(Q.get('side')||'').then(r=>r.json()).then(j=>{window.__SIDE=j;}).catch(()=>{window.__SIDE=null;}); window.__RESULT=null; window.__VIEWS=[]; window.__cur=0;
 function ink(){ // 落笔占比：数**比背景亮**的采样像素。用「与背景不同」是错的——
   // 无光时模型是纯黑，纯黑与深色背景「不同」，会把一片漆黑读成画满了内容。
   const c=document.createElement('canvas'); c.width=W; c.height=H;
@@ -83,9 +84,33 @@ function boxOf(list, onlyReal){
     t.setFromObject(o); if(!t.isEmpty()) b.union(t); }
   return b.isEmpty()?null:[ [b.min.x,b.min.y,b.min.z],[b.max.x,b.max.y,b.max.z] ];
 }
+function loadTex(u){ return new Promise((res,rej)=>{
+  new THREE.TextureLoader().load(u, t=>res(t), undefined, e=>rej(e&&e.message||u)); }); }
+async function applyLightmaps(root, side, mode){
+  // 贴图是异步解码的：不等它们落地就截图，拍到的是**没有 lightmap 的那一帧**
+  // （本轮真实踩过：五个机位的落笔占比与未挂 lightmap 版**逐位相同**才发现）。
+  const pages={};
+  for(const p of side.pages){
+    // 绝对路径：harness 自己就在 /dorm3d_room/ 下，相对写法会把目录叠成
+    // /dorm3d_room/dorm3d_room/lightmaps/... 而 404（TextureLoader 的 onError 会 reject，
+    // 正好被上面的 catch 抓住 —— 之前用不 await 的 tl.load() 时它静默返回占位贴图，
+    // 于是"挂了 lightMap 的版"与"没挂的版"落笔占比逐位相同）
+    const t=await loadTex('/dorm3d_room/lightmaps/'+p.file);
+    t.colorSpace = (mode==='srgb')?THREE.SRGBColorSpace:THREE.NoColorSpace;
+    t.flipY=false;                     // Unity lightmap 与我们的 UV 同向，多翻一次就上下错位
+    pages[p.index]=t;
+  }
+  let n=0; const uniq=new Set();
+  root.traverse(o=>{ if(!o.isMesh||!o.material) return;
+    const ms=Array.isArray(o.material)?o.material:[o.material];
+    for(const m of ms){ const pg=(m.userData&&m.userData.lmPage);
+      if(pg===undefined||!pages[pg]) continue;
+      m.lightMap=pages[pg]; m.lightMapIntensity=1.0; m.needsUpdate=true; n++; uniq.add(m.uuid); } });
+  return {mats:n, uniqMats:uniq.size, pages:Object.keys(pages).length};
+}
 fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
   window.__TRUTH=truth;
-  new GLTFLoader().load(Q.get('m'), g=>{
+  new GLTFLoader().load(Q.get('m'), async g=>{
     scene.add(g.scene);
     const clean=s=>String(s||'').replace(/__mesh_\d+$/,'');
     const phNames=new Set(truth.per_object.filter(p=>p.placeholder).map(p=>clean(p.mesh)));
@@ -100,7 +125,25 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
       kill.forEach(o=>o.parent&&o.parent.remove(o)); }
     const amb=parseFloat(Q.get('amb')||'0');
     if(amb>0) scene.add(new THREE.AmbientLight(0xffffff, amb));   // 补光不是包里的数据，只用于对照观感
-    g.scene.traverse(o=>{ o.frustumCulled=false; });
+    let uv1geoms=0, pagemats=0;
+    g.scene.traverse(o=>{ o.frustumCulled=false;
+      if(o.isMesh&&o.geometry&&o.geometry.attributes.uv1) uv1geoms++;
+      const ms=o.isMesh?(Array.isArray(o.material)?o.material:[o.material]):[];
+      for(const m of ms){ const pg=m&&m.userData&&m.userData.unityLightmapPage;
+        if(pg!==undefined&&pg!==null){ m.userData.lmPage=pg; pagemats++; } } });
+    window.__UV1={geoms:uv1geoms, pagemats};
+    let lmApplied={mats:0,uniqMats:0,pages:0};
+    if(Q.get('lm')==='1'){
+      try {
+        // sidecar 与模型是两条并发请求，谁先到不确定 ⇒ 这里**自己等它**，不赌时序
+        if(!window.__SIDE && Q.get('side')){
+          window.__SIDE = await fetch(Q.get('side')).then(r=>r.json());
+        }
+        lmApplied=await applyLightmaps(g.scene, window.__SIDE||{pages:[]}, Q.get('lmc')||'linear');
+      } catch(e){ window.__ERR=(window.__ERR||'')+' lightmap 载入失败 '+String(e).slice(0,140); }
+    }
+    window.__LM=lmApplied;
+
     g.scene.updateMatrixWorld(true);
     const inner=truth.per_object.filter(p=>p.center&&Math.max(...p.center.map(Math.abs))<=15);
     window.__VIEWS=[
@@ -110,6 +153,9 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
       {name:'az180', pos:[0, 6.5, 11], look:[0,1.2,0], fov:55},
       {name:'top', pos:[7.5, 12.5, 7.5], look:[0,0.6,0], fov:55}];
     window.__STATS={meshObjects:meshes.length, posTotal, lights,
+                    lmMats:(window.__LM||{}).uniqMats||0, lmSlots:(window.__LM||{}).mats||0,
+                    lmPages:(window.__LM||{}).pages||0, sideOk:!!window.__SIDE,
+                    uv1Geoms:(window.__UV1||{}).geoms||0,
                     renderedTris:renderer.info.render.triangles,
                     boxAll:boxOf(meshes,false), boxReal:boxOf(meshes,true),
                     innerCount:inner.length, distinctNames:Object.keys(names).length};
@@ -126,6 +172,61 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
     window.applyView=()=>({ink:0,sampled:0}); window.__DONE=true; });
 }).catch(e=>{ window.__ERR='truth 读取失败 '+String(e).slice(0,120); window.__DONE=true; });
 </script></body></html>"""
+
+
+def page_sensitivity(side, work=WORK):
+    """对照：把每个对象采样的 lightmap  texel 换到"错的一页"，看亮度变不变。
+
+    变的比例高 ⇒ 页号分配是**承载信息**的（烘错页就会看出来）；几乎不变 ⇒ 这条通路是装饰。
+    """
+    from PIL import Image
+    objs = side.get("objects") or []
+    pages = {p["index"]: p for p in side.get("pages", [])}
+    if not objs or len(pages) < 2:
+        return None
+    imgs = {}
+    for i, p in pages.items():
+        fp = os.path.join(work, "lightmaps", p["file"])
+        if os.path.isfile(fp):
+            imgs[i] = Image.open(fp).convert("RGB")
+    keys = sorted(imgs)
+    if len(imgs) < 2:
+        return None
+
+    def lum(pg, cx, cy):
+        im = imgs[pg]
+        x = min(im.width - 1, max(0, int(cx * im.width)))
+        y = min(im.height - 1, max(0, int(cy * im.height)))
+        box = 3
+        tot = [0, 0, 0]
+        n = 0
+        for dx in range(-box, box + 1):
+            for dy in range(-box, box + 1):
+                px = min(im.width - 1, max(0, x + dx))
+                py = min(im.height - 1, max(0, y + dy))
+                r, g, b = im.getpixel((px, py))
+                tot[0] += r; tot[1] += g; tot[2] += b; n += 1
+        return 0.2126 * tot[0] / n + 0.7152 * tot[1] / n + 0.0722 * tot[2] / n
+
+    diff = 0
+    tot = 0
+    samples = []
+    for o in objs:
+        bb = o.get("uv1_bbox")
+        if not bb or o["page"] not in imgs:
+            continue
+        cx = (bb[0][0] + bb[0][1]) / 2.0
+        cy = (bb[1][0] + bb[1][1]) / 2.0
+        a = lum(o["page"], cx, cy)
+        wrong = [k for k in keys if k != o["page"]][0]
+        b = lum(wrong, cx, cy)
+        tot += 1
+        if abs(a - b) > 0.05 * max(a, b, 1.0):
+            diff += 1
+        if len(samples) < 3:
+            samples.append((o["object"], round(a, 1), round(b, 1)))
+    return {"tot": tot, "diff": diff, "ratio": (diff / tot) if tot else 0.0,
+            "samples": samples}
 
 
 def serve(root_dir):
@@ -334,6 +435,35 @@ def main():
             say(nl_ink is not None and nl_ink < 0.05,
                 "C2 摘掉所有灯之后落笔占比必须塌（证明 J6 量的是被照亮的内容）: 实得 %s"
                 % (None if nl_ink is None else round(nl_ink, 4)))
+        rel_side = "dorm3d_room/" + os.path.splitext(os.path.basename(glb))[0] + ".lightmaps.json"
+        side_p = os.path.join(WORK, os.path.basename(rel_side))
+        side = json.load(open(side_p, encoding="utf-8")) if os.path.isfile(side_p) else None
+        if side:
+            lmcase = run_case(browser, base, rel_glb, rel_truth, "lm", {"names": names},
+                              extra="&lm=1&side=%s" % (base + rel_side))
+            lst = (lmcase or {}).get("stats") or {}
+            say(lst.get("lmMats", 0) == len(side.get("material_pages", {})),
+                "L1 前端挂上 lightMap 的**去重材质数** == sidecar 声明: %s vs %d"
+                "（槽位数 %s 是 primitive 级的另一个母体，别混）"
+                % (lst.get("lmMats"), len(side.get("material_pages", {})), lst.get("lmSlots")))
+            say(lst.get("uv1Geoms", 0) == side.get("lm_prims", -1),
+                "L2 前端带 uv1 属性的几何数 == 真值烘焙 primitive 数: %s vs %d"
+                "（GLTFLoader 一个 primitive 建一个 geometry，所以母体是 primitive 不是对象）"
+                % (lst.get("uv1Geoms"), side.get("lm_prims", -1)))
+            ps = page_sensitivity(side)
+            say(ps and ps["ratio"] >= 0.6,
+                "C3 页号敏感性：把每个对象换到**错的一页**后，亮度变化 >5%% 的对象占比 "
+                "%s（%s/%s）—— 占比太低说明页号分配不影响画面，这条通路是装饰"
+                % (None if not ps else round(ps["ratio"], 3),
+                   None if not ps else ps["diff"], None if not ps else ps["tot"]))
+            lmk = {v["name"]: (round(v["ink"], 3) if v["ink"] is not None else None)
+                   for v in (lmcase or {}).get("views", [])}
+            print("  ℹ lightmap 版各机位落笔 %s；截图 shot_lm_*.png" % lmk)
+            print("     lm 版 stats=%s err=%r" % (json.dumps(lst, ensure_ascii=False)[:260],
+                                                  ((lmcase or {}).get('err') or '')[:260]))
+        else:
+            print("  ⚠ 没有 sidecar（%s）—— L1/L2/C3 无从判起" % rel_side)
+            FAIL.append("缺 lightmap sidecar")
         amb = run_case(browser, base, rel_glb, rel_truth, "amb", {"names": names},
                        extra="&amb=0.6")
         aink = {v["name"]: (round(v["ink"], 3) if v["ink"] is not None else None)

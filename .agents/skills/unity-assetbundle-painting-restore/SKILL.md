@@ -1,7 +1,7 @@
 ---
 name: unity-assetbundle-painting-restore 触发词（3D 侧）：跨包 PPtr、assets_file 带下划线、ObjectReader.assetsfile 为 None、.sharedAssets、resS 不是 SerializedFile、externals 下标 ±1、pptr.deref、CAB 索引现扫、unity default resources 内置外链、激活态过滤、m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、跨包解析、SerializedFile 多个、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.13.5
+version: 1.13.6
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -352,6 +352,21 @@ MAD 分不开"该替换/不该替换"，两者数值重叠。这条写进了常�
   「权重和==1」这条闸完全看不见；且 `abs(NaN-1)>eps` 恒 False，NaN 连这条都过。
   ⇒ 除了内部不变式，还要 ① `math.isfinite` 单独查 ② **跨源逐行比对**（产物前 N 行 vs 源包重读值）。
 - ⚠️ `Mesh.m_CompressedMesh` 在 TypeTree 里**恒存在**，`if obj.m_CompressedMesh: 判"压缩网格"` 会得到永远为真的假信号——要看到里面 `m_Vertices/m_BoneWeights` 的 `m_NumItems>0` 才算数据存在。**"字段读得出来"不等于"里面有数据"**，探针一律量内部计数。
+
+**Unity 烘焙 lightmap → glTF/three.js 的四条**（场景级还原用；glTF 核心没有 lightmap 这个概念）
+
+- 页号写进 `material.extras.unityLightmapPage`，每 renderer 的矩形 `m_LightmapTilingOffset`
+  **烘进几何的第二套 UV**（`uv1*tiling+offset`），另出一份 sidecar 让查看端挂 `material.lightMap`
+  （three.js 用 `uv1` 属性采样）。⚠️ **不要**把矩形放进 `texture.repeat/offset`：一张 lightmap
+  实测有 196 个不同矩形 ⇒ 按矩形克隆贴图就是 196 次 1024² 上传；烘进几何只让几何数 205→252。
+  代价是**几何去重键必须带上这个矩形**，否则同网格不同矩形互相覆盖。
+- `m_LightmapIndex == 65535` 是"未烘焙"（不是错误码）；`LightmapSettings.m_Lightmaps[i]` 的字段是
+  `m_Lightmap / m_DirLightmap / m_IndirectLightmap / m_ShadowMask`（**没有** `m_LightmapTexture`）。
+  `m_LightmapsMode=1`(Directional) 而 `m_DirLightmap` 全空时，只有颜色页可用，第一版别硬造方向。
+- **只给烘过的对象发 `TEXCOORD_1`**：未烘焙对象留着满幅 UV1 会让"带 uv1 的几何数"变成混合母体。
+- **Unity 的 Area 灯（type 0）只参与烘焙、运行时不发光** ⇒ 不要把它补成实时灯去"照亮画面"；
+  它正是"必须有 lightmap"的原因。判据侧要加一条**页号敏感性**：把每个对象的采样点换到错的一页，
+  亮度变化 >5% 的对象占比必须高（实测 0.967）——占比低说明页号分配根本不承载信息。
 
 **从蒙皮包出 glTF（`.glb`）的四条硬事实**（`export()` 只给无骨骼 OBJ，装配层必须自己写）：
 

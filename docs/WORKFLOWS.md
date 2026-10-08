@@ -3396,3 +3396,24 @@ prefab→res 材质），必须按 `(file_id, path_id)` 跨包取回真实对象
 `scripts/diag/dorm3d_pptr_resolve.py`（WF-37 解析层，本轮修 `self` 语义）、
 产物 `.diag/dorm3d_room/{room.glb,room.glb.truth.json,harness.html,shot_*.png}`（不入库）。
 相关：**WF-37**（跨包 PPtr）、**WF-32**（角色级 GLB 装配与回读纪律）、§124、§116、§55。
+
+**追加（2026-10-08 光照轮）：Unity 烘焙 lightmap 怎么接进 glTF/three.js**
+
+- **glTF 核心没有 lightmap**（只有 occlusion/emissive），所以：页号写进 `material.extras.unityLightmapPage`、
+  每 renderer 的矩形 `m_LightmapTilingOffset` **烘进几何的第二套 UV**（`uv1*tiling+offset`），
+  另出一份 sidecar（`room.lightmaps.json`：页清单 + 材质→页 + 每对象 ST 与 UV1 包围盒），
+  由查看端 `material.lightMap = pages[page]` 挂上（three.js 用 `uv1` 属性采样）。
+  ⚠️ **不要把 ST 放进 `texture.repeat/offset`**：一张 lightmap 在本房间有 **196 个不同矩形**，
+  按矩形克隆贴图 = 196 次 1024² 上传；烘进几何只让几何数从 205 涨到 252。
+  ⚠️ 代价是**几何去重键必须带上 ST**（否则同网格不同矩形会互相覆盖）。
+- **只给烘过的对象发 `TEXCOORD_1`**：没挂 lightmap 的对象留着满幅 UV1 会让"带 uv1 的几何数"
+  变成混合母体（本房间 117 个对象未烘焙）。
+- **Unity 侧 `m_LightmapIndex == 65535` 表示"未烘焙"**（不是错误码）；`LightmapSettings.m_Lightmaps[i]`
+  的字段是 `m_Lightmap / m_DirLightmap / m_IndirectLightmap / m_ShadowMask`（**不是** `m_LightmapTexture`）。
+  本房间 `m_LightmapsMode=1`(Directional) 但 `m_DirLightmap` 全空 ⇒ 只有颜色页，第一版不补方向。
+- **Area 灯（Unity type 0）不进 glTF 也不该补成实时灯**：Unity 的面光源只参与烘焙、运行时不发光，
+  这正是"必须有 lightmap"的原因。实测 21 盏 = Point 7 / Spot 4 / Directional 6 / Area 4，
+  激活且可映射的只有 5 盏。
+- **判据加三条**（L1 去重材质数 / L2 带 uv1 的 primitive 数 / C3 页号敏感性 ≥0.6），
+  加 `--verify` 里的**逐点** lightmap 锚点；三条新踩坑（异步贴图未等待、相对路径叠目录、
+  无引用材质让母体差一个）记 **§124 追加**。
