@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
-description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.7.2
+description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳、选某个动作时手会消失、部件在任何动作里都不动。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
+version: 1.7.3
 ---
 
 # Live2D 网页运行时集成
@@ -466,17 +466,32 @@ moc3 的 max 上，而 motion 曲线明显写着要跑到量程外。这不是�
   repeat=1 上、repeat=0 越界 0 条**，一次同时否证"美术写错"与"导出写坏"。
 
 **修法（一处原型包装，不要改数据）**：包 `CubismModel.prototype.setParameterValueByIndex`，
-`repeat[ix]` 且**严格越界**时 `val = mn + ((val-mn)%sp+sp)%sp`。三条硬约束：
+对**相位参数**在严格越界时 `val = mn + ((val-mn)%sp+sp)%sp`。
+
+⚠️ **判据不能用 moc3 的 `repeat` 标志**（这是本条最初踩的坑）：实测同一个 moc3 里，标志为 1 的参数
+**混着两类**——真循环相位（斜坡型：`0→2000`、`0→5.867`、GL 光扫每条 Δ 都等于 0.81）与普通振荡角度
+（`ParamForearmRAngle` 量程 [-30,30]，某条 clip 曲线 -59…9 带 8 次复位）。按标志一律回绕，振荡角度会
+从 -59° 瞬间跳到 +1° ⇒ 用户症状「选某个动作时手会消失」。**可用的判据是曲线形状**：
+`整条 clip 键值单调 && 至少一个键越界` 才当相位；振荡/锯齿型的越界照旧硬钳（游戏里也是钳住的）。
+落地：在 `createMotion`（本来就要解析一遍 Curves）里顺手把相位参数的下标登记到
+`coreModel.__phaseSet`，setter 只对白名单回绕。
+
+三条硬约束：
 
 1. **`val == max` 不折**。官方 ModF 会把"刚好等于 max"折成 min，但曲线里常有**刻意钉在 max**
    的键点（实测 75 个：某参数整段 =1.0、某花瓣值 =10.0），折过去就是让部件瞬间消失。
    这条不是洁癖——是**量程内恒等自检**（全部 repeat 参数 × 5 档写入读回，要求 0 失配）抓出来的。
-2. **包装体里必须用 `this._model.parameters`**，不能用闭包捕获某个实例：标志表逐模型不同，
-   捕错实例就会拿别人的量程折这条值。
+2. **包装体里必须用 `this._model.parameters` / `this.__phaseSet`**，不能用闭包捕获某个实例：
+   量程表与白名单都逐模型不同，捕错实例就会拿别人的量程折这条值。
 3. **写值的唯一入口是 framework**：Cubism Core for Web 的 Model **没有 `setParameterValue`**
    （只有 `getParameterValues` 等只读绑定 + `parameters.values` 这个 wasm 视图），
-   所以钳位/回绕只能在 setter 这一层修；`parameters.repeats` 就是那张标志表，直接读即可。
+   所以钳位/回绕只能在 setter 这一层修；`parameters.repeats` 能读到标志，但**别拿它当判据**（见上）。
    另：`_parameterIds` / `parameters.ids` 实测是**纯字符串数组**，按 `.string` 取会全部落空。
+
+**还有一类"某部件在任何动作里都不动"**：不是钳位，是**那条 clip 根本没播**。查法=对每个候选参数
+统计"被几条 clip 驱动、驱动时是常量还是斜坡"（`l2d_curve_shape.py`）；本项目实例：某批前景花瓣
+由 `Paramfh` 驱动，而它只在 `effect` 这条里有曲线（0→2000），idle/home/main 全是常量 0 ⇒
+只有把 `effect` 当常驻层叠上才会掉花瓣，而那属于播放策略决策，不是 bug 修复。
 
 **验收四条，缺一条不许说修好**：① 直写超量程值读回 = 期望回绕值；② 在**真实播放路径**上
 统计"动作层交给 setter 的原始值"确实越界过（直写绕过了动作求值，不能当这条证据）；

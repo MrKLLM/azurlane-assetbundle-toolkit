@@ -141,7 +141,7 @@ JS_BOOT = r"""(async(key)=>{
   const on= []; for(let i=0;i<rpt.length;i++) if(rpt[i]) on.push([ids[i], rpt[i]]);
   const pSrc=String(Object.getPrototypeOf(core).setParameterValueByIndex).slice(0,300);
   return JSON.stringify({n:P.count, repeatOnCount:on.length,
-     patchLive:/repeats/.test(pSrc), patchSrc:pSrc,
+     patchLive:/repeats|__phaseSet/.test(pSrc), patchSrc:pSrc,
      typesSample:Array.from(P.types.slice(0,8)),
      sampleBuf:Array.from(P.values.slice(0,4))});
 })"""
@@ -198,6 +198,28 @@ JS_SET = r"""(async(p,v)=>{
 OUT = os.path.join(ROOT, '.diag', 'effect_scan', 'sweep')
 os.makedirs(OUT, exist_ok=True)
 
+# —— @phaseset：把前端「循环相位白名单」打出来（补丁 ⑤ 只对这些参数回绕）
+if PARAM == '@phaseset':
+    JS_PS = r"""(()=>{
+      const {core,ids}=window.__S; const S=core.__phaseSet;
+      if(!S) return {err:'页面里没有 __phaseSet —— 补丁 ⑤ 或 markPhase 没跑'};
+      const on=[...S].sort((a,b)=>a-b).map(i=>[ids[i], core.getParameterMinimumValue(i),
+                                             core.getParameterMaximumValue(i),
+                                             core._model.parameters.repeats[i]]);
+      const repNotOn=[]; for(let i=0;i<core.getParameterCount();i++)
+        if(core._model.parameters.repeats[i] && !S.has(i)) repNotOn.push(ids[i]);
+      return {nPhase:on.length, phase:on, repeatButClamped:repNotOn.length,
+              sampleNotWrapped:repNotOn.slice(0,14)};
+    })()"""
+    d = ev_retry(JS_PS)
+    print(' @phaseset → ', json.dumps(d, ensure_ascii=False)[:2400])
+    ws.close()
+    try:
+        proc.terminate(); srv.terminate()
+    except Exception:
+        pass
+    raise SystemExit(0)
+
 # —— 量程内恒等自检：证明补丁对「没越界」的写入是恒等变换（零回退的写入路径级证据）
 if PARAM == '@inrange':
     JS_ID = r"""(()=>{
@@ -253,7 +275,7 @@ if os.environ.get('WATCH'):
         await new Promise(r=>setTimeout(r,40));
       }
       CP.setParameterValueByIndex=CP.__origSet;      // 摘掉记录器，只留补丁本身
-      rec.patchLive=/repeats/.test(String(CP.__origSet));
+      rec.patchLive=/repeats|__phaseSet/.test(String(CP.__origSet));
       rec.baseSrc=String(CP.__origSet).slice(0,170);
       return {ix, patchLive:rec.patchLive, baseSrc:rec.baseSrc,
               max:P.maximumValues[ix], min:P.minimumValues[ix], repeat:P.repeats[ix],

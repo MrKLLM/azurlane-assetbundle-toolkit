@@ -1303,12 +1303,39 @@ async function renderLive2D(s, sk){
        下面的「残留复位」和 motion3.json 的曲线绑定集是同一份数据，不另开文件。 */
     const paramSets=Object.create(null);
     const curveId=(c)=>{ const i=c&&c.Id; return typeof i==='string'? i : (i&&i.string)||null; };
+    /* 循环相位登记（配合下面的补丁 ⑤，取证见 docs/TROUBLESHOOTING.md §123）：
+       逐条曲线判「是不是一个只往一个方向推进、并且越出 moc3 量程的相位」——
+       即键值单调 + 至少一个键越界。只有这种才该在越界处回绕（0→2000 的滚动、0→5.867 的下落循环）。
+       ⚠️ 不能用 moc3 的 repeat 标志当判据：安土 52 个参数标了 repeat=1，里面混着
+       `ParamForearmRAngle`（右前臂角，量程 [-30,30]，home 曲线 -59…9 带 8 次复位）这类**振荡型**参数，
+       一律回绕会让它从 -59° 瞬间跳到 +1° —— 用户实测就是「选 home 时手会消失」。
+       振荡/锯齿型的越界照旧钳位（那是曲线超出美术滑杆几个单位，不是循环）。 */
+    const phaseSet=im.coreModel.__phaseSet||(im.coreModel.__phaseSet=new Set());
+    const markPhase=(json)=>{ if(!json||!json.Curves) return; const core=im.coreModel;
+      for(const c of json.Curves){ if(c.Target!=='Parameter') continue;
+        const id=curveId(c), s=c.Segments; if(!id||!s||s.length<5) continue;
+        let ix=-1; try{ ix=core.getParameterIndex(id); }catch(e){ continue; }
+        if(ix<0||phaseSet.has(ix)) continue;
+        const mn=core.getParameterMinimumValue(ix), mx=core.getParameterMaximumValue(ix);
+        if(!(mx>mn)) continue;
+        let up=true, down=true, over=false;
+        for(let i=0, prev=null; i+1<s.length; ){
+          const v=s[i+1];
+          if(prev!==null){ if(v<prev-1e-6) up=false; if(v>prev+1e-6) down=false; }
+          prev=v;
+          if(v>mx+1e-6||v<mn-1e-6) over=true;
+          const ty=(i+2<s.length)? s[i+2] : null;
+          i += (ty===null) ? 2 : 3 + ((ty===2||ty===3)?4:0);
+        }
+        if(over&&(up||down)) phaseSet.add(ix);
+      } };
     const origCreateMotion=mm.createMotion.bind(mm);
     mm.createMotion=(json,group,def)=>{ const m=origCreateMotion(json,group,def);
       if(group===idleGroup&&json&&json.Meta&&json.Meta.Loop&&m.setIsLoop){
         m.setIsLoop(true); if(m.setIsLoopFadeIn) m.setIsLoopFadeIn(false); }
       try{ if(json&&json.Curves){ const s=paramSets[group]||(paramSets[group]=new Set());
-          for(const c of json.Curves) if(c.Target==='Parameter'){ const id=curveId(c); if(id) s.add(id); } } }catch(e){}
+          for(const c of json.Curves) if(c.Target==='Parameter'){ const id=curveId(c); if(id) s.add(id); } }
+        markPhase(json); }catch(e){}
       return m; };
     mm.groups.idle=idleGroup;
     mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }catch(e){}
@@ -1322,6 +1349,7 @@ async function renderLive2D(s, sk){
           const r=await fetch(P+model+'/'+d.File); if(!r.ok) continue; const j=await r.json();
           if(!(j&&j.Curves)) continue;
           for(const c of j.Curves) if(c.Target==='Parameter'){ const id=curveId(c); if(id) s.add(id); }
+          markPhase(j);
           if(j.Meta&&j.Meta.Loop) loop=true; }
         if(!loop) return;
         for(const m of (mm.motionGroups[idleGroup]||[])){ if(m&&m.setIsLoop){
@@ -1331,26 +1359,25 @@ async function renderLive2D(s, sk){
           Raycaster/Live2dChar）里根本没有 Breath，而 74~85% 的 idle 已自带动 ParamAngleX/Y/Z +
           ParamBodyAngleX 曲线，这层会在动作之后再叠 ±4~7.5° 的 3.2~6.5s 高频摆动 → 头部双驱动。 */
     if(im.breath&&im.breath.setParameters) im.breath.setParameters([]);
-    /* ⑤ repeat 参数按量程**回绕**（取证见 docs/TROUBLESHOOTING.md §120）：moc3 给每个参数带 1 字节
-          repeat 标志，Cubism 官方语义是"值超出 [min,max] 就按量程取模回绕"（Unity 原生 framework 走
-          CubismMath::ModF），而 vendored pixi-live2d-display 0.4.0 的 setParameterValueByIndex 只做
-          min/max 硬钳——整包 119,922 字节里字符串 "repeat" 出现 **0 次**，它压根不知道有这个标志。
-          安土实测：57 条 clip 的 27,865 条参数曲线中 580 条越界，**580 条全部落在 repeat=1 的参数上**
-          （repeat=0 的越界 0 条）⇒ 越界不是美术失误，而是刻意写的循环相位，被硬钳之后半段动作整段
-          消失：MB_wutixialuoxunhuangz 量程 [0,3] 而 idle 曲线是 0→5.867 的一条直线 ⇒ 花瓣掉到
-          11.25s 就冻住（实测在 max 上的平台 11.1s，占一个 22s 循环的 44%）。
-          量程内的值经取模是恒等变换，所以本补丁只可能影响那 580 条越界曲线。 */
+    /* ⑤ 循环相位参数按量程**回绕**（取证见 docs/TROUBLESHOOTING.md §123）：Cubism 官方语义是
+          "值超出 [min,max] 就按量程取模回绕"（Unity 原生 framework 走 CubismMath::ModF），而 vendored
+          pixi-live2d-display 0.4.0 的 setParameterValueByIndex 只做 min/max 硬钳——整包 119,922 字节里
+          字符串 "repeat" 出现 **0 次**，它压根不知道有这回事。安土因此丢掉的动作：
+          MB_wutixialuoxunhuangz 量程 [0,3] 而 idle 曲线是 0→5.867 的一条直线 ⇒ 花瓣掉到 11.25s 就冻住
+          （实测在 max 上的平台 11.1s，占一个 22s 循环的 44%）；GL1~GL14 光扫、bowen 波纹同理。
+          ⚠️ 判据**不是 moc3 的 repeat 标志**：安土 52 个 repeat=1 参数里混着 ParamForearmRAngle
+          （右前臂角，量程 [-30,30]，home 曲线 -59…9 带 8 次复位）这类**振荡型**参数，一律回绕会让它
+          从 -59° 瞬间跳到 +1° —— 用户实测症状是「选 home 时手会消失」。所以只对上面 markPhase 登记的
+          「整条 clip 单调推进且越界」的相位参数回绕，其余照旧硬钳；量程内是恒等变换。 */
     (()=>{ try{ const CP=im.coreModel&&Object.getPrototypeOf(im.coreModel);
         if(!CP||CP.__repeatWrap||typeof CP.setParameterValueByIndex!=='function') return;
         const orig=CP.setParameterValueByIndex;
         CP.setParameterValueByIndex=function(ix,val,w){
-          const PR=this&&this._model&&this._model.parameters;   // 打在原型上，必须用 this 取自己那份缓冲
-          if(PR&&PR.repeats&&PR.repeats[ix]&&typeof val==='number'&&isFinite(val)){
-            const mn=PR.minimumValues[ix], mx=PR.maximumValues[ix], sp=mx-mn;
-            /* 只在**严格越界**时取模：官方 ModF 会把「刚好等于 max」也折成 min，
-               而本皮肤有 75 个键点是刻意钉在 max 上的（effect 里 Param81 整段 =1.0、
-               complete 里 hxhb5=10），折到 min 就是让这些参数瞬间消失 → 按 max 端点不折处理。 */
-            if(sp>0&&(val>mx||val<mn)) val=mn+((val-mn)%sp+sp)%sp; }
+          const S=this.__phaseSet;                                // 逐模型登记，见上面 markPhase
+          if(S&&S.has(ix)&&typeof val==='number'&&isFinite(val)){
+            const PR=this&&this._model&&this._model.parameters;   // 打在原型上，必须用 this 取自己那份缓冲
+            if(PR){ const mn=PR.minimumValues[ix], mx=PR.maximumValues[ix], sp=mx-mn;
+              if(sp>0&&(val>mx||val<mn)) val=mn+((val-mn)%sp+sp)%sp; } }
           return orig.call(this,ix,val,w); };
         CP.__repeatWrap=1;
       }catch(e){} })();

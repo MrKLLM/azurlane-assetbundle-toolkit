@@ -273,13 +273,12 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
      做完这条之后，§6.33① 那个"画廊默认给 CG 还是给立绘"的取舍才不再是权衡问题。
 
 
-36. ✅ **Live2D 画廊里"花瓣不下落/动作后半段冻住"的真因：vendored Cubism framework 不实现 moc3 的 `repeat` 回绕标志（2026-10-08 第六轮，§123 / WF-36）**：
-     ~~上一轮结论「下落花瓣是场景侧粒子特效，`effect/gezi_jiguang` 的 17 个 ParticleSystem，调 motion
-     参数不可能补出来」~~ **已被推翻**：那 3 张贴图是纯白 alpha 遮罩（`wave/mask/line`）、物体名
-     `BombGlow/BombLine/iceParticles`、无 externals。载体在模型内——`MB_wutixialuoxunhuangz` 量程 [0,3]
-     且 **repeat=1**，idle 曲线是 0→5.867 的直线 ⇒ 库只硬钳不绕 ⇒ 11.25s 到顶、后 10.75s 冻住。
-     本皮肤 27865 条曲线中 580 条越界，**580 条 100% 落在 repeat=1 参数上（repeat=0 越界 0 条）**。修法：`index.html` 运行时补丁 ⑤ 按官方 ModF 只在严格越界时取模（量程内 260 次写入恒等 0 失配）。**未做**：其它皮肤的 repeat 标志表与影响面统计。
-     提交 `7121e12`；WF-16 六件套**串行全通过**（2821s，含第 5 件 269 皮肤全量按部位点击与第 6 件语音开关矩阵）。
+36. ⚠️ **Live2D「花瓣不下落 / 动作后半段冻住」：一半的原因是 vendored Cubism framework 缺"越界回绕"（2026-10-08 第六轮，§123 / WF-36）**：
+     ~~上一轮结论「下落花瓣是场景侧粒子特效 `effect/gezi_jiguang` 的 17 个 ParticleSystem，调 motion 参数不可能补出来」~~ **已被推翻**：那 3 张贴图是纯白 alpha 遮罩（`wave/mask/line`）、物体名 `BombGlow/BombLine/iceParticles`、无 externals。
+     **已修**：`MB_wutixialuoxunhuangz` 量程 [0,3] 而 idle 曲线是 0→5.867 的直线 ⇒ 库只硬钳不绕 ⇒ 11.25s 到顶、后 10.75s 冻住；运行时补丁 ⑤ 对「整条 clip 单调推进且越界」的相位参数按 ModF 取模（安土白名单 22 个：MB_ 下落与三组角度、GL2~GL13、Param52/65/122/141/142/143）。
+     ⚠️ 判据**不是** moc3 的 `repeat` 标志：它混标了 `ParamForearmRAngle`（[-30,30]，home 曲线 -59…9 带 8 次复位）这类振荡角，一律回绕 = 瞬间甩 60°，用户实测症状是「选 home 时手会消失」。
+     **仍未解决**：用户圈的 5 片静止花瓣由 `Paramfh`（量程 [0,10]，只在 `effect` 里是 0→2000 的斜坡，idle/home/main 全为常量 0）驱动，而画廊从不播 `effect` ⇒ 任何动作里都不动。要它们掉需把 `effect` 当常驻层叠上（源包 AnimatorController 实测 `effect` 是独立一层默认状态、权重 1.0/Override/Loop，全库 224/224 皆如此）——即 §6.35 撤销掉的那一层，**待拍板**。
+     提交 `7121e12`（首版按标志回绕）→ 本轮收窄为按曲线形状；WF-16 六件套串行全通过（2821s，含 269 皮肤全量按部位点击与语音开关矩阵）。
 
 
 ---
