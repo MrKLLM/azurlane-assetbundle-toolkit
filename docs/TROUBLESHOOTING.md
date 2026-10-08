@@ -7478,3 +7478,22 @@ C3 **页号敏感性**：把每个对象的采样点换到"错的一页" lightma
 ⚠️ 这条锚点第一版写成"UV1 跨度 == tiling"，**报 238 个不匹配**——那是判据自己错了：
 网格原始 UV1 并非恰好 [0,1]（实测 0.004..0.993），跨度是 `tiling × raw_span`。
 ⇒ 判据要落在**可精确重算的关系**上（重读源包原始 UV1 逐点算），不要落在"看起来该相等"的派生量上。
+
+
+### 追加（2026-10-08 分区域截图）：`import urllib.parse` 写在函数里，把"探针坏了"伪装成"浏览器起不来"
+
+**症状**：`dorm3d_room_probe.py` 连着四轮报 `[FAIL] 连不上浏览器`，`proc.poll()` 是 `None`（chrome 活着），
+手工用同样的参数起 chrome 却能秒连 `/json`。看起来完全是环境问题。
+
+**真因**：为了做分区域机位，在 `main()` 里加了一句 `import urllib.parse`。Python 的作用域规则是
+**函数内任何位置的 `import X` 都会把 `X` 绑成该函数的局部名** ⇒ 同一函数里更早、本来正常的
+`urllib.request.urlopen(...)` 全部抛 `UnboundLocalError: cannot access local variable 'urllib'`；
+而那段轮询写的是 `except Exception: pass` —— **报错被吞干净**，只剩下"连不上浏览器"这一句误导人的结论。
+
+**修法（两条都要，缺一不可）**：① 顶层已导入的模块**不要在函数内再 import 子模块**，需要子模块就在文件头写；
+② 轮询/重试的 `except` 只容忍连接类异常（`OSError / URLError / ValueError`），
+其余（`NameError / UnboundLocalError / AttributeError`）是**探针自己坏了**，必须原样报出来并立刻退出——
+本轮把它写成 `return 3` 并打印异常类型。
+**判据侧的教训**：一条"重试直到成功，否则报环境问题"的循环，如果吞掉所有异常，
+它就把程序性错误统一改写成"外部没就绪"，这类**错误归因失真**比崩溃更难查（崩溃至少会留栈）。
+已沉淀到技能 `headless-chrome-cdp-batch-export` 1.8.3（第 4b 条）。

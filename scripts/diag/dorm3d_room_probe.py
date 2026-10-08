@@ -28,6 +28,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -46,6 +48,7 @@ CHROME = AP.tool("AL_CHROME", "chrome", r"C:/Program Files/Google/Chrome/Applica
                  r"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe")
 PORT, PROFILE = cdp_slot.slot(ROOT, "d3droom")
 FAIL = []
+LAST_TABS = None
 
 
 def say(cond, msg):
@@ -146,7 +149,9 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
 
     g.scene.updateMatrixWorld(true);
     const inner=truth.per_object.filter(p=>p.center&&Math.max(...p.center.map(Math.abs))<=15);
-    window.__VIEWS=[
+    const ext=Q.get('views');
+    if(ext){ window.__VIEWS=JSON.parse(decodeURIComponent(ext)); }
+    else window.__VIEWS=[
       {name:'game', pos:truth.camera.pos, look:truth.camera.pos.map((v,i)=>v+truth.camera.fwd[i]*3.0), fov:60},
       {name:'az000', pos:[0, 6.5, -11], look:[0,1.2,0], fov:55},
       {name:'az090', pos:[11, 6.5, 0], look:[0,1.2,0], fov:55},
@@ -227,6 +232,66 @@ def page_sensitivity(side, work=WORK):
             samples.append((o["object"], round(a, 1), round(b, 1)))
     return {"tot": tot, "diff": diff, "ratio": (diff / tot) if tot else 0.0,
             "samples": samples}
+
+
+ZONE_ANCHORS = {
+    "bedroom": ["Bed", "Cabinet", "ChairFrontDesk", "FittingRoom"],
+    "living": ["Sofa", "Table", "Chair_1", "Chair_2", "Fireplace", "Lamp"],
+    "kitchen": ["Kitchen", "TableKitchen", "ChairKitchen"],
+}
+
+
+def zone_views(glb_path):
+    """按**场景里按名字命名的锚点**算分区域机位（不是手调坐标）。
+
+    相机放在"簇中心 -> 房间中心"这条线上、退到簇外 3.2 单位，眼高 1.45，看向簇心 0.8 高处。
+    锚点世界位置从 GLB 的节点 TRS 复算（与 --verify 的镜像锚点同一套矩阵代码）。
+    """
+    import struct
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import dorm3d_room_to_gltf as A
+    raw = open(glb_path, "rb").read()
+    jl, _t = struct.unpack_from("<II", raw, 12)
+    g = json.loads(raw[20:20 + jl].decode("utf-8"))
+    nodes = g["nodes"]
+    kids = {}
+    for i, n in enumerate(nodes):
+        for c in n.get("children", []):
+            kids[c] = i
+
+    def world(i, memo={}):
+        if i in memo:
+            return memo[i]
+        n = nodes[i]
+        M = A._quat_mat(n.get("translation", [0, 0, 0]), n.get("rotation", [0, 0, 0, 1]),
+                        n.get("scale", [1, 1, 1]))
+        p = kids.get(i)
+        if p is not None:
+            PM = world(p)
+            M = A._mul(PM[0], PM[1], M[0], M[1])
+        memo[i] = M
+        return M
+
+    pos_of = {}
+    for i, n in enumerate(nodes):
+        if n.get("name") in sum(ZONE_ANCHORS.values(), []):
+            pos_of.setdefault(n["name"], []).append(world(i)[1])
+    allp = [q for v in pos_of.values() for q in v]
+    centre = [sum(q[k] for q in allp) / len(allp) for k in range(3)]
+    views = []
+    for zone, names in ZONE_ANCHORS.items():
+        pts = [q for nm in names for q in pos_of.get(nm, [])]
+        if not pts:
+            continue
+        c = [sum(q[k] for q in pts) / len(pts) for k in range(3)]
+        # 相机放在簇中心**朝房间中心那一侧**（放反就穿到墙外，会被墙挡住）
+        dx, dz = centre[0] - c[0], centre[2] - c[2]
+        L = max(1e-6, (dx * dx + dz * dz) ** 0.5)
+        back = min(3.2, max(1.6, L * 0.9))
+        views.append({"name": zone, "n": len(pts),
+                      "pos": [round(c[0] + dx / L * back, 3), 1.45, round(c[2] + dz / L * back, 3)],
+                      "look": [round(c[0], 3), 0.8, round(c[2], 3)], "fov": 62})
+    return views, {k: [round(x, 2) for x in centre] for k in ["_centre"]}
 
 
 def serve(root_dir):
@@ -326,6 +391,8 @@ def main():
     ap.add_argument("--glb", default=".diag/dorm3d_room/room.glb")
     ap.add_argument("--truth", default=".diag/dorm3d_room/room.glb.truth.json")
     ap.add_argument("--skip-controls", action="store_true", help="调试用；正式判定不许跳")
+    ap.add_argument("--zones", action="store_true",
+                    help="按场景锚点补拍三个分区域机位（卧室/起居/厨房），不参与判定，只出图")
     a = ap.parse_args()
     glb = os.path.join(ROOT, a.glb) if not os.path.isabs(a.glb) else a.glb
     truth_p = os.path.join(ROOT, a.truth) if not os.path.isabs(a.truth) else a.truth
@@ -354,22 +421,33 @@ def main():
                                 base + "dorm3d_room/" + os.path.basename(truth_p))],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     chrome_tree.install(proc)
+    if os.environ.get("AL_DEBUG"):
+        print("[dbg] argv=%r" % (proc.args,))
+        print("[dbg] chrome pid=%s profile=%s port=%d" % (proc.pid, PROFILE, PORT))
     try:
         import websocket
         ws = None
-        for _ in range(120):
+        for _try in range(120):
             try:
                 tabs = json.load(urllib.request.urlopen("http://127.0.0.1:%d/json" % PORT, timeout=5))
+                globals()["LAST_TABS"] = [(t.get("type"), (t.get("url") or "")[:70]) for t in tabs][:5]
                 u = [t["webSocketDebuggerUrl"] for t in tabs
                      if "harness.html" in t.get("url", "") and t.get("webSocketDebuggerUrl")]
                 if u:
                     ws = websocket.create_connection(u[0], timeout=240, max_size=None)
                     break
-            except Exception:
-                pass
+            except (OSError, urllib.error.URLError, ValueError) as e:
+                if os.environ.get("AL_DEBUG") and _try in (0, 4, 12, 30):
+                    print("[dbg] /json 第 %d 次没连上 %s %s" % (_try, type(e).__name__, str(e)[:90]))
+            except Exception as e:
+                # 连不上可以等；NameError/UnboundLocalError 这类是**探针自己坏了**，
+                # 继续静默重试只会把"脚本写错"伪装成"浏览器起不来"（本轮真实踩过 4 次）
+                print("[FAIL] 轮询 /json 时探针自身出错: %s: %s" % (type(e).__name__, e))
+                return 3
             time.sleep(0.5)
         if ws is None:
-            print("[FAIL] 连不上浏览器")
+            print("[FAIL] 连不上浏览器：端口 %d 的 /json 最后一次 = %r；chrome rc=%s"
+                  % (PORT, LAST_TABS, proc.poll()))
             return 2
         browser = {"ws": ws, "errs": []}
         for m in ("Runtime.enable", "Log.enable", "Page.enable"):
@@ -470,6 +548,18 @@ def main():
                 for v in (amb or {}).get("views", [])}
         print("  ℹ 补光版（scene 加 AmbientLight 0.6，**不是包里的数据**，只为看清明暗关系）: "
               "各机位落笔 %s；截图 shot_amb_*.png" % aink)
+        if a.zones and side:
+            views, _c = zone_views(glb)
+            zn = [v["name"] for v in views]
+            zq = ("&lm=1&side=%s&views=%s"
+                  % (base + rel_side, urllib.parse.quote(json.dumps(views, ensure_ascii=False))))
+            zc = run_case(browser, base, rel_glb, rel_truth, "zone", {"names": zn}, extra=zq)
+            print("  ℹ 分区域机位（相机放在房间中央朝各簇看，眼高 1.45；锚点来自场景命名物体）:")
+            for v in views:
+                print("     %s: %d 个锚点，相机 %s 看 %s" % (v["name"], v["n"], v["pos"], v["look"]))
+            print("     各机位落笔 %s；截图 shot_zone_*.png"
+                  % {v["name"]: (round(v["ink"], 3) if v["ink"] is not None else None)
+                     for v in (zc or {}).get("views", [])})
     finally:
         try:
             ws.close()

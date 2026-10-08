@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。
-version: 1.8.2
+version: 1.8.3
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -39,6 +39,14 @@ version: 1.8.2
 2. **独立 `--user-data-dir` + 清残留 chrome**：必须用独立 profile 目录，且启动前杀掉使用同一目录的残留 chrome 进程，否则调试端口被旧进程占用，`/json` 返回的是旧会话的 tab。
 3. **WebGL 走软渲染**：无头环境 GPU 不可用，WebGL 页面会黑屏或崩溃。加 `--enable-unsafe-swiftshader --use-angle=swiftshader` 强制 SwiftShader 软渲染。实测 2400px 长边约 2s/张，可接受；输出尺寸设上限防纹理超限。
 4. **`toBlob` 需要 `preserveDrawingBuffer:true`**：WebGL 上下文创建时必须传 `preserveDrawingBuffer: true`，否则事件循环清空帧缓冲后 `toBlob`/`toDataURL` 拿到黑图或空图。批量循环里逐项 `dispose()` 纹理/资源，防 4096² 页纹理堆爆显存。
+4b. **连不上浏览器时先怀疑探针自己，而不是 chrome**。真实案例（2026-10-08）：在 `main()` 里写了
+   一句 `import urllib.parse`，Python 把 `urllib` 当成**该函数的局部名**，于是同一函数里更早的
+   `urllib.request.urlopen(...)` 每次抛 `UnboundLocalError`；而那段轮询写的是 `except Exception: pass`，
+   于是报错被完全吞掉，症状变成"chrome 起不来 / 连不上浏览器"，白查四轮。
+   ⇒ ① **函数内不要 import 顶层已导入的模块**（要子模块就在文件头 `import urllib.parse`）；
+   ② 轮询/重试的 `except` 必须**只容忍连接类异常**（`OSError/URLError/ValueError`），
+   其余原样抛出或打印——`NameError/UnboundLocalError/AttributeError` 是探针坏了，不是环境没就绪。
+   ③ 排障时先打印 `proc.poll()` 与最后一次异常类型，再动启动参数。
 5. **`Runtime.evaluate` 前须等页面就绪**：`/json` 出现 tab ≠ 页面加载完成。探针若在目标 DOM（如 `#prog`）存在前发送，evaluate 返回 null 或抛异常。驱动脚本应对 `null` 探针结果做容错重试，或先 evaluate 一个存在性检查再进入正常轮询。
 
 ## 验证类任务的额外坑（做"批量断言"而非"批量导出"时）
