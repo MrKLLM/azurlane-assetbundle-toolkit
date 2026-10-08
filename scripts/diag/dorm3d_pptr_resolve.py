@@ -212,10 +212,22 @@ class Resolver:
         return "ext_hit", e.name, pid
 
     def fetch(self, owner_env_table, bucket, cab, pid):
-        """拿到目标 ObjectReader；解不开返回 (None, 原因)。"""
+        """拿到目标 ObjectReader；解不开返回 (None, 原因)。
+
+        ⚠️ `file_id == 0` 的"本包"指的是**引用方自己那个 SerializedFile**，不是"这次装配的源包"。
+        材质对象住在 `mat_db_*` 包里，它自己引用的贴图常常也在同一个包里 ⇒ 拿源包的表去查会
+        静默查不到（实测：141 个材质里 93 个因此丢了贴图）。所以本包先查调用者给的表，
+        查不到再按 CAB 名回落到索引里那个包。
+        """
         if bucket == "self":
             o = owner_env_table.get((cab_key(cab), pid))
-            return (o, None) if o is not None else (None, "本包 path_id 未命中")
+            if o is not None:
+                return o, None
+            bp = self.bundle_of(cab)
+            if bp is None:
+                return None, "本包 path_id 未命中，且 CAB %s 不在索引里" % cab
+            o = self.table(bp).get((cab_key(cab), pid))
+            return (o, None) if o is not None else (None, "本包 path_id 未命中 (%s)" % norm(bp))
         if bucket != "ext_hit":
             return None, "不落盘: %s" % bucket
         bp = self.bundle_of(cab)

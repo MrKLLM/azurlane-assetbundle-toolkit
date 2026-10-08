@@ -3304,3 +3304,72 @@ prefab→res 材质），必须按 `(file_id, path_id)` 跨包取回真实对象
 产物 `.diag/dorm3d_pptr/resolve_report.json`（不入库），对照缓存 `.diag/dorm3d_cab_index.json`（不入库），
 `scripts/diag/peak_mem.py`（资源口径），`Output/dependency_manifest.json`（依赖清单）。
 相关：**WF-32**（单包版材质 PPtr + 装配验收）、**WF-28**（定向拉依赖闭包）、**§116**（假读数族，本轮追加一条否证）。
+
+---
+
+### WF-38: Unity 场景包 → `room.glb`：房间级装配怎么落地、怎么验到能交人目视（2026-10-08）
+
+适用：把一个**场景包**（几百个 `GameObject` + `MeshFilter`/`MeshRenderer` + 灯 + 外链网格/材质/贴图）
+装配成前端可显示的 glTF。与 **WF-32**（单个蒙皮角色）的区别：这里几何是**静态网格 + 跨包外链 + 实例复用**，
+所以新增三件事——激活态过滤、材质/贴图的跨包解析、以及"画面到底有没有东西"的可测判据。
+
+**六步（顺序即依赖）**
+
+1. **解析层直接复用 WF-37**（`diag/dorm3d_pptr_resolve.py` 的 `Resolver` + 现扫 CAB 索引），
+   不要在新装配器里再写一套 externals 处理。⚠️ `file_id==0` 的"本包"是**引用方自己的 SerializedFile**，
+   不是"这次打开的源包"——材质自引用贴图就在材质包里，查错表会**静默丢贴图**（§124）。
+2. **几何用 UnityPy 自己的 `MeshHelper.MeshHandler` 解码**，不要用 §116 的反解路径：
+   房间 FBX 网格的 `ChannelInfo.dimension` 是打包字节（实测读到 52，UnityPy 按 `& 0xF` 用），
+   反解的"非末段通道宽度可整除推出"前提不成立 ⇒ `KeyError`。
+   换解码器**必须先做跨实现对齐**：在天狼星 `body` 上比 `MeshHandler` 与反解结果
+   （13,412 顶点 / 首顶点权重 `(32768,32767,0,0)` / 骨号 `(27,31)`）逐位相同才允许换。
+   `MeshHandler` 还顺手覆盖了 `.resS` 流式顶点数据（角色包是内联、房间包是流式，两种都有）。
+3. **按激活态过滤**（`自身 + 全祖先 m_IsActive`）：房间 1 实测 348 个 MeshFilter 里 **49 个是关着的**
+   （首因 39 个在 `night` 子树），日夜两套在同一位置，都画就叠面。这是 §55 在 3D 侧的同一件事。
+4. **实例去重按 `(网格, 材质序列)` 组合键**，不是按网格名：一个网格可被多个节点复用（吊灯 8 盏共用 1 份几何），
+   而同一网格在不同对象上可挂不同材质序列。299 个对象 → 205 个 glTF 网格 / 219 个 primitive。
+5. **坐标系沿用 WF-32 的镜像 X**（顶点/法线 x 取反 + 换绕序 + 节点 TRS 同一套），
+   并把它做成可关的 `--no-mirror`，**专门用来给判据做反向对照**（见下）。
+6. **产物交人看之前，先把它变成数**：装配器另写一份 `room.glb.truth.json`——
+   里面的 primitive 数 / position 计数 / 三角数 / 世界盒 / 每对象中心与尺寸 **全部来自 Unity 声明字段**
+   （`m_VertexData.m_VertexCount`、`m_SubMeshes.indexCount`、`m_LocalAABB`、Transform 链），
+   **不是**我写进 GLB 的那份字节。前端探针（`diag/dorm3d_room_probe.py`）拿 GLTFLoader 的真实读数去对这份真值。
+
+**判据（`exit 0` 即通路成立）**
+| 判 | 内容 | 房间 1 实测 |
+|---|---|---|
+| V1 | 装配期锚点：解码顶点数 == 源包声明、submesh 数 == `m_SubMeshes`、实算顶点盒 vs 声明 `m_LocalAABB` 偏差 <3% | 不符 0 / 0 / 0 |
+| V2 | 字节级回读（`--verify`）：bufferViews 挂上、accessor 不越界、属性名按规范白名单、索引 < 顶点数、PNG 魔数、无 orphan mesh | 全过 |
+| V3 | **镜像锚点**：glTF 世界盒（文件字节算）vs Unity 世界盒（源包算），应 x 反号、y/z 相等 | 有效 264 条，最大相对差 **7.4e-08** |
+| V4 | 前端 Mesh 对象数 == 真值 primitive 数 | 329 vs 329 |
+| V5 | 前端 Σ `position.count` == 真值 | 219,964 vs 219,964 |
+| V6 | `renderer.info.render.triangles` == 真值（所有对象 `frustumCulled=false` ⇒ 恒等而非"至少"） | 121,321 vs 121,321 |
+| V7 | 前端非占位世界盒 vs 真值世界盒，逐轴相对全场景跨度 <0.5% | 逐轴吻合 |
+| V8 | console 零 error；游戏机位落笔占比 ≥0.15 | 0 条；0.546 |
+| C1 | 反向对照：指向不存在的 glb ⇒ V4/V5 计数必须归零 | Mesh 0 / position 0 ✅ 红得对 |
+| C2 | 反向对照：摘掉所有灯 ⇒ 落笔占比必须塌 | 0 ✅（改判据前它报 1.0，见 §124） |
+| C3 | 反向对照：`--no-mirror` 版必须被 V3 判红 | 最大相对差 5.8e-02 ✅ |
+
+**踩坑记录**
+- ⚠️ **三条"结构合法、数字全绿、画面是错的"同族假绿灯**（详见 §124）：`self` 解释错 ⇒ 93/141 材质静默丢贴图；
+  落笔占比按"与背景不同"数 ⇒ 一片漆黑报 1.0；镜像锚点在几何中心含原点时**退化恒真** ⇒ 反向对照假通过。
+  ⇒ 每条锚点都要**自带敏感度声明**（剔除给不出证据的样本并打印剔除数，有效分母不足就判红）。
+- **世界盒会被户外布景撑爆**：房间 1 的场景里 `pre_ship01` 在 280 单位外、`fbx_Cloud_Layer_*` 在 ±200 的 y 上，
+  全场景盒跨 1400 单位 ⇒ 取景/截图必须按**室内子集**（对象中心距 ≤15，实测 247 个）来定，
+  否则相机一退就退到太空外面（与 Spine 那条"恒不渲染的巨幕遮罩撑爆取景"同族）。
+- **场景里那台 `Camera` 不能当取景权威**：它的 TypeTree 里没有 `m_FieldOfView/m_Near/m_Far`（只有镜头/物理相机类字段），
+  位置与朝向可用（机位 (-2.32,1.38,-2.67) 看向 +Z，眼高 1.38 m 合理），**FOV 只能由观看者定**并在报告里写明。
+- **Unity 内置原语（`unity default resources`）盘上没有文件**：31 个对象（含 `WallLeft/Floor/Bed/Sofa`）
+  只能用带 `extras.placeholder` 标记的单位立方体占位，**不算已还原**；它们按 path_id 只分 3 组
+  （10202×28 / 10206×2 / 10209×1），要真网格得从设备取内置资源文件。占位对象的 24 顶点/12 三角
+  会计入总数（真值里用 `placeholder_basis` 注明），但**不进世界盒**。
+- **观感 ≠ 通路**：以上全绿只证明"几何/材质/贴图/摆位搬对了"。画面与游戏差的是**光照模型**——
+  包里 21 盏灯只有 5 盏是激活态（12 盏属夜版、4 盏是 glTF 没有的 Area 面光源），
+  且 Unity 光强与 glTF 量纲不同。补 `AmbientLight` 只是给对照看明暗关系用的，**不是包里的数据**，
+  截图文件名用 `shot_amb_*` 与 `shot_good_*` 分开。
+
+**涉及文件**：`scripts/dorm3d_room_to_gltf.py`（装配器 + `--verify` + `--truth-out` + `--no-mirror/--include-inactive` 对照开关）、
+`scripts/diag/dorm3d_room_probe.py`（three.js 验收 + CDP 截图 + C1/C2 对照）、
+`scripts/diag/dorm3d_pptr_resolve.py`（WF-37 解析层，本轮修 `self` 语义）、
+产物 `.diag/dorm3d_room/{room.glb,room.glb.truth.json,harness.html,shot_*.png}`（不入库）。
+相关：**WF-37**（跨包 PPtr）、**WF-32**（角色级 GLB 装配与回读纪律）、§124、§116、§55。

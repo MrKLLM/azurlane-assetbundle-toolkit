@@ -1,7 +1,7 @@
 ---
 name: unity-assetbundle-painting-restore 触发词（3D 侧）：跨包 PPtr、assets_file 带下划线、ObjectReader.assetsfile 为 None、.sharedAssets、resS 不是 SerializedFile、externals 下标 ±1、pptr.deref、CAB 索引现扫、unity default resources 内置外链、激活态过滤、m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、跨包解析、SerializedFile 多个、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.13.4
+version: 1.13.5
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -67,7 +67,12 @@ prefab 中 `m_Sprite = (FileID, PathID)`：
    ⚠️ 恒 None 的是 **PPtr** 上的 `assetsfile`——别把这两个名字混成一条"读不出归属"的结论（本项目就因此多写了一圈
    "遍历 `env.file.files` 建 path_id 反查表"的无用代码）。归属表仍要建，但**键必须是 `(assets_file.name, path_id)`**：
    同一 bundle 的两份 SerializedFile 的 `path_id` **会撞车**。
-3. **`file_id` 从 1 起 → `externals[file_id-1]`，且 `file_id==0` 指"同一份 SerializedFile"**（不是"同一个 bundle"）。
+3. **`file_id` 从 1 起 → `externals[file_id-1]`，且 `file_id==0` 指"引用方自己那份 SerializedFile"**
+   ——不是"我这次打开的源包"。材质对象住在 `mat_*` 包里、它引用的贴图常常**也在同一个材质包**里（自引用），
+   拿源包的对象表去查 `self` 会**查不到且不报错**：真实事故是 141 个材质里 **93 个静默丢了贴图**，
+   而顶点数 / 三角数 / 世界盒 / console 四条锚点全绿（"结构合法、数字全绿、画面是错的"）。
+   ⇒ `self` 先查调用者给的表，查不到再按 CAB 名回落到索引里那个包；并把
+   **挂上 / 解析失败 / 本就无槽**三个数分开打印，不许合并成一个"贴图引用数"。
 4. **落点按 CAB 名索引 + 按名字精确选目标 SerializedFile**。索引给**每个** SerializedFile 单条登记（含 `.sharedAssets`）；
    作用域除资产前缀目录外，还要用官方依赖表里该包的 `deps` 补齐**类目之外**的依赖（实测补进 2 条：
    `custom_builtin`、`font/zhunyuan`——它们不被 MeshFilter 引用，但材质引用，缺一类就少一类）。
