@@ -270,8 +270,8 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
      参数不可能补出来」~~ **已被推翻**：那 3 张贴图是纯白 alpha 遮罩（`wave/mask/line`）、物体名
      `BombGlow/BombLine/iceParticles`、无 externals。载体在模型内——`MB_wutixialuoxunhuangz` 量程 [0,3]
      且 **repeat=1**，idle 曲线是 0→5.867 的直线 ⇒ 库只硬钳不绕 ⇒ 11.25s 到顶、后 10.75s 冻住。
-     本皮肤 27865 条曲线中 580 条越界，**580 条 100% 落在 repeat=1 参数上（repeat=0 越界 0 条）**。
-     修法：`index.html` 运行时补丁 ⑤ 按官方 ModF 只在严格越界时取模（量程内 260 次写入恒等 0 失配）。**未做**：其它皮肤的 repeat 标志表与影响面统计。
+     本皮肤 27865 条曲线中 580 条越界，**580 条 100% 落在 repeat=1 参数上（repeat=0 越界 0 条）**。修法：`index.html` 运行时补丁 ⑤ 按官方 ModF 只在严格越界时取模（量程内 260 次写入恒等 0 失配）。**未做**：其它皮肤的 repeat 标志表与影响面统计。
+     提交 `7121e12`；WF-16 六件套**串行全通过**（2821s，含第 5 件 269 皮肤全量按部位点击与第 6 件语音开关矩阵）。
 
 
 ---
