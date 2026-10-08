@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
-description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.7.1
+description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
+version: 1.7.2
 ---
 
 # Live2D 网页运行时集成
@@ -447,5 +447,49 @@ after **53（与 before 相等）**，且位移 >0.3 的判定区数 = **0**。
 **量程这一层不在 motion 文件里**：Cubism 会把参数钳进 moc3 声明的 [min,max]，所以
 "曲线 0→2000"可能对应"部件纹丝不动"（实测某参数量程 [0,10]，起播 0.45 秒即饱和）。
 判"动没动"必须读 `getParameterValueByIndex` 并配 `getParameterMinimumValue/MaximumValue`
-（这个 build 只有 index 版，`…ById` 版不存在），而且**采样窗要盖过整条 clip**——有的部件
-要到第 8 秒才动，采 3 秒会得到假阴性。
+（index 版与 `…ById` 版都在，`ById` 内部就是 `getParameterIndex` + 转调 `ByIndex`），
+而且**采样窗要盖过整条 clip**——有的部件要到第 8 秒才动，采 3 秒会得到假阴性结论。
+
+## 11. 运行时语义差异：moc3 的 `repeat` 回绕标志（2026-10-08 实测，见 §123）
+
+**症状形状**：某个部件在**游戏里连续动、在我们这里动到一半冻住**；参数轨迹恰好饱和在
+moc3 的 max 上，而 motion 曲线明显写着要跑到量程外。这不是丢曲线、也不是选错 clip——
+是**两边运行时对同一个标志的解释不同**。
+
+- moc3 每个参数除 `[min,max,default]` 外还有一个 **`repeat` 标志**；官方语义 = 值超出量程时
+  **按量程取模回绕**（Unity 原生 framework 走 `CubismMath::ModF`）。所以"单调爬升远超 max"
+  可以是美术刻意的循环相位（本项目实例：下落循环值量程 [0,3]、idle 曲线 0→5.867 的一条直线，
+  斜率在 idle/home/effect 三条 clip 上恒等 ⇒ 相位型参数无疑）。
+- **vendored `pixi-live2d-display` 0.4.0 完全不认这个标志**：整包字符串 `repeat` 命中 0 次，
+  `setParameterValueByIndex` 只有两行 min/max 硬钳 ⇒ 所有 repeat 参数的循环在后半段被抹平。
+  判据别靠猜：**拿"越界曲线"与"repeat 标志"做交叉表**——本项目越界 580 条 **100% 落在
+  repeat=1 上、repeat=0 越界 0 条**，一次同时否证"美术写错"与"导出写坏"。
+
+**修法（一处原型包装，不要改数据）**：包 `CubismModel.prototype.setParameterValueByIndex`，
+`repeat[ix]` 且**严格越界**时 `val = mn + ((val-mn)%sp+sp)%sp`。三条硬约束：
+
+1. **`val == max` 不折**。官方 ModF 会把"刚好等于 max"折成 min，但曲线里常有**刻意钉在 max**
+   的键点（实测 75 个：某参数整段 =1.0、某花瓣值 =10.0），折过去就是让部件瞬间消失。
+   这条不是洁癖——是**量程内恒等自检**（全部 repeat 参数 × 5 档写入读回，要求 0 失配）抓出来的。
+2. **包装体里必须用 `this._model.parameters`**，不能用闭包捕获某个实例：标志表逐模型不同，
+   捕错实例就会拿别人的量程折这条值。
+3. **写值的唯一入口是 framework**：Cubism Core for Web 的 Model **没有 `setParameterValue`**
+   （只有 `getParameterValues` 等只读绑定 + `parameters.values` 这个 wasm 视图），
+   所以钳位/回绕只能在 setter 这一层修；`parameters.repeats` 就是那张标志表，直接读即可。
+   另：`_parameterIds` / `parameters.ids` 实测是**纯字符串数组**，按 `.string` 取会全部落空。
+
+**验收四条，缺一条不许说修好**：① 直写超量程值读回 = 期望回绕值；② 在**真实播放路径**上
+统计"动作层交给 setter 的原始值"确实越界过（直写绕过了动作求值，不能当这条证据）；
+③ 接缝处一条"传入→存值"实例（3.0483 → 0.0216）；④ 量程内恒等自检 0 失配。
+
+**仪器陷阱（每条单独就能造出"补丁没用"的假结论）**：
+- 无头里 `Ticker` 对 `dt` 有上限 ⇒ 运动相位推进远慢于墙钟（实测约 3 帧/秒），
+  11.25s 的接缝要 ~49s 墙钟才走到；**按墙钟给的 25 秒采样窗会整段落在接缝之前**。
+  用 `Ticker.shared.tick(合成时刻)` 推时间**推不动**，只能拉长墙钟窗口。
+- 两次独立抓帧**不能**逐像素对照（起播相位与物理积分步数不同，t=0 就差几万像素）；
+  定位改动面用参数级判据，或在同一次会话里扫值截图。
+- 探针不许写死别人的服务器；自带 `http.server` 并在启动 Chrome 前轮询 200，
+  失败时打印 `location.href` + `document.body.innerText`——「GALLERY is not defined」
+  十有八九是连不上服务器，不是页面被改坏。
+- 在原型上叠第二层监视器前必须先存**原始**实现引用（`CP.__origSet || CP[method]`），
+  否则第二次运行会把监视器自己当基类，`return base.call(...)` 立刻自递归。

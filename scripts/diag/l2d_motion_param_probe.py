@@ -55,6 +55,9 @@ def main():
                     help="采样次数；⚠️ 窗口必须盖过整条 clip——main_1 的 hxhb 要到 8.12s 才动，"
                          "采 3 秒会得到「这条 clip 不动花瓣」的假结论")
     ap.add_argument("--step", type=int, default=STEP_MS, help="采样间隔 ms")
+    ap.add_argument("--dump", action="store_true",
+                    help="把逐帧轨迹写进 .diag/l2d_param_probe_shots/<model>_<clip>_series.json，"
+                         "供改前/改后逐样本比对（终端只有 min..max，看不出平台）")
     a = ap.parse_args()
     pat = re.compile(a.params)
 
@@ -195,6 +198,7 @@ def main():
         if r.get("skip"):
             print("\n-- %s: %s" % (clip, r["skip"])); continue
         moved = list(zip(r["ids"], r["series"]))
+        series_dump = {}
         print("\n-- clip `%s`（currentGroup=%s）" % (clip, r.get("curGroup")))
         n_move = 0
         for i, s in moved:
@@ -208,11 +212,40 @@ def main():
             if span > 1e-3:
                 n_move += 1
             clamp = ""
-            if m.get("max") is not None and (max(v) >= m["max"] - 1e-6 or min(v) <= (m.get("min") or 0) + 1e-6):
-                clamp = "  ← 触到量程 [%s,%s]" % (m.get("min"), m.get("max"))
-            print("   %-26s %+.3f..%+.3f  Δ=%.3f  量程[%s,%s]%s"
-                  % (i, min(v), max(v), span, m.get("min"), m.get("max"), clamp))
+            if m.get("max") is None or m.get("min") is None:
+                shape = ""
+            else:
+                # 「触到量程」不等于「被钳死」：合法的曲线末帧也会刚好碰到 max。
+                # 真正的失真特征是**在 max 上停一段平台**（moc3 repeat 参数被硬钳时的表现），
+                # 以及锯齿回绕应有的**下降次数**（每循环一次下降一次）。
+                mx, mn, span_q = m["max"], m["min"], (m["max"] - m["min"]) or 1.0
+                run = best = 0
+                for x in v:
+                    run = run + 1 if abs(x - mx) <= 1e-3 * max(1.0, abs(mx)) else 0
+                    best = max(best, run)
+                hold_s = best * a.step / 1000.0
+                drops = sum(1 for k in range(1, len(v)) if v[k] < v[k - 1] - 1e-3)
+                shape = "  平台%.1fs/占%.0f%% 下降%d次" % (
+                    hold_s, 100.0 * best / max(1, len(v)), drops)
+                if best >= 3:
+                    clamp = "  ← 被钳死在 max=%s（停 %.1fs）" % (m["max"], hold_s)
+                elif max(v) >= mx - 1e-6:
+                    clamp = "  ← 触到量程上沿"
+                step_ = max(1, len(s) // 46)
+                spark = "".join(" ▁▂▃▄▅▆▇█"[min(7, max(0, int(round((x - mn) / span_q * 7))))]
+                                for x in v[::step_])
+                shape += "  [" + spark + "]"
+            print("   %-26s %+.3f..%+.3f  Δ=%.3f  量程[%s,%s]%s%s"
+                  % (i, min(v), max(v), span, m.get("min"), m.get("max"), shape, clamp))
+            if a.dump:
+                series_dump[i] = {"meta": m, "series": s}
         print("   会动的参数 %d / %d" % (n_move, len(r["ids"])))
+        if a.dump:
+            fp = os.path.join(SHOTS, "%s_%s_series.json" % (a.model, clip))
+            with open(fp, "w", encoding="utf-8") as fh:
+                json.dump({"model": a.model, "clip": clip, "step_ms": a.step,
+                           "sample_ms": 1500, "series": series_dump}, fh, ensure_ascii=False)
+            print("   轨迹已落盘 →", fp)
     try:
         ws.close()
     except Exception:

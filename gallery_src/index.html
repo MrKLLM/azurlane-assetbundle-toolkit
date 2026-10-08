@@ -1331,6 +1331,29 @@ async function renderLive2D(s, sk){
           Raycaster/Live2dChar）里根本没有 Breath，而 74~85% 的 idle 已自带动 ParamAngleX/Y/Z +
           ParamBodyAngleX 曲线，这层会在动作之后再叠 ±4~7.5° 的 3.2~6.5s 高频摆动 → 头部双驱动。 */
     if(im.breath&&im.breath.setParameters) im.breath.setParameters([]);
+    /* ⑤ repeat 参数按量程**回绕**（取证见 docs/TROUBLESHOOTING.md §120）：moc3 给每个参数带 1 字节
+          repeat 标志，Cubism 官方语义是"值超出 [min,max] 就按量程取模回绕"（Unity 原生 framework 走
+          CubismMath::ModF），而 vendored pixi-live2d-display 0.4.0 的 setParameterValueByIndex 只做
+          min/max 硬钳——整包 119,922 字节里字符串 "repeat" 出现 **0 次**，它压根不知道有这个标志。
+          安土实测：57 条 clip 的 27,865 条参数曲线中 580 条越界，**580 条全部落在 repeat=1 的参数上**
+          （repeat=0 的越界 0 条）⇒ 越界不是美术失误，而是刻意写的循环相位，被硬钳之后半段动作整段
+          消失：MB_wutixialuoxunhuangz 量程 [0,3] 而 idle 曲线是 0→5.867 的一条直线 ⇒ 花瓣掉到
+          11.25s 就冻住（实测在 max 上的平台 11.1s，占一个 22s 循环的 44%）。
+          量程内的值经取模是恒等变换，所以本补丁只可能影响那 580 条越界曲线。 */
+    (()=>{ try{ const CP=im.coreModel&&Object.getPrototypeOf(im.coreModel);
+        if(!CP||CP.__repeatWrap||typeof CP.setParameterValueByIndex!=='function') return;
+        const orig=CP.setParameterValueByIndex;
+        CP.setParameterValueByIndex=function(ix,val,w){
+          const PR=this&&this._model&&this._model.parameters;   // 打在原型上，必须用 this 取自己那份缓冲
+          if(PR&&PR.repeats&&PR.repeats[ix]&&typeof val==='number'&&isFinite(val)){
+            const mn=PR.minimumValues[ix], mx=PR.maximumValues[ix], sp=mx-mn;
+            /* 只在**严格越界**时取模：官方 ModF 会把「刚好等于 max」也折成 min，
+               而本皮肤有 75 个键点是刻意钉在 max 上的（effect 里 Param81 整段 =1.0、
+               complete 里 hxhb5=10），折到 min 就是让这些参数瞬间消失 → 按 max 端点不折处理。 */
+            if(sp>0&&(val>mx||val<mn)) val=mn+((val-mn)%sp+sp)%sp; }
+          return orig.call(this,ix,val,w); };
+        CP.__repeatWrap=1;
+      }catch(e){} })();
     /* startMotion 必须显式给 index：传 null 会让库取 motion[group][null] → undefined 而静默失败。
        用户触发的动作一律 FORCE：库的 state.reserve() 会拒绝 ≤ 当前优先级的请求（idle 占 IDLE=1），
        不 FORCE 就连点第二个部位都放不出来。回落 idle 交给运行时（见 ②），不再需要定时器。 */
