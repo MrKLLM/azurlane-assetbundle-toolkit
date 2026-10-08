@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
-description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳、选某个动作时手会消失、部件在任何动作里都不动。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.7.5
+description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳、选某个动作时手会消失、部件在任何动作里都不动、切动作时某个部件闪一下、部件消失一下但 part 组读数恒定。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
+version: 1.7.6
 ---
 
 # Live2D 网页运行时集成
@@ -519,4 +519,16 @@ moc3 的 max 上，而 motion 曲线明显写着要跑到量程外。这不是�
   那一臂"台阶没变"，但打印里没能带上这个标志的实际值 ⇒ 那次"没用"不算结论。
   通用形状：任何"关掉/打开某行为"的对照，都要在同一份输出里回读出**它此刻的真值**，
   否则"配置没生效"与"这条路无效"长得一模一样。
+
+**显隐类症状（"某个部件闪一下 / 消失一下"）的三条判据（2026-10-08 实测）**：
+- **先分层，再猜原因**：逐帧同时采 `getPartOpacityByIndex`（全部 part）与全部 drawable 的
+  `getDrawableOpacity`，看台阶落在哪一层。实测形状 = **195 个 part 全程恒定、770 个 drawable
+  有 188 个在变** ⇒ 隐藏是**逐个 ArtMesh 自己的透明度**做的，与部件组无关——顺带否证了
+  "PartGroup 在 motion 起播时 `reset()` 按 `i==e?1:0` 写 0/1，与交叉淡化权重叠出中间档"这条假设。
+  不做这一步就会在错误的层上找正确的 bug。
+- **事件"次数"不能当判据**：采样窗按墙钟切、动作时间推进又不均匀（上面第一条仪器陷阱），
+  同一条 clip 两次跑出 10 与 20 次。可比的只有「同一批成员是否反复出现」与「两臂之差」。
+- **计数为 0 必须先证"采到了"**：一条臂管道没接通时同样打印 `0`，而「没跳变」与「没采到」
+  长得一模一样（本轮真实踩到：`--allparams` 报 `groupParams:0`，被读成了"参数层没问题"）。
+  任何计数判据都要在同一份输出里带上**实际样本数**；管道没接通就先摘掉那条臂并留 TODO。
 

@@ -3263,8 +3263,20 @@ WF-15（承重白名单：标注正本属于"丢了不可复原"那一类）、W
    而在场景侧那层常驻动效（光带/星点/飘落）我们整层没有；绝对 ‰ 跨源仍受缩放影响，
    但"运动分布"（各条占总量的百分比）是可比的：我们 100% 挤在中间两条，游戏是 19/37/33/11。
 
+6. **观感是"闪一下 / 消失一下"而不是"冻住"时，先分层再猜原因**（工具 `scripts/diag/l2d_part_flicker_probe.py`）：
+   逐帧**同时**采全部 part 的不透明度与全部 drawable 的不透明度，按两档筛台阶（hard：`<0.05` 且前帧 `>0.5`；
+   soft：单步降 ≥0.4 且 4 步内回升到 80%），并配一条"只跑 idle 不切动作"的对照组。本项目实测四连：
+   对照组 **0 次** ⇒ 症状绑的是"切换动作"这个事件；复位补丁两臂 **11 vs 12 次** ⇒ 无罪；
+   `home.motion3.json` 里 `Target=="PartOpacity"` 曲线 **0 条** ⇒ 台阶不是动画师写的；
+   **195 个 part 全程恒定 / 770 个 drawable 有 188 个在变** ⇒ 隐藏落在**逐个 ArtMesh 自己的透明度**这一层，
+   "PartGroup 在起播时 `reset()` 写 0/1"这条假设当场被否证。**不做第 ④ 步就会在错误的层上找正确的 bug。**
+   ⚠️ 两条判据红线：**事件绝对次数不能当判据**（采样窗按墙钟切、无头里动作时间推进又不均匀，同一条 clip
+   两次跑出 10 与 20 次；只有"同一批成员是否反复出现"与"两臂之差"可比）；**计数为 0 必须先证明这条臂真的采到了**
+   （本轮 `--allparams` 管道没接通却输出 `0`，被读成了"参数层没问题"——「没跳变」与「没采到」长得一模一样）。
+
 **涉及文件**：`gallery_src/index.html`（运行时补丁 ⑤ + 环境层 + `motionSegs`/`poseDriven`/`markPhase`）、
 `scripts/diag/l2d_curve_shape.py`、`scripts/diag/l2d_param_meta_probe.py`、`scripts/diag/l2d_motion_param_probe.py`（`--dump` + 平台/下降判据 + `AMB=1`）、
+`scripts/diag/l2d_part_flicker_probe.py`（逐帧 part/drawable 不透明度 + `--trace` + `window.__noRest` 两臂）、
 `scripts/diag/l2d_gallery_capture.py`（`--amb off|yield|mask` 三臂）、
 `scripts/diag/l2d_motion_energy.py`（分带/热区）、
 `scripts/diag/l2d_effect_layer_scan.py`（`--speeds` 逐层倍速/默认状态）、
