@@ -6660,12 +6660,42 @@ D 盘可用 **268.64 GB**。
 ⇒ 任何新写的 UnityPy 读取脚本，开头就要按项目既有写法设这个常量（`export_assets.py` 等 8 个脚本都是这么做的）。
 
 
+### 追加（2026-10-08 跨包 PPtr 打通）：一条否证 + 两个新的"安静错位"读数
+
+- **否证交接文档的坑 #2**（`docs/archive/2026-10-07_3D宿舍_交接给下一轮.md` 第 34 行那句
+  "`ObjectReader.assetsfile` 在这批包上是 None ⇒ 要自己遍历 `env.file.files` 建 path_id 归属表"）：
+  **不成立**。UnityPy 1.25.3 的 ObjectReader 上那个属性叫 **`assets_file`（带下划线）且有值**，
+  逐对象给得出归属——实测 2364 个对象 = 主包 2332 + `.sharedAssets` 32，与两份 SerializedFile
+  各自的对象数**完全吻合**。恒 None 的是 **PPtr** 上的 `assetsfile`。
+  ⇒ 归属表仍然要建（两个 SerializedFile 的 `path_id` 会撞车），但**键换成
+  `(assets_file.name, path_id)` 就够了**，不需要"遍历反查"那一圈。
+- **第五个假读数：`env.file.files` 里混着非 SerializedFile 成员**。场景包 4 个成员 =
+  主 `CAB-x` + `CAB-x.sharedAssets` + **两个 `.resS`**（`EndianBinaryReader_Memoryview`）。
+  上一轮"externals 整体错位"的真实成因是**盲取 + 不判类型**：`.resS` 上取 `.externals` 会
+  `AttributeError`（响亮、当场发现），而 `.sharedAssets` **不报错、安静地给一份错位表**——
+  后者才是危险的那种。⇒ 凡遍历必须 `isinstance(v, SerializedFile)`；凡按 CAB 选文件必须**用名字精确选**。
+- **第六个：`load_file` 之后 `env.objects` 不再只含源包对象**。把 359 个依赖包装进同一个
+  Environment 后直接遍历数出 **630 个 MeshFilter**，而源包只有 348 ⇒ 计数/取样的分母本身被污染。
+  这类"分母换了"的读数不会报错，只会让比例看起来正常而实际是混合母体。
+
+**打通的七条判据与实测数字见 WF-37**（348 分桶 = 315 外链命中 / 2 本包 / 31 内置资源 / 0 未命中；
+抽 20 条语义相符 20/20；两条反向对照各 0/20；顶点数双锚点 0 例外；34 秒 / 峰值 0.32 GB）。
+顺带两条**新的资产侧事实**要记（都不是解析失败，而是解析成功后才看见的东西）：
+① **49/348 个 MeshFilter 挂在关闭态对象上**（首因 39 个是 `night` 祖先），与 §55「只画游戏里开着的层」
+同族，装配时必须按激活态过滤，否则日夜两套同位置叠画；
+② 那 31 条内置外链里有 **30 条是激活态**，且 348 个 MeshFilter 与 348 个 MeshRenderer **一一配对**
+⇒ `WallLeft/Floor/Celling/Bed/Sofa/Door/Cabinet/Cube*/Plane` 用的是 **Unity 内置原语网格**
+（盘上没有对应文件），房间壳体混了原语——要拿这些网格的真名与顶点数只能从设备取
+`unity default resources`，或按 Transform 尺寸程序化补原语。**未决**。
+
+
 **涉及文件**：`scripts/diag/probe_3d_capability.py`（`probe_mesh` 的 `compressedMesh` 判据、`probe_skin`
 整段只会喊不会读 —— 待改成上面的反解 + 三重自证）；靶子
 `files/AssetBundles/dorm3d/character/tianlangxing_db/res/tianlangxing_noshoes`；
 骨骼/Prefab 侧 `…/prefabs/tianlangxing_noshoes`（SMR 的 `m_Bones` 指向同包 Transform，可当场解析出骨名）。
 完整数字与流程 **`docs/archive/2026-10-07_3D宿舍复刻可行性取证.md` 追加-VII**。
-相关：§114（同一族"探针把字段存在当数据存在"）、WF-28（撤销归档闸 / `--only` 粒度）。
+跨包解析正本 `scripts/diag/dorm3d_pptr_resolve.py`（2026-10-08，判据与数字见 **WF-37**）。
+相关：§114（同一族"探针把字段存在当数据存在"）、WF-28（撤销归档闸 / `--only` 粒度）、WF-37。
 
 
 ---

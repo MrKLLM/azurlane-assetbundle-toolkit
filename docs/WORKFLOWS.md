@@ -3230,3 +3230,77 @@ WF-15（承重白名单：标注正本属于"丢了不可复原"那一类）、W
 `scripts/diag/l2d_param_meta_probe.py`、`scripts/diag/l2d_motion_param_probe.py`（`--dump` + 平台/下降判据）、
 `.diag/_param_meta_<key>.json`（标志表产物）。相关：WF-31（三层归因，本 WF 是它的第四层）、
 WF-16 六件套（前端改动的回归闸门）。
+
+---
+
+### WF-37: UnityPy 跨包 PPtr 解析怎么打通、怎么验到敢拿去装配房间（2026-10-08）
+
+适用：一个包里的对象大量**外链**到别的包（`MeshFilter.m_Mesh`、`MeshRenderer.m_Materials`、
+prefab→res 材质），必须按 `(file_id, path_id)` 跨包取回真实对象。§8 那条「FileID=N →
+`externals[N-1]` 的 CAB 名」是同一件事的**单包版**；本条是**一个 bundle 多个 SerializedFile +
+目标散在几百个包里**的通用版。靶子 = `dorm3d/scenesres/scenes/tianlangxing_db/siriushostel/map_siriushostel_01_scene`
+（348 个 MeshFilter 全是外链）。
+
+**五条实现要点（顺序即依赖）**
+
+1. **一个 bundle 里有多个 SerializedFile**。该场景包 `env.file.files` 是 **4 个成员**：
+   主包 `CAB-x`（2332 对象 / 357 externals）、`CAB-x.sharedAssets`（32 / 360）、**两个 `.resS`**。
+   ⇒ 遍历必须 `isinstance(v, SerializedFile)`：`.resS` 是 `EndianBinaryReader`，取 `.externals` 直接
+   `AttributeError`；而 `.sharedAssets` **不报错、安静地给一份错位表**（上一轮就是这么把 `WallLeft`
+   算成 `fbx_db_pail01_fbx` 的）。
+2. **归属白拿**：`ObjectReader.assets_file`（**带下划线**）逐对象给得出所属 SerializedFile，
+   实测 2332 + 32 = 2364 与两份文件的对象数完全吻合。
+   ⚠️ 恒 None 的是 **PPtr** 上的 `assetsfile`，两者不是一个东西——交接文档据此写的"要自己遍历建
+   path_id 归属表"是不必要的。归属表仍要建，但**键必须是 `(assets_file.name, path_id)`**，
+   因为两个 SerializedFile 的 `path_id` 会撞车。
+3. **externals 只取引用方自己那份 SerializedFile 的**，`file_id` **从 1 起** ⇒ `externals[file_id-1]`；
+   `file_id == 0` 是**同一份 SerializedFile**（不是"同一个 bundle"）。
+4. **落点按 CAB 名索引本地包，并且按名字精确选目标 SerializedFile**（绝不 `next(iter(...))`）。
+   索引要给**每个** SerializedFile 单条登记（含 `.sharedAssets`）；作用域除资产前缀目录外，
+   还要用 `Output/dependency_manifest.json` 里该包的 `deps` 补齐**类目之外**的依赖
+   （本例补进 `files/AssetBundles/custom_builtin` 与 `font/zhunyuan`，各 1 条 CAB）。
+   实测：474 个 dorm3d 包 + 451 个依赖包，现扫 **19.8 秒 / 479 条**——**每次都现扫，不吃缓存**
+   （吃缓存就是"改了索引层忘了刷缓存"的静默失败面）；旧缓存只作对照用。
+5. **内置外链单独归桶**：`FileIdentifier.path` 不以 `archive:` 开头的（如 `unity default resources`）
+   **盘上没有对应文件**。它既不是失败也不该进判据分母，更不许留结构合法的占位对象。
+
+**判据（七条同时绿，`exit 0` 即打通）**
+| 判 | 内容 | 实测（房间 1） |
+|---|---|---|
+| J1 | 分桶求和 == MeshFilter 总数（无静默丢失） | 348/348：外链命中 315 / 本包 2 / 内置 31 / 未命中 0 |
+| J2 | 固定种子抽 20 条解析出 `(包, 网格名, 顶点数)` 且语义相符 ≥18/20 | **20/20**（`--seed 20261008`） |
+| J3 | 同批走 UnityPy 原生 `pptr.deref()`（先把依赖 `load_file` 进同一个 Environment）逐条比对 | 不一致 **0/20**，装载 20 包 0.8 秒 |
+| J4 | 反向对照：换**错的那份** SerializedFile 的 externals ⇒ 必须塌 | **0/20**（20 条全 `notfound`） |
+| J4b | 反向对照：同一份 externals 下标 **±1** ⇒ 必须塌（钉住"`file_id` 从 1 起"） | +1 得 0、−1 得 0 |
+| J5 | 顶点数两条独立锚点：`m_VertexData.m_VertexCount` == UnityPy 自己 `export()` 出的 `v` 行数，且 `max(index) < 顶点数` | 不符 **0/20** |
+| J6 | 自建索引与缓存索引键集对照（两套独立构建） | 仅缓存 0 / 同键不同包 0 / 仅自建 2（即依赖补齐那两条） |
+
+资源口径：整轮 **34 秒 / 峰值 0.32 GB**（`scripts/diag/peak_mem.py` 量的），
+180 个去重外链包、跨包加载 4.4 秒。
+
+**踩坑记录**
+- ⚠️ **语义判据吃命名约定 ⇒ 两头都会翻车**。规则 = 剥 `pre_/fbx_/mat_` 前缀与 ` (N)` 副本后缀、
+  按非字母数字切词、**数字段去前导零**（`Chair_1` ↔ `fbx_chair01` 是同一个）、再要求
+  **词元序列相等或互为子序列**（对象名里可插颜色词：`pre_oak02_green02_lod3` ↔ `fbx_oak02_lod3`）。
+  用"序列"而不是"集合包含"，`WallLeft` ↔ `pail01` 这类真错位才必红。
+  第一版按"剥前后缀完全同名"写，把正确的 `pre_oak02_green02_lod3` 判成不符 ⇒ **判据过严一样是错的**。
+  全量 317 条里 27 条语义不符（`fbx_sence_xyd_tree_04_lod0` ↔ `fbx_oak01`、`fbx_Cloud_Layer_Top` ↔
+  `CloudMesh_Top`、`pre_db_decoration03a` ↔ `fbx_db_decoration03`、两条指向场景 `Combined Mesh`），
+  逐条打印出来看过：是**美术复用资产 + 实例名不同**，不是解析错 ⇒ 这类"命名差异"要列出来人判，
+  不许悄悄放宽规则把它放行成绿。
+- ⚠️ **一条反向对照不够，要两条**：J4（换错 SF）20/20 全 `notfound`，看着"塌得干净"，
+  其实只证明了"错表会连包都找不到"；真正把 **1-based 下标约定**钉死的是 J4b（±1）。
+  与 §116 那批"变异样本必须真的改变被测物理量"同族——**对照的强度要按它排除了什么来写，不按它红了没有来写**。
+- ⚠️ **`load_file` 之后 `env.objects` 不再只含源包对象**：装进 359 个依赖包后直接遍历数出 **630 个
+  MeshFilter**（源包只有 348）。取样/计数必须先按 `assets_file` 限定回源包，否则连分母都是别人的。
+- **解析率 ≠ 可画率**：场景里 **49/348 个 MeshFilter 挂在关闭态对象上**（首因 39 个是 `night` 祖先），
+  这是 §55「只画游戏里开着的层」在 3D 侧的同一件事 ⇒ 装配按激活态过滤（299 条），日/夜两套同位置不能都画。
+- **348 个 MeshFilter 与 348 个 MeshRenderer 一一配对**（无"有 Filter 没 Renderer"），
+  而那 31 条内置外链里 **30 条是激活态** ⇒ `WallLeft/Floor/Celling/Bed/Sofa/Door/Cabinet/Cube*/Plane`
+  **真会被画出来，用的是 Unity 原语网格**：房间壳体混了原语。要拿到这些原语的网格名/顶点数，
+  只能从设备取 `unity default resources`（或按 Transform 尺寸程序化补原语）——**这是一条新的未决项**。
+
+**涉及文件**：`scripts/diag/dorm3d_pptr_resolve.py`（本 WF 正本，只读；`--scene/--root/--sample/--seed/--out`），
+产物 `.diag/dorm3d_pptr/resolve_report.json`（不入库），对照缓存 `.diag/dorm3d_cab_index.json`（不入库），
+`scripts/diag/peak_mem.py`（资源口径），`Output/dependency_manifest.json`（依赖清单）。
+相关：**WF-32**（单包版材质 PPtr + 装配验收）、**WF-28**（定向拉依赖闭包）、**§116**（假读数族，本轮追加一条否证）。

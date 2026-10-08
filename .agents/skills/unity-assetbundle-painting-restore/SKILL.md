@@ -1,7 +1,7 @@
 ---
-name: unity-assetbundle-painting-restore 触发词（3D 侧）：m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
-description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.13.3
+name: unity-assetbundle-painting-restore 触发词（3D 侧）：跨包 PPtr、assets_file 带下划线、ObjectReader.assetsfile 为 None、.sharedAssets、resS 不是 SerializedFile、externals 下标 ±1、pptr.deref、CAB 索引现扫、unity default resources 内置外链、激活态过滤、m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
+description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、跨包解析、SerializedFile 多个、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
+version: 1.13.4
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -53,6 +53,43 @@ prefab 中 `m_Sprite = (FileID, PathID)`：
 - FileID = N → 取 **SerializedFile.externals[N-1] 的 CAB 名**，反查所在依赖包，再在该包内按 PathID 精确匹配 Mesh/Sprite。
 
 ⚠️ externals 顺序 ≠ manifest deps 排序（后者按字母序），**必须以 externals 为准**。一包多 mesh 时按 PathID 精确匹配，不按顺序/面积猜。详见 reference.md「PPtr/externals 解析规则」。
+
+#### 第 2 步补充：目标散在几百个包里（场景/prefab 级外链）怎么打通——五条实现要点（2026-10-08，3D 房间场景 348 个 MeshFilter 实测）
+
+上面那条规则在**一个 bundle 含多个 SerializedFile、目标又跨几百个包**时会不够用。五条按顺序：
+
+1. **一个 bundle 里有多个 SerializedFile，还有非 SerializedFile 的成员**。实测场景包 `env.file.files` = 4 个成员：
+   主 `CAB-x`（2332 对象/357 externals）、`CAB-x.sharedAssets`（32/**360**）、**两个 `.resS`**。
+   ⇒ 遍历必须 `isinstance(v, SerializedFile)`（`.resS` 是 `EndianBinaryReader`，取 `.externals` 直接 `AttributeError`）。
+   ⚠️ 危险的是**不报错的那一种**：`next(iter(env.file.files.values()))` 取到 `.sharedAssets` 后
+   `externals[file_id-1]` 整体**安静错位**（真实事故：把 `WallLeft` 的网格算成 `fbx_db_pail01_fbx`）。
+2. **归属白拿**：`ObjectReader.assets_file`（**带下划线**）逐对象给得出所属 SerializedFile。
+   ⚠️ 恒 None 的是 **PPtr** 上的 `assetsfile`——别把这两个名字混成一条"读不出归属"的结论（本项目就因此多写了一圈
+   "遍历 `env.file.files` 建 path_id 反查表"的无用代码）。归属表仍要建，但**键必须是 `(assets_file.name, path_id)`**：
+   同一 bundle 的两份 SerializedFile 的 `path_id` **会撞车**。
+3. **`file_id` 从 1 起 → `externals[file_id-1]`，且 `file_id==0` 指"同一份 SerializedFile"**（不是"同一个 bundle"）。
+4. **落点按 CAB 名索引 + 按名字精确选目标 SerializedFile**。索引给**每个** SerializedFile 单条登记（含 `.sharedAssets`）；
+   作用域除资产前缀目录外，还要用官方依赖表里该包的 `deps` 补齐**类目之外**的依赖（实测补进 2 条：
+   `custom_builtin`、`font/zhunyuan`——它们不被 MeshFilter 引用，但材质引用，缺一类就少一类）。
+   **每次现扫、不吃缓存**（474 包 + 451 依赖包 = 19.8 秒；缓存留着只做对照，否则"改了索引层忘了刷缓存"就是静默失败面）。
+5. **内置外链单独归桶**：`FileIdentifier.path` 不以 `archive:` 开头的（如 `unity default resources`）**盘上没有文件**。
+   它不是失败，**也不该进判据分母**，更不许写结构合法的占位对象。实测 348 条里 31 条是内置，其中 **30 条是激活态**
+   ⇒ 说明这个房间壳体真的混用了 Unity 原语（`WallLeft/Floor/Bed/Sofa/Cube*/Plane`），要它们的真网格只能从设备取内置资源文件。
+
+**打通的判据（七条，缺一条例外就还不许说"打通"）**：① 分桶求和 == 对象总数（防静默丢失）；
+② 固定种子抽 20 条 `(包, 名, 顶点数)` 语义相符 ≥18/20；③ **同一批走库自己的 `pptr.deref()`**
+（先把依赖 `load_file` 进同一个 Environment）逐条比对，差异必须 0——这条是"另一套代码"的外部裁判；
+④ 换错 SerializedFile 的对照必须塌；⑤ **externals 下标 ±1 的对照也必须塌**（见 C8 第 3 条：④那种"全 `notfound` 的红"
+其实没验到下标约定）；⑥ 数量类字段要有**第二条独立来源**（`m_VertexData.m_VertexCount` vs 库自己 `export()` 出的 `v` 行数，
+另查 `max(index) < 顶点数`）；⑦ 自建索引与既有缓存键集对照（两套独立构建，差异要么 0 要么逐条解释）。
+语义判据的归一化口径：剥 `pre_/fbx_/mat_` 前缀与 ` (N)` 副本后缀、按非字母数字切词、**数字段去前导零**
+（`Chair_1` ↔ `fbx_chair01` 是同一个），再要求**词元序列相等或互为子序列**（对象名可插颜色词）。
+⚠️ 用"序列"而不是"集合包含"，`WallLeft` ↔ `pail01` 才必红；⚠️ **判据过严一样是错的**——第一版按"剥前后缀完全同名"
+写，把正确的 `pre_oak02_green02_lod3` ↔ `fbx_oak02_lod3` 判成不符。余下不匹配的（实测 317 条里 27 条，多为美术复用资产）
+**逐条打印出来人看**，不许悄悄放宽规则放行成绿。
+另两条会咬人的：`load_file` 之后 **`env.objects` 不再只含源包对象**（实测数出 630 个 MeshFilter，源包只有 348）
+⇒ 分母必须先按 `assets_file` 限定回源包；**解析率 ≠ 可画率**（实测 49/348 挂在关闭态对象上，首因是 `night` 子树）
+⇒ 与第 4.8 步「激活位」同一条规则，装配/渲染前必须过滤，否则日夜两套同位置叠画。
 
 ### 第 3 步：部件纹理还原
 
