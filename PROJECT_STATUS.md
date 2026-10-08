@@ -179,9 +179,10 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
    ⇒ 正本 `scripts/diag/dorm3d_pptr_resolve.py`（每次现扫索引、不吃缓存）、做法 **WF-37**、字段坑 **§116 追加**、装配验收 **WF-32**。
    ⚠️ 否证：交接文档那句「`ObjectReader.assetsfile` 为 None」**不成立**（带下划线的 `assets_file` 有值）；真坑是 `env.file.files`
    里混着**非 SerializedFile** 的 `.resS`，而盲取 `.sharedAssets` **不报错**地给出一份错位表。
-   ⚠️ 两条新事实决定装配口径：**49/348 个 MeshFilter 挂在关闭态对象上**（首因 39 个是 `night` 祖先）⇒ 只画 299 条（§55 的 3D 版）；
-   31 条内置原语里 **30 条是激活态**且 348 Filter 与 348 Renderer 一一配对 ⇒ **房间壳体混了 Unity 原语**（`WallLeft/Floor/Bed/Sofa/Cube*`），
-   要真网格只能从设备取 `unity default resources`——**新的未决项**。
+   ⚠️ 装配口径三条门控（**§125**，同日改判）：348 个 MeshFilter 里 **该画只有 269** —— 49 个对象关着（首因 39 个在 `night` 子树）、
+   26 个 `MeshRenderer.m_Enabled=0`、4 个所在层不在相机 `cullingMask` 里。⇒ 之前那句"31 条内置原语里 30 条是激活态
+   ⇒ 房间壳体混了 Unity 原语，要真网格只能从设备取 `unity default resources`"**作废**：补全门控后那 31 个原语
+   **一个都不画**（layer 16/28、26 个渲染器禁用）⇒ 它们是碰撞/标记物，那条未决项连带取消，白方块类错误一并消失。
    ✅ **房间装配器已落地并全绿（同日）**：`scripts/dorm3d_room_to_gltf.py` 出 `.diag/dorm3d_room/room.glb`
    （299 个激活对象 / 205 网格 / 219 primitive / 141 材质 / 135 贴图 / 28.4 MB），前端探针
    `scripts/diag/dorm3d_room_probe.py` 八条判据 + 三条反向对照全绿（Mesh 329=329、position 合计 219,964 相等、

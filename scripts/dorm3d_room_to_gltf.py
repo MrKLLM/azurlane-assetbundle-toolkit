@@ -261,7 +261,8 @@ def scene_tables(env):
     return own, trs, tr_of_go, rend_of_go
 
 
-def jobs_from_scene(env, res, own, trs, tr_of_go, rend_of_go, only, limit, include_inactive):
+def jobs_from_scene(env, res, own, trs, tr_of_go, rend_of_go, only, limit, include_inactive,
+                  cull_bits=None):
     node_of = {o.path_id: i for i, o in enumerate(trs)}
     name_of = {}
     for o in trs:
@@ -270,7 +271,7 @@ def jobs_from_scene(env, res, own, trs, tr_of_go, rend_of_go, only, limit, inclu
         g = own.get((sfn, gp))
         name_of[o.path_id] = g.read().m_Name if g is not None else ""
     want = set(x.strip() for x in only.split(",") if x.strip()) if only else None
-    jobs, skipped, builtin_groups, unresolved = [], 0, {}, 0
+    jobs, skipped_by, builtin_groups, unresolved = [], {}, {}, 0
     for o in env.objects:
         if o.type.name != "MeshFilter":
             continue
@@ -281,10 +282,23 @@ def jobs_from_scene(env, res, own, trs, tr_of_go, rend_of_go, only, limit, inclu
         gname = name_of.get(trp, "?")
         if want and gname not in want:
             continue
+        # 三重门控（少一条就会多画游戏里看不见的东西）：
+        #   ① 自身+全祖先 m_IsActive   ② MeshRenderer.m_Enabled   ③ GameObject.m_Layer 在相机 cullingMask 里
+        # 实测房间 1：348 个 MeshFilter 只有 269 个该画（49 关着 / 26 渲染器禁用 / 4 层被相机剔除），
+        # 而那 31 个 Unity 内置原语**一个都不画**（它们是碰撞/标记物）⇒ 画成白方块是错的。
         on, blocker = P.go_active(own, tr_of_go, sfn, goid)
-        if not on and not include_inactive:
-            skipped += 1
+        rend0 = rend_of_go.get((sfn, goid))
+        ren_on = bool(rend0 is not None and int(getattr(rend0.read(), "m_Enabled", 1) or 0) == 1)
+        go0 = own.get((sfn, goid))
+        layer = int(getattr(go0.read(), "m_Layer", 0) or 0) if go0 is not None else 0
+        in_mask = True if cull_bits is None else bool((cull_bits >> layer) & 1)
+        reason = (None if (on and ren_on and in_mask) else
+                  ("inactive" if not on else ("renderer_off" if not ren_on else "layer")))
+        if reason and not include_inactive:
+            skipped_by[reason] = skipped_by.get(reason, 0) + 1
             continue
+        if reason:
+            skipped_by[reason] = skipped_by.get(reason, 0) + 1
         if trp is None:
             unresolved += 1
             continue
@@ -320,7 +334,7 @@ def jobs_from_scene(env, res, own, trs, tr_of_go, rend_of_go, only, limit, inclu
                      "builtin_key": (cab, pid) if rdr is None else None})
         if limit and len(jobs) >= limit:
             break
-    return jobs, node_of, name_of, skipped, builtin_groups, unresolved
+    return jobs, node_of, name_of, skipped_by, builtin_groups, unresolved
 
 
 def add_lights(env, own, gltf, nodes, tr_of_go, node_of):
@@ -369,8 +383,14 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
     res = P.Resolver(index)
     env = UnityPy.load(scene)
     own, trs, tr_of_go, rend_of_go = scene_tables(env)
-    jobs, node_of, name_of, skipped, bgroups, unresolved = jobs_from_scene(
-        env, res, own, trs, tr_of_go, rend_of_go, only, limit, include_inactive)
+    cam = [o for o in env.objects if o.type.name == "Camera"]
+    cull_bits = None
+    if cam:
+        cm = getattr(cam[0].read(), "m_CullingMask", None)
+        cull_bits = int(getattr(cm, "m_Bits", getattr(cm, "value", 0xFFFFFFFF)) or 0) if cm else None
+    jobs, node_of, name_of, skipped_by, bgroups, unresolved = jobs_from_scene(
+        env, res, own, trs, tr_of_go, rend_of_go, only, limit, include_inactive, cull_bits)
+    skipped = sum(skipped_by.values())
     nodes, roots, _ = G.build_nodes(trs, node_of, name_of, own)
     gltf = {"asset": {"version": "2.0", "generator": "dorm3d_room_to_gltf"},
             "scene": 0, "scenes": [{"nodes": sorted(set(roots))}],
@@ -493,7 +513,7 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
              "tex_no_slot": len(texstat["none"]),
              "placeholder_basis": "占位对象按本装配器生成的单位立方体计入总数(24 顶点/12 三角)，"
                                   "其 Unity 侧声明值不可得；世界盒不含占位对象",
-             "textures": len(gltf["images"]), "skipped_inactive": skipped, "mirror": mirror,
+             "textures": len(gltf["images"]), "skipped_by": skipped_by, "mirror": mirror,
              "per_object": [{"object": a["object"], "mesh": a["mesh"], "verts": a["declared_v"],
                              "tris": a["tris"], "submeshes": a["submesh_decl"],
                              "center": a.get("center"), "size": a.get("size"),
@@ -520,6 +540,8 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
     truth["lm_no_uv1"] = lm_nouv1
     truth["lm_materials"] = len(mat_pages)
     truth["dropped_materials"] = dropped
+    truth["cull_bits"] = cull_bits
+    truth["skipped_by"] = skipped_by
     truth["lm_prims"] = lm_prims
     cam = None
     for o in env.objects:
@@ -562,7 +584,7 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
                      [[round(v, 3) for v in wmin], [round(v, 3) for v in wmax]] if wmin else "空",
                      wb_skipped))
     if verbose:
-        print("索引 %d 包 / %.1f 秒 | 工单 %d（跳过关闭态 %d，无 Transform %d）| 节点 %d | "
+        print("索引 %d 包 / %.1f 秒 | 工单 %d（门控剔除 %d，无 Transform %d）| 节点 %d | "
               "网格 %d（占位 %d）| 材质 %d | 贴图 %d | 灯 %d（跳过 %s）"
               % (scanned, isec, len(jobs), skipped, unresolved, len(nodes),
                  len(gltf["meshes"]), n_place, len(gltf["materials"]), len(gltf["images"]),
