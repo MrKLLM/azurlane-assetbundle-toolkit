@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """l2d_part_flicker_probe.py — 抓「部件闪一下」：把台阶定位到**具体哪一个参数**，并回答"谁写的"。
 
-四条臂（同一次运行按顺序出）：
+各臂（同一次运行按传入的开关依次出）：
   ① part / drawable 逐帧不透明度台阶（hard：`<0.05` 且前帧 `>0.5`；soft：单步降 ≥0.4 且 4 帧内回升 80%）。
   ② **全部参数逐帧**：从 wasm 实时缓冲 `parameters.values` 取全部参数，点名「与 ① 的台阶落在同一次
      update 里变化」的参数。cubism4 包里没有 `setDrawableOpacity`，能写 `drawables.opacities` 的只有
@@ -17,6 +17,23 @@
   ⑤ `--mapall` **全量绑定表**：一次跑完「哪个参数在量程内哪些点上，会让哪几个 mesh 的透明度离开基准」，
      落 `.diag/l2d_opacity_map_<model>.json`（每条都带 11 点曲线，可离线复算）。回答"这批 mesh 的开关都有谁"
      "某些参数到底关不关可视性"——与逐个 `--drivers` 同样的 update 次数，但读的是全部 drawable，一次顶 N 次。
+  ⑥ `--shot` 单参数 A/B 截图（只回答"这个参数管的是画面上哪一块"，不当验收判据）。
+  ⑦ `--dumpgeo` 全部 mesh 的屏幕包围盒/面积/透明度（认"这个像素是哪几片"）。
+     ⚠️ **不透明度为 0 的 ArtMesh 顶点会塌到原点**（实测灭着的片在两个姿态下都是 `[0,0,0,0]`）
+     ⇒ 从任何单一姿态导出都拿不到"灭着那组"的尺寸，**不能用它算面积覆盖**。
+  ⑧ `--hide/--hideclip/--hidewait` 藏掉指定 mesh 再截图（认画面身份）。
+     ⚠️ base/hide 是两次独立播放 ⇒ 像素差主要来自相位与物理漂移，只可肉眼看同帧两图，不可当数值判据。
+  ⑨ `--deform <名|@文件>` **变形者闸**：这个参数在自己量程内挪不挪几何？别的参数全钉在 setup 基准，
+     只把它在第 q-1→q 点之间移动，比较**两点都亮着**的 mesh 的屏幕框 Σ(宽+高) —— 纯显隐开关应当一像素不动。
+     落 `.diag/l2d_deform_<model>.json`。用途：把"既绑显隐又形变"的姿态参数（`ParamForearmLAngle`）
+     从 snap 名单里挡出去（snap 它 = 手臂瞬移）。判据与下游见 `scripts/diag/l2d_snap_criterion_scan.py`。
+  ⑩ `--snapab idle->home` **snap 修法的 A/B 时间轴**：同一趟跑 `window.__snapOff` 关/开两个模式，
+     每次模型 update 记一行 [相对秒, currentGroup, 全模型亮着数, A 组峰值, B 组峰值, 台账集亮着数/峰值, 参数值…]。
+     验收看的是**"该参数能影响的全部 mesh 里有几盏亮"**随帧的曲线（修法开时不得出现 0），不是截图。
+     ⚠️ A/B 两组名要自己给对：在实态里从不亮的一组会让"A∧B 同时灭"变成常真、失去区分度。
+
+⚠️ URL 必须带 cache-buster（`?v=<epoch>`）：headless 用固定 `--user-data-dir`，改过前端之后 Chrome 会端出
+   磁盘缓存里的旧 `index.html` —— 症状是"补丁明明落盘了、跑出来的行为与改动前逐帧相同"。
 
 ⚠️ 采样基准是**每一次模型 update**（包 `CubismCoreModel.prototype.update`），不是墙钟 setTimeout：
    无头里动作时间推进极不均匀（`Ticker` 对 `dt` 有上限），按墙钟数台阶次数同一条 clip 会跑出 10 与 20
@@ -31,6 +48,10 @@
       py -3 scripts/diag/l2d_part_flicker_probe.py gezi_2 --clips home --nowriters --drivers ArtMesh42,case15
       py -3 scripts/diag/l2d_part_flicker_probe.py gezi_2 --clips home --trace ArtMesh42 \
               --wparams Param25,l2d_hx                                              # ③ 定向归因到指定参数
+      py -3 scripts/diag/l2d_part_flicker_probe.py gezi_2 --clips __none__ --nowriters \
+              --deform "@Output/Live2D/gezi_2/gezi_2.snapswitch.json"                # ⑨ 变形者闸
+      py -3 scripts/diag/l2d_part_flicker_probe.py gezi_2 --clips __none__ --nowriters \
+              --snapab "idle->home" --hold 6 --step 60                               # ⑩ snap A/B 时间轴
 输出: 终端报告 + .diag/l2d_flicker_<model>_{rest,norest}.json
 """
 import argparse
@@ -425,6 +446,108 @@ JS_MAPALL = r"""(async (nstep) => {
 })"""
 
 
+# ---------------------------------------------------------------- ⑨ 变形者闸：这个参数除了显隐，还挪不挪几何？
+# 为什么要它：判据 C2「边界恒定 + 跨过美术翻转点」会把 `ParamForearmLAngle`（左前臂角）也捞进来 ——
+# 它确实绑定着某些 ArtMesh 的显隐，但它同时是**姿态形变**参数。snap 它 = 手臂角度硬跳，
+# 正好把 §6.35 治好的"姿态硬跳"从一个局部参数上放回来。⇒ 只 snap「不形变」的选择器。
+# 怎么测（不解析 moc3，用因果对照）：别的参数一律钉在 setup 基准，只把这一个从第 q-1 点移到第 q 点；
+# 取**两点都亮着**的 mesh（显隐翻转的那批要剔掉，否则"灭掉的片从有框变塌框"会被当成形变），
+# 比较它们屏幕框的 Σ(宽+高)。纯显隐开关 ⇒ 这批片一个像素都不该动；动了就是形变者。
+JS_DEFORM = r"""(async (names, nstep) => {
+  const core=window.__m.internalModel.coreModel, mm=window.__m.internalModel.motionManager;
+  const M=core._model, P=M.parameters, D=M.drawables;
+  window.__cap=null; window.__wset=null;
+  const ambWas=window.__ambOff; window.__ambOff=true;
+  try{ mm.stopAllMotions(); }catch(e){}
+  try{ window.__app.ticker.stop(); }catch(e){}
+  for(let i=0;i<P.count;i++) P.values[i]=P.defaultValues[i];
+  core.update();
+  const base=[]; for(let i=0;i<P.count;i++) base.push(P.values[i]);
+  const nd=D.count;
+  // 每个 drawable 的顶点缓冲是 Float32Array 视图，取两次要重算框 —— 只为「两点都亮」的那批算，够快
+  const boxOf=(d)=>{ const p=D.vertexPositions[d]; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for(let k=0;k+1<p.length;k+=2){ const x=p[k],y=p[k+1];
+      if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+    return (x1<x0||y1<y0)? 0 : (x1-x0)+(y1-y0); };
+  const litOf=()=>{ const O=D.opacities, a=new Float32Array(nd), s=new Float32Array(nd);
+    for(let d=0;d<nd;d++){ const on=O[d]>=0.5; a[d]=on?1:0; s[d]=on?boxOf(d):0; }
+    return {a,s}; };
+  const out=[]; let updates=0;
+  for(const nm of names){
+    const i=P.ids.indexOf(nm); if(i<0){ out.push({name:nm, err:'no-such-param'}); continue; }
+    const mn=P.minimumValues[i], mx=P.maximumValues[i];
+    const hist=[]; let prev=null;
+    for(let q=0;q<=nstep;q++){
+      for(let k=0;k<P.count;k++) P.values[k]=base[k];
+      P.values[i]=mn+(mx-mn)*q/nstep; core.update(); updates++;
+      const cur=litOf();
+      if(prev){ let both=0, dsum=0;
+        for(let d=0;d<nd;d++) if(prev.a[d]&&cur.a[d]){ both++; dsum+=Math.abs(cur.s[d]-prev.s[d]); }
+        hist.push([q, both, +dsum.toFixed(4)]);
+      }
+      prev=cur;
+    }
+    for(let k=0;k<P.count;k++) P.values[k]=base[k];
+    core.update();
+    const mxShift=hist.reduce((m,x)=>Math.max(m,x[2]),0);
+    out.push({name:nm, mn:+mn.toFixed(3), mx:+mx.toFixed(3), maxBBoxShift:mxShift, hist});
+  }
+  try{ window.__app.ticker.start(); }catch(e){}
+  window.__ambOff=ambWas;
+  return JSON.stringify({nstep, drawables:nd, updates, params:out});
+})"""
+
+
+# ---------------------------------------------------------------- ⑩ snap 的 A/B 时间轴（修法 (b) 的验收判据）
+# 同一趟里跑两个模式：window.__snapOff=true（修法关）→ false（修法开），每次都
+# 「播 A 条 clip 进稳态 → 切到 B 条 → 逐次模型 update 采样」。
+# 报的每一行 = 一次 update：[相对秒, 当时的 currentGroup, 全模型亮着的 mesh 数, A 组最大不透明度, B 组最大不透明度, 各参数值…]
+# 判据不是截图，是**时间**：切换后「A 组和 B 组同时 <0.05」的累计秒数（修法开时应为 0）。
+JS_SNAPAB = r"""(async (cfg) => {
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  const m=window.__m, im=m.internalModel, core=im.coreModel, mm=im.motionManager;
+  const M=core._model, P=M.parameters, D=M.drawables;
+  const ia=cfg.setA.map(n=>D.ids.indexOf(n)).filter(i=>i>=0);
+  const ib=cfg.setB.map(n=>D.ids.indexOf(n)).filter(i=>i>=0);
+  const ip=cfg.pnames.map(n=>P.ids.indexOf(n));
+  const i25=cfg.set25.map(n=>D.ids.indexOf(n)).filter(i=>i>=0);
+  const frameN=()=>{ try{ PIXI.Ticker.shared.tick(performance.now()); }catch(e){}
+                     try{ window.__app.render(); }catch(e){} };
+  const run=async(off)=>{
+    window.__snapOff=off;
+    try{ mm.stopAllMotions(); }catch(e){}
+    try{ mm.startMotion(cfg.from,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){}
+    for(let k=0;k<cfg.frames;k++){ frameN(); await t(cfg.stepMs); }
+    const cap={t0:performance.now(), rows:[], partrows:[], drows:[], ts:[], groups:[], max:cfg.frames*3};
+    window.__cap=cap;
+    try{ mm.startMotion(cfg.to,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){}
+    for(let k=0;k<cfg.frames;k++){ frameN(); await t(cfg.stepMs); }
+    window.__cap=null;
+    const rows=[];
+    for(let r=0;r<cap.rows.length;r++){
+      const O=cap.drows[r]; if(!O) continue;
+      let nLit=0; for(let i=0;i<O.length;i++) if(O[i]>=0.5) nLit++;
+      const mx=(ix)=>ix.length? Math.max.apply(null,ix.map(i=>O[i])) : -1;
+      const row=[+(cap.ts[r]).toFixed(3), cap.groups[r]||null, nLit,
+                 +mx(ia).toFixed(3), +mx(ib).toFixed(3),
+                 i25.reduce((a,i)=>a+(O[i]>=0.5?1:0),0), +mx(i25).toFixed(3)];
+      for(let j=0;j<ip.length;j++) row.push(ip[j]<0? null: +cap.rows[r][ip[j]].toFixed(3));
+      rows.push(row);
+    }
+    return {off, rows};
+  };
+  const a=await run(true), b=await run(false);
+  let dbg=null,dbgErr=null;
+  try{ dbg = (typeof window.__snapDbg==='function')? window.__snapDbg() : 'NO-SUCH-FN(前端 snap 块没跑)'; }
+  catch(e){ dbgErr=String(e&&e.message||e); }
+  window.__snapOff=false;
+  return JSON.stringify({cfg, snapDbg:dbg, snapDbgErr:dbgErr,
+    marker:{snap:typeof window.__snapDbg, l2hit:typeof window.__L2_HIT,
+            snapOff:typeof window.__snapOff, srcHash:(document.documentElement.innerHTML||'').length},
+    off:a, on:b});
+})"""
+
+
 # ---------------------------------------------------------------- ⑥ 单参数 A/B 截图（只为"这块参数管的是画面上什么"）
 JS_SHOT = r"""(async (name, v) => {
   const core=window.__m.internalModel.coreModel, mm=window.__m.internalModel.motionManager;
@@ -547,6 +670,11 @@ def main():
     ap.add_argument("--drvclip", default="", help="④ 第二基准：先播这条 clip、等 --drvwait 秒定格后再扫（setup 基线下乘性门会漏）")
     ap.add_argument("--drvwait", type=float, default=10.0, help="④ 播 clip 后等几秒定格（要等到角色在画面内）")
     ap.add_argument("--mapall", action="store_true", help="⑤ 全量「参数→哪些 mesh 显隐」绑定表（落 .diag/l2d_opacity_map_<model>.json）")
+    ap.add_argument("--deform", default="", help="⑨ 变形者闸：逗号分隔参数名，或 @文件（每行一个/JSON 列表）。落 .diag/l2d_deform_<model>.json")
+    ap.add_argument("--snapab", default="", help="⑩ snap A/B：形如 idle->home，同一趟跑 修法关/开 两个模式，逐次 update 记时间轴（验收判据用这个，不用截图）")
+    ap.add_argument("--snapA", default="ArtMesh36,ArtMesh42,ArtMesh43,ArtMesh44,ArtMesh51",help="⑩ A 组 mesh 名（切换前应亮着的那组）")
+    ap.add_argument("--snapB", default="ArtMesh325,ArtMesh326,ArtMesh327,ArtMesh328,ArtMesh329,ArtMesh330",help="⑩ B 组 mesh 名（切换后应亮着的那组）")
+    ap.add_argument("--snapP", default="Param25,Param27", help="⑩ 时间轴里带上哪几个参数的值")
     ap.add_argument("--shot", default="", help="⑥ 单参数 A/B 截图，形如 Param25:0,0.5（只为认出画面上是哪一块）")
     ap.add_argument("--dumpgeo", action="store_true", help="⑦ 导出全部 mesh 的屏幕包围盒/面积/透明度，供离线反查「这个像素是哪几片」")
     ap.add_argument("--hide", default="", help="⑧ 逗号分隔的 drawable 名：setup 姿态下把这几片藏掉再截图（认画面身份用）")
@@ -559,7 +687,9 @@ def main():
     srv = subprocess.Popen([sys.executable, "-m", "http.server", str(SRV_PORT),
                             "-b", "127.0.0.1", "-d", os.path.join(ROOT, "Output")],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    url = "http://127.0.0.1:%d/gallery_v2/index.html" % SRV_PORT
+    # 必须带 cache-buster：headless 用固定的 user-data-dir，改过 gallery 后 Chrome 会端出
+    # 磁盘缓存里的旧 index.html —— 症状是"前端补丁明明改了、探针跑出来的行为和改动前一模一样"。
+    url = "http://127.0.0.1:%d/gallery_v2/index.html?v=%d" % (SRV_PORT, int(time.time()))
     for _ in range(60):
         try:
             if urllib.request.urlopen(url, timeout=2).status == 200:
@@ -785,6 +915,96 @@ def main():
                       % (str(x[1])[:24], x[2], x[3], x[4], x[6]))
         else:
             print("\n== ⑤ 绑定表未出结果: %s" % str(mp)[:250])
+
+    # —— ⑩ snap 的 A/B 时间轴（修法 (b) 的验收）
+    if a.snapab and "->" in a.snapab:
+        frm, to = [x.strip() for x in a.snapab.split("->", 1)]
+        set25 = []
+        lf = os.path.join(ROOT, ".diag", "l2d_opacity_map_%s.json" % a.model)
+        if os.path.exists(lf):
+            ld = json.load(open(lf, encoding="utf-8"))
+            pn0 = [x.strip() for x in a.snapP.split(",") if x.strip()]
+            tgt = pn0[0] if pn0 else ""
+            for e in ld.get("map", []):
+                if e[1] == tgt:
+                    set25 = [ld["names"][x[0]] for x in e[7]]
+                    break
+        cfg = {"from": frm, "to": to,
+               "setA": [x.strip() for x in a.snapA.split(",") if x.strip()],
+               "setB": [x.strip() for x in a.snapB.split(",") if x.strip()],
+               "set25": set25,
+               "pnames": [x.strip() for x in a.snapP.split(",") if x.strip()],
+               "frames": max(12, int(a.hold * 1000 / max(1, a.step))), "stepMs": max(16, a.step)}
+        raw10 = ev(JS_SNAPAB + "(" + json.dumps(cfg) + ")")
+        try:
+            ab = json.loads(raw10) if isinstance(raw10, str) and raw10.strip().startswith("{") else {"err": str(raw10)[:400]}
+        except Exception:
+            ab = {"err": str(raw10)[:400]}
+        if "off" in ab and "on" in ab:
+            f10 = os.path.join(ROOT, ".diag", "l2d_snapab_%s.json" % a.model)
+            with open(f10, "w", encoding="utf-8") as fh:
+                json.dump(ab, fh, ensure_ascii=False)
+            print("\n== ⑩ snap A/B：%s -> %s（A 组 %d 片 / B 组 %d 片，参数 %s）"                  % (frm, to, len(cfg["setA"]), len(cfg["setB"]), cfg["pnames"]))
+            for mode in ("off", "on"):
+                rows = ab[mode]["rows"]
+                head = "切换" if not rows else rows[0][1]
+                # 切换帧 = currentGroup 第一次变成 to 的那一帧
+                k0 = next((i for i, r in enumerate(rows) if r[1] == to), 0)
+                win = rows[k0:]
+                darki = [i for i in range(len(win)) if win[i][3] < 0.05 and win[i][4] < 0.05]
+                secs = round(sum(max(0.0, win[i + 1][0] - win[i][0]) for i in darki if i + 1 < len(win)), 3)
+                print("   %-4s 采样 %d 帧（切换在第 %d 帧）；A∧B 同时灭 %d 帧 / 约 %.2fs；切换后 nLit 最低 %s；A 峰 %.2f B 峰 %.2f；台账集(该参数能影响的全部 mesh) 最低 %d/%d 亮、峰值 %.2f"
+                      % ("修法关" if mode == "off" else "修法开", len(rows), k0, len(darki), secs,
+                         min([r[2] for r in win]) if win else "-",
+                         max([r[3] for r in win]) if win else -1, max([r[4] for r in win]) if win else -1,
+                         min([r[5] for r in win]) if win else -1, len(cfg["set25"]),
+                         max([r[6] for r in win]) if win else -1))
+                tl = os.path.join(ROOT, ".diag", "l2d_snapab_%s_%s.txt" % (a.model, mode))
+                with open(tl, "w", encoding="utf-8") as fh:
+                    fh.write("ts group nLit maxA maxB nLedger25 maxLedger25 %s\n" % " ".join(cfg["pnames"]))
+                    for r in rows:
+                        fh.write("%.3f %s %d %.3f %.3f %s\n" % (r[0], r[1], r[2], r[3], r[4],
+                                                                " ".join("-" if x is None else str(x) for x in r[5:])))
+            print("   前端 snap 层自证: %s  (标记=%s)"
+                  % (json.dumps(ab.get("snapDbg"), ensure_ascii=False),
+                     json.dumps(ab.get("marker"), ensure_ascii=False)))
+            print("   时间轴 → %s / .diag/l2d_snapab_%s_{off,on}.txt" % (f10, a.model))
+        else:
+            print("\n== ⑩ snap A/B 未出结果: %s" % str(ab)[:300])
+
+    # —— ⑨ 变形者闸：这个参数在自己量程内挪不挪几何（挪 = 不能 snap，会把姿态硬跳放回来）
+    if a.deform:
+        spec = a.deform
+        if spec.startswith("@"):
+            txt = open(spec[1:], encoding="utf-8").read().strip()
+            try:
+                j = json.loads(txt)
+                nm = list(j["params"]) if isinstance(j, dict) and "params" in j else j
+            except Exception:
+                nm = [x.strip() for x in txt.splitlines() if x.strip()]
+        else:
+            nm = [x.strip() for x in spec.split(",") if x.strip()]
+        raw9 = ev(JS_DEFORM + "(%s, %d)" % (json.dumps(nm), max(3, a.nsweep)))
+        try:
+            df = json.loads(raw9) if isinstance(raw9, str) and raw9.strip().startswith("{") else {"err": str(raw9)[:300]}
+        except Exception:
+            df = {"err": str(raw9)[:300]}
+        if "params" in df:
+            f9 = os.path.join(ROOT, ".diag", "l2d_deform_%s.json" % a.model)
+            with open(f9, "w", encoding="utf-8") as fh:
+                json.dump(df, fh, ensure_ascii=False)
+            print("\n== ⑨ 变形者闸：%d 个参数 × 量程内 %d 点 = %s 次 core.update（只比两点都亮着的 mesh 的屏幕框）"
+                  % (len(df["params"]), df["nstep"], df["updates"]))
+            for x in df["params"]:
+                if "err" in x:
+                    print("     %-24s %s" % (str(x["name"])[:24], x["err"]))
+                    continue
+                print("     %-24s 量程[%.3g,%.3g] 最大框位移 %.4f → %s"
+                      % (str(x["name"])[:24], x["mn"], x["mx"], x["maxBBoxShift"],
+                         "形变者(不可 snap)" if x["maxBBoxShift"] > 0.01 else "纯显隐选择器(可 snap)"))
+            print("   台账 → %s" % f9)
+        else:
+            print("\n== ⑨ 变形者闸未出结果: %s" % str(df)[:250])
 
     # —— ⑥ 单参数 A/B 截图：只回答「这个参数管的是画面上哪一块」，不当验收判据
     sm = re.match(r"^([\w\-]+):(.+)$", a.shot or "")

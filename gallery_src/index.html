@@ -1488,6 +1488,84 @@ async function renderLive2D(s, sk){
           for(const x of sg){ if(t<=x.t1){ v=segValue(x,t); break; } v=x.v1; }
           try{ cm.setParameterValueByIndex(c.idx,v); }catch(e){} } });
     })();
+    /* ---------- ⑦ 互斥美术开关：交叉淡化里**不混合**这些参数，直接钉在「进来的那条 clip」的边界值 ----------
+       根因（§123 追加-IX/X）：`Param25` 这类参数是**两套互斥手部美术的开关**（0=A 组手、≥0.2=B 组手，
+       中间约 0.1 宽两组全灭）。源包 AnimatorController 的 462 个状态**一条出边过渡都没有** ⇒ 游戏侧是
+       `Animator.Play()` 瞬时切换，值一帧跳过去、从不落进死区；我们为了治 §6.35 的"姿态硬跳"把库的交叉
+       淡化留住了 ⇒ 值被平滑插值 ⇒ **必穿死区** ⇒ 观感就是"切动作那一下两只手一起没"。
+       ⇒ 只把**开关类**参数改成瞬时，姿态类照常淡化。开关类由离线判据算（脚本见表里的 generatedBy）：
+         ① 该参数在探针臂 ⑤ 的「参数→mesh 显隐」台账里（它真的会改变某个 ArtMesh 的不透明度）；
+         ② 切换前后跨过台账里的翻转点（= 这一淡会改变"哪些美术在画"）；
+         ③ 探针臂 ⑨ 实测它在量程内的**几何位移**够小 —— `ParamForearmLAngle` 这类"既绑显隐又形变"的
+            姿态参数正是被这条挡下：snap 它 = 手臂瞬移，那就是 §6.35 治过的病。
+       ⚠️ 表文件不存在 = 这层完全不存在：没跑过判据的模型，行为与改动前逐帧相同（不留"空表跑过"的假成功）。
+       `window.__snapOff=true` 是取证用的反向开关（A/B 靠它，UI 上没有入口）；表里 maxjump 之外的参数不钉。 */
+    const snapP=Object.create(null);                  // 参数索引 -> {flips,mn,mx,step,maxjump}
+    const snapHead=Object.create(null);               // group   -> { 参数索引: [边界值, 该值恒定多少秒] }
+    let snapHold=null, snapPrevG=null, snapPending=false;
+    const snapUrl=P+model+'/'+String(model).split('/').pop()+'.snapswitch.json';
+    window.__snapDbg=()=>({url:snapUrl, state:'loading'});
+    (async()=>{ let j=null;
+      try{ const r=await fetch(snapUrl);
+        if(!r.ok){ window.__snapDbg=()=>({url:snapUrl, state:'http-'+r.status}); return; }
+        j=await r.json(); }
+      catch(e){ window.__snapDbg=()=>({url:snapUrl, state:'err '+String(e)}); return; }
+      const ps=j&&j.params, cl=j&&j.clips;
+      if(!ps||!cl){ window.__snapDbg=()=>({url:snapUrl, state:'no-params-or-clips'}); return; }
+      const mj=(+j.maxjump>0)? +j.maxjump:0.5, ix=Object.create(null);
+      for(const name in ps){ let k=-1; try{ k=cm.getParameterIndex(name); }catch(e){}
+        if(k<0) continue; ix[name]=k;
+        snapP[k]={flips:ps[name].flips||[], mn:+ps[name].mn, mx:+ps[name].mx,
+                  step:ps[name].stepShift||[], maxjump:mj}; }
+      for(const g in cl){ const row=cl[g]||{}, o=Object.create(null); let nn=0;
+        for(const name in row){ const k=ix[name]; if(k===undefined) continue; o[k]=row[name]; nn++; }
+        if(nn) snapHead[g]=o; }
+      window.__snapDbg=()=>({url:snapUrl, state:'ok', params:Object.keys(snapP).length,
+        groups:Object.keys(snapHead).length, held:snapHold?snapHold.items.map(x=>[x[0],x[1],Math.round(x[2])]):[],
+        off:!!window.__snapOff });
+    })();
+    const fadeOf=(g,key)=>{ const d=g&&mm.definitions&&mm.definitions[g]&&mm.definitions[g][0];
+      return d&&typeof d[key]==='number'? d[key]:0.5; };
+    const origStartMotion=mm.startMotion.bind(mm);
+    mm.startMotion=(g,i,mode,opt)=>{ snapPending=true; return origStartMotion(g,i,mode,opt); };
+    /* 抓"切换前的实际值"必须写在 beforeMotionUpdate：afterMotionUpdate 之后缓冲里已经是混合值了。
+       钉住的时长 = 淡化窗口（进来的 FadeInTime 与上一条的 FadeOutTime 取大者 + 余量），
+       且**不许超过该值在源 clip 里恒定的秒数** —— 超过就钉到了一个 clip 自己后面会走的值上。 */
+    im.on('beforeMotionUpdate',()=>{
+      const st=mm.state, g=st? st.currentGroup:null;
+      const changed=snapPending||(g!==snapPrevG);
+      const prevG=snapPrevG; snapPrevG=g; snapPending=false;
+      if(!changed) return;
+      const rows=(g&&snapHead[g])? snapHead[g]:null;
+      snapHold=null;
+      if(!rows||window.__snapOff||!Object.keys(snapP).length) return;
+      /* 淡化窗口：实测 idle↔home 的交叉淡化跑满 ~2s（库取的是两条动作各自 fade 的较大者，
+         不止入参那条的 FadeInTime），所以四个值全取大者再 +0.2 余量；上限是该值在源 clip 里
+         真正恒定的秒数（表里 clips[g][p][1]），钉过头会钉到一个 clip 自己后面会走的值上。 */
+      const win=Math.max(fadeOf(g,'FadeInTime'), fadeOf(g,'FadeOutTime'),
+                         fadeOf(prevG,'FadeInTime'), fadeOf(prevG,'FadeOutTime'))+0.2;
+      const items=[];
+      for(const k in rows){ const idx=+k, hv=rows[k], cfg=snapP[idx];
+        if(!cfg||!hv||!(cfg.mx>cfg.mn)) continue;
+        const from=cm.getParameterValueByIndex(idx), to=+hv[0], sp=cfg.mx-cfg.mn;
+        if(!(Math.abs(to-from)>1e-6)) continue;
+        const lo=Math.min(from,to), hi=Math.max(from,to);
+        let cross=0; for(const f of cfg.flips) if(f>lo+1e-4*sp&&f<hi-1e-4*sp) cross++;
+        if(!cross) continue;
+        let jump=0; const step=cfg.step, n=step.length-1;
+        if(n>0){ const qa=(from-cfg.mn)/sp*n, qb=(to-cfg.mn)/sp*n;
+          const a=Math.min(qa,qb), b=Math.max(qa,qb);
+          for(let q=1;q<=n;q++) if(q-1<b&&q>a) jump+=step[q]; }
+        if(jump>cfg.maxjump) continue;
+        const hold=Math.min(win, +hv[1]-0.02); if(hold<0.08) continue;
+        items.push([idx,to,hold*1000]); }
+      if(items.length) snapHold={items, t0:performance.now()}; });
+    im.on('afterMotionUpdate',()=>{ const h=snapHold; if(!h) return;
+      if(window.__snapOff){ snapHold=null; return; }
+      const now=performance.now(); let alive=false;
+      for(const it of h.items) if(now<h.t0+it[2]){ alive=true;
+        try{ cm.setParameterValueByIndex(it[0],it[1]); }catch(e){} }
+      if(!alive) snapHold=null; });
     const bar=document.getElementById('l2bar');
     bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
