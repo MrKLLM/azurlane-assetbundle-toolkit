@@ -137,14 +137,18 @@ function frameStats(){ // 与参照截图**同一套**裁剪(左右 8%、上 14%
   const x=c.getContext('2d'); x.drawImage(renderer.domElement,0,0);
   const x0=Math.floor(W*0.08), x1=Math.floor(W*0.92), y0=Math.floor(H*0.14), y1=Math.floor(H*0.85);
   const d=x.getImageData(x0,y0,x1-x0,y1-y0).data;
-  const L=[]; let sat=0;
-  for(let i=0;i<d.length;i+=4*7){ const r=d[i],g=d[i+1],b=d[i+2];
-    L.push((0.2126*r+0.7152*g+0.0722*b)/255); sat+=(Math.max(r,g,b)-Math.min(r,g,b))/255; }
+  const L=[]; let sat=0, sky=0, tot=0;
+  for(let i=0;i<d.length;i+=4*7){ const r=d[i],g=d[i+1],b=d[i+2]; tot++;
+    const l=(0.2126*r+0.7152*g+0.0722*b)/255; L.push(l);
+    sat+=(Math.max(r,g,b)-Math.min(r,g,b))/255;
+    // 天空/海面的判据（两侧同一把尺子，Python 侧 ref_stats 里逐字相同）
+    if(b/255>r/255+0.08 && b/255>0.55 && l>0.5) sky++; }
   L.sort((a,b)=>a-b); const n=L.length;
   const q=t=>L[Math.min(n-1,Math.floor(n*t))];
   const bs=L.filter(v=>v<=0.6);
   return {mean:L.reduce((a,b)=>a+b,0)/n, med:q(0.5), p05:q(0.05), p25:q(0.25), p75:q(0.75), p95:q(0.95),
           hi:L.filter(v=>v>0.75).length/n, lo:L.filter(v=>v<0.25).length/n, sat:sat/n,
+          skyf:sky/tot,
           hi6:L.filter(v=>v>0.6).length/n, base6:bs.length?bs.reduce((a,b)=>a+b,0)/bs.length:0,
           samples:n};
 }
@@ -352,7 +356,7 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
       const k=ink(); const f=frameStats();
       let pk=[]; try{ pk=picksAt(); }catch(e){ pk=[{err:String(e).slice(0,80)}]; }
       return {ink:k.ink, mean:f.mean, med:f.med, p05:f.p05, p25:f.p25, p75:f.p75, p95:f.p95, hi:f.hi, lo:f.lo,
-              hi6:f.hi6, base6:f.base6, sat:f.sat, picks:pk}; };
+              hi6:f.hi6, base6:f.base6, sat:f.sat, skyf:f.skyf, picks:pk}; };
     window.__DONE=true;
   }, undefined, e=>{ window.__ERR=String(e&&e.message||e).slice(0,300);
     window.__STATS={meshObjects:0,posTotal:0,lights:0,renderedTris:0,boxAll:null,boxReal:null,
@@ -461,20 +465,56 @@ def zone_views(glb_path):
             pos_of.setdefault(n["name"], []).append(world(i)[1])
     allp = [q for v in pos_of.values() for q in v]
     centre = [sum(q[k] for q in allp) / len(allp) for k in range(3)]
+    # "外面在哪一侧"：用窗外内容（船/地形/云/树/礁石）的世界位置质心定方向，
+    # 而不是手填一个 -z。窗在相机视野里 ⇒ 才谈得上"天空占画面比例"这个量。
+    import re
+    outside = []
+    for i, n in enumerate(nodes):
+        nm = (n.get("name") or "")
+        if re.search(r"ship01|terrain_0|Cloud_Layer|stylizedrock|poplar04|oak01", nm):
+            outside.append(world(i)[1])
+    if outside:
+        oc = [sum(q[k] for q in outside) / len(outside) for k in range(3)]
+    else:
+        oc = [centre[0], centre[1], centre[2] - 100.0]
+    near = [q for q in allp if max(abs(q[0]), abs(q[2])) <= 12.0]
+    box = [[min(q[k] for q in near) for k in (0, 2)], [max(q[k] for q in near) for k in (0, 2)]] \
+        if near else [[-8, -8], [8, 8]]
+
+    def inside(p):
+        return box[0][0] - 0.5 <= p[0] <= box[1][0] + 0.5 and box[0][1] - 0.5 <= p[2] <= box[1][1] + 0.5
+
     views = []
     for zone, names in ZONE_ANCHORS.items():
         pts = [q for nm in names for q in pos_of.get(nm, [])]
         if not pts:
             continue
         c = [sum(q[k] for q in pts) / len(pts) for k in range(3)]
-        # 相机放在簇中心**朝房间中心那一侧**（放反就穿到墙外，会被墙挡住）
+        ux, uz = oc[0] - c[0], oc[2] - c[2]
+        uL = max(1e-6, (ux * ux + uz * uz) ** 0.5)
         dx, dz = centre[0] - c[0], centre[2] - c[2]
         L = max(1e-6, (dx * dx + dz * dz) ** 0.5)
-        back = min(3.2, max(1.6, L * 0.9))
-        views.append({"name": zone, "n": len(pts),
-                      "pos": [round(c[0] + dx / L * back, 3), 1.45, round(c[2] + dz / L * back, 3)],
-                      "look": [round(c[0], 3), 0.8, round(c[2], 3)], "fov": 62})
-    return views, {k: [round(x, 2) for x in centre] for k in ["_centre"]}
+        back = min(3.6, max(1.6, L * 0.9))
+        # 两个候选：朝外那侧的对面（能把窗拍进画面）与原来的"朝房间中心"侧。
+        # 取"在屋内"且视线与朝外方向点积最大的那个——点积就是"窗有多进画面"。
+        cands = []
+        for sgn in (-1.0, 1.0):
+            for base in ((ux / uL, uz / uL), (dx / L, dz / L)):
+                p = [c[0] + sgn * base[0] * back, 1.45, c[2] + sgn * base[1] * back]
+                vx, vz = c[0] - p[0], c[2] - p[2]
+                vL = max(1e-6, (vx * vx + vz * vz) ** 0.5)
+                dot = (vx / vL) * (ux / uL) + (vz / vL) * (uz / uL)
+                cands.append((dot, p, inside(p)))
+        ok = [q for q in cands if q[2]] or cands
+        dot, pos, _ = max(ok, key=lambda q: q[0])
+        # 朝不到窗外（簇本身背对窗、转过去就出墙）时把视角放宽到 80°，
+        # 让窗从侧面进画面——这是**近似的取景**，不是包里的相机参数（那台相机没有 FOV）。
+        views.append({"name": zone, "n": len(pts), "dot_outside": round(dot, 3),
+                      "pos": [round(pos[0], 3), pos[1], round(pos[2], 3)],
+                      "look": [round(c[0], 3), 0.8, round(c[2], 3)],
+                      "fov": 62 if dot > 0.3 else 80})
+    return views, {"_centre": [round(x, 2) for x in centre],
+                   "_outside": [round(x, 2) for x in oc]}
 
 
 REF_CROP = (0.08, 0.14, 0.92, 0.85)   # 与 harness 的 frameStats 同一套裁剪
@@ -495,6 +535,9 @@ def ref_stats(ref_dir):
         n = len(L)
         q = lambda t: L[min(n - 1, int(n * t))]
         sat = sum(max(p) - min(p) for p in px) / 255.0 / n
+        skyf = sum(1 for r, g, b in px
+                   if b / 255.0 > r / 255.0 + 0.08 and b / 255.0 > 0.55
+                   and (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0 > 0.5) / n
         out.append({"file": os.path.basename(f)[:10], "mean": sum(L) / n, "med": q(0.5),
                     "p05": q(0.05), "p25": q(0.25), "p75": q(0.75), "p95": q(0.95),
                     "hi": sum(1 for v in L if v > 0.75) / n, "lo": sum(1 for v in L if v < 0.25) / n,
@@ -502,7 +545,7 @@ def ref_stats(ref_dir):
                     # 否则一个 mean 把两件事混在一起，会误判成"再抬点亮度就行"
                     "hi6": sum(1 for v in L if v > 0.6) / n,
                     "base6": (sum(v for v in L if v <= 0.6) / max(1, sum(1 for v in L if v <= 0.6))),
-                    "sat": sat})
+                    "sat": sat, "skyf": skyf})
     return out
 
 
@@ -511,7 +554,7 @@ def grade_sweep(browser, base, rel_glb, rel_truth, rel_side, rel_render, views, 
     比与参照图的亮度距离；几何计数不许变（那是护栏）。"""
     vq = urllib.parse.quote(json.dumps(views, ensure_ascii=False))
     rows = []
-    keys = ("mean", "med", "p05", "p25", "p75", "p95", "hi", "lo", "hi6", "base6", "sat")
+    keys = ("mean", "med", "p05", "p25", "p75", "p95", "hi", "lo", "hi6", "base6", "sat", "skyf")
     for p in presets:
         q = preset_query(p, base, rel_side, rel_render, vq)
         tag = p.get("tag") or ("%s/%s" % (p.get("tone", "none"), p.get("exp", 1)))
@@ -539,7 +582,9 @@ def grade_sweep(browser, base, rel_glb, rel_truth, rel_side, rel_render, views, 
                      # 模型侧计数要扣掉查看端补摆的穹顶，否则"加了 sky"会被误判成改了模型
                      "counts": (stt.get("meshObjects"), stt.get("posTotal"),
                                 (stt.get("renderedTris") or 0) - int(stt.get("backdropTris") or 0)),
-                     "per_view": {v["name"]: round(v.get("mean", 0), 3) for v in st["views"]}})
+                     "per_view": {v["name"]: {k: round(v.get(k, 0), 3)
+                                             for k in ("mean", "hi6", "sat", "skyf")}
+                                 for v in st["views"]}})
     return rows
 
 
@@ -903,7 +948,8 @@ def main():
             zc = run_case(browser, base, rel_glb, rel_truth, "zone", {"names": zn}, extra=zq)
             print("  ℹ 分区域机位（相机放在房间中央朝各簇看，眼高 1.45；锚点来自场景命名物体）:")
             for v in views:
-                print("     %s: %d 个锚点，相机 %s 看 %s" % (v["name"], v["n"], v["pos"], v["look"]))
+                print("     %s: %d 个锚点，朝外点积 %-6s fov=%-3s 相机 %s 看 %s"
+                      % (v["name"], v["n"], v.get("dot_outside"), v["fov"], v["pos"], v["look"]))
             print("     各机位落笔 %s；截图 shot_zone_*.png"
                   % {v["name"]: (round(v["ink"], 3) if v["ink"] is not None else None)
                      for v in (zc or {}).get("views", [])})
@@ -931,14 +977,14 @@ def main():
             if not refs:
                 print("  ⚠ 参照图目录没有图：%s" % a.ref_dir)
             else:
-                keys = ("mean", "med", "p05", "p25", "p75", "p95", "hi", "lo", "hi6", "base6", "sat")
+                keys = ("mean", "med", "p05", "p25", "p75", "p95", "hi", "lo", "hi6", "base6", "sat", "skyf")
                 target = {k: sorted(r[k] for r in refs)[len(refs) // 2] for k in keys}
                 print("  参照图（游戏内截图，裁掉 UI）%d 张：" % len(refs))
                 for r in refs:
                     print("     %s mean=%.3f med=%.3f p95=%.3f 高光>0.75=%.1f%% 亮部>0.6=%.1f%% "
-                          "其余均值=%.3f 暗部=%.1f%% 饱和=%.3f"
+                          "其余均值=%.3f 暗部=%.1f%% 饱和=%.3f 天空=%.1f%%"
                           % (r["file"], r["mean"], r["med"], r["p95"], 100 * r["hi"], 100 * r["hi6"],
-                             r["base6"], 100 * r["lo"], r["sat"]))
+                             r["base6"], 100 * r["lo"], r["sat"], 100 * r["skyf"]))
                 print("     目标(取中位) " + " ".join("%s=%.3f" % (k, target[k]) for k in keys))
                 rel_render = None
                 rs_p = os.path.join(WORK, "room.render.json")
@@ -1026,9 +1072,10 @@ def main():
                 for r in sorted(rows, key=lambda x: x["dist"]):
                     a2 = r["avg"]
                     print("     %-24s 分位+饱和 %.3f (均值距离 %.3f) | mean %.3f med %.3f p05 %.3f "
-                          "p95 %.3f 亮部>0.6 %.1f%% 其余 %.3f 暗部 %.1f%% sat %.3f"
+                          "p95 %.3f 亮部>0.6 %.1f%% 其余 %.3f 暗部 %.1f%% sat %.3f 天空 %.1f%%"
                           % (r["tag"], r["dist"], r.get("mean_dist", 0), a2["mean"], a2["med"],
-                             a2["p05"], a2["p95"], 100 * a2["hi6"], a2["base6"], 100 * a2["lo"], a2["sat"]))
+                             a2["p05"], a2["p95"], 100 * a2["hi6"], a2["base6"], 100 * a2["lo"],
+                             a2["sat"], 100 * a2["skyf"]))
                 by_tag = {r["tag"]: r for r in rows}
                 counts = set(r["counts"] for r in rows)
                 say(len(counts) == 1 and rows and rows[0]["counts"] == (st.get("meshObjects"),
@@ -1074,20 +1121,35 @@ def main():
                         "C10 白云推断敏感性：与不替换相比最大分布差 %.4f（须 >0.01，否则这条推断是装饰）" % dv)
                 # C7：过曝闸。分位数距离仍可能被"整幅一起提亮"讨好一部分，
                 # 亮部面积超过参照 1.6 倍就直接判红——那是糊白，不是还原。
+                # 亮部面积超过参照 1.6 倍、或饱和度低于参照 6 成的档位，**先取消候选资格**
+                # 再挑最近的——闸门只抱怨不约束，等于让"整幅糊白"继续当选（本轮真实踩过：
+                # 一个 living hi6 冲到 74.5%、sat 掉到 0.046 的档位是"距离最小"的那一个）。
+                def _worst_over(r):
+                    return max(v["hi6"] for v in r["per_view"].values()) / max(1e-6, target["hi6"])
+
                 if rows:
-                    best = min(rows, key=lambda x: x["dist"])
-                    over = best["avg"]["hi6"] / max(1e-6, target["hi6"])
-                    say(over <= 1.6,
-                        "C7 过曝闸：最近档亮部(>0.6)占比 %.1f%% vs 参照 %.1f%% = %.2f 倍（须 ≤1.6）"
-                        % (100 * best["avg"]["hi6"], 100 * target["hi6"], over))
+                    elig = [r for r in rows if _worst_over(r) <= 1.6 and r["avg"]["sat"] >= 0.6 * target["sat"]]
+                    drop = [r["tag"] for r in rows if r not in elig]
+                    say(bool(elig),
+                        "C7 过曝/褪色闸：按"
+                        "最差机位亮部≤1.6 倍 且 sat≥参照 60%%"
+                        "\"筛掉 %d/%d 档 %s%s"
+                        % (len(drop), len(rows), "、".join(drop[:4]), "…" if len(drop) > 4 else ""))
+                    best = min(elig or rows, key=lambda x: x["dist"])
                     print("  最近档位: %s（分位+饱和距离 %.3f）参数 %s —— 出图 shot_best_*.png"
                           % (best["tag"], best["dist"], json.dumps(best["preset"], ensure_ascii=False)))
+                    if not elig:
+                        print("  ⚠ 没有任何档位过闸 ⇒ 当前网格内**没有**既贴参照又不糊白的组合，"
+                              "这句话本身就是结论，不许退回"
+                              "全体里挑最近的\"当结论")
                     run_case(browser, base, rel_glb, rel_truth, "best",
                              {"names": [v["name"] for v in zone_v]},
                              extra=preset_query(best["preset"], base, rel_side, rel_render,
                                                 urllib.parse.quote(json.dumps(zone_v, ensure_ascii=False))))
                     with open(os.path.join(WORK, "grade_sweep.json"), "w", encoding="utf-8") as f:
-                        json.dump({"target": target, "rows": rows}, f, ensure_ascii=False, indent=1)
+                        json.dump({"target": target, "rows": rows,
+                                   "eligible": [r["tag"] for r in elig]},
+                                  f, ensure_ascii=False, indent=1)
 
     finally:
         try:
