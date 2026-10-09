@@ -90,9 +90,12 @@ JS_INSTALL = r"""(() => {
     CP.__baseUpdate = base;
     CP.update = function () {
       const r = base.apply(this, arguments);
+      const M = this._model;
+      // 藏 mesh 必须打在 core.update() **之后**：渲染读的就是这份缓冲，
+      // 若在 update 之前写，会被按参数重算覆盖掉（实测写 0 读回还是 1，两张图逐像素相同）。
+      if(window.__hideSet){ const O=M.drawables.opacities; window.__hideSet.forEach(j=>{ O[j]=0; }); }
       const c = window.__cap;
       if (c && c.rows.length < c.max) {
-        const M = this._model;
         c.rows.push(M.parameters.values.slice());
         c.partrows.push(M.parts.opacities.slice());
         c.drows.push(M.drawables.opacities.slice());
@@ -349,10 +352,16 @@ JS_MAPALL = r"""(async (nstep) => {
   const ambWas=window.__ambOff; window.__ambOff=true;
   try{ mm.stopAllMotions(); }catch(e){}
   const nd=D.count, np=P.count;
+  // 基准必须是**确定性姿态**：全部参数写 moc3 默认值后再采 ref。用"当前姿态"当基准会造出假阳性 ——
+  // 实测 ArtMesh312 在当前基准里是关着的 0，结果 253 个参数各被扫出"11 个点全是 1.00"，
+  // 看着像 253 条绑定，其实只是"动一下就开"，不是该参数决定的。
+  try{ window.__app.ticker.stop(); }catch(e){}
+  for(let i=0;i<np;i++) P.values[i]=P.defaultValues[i];
+  core.update();
   const base=[]; for(let i=0;i<np;i++) base.push(P.values[i]);
   const ref=new Float32Array(nd);
-  core.update(); ref.set(D.opacities);
-  const out=[]; let updates=0, pairs=0;
+  ref.set(D.opacities);
+  const out=[]; let updates=0, pairs=0, flat=0;
   const touched=new Uint8Array(nd);
   for(let i=0;i<np;i++){
     const mn=P.minimumValues[i], mx=P.maximumValues[i], map=new Map();
@@ -361,22 +370,30 @@ JS_MAPALL = r"""(async (nstep) => {
       const O=D.opacities;
       for(let d=0;d<nd;d++){ const x=O[d];
         if(Math.abs(x-ref[d])>1e-3){
-          const cur=map.get(d);
-          if(cur) cur.push([q,+x.toFixed(3)]); else map.set(d,[[q,+x.toFixed(3)]]);
+          let e=map.get(d); if(!e){ e={pts:[], mn:x, mx:x}; map.set(d,e); }
+          e.pts.push([q,+x.toFixed(3)]); if(x<e.mn)e.mn=x; if(x>e.mx)e.mx=x;
         } }
     }
     P.values[i]=base[i];
     if(!map.size) continue;
-    const aff=[]; map.forEach((arr,d)=>{ aff.push([d,arr]); touched[d]=1; });
+    const aff=[];
+    map.forEach((e,d)=>{
+      // 真绑定 = 11 点序列非常量：要么有点等于基准（没被记进 pts），要么记录值本身有高低。
+      // 11 点全等于同一个非基准值 ⇒ 假阳性（基准里关着、一动就开），丢掉。
+      if(!(e.pts.length<nstep+1 || (e.mx-e.mn)>1e-3)){ flat++; return; }
+      aff.push([d,e.pts]); touched[d]=1;
+    });
+    if(!aff.length) continue;
     pairs+=aff.length;
     out.push([i, window.__pid[i], +mn.toFixed(3), +mx.toFixed(3), +P.defaultValues[i].toFixed(3),
               P.repeats[i], aff.length, aff]);
   }
   for(let i=0;i<np;i++) P.values[i]=base[i];
   core.update(); window.__ambOff=ambWas;
+  try{ window.__app.ticker.start(); }catch(e){}
   const un=[]; for(let d=0;d<nd;d++) if(!touched[d]) un.push(d);
   return JSON.stringify({nstep, params:np, drawables:nd, updates,
-    nParamsWithEffect:out.length, pairs, nUntouched:un.length, untouched:un,
+    nParamsWithEffect:out.length, pairs, nFlatRejected:flat, nUntouched:un.length, untouched:un,
     ref:Array.from(ref, x=>+x.toFixed(3)), names:window.__drawableIds, map:out});
 })"""
 
@@ -407,16 +424,61 @@ JS_GEO = r"""(async (dummy) => {
   const m=window.__m, im=m.internalModel, core=im.coreModel, M=core._model;
   const ppu=im.pixelsPerUnit||1, cux=im.width/ppu, cuy=im.height/ppu;
   const cv=document.querySelector('canvas'); const r=cv.getBoundingClientRect();
-  const D=M.drawables, rows=[];
-  for(let i=0;i<D.count;i++){
-    const p=D.vertexPositions[i]; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-    for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
-    rows.push([window.__drawableIds[i], +x0.toFixed(4), +y0.toFixed(4), +x1.toFixed(4), +y1.toFixed(4),
-               +((x1-x0)*(y1-y0)).toFixed(6), +D.opacities[i].toFixed(3), D.renderOrders[i]]);
-  }
+  const P=M.parameters, D=M.drawables;
+  window.__cap=null; window.__wset=null;
+  try{ im.motionManager.stopAllMotions(); }catch(e){}
+  try{ window.__app.ticker.stop(); }catch(e){}          // 静止采样，别边采边动
+  const grab=()=>{ const rows=[];
+    for(let i=0;i<D.count;i++){ const p=D.vertexPositions[i];
+      let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+      for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
+      rows.push([window.__drawableIds[i], +x0.toFixed(4), +y0.toFixed(4), +x1.toFixed(4), +y1.toFixed(4),
+                 +((x1-x0)*(y1-y0)).toFixed(6), +D.opacities[i].toFixed(3), D.renderOrders[i]]); }
+    return rows; };
+  const cur=grab();
+  // setup 姿态：全部参数写 moc3 默认值。左右对称 ⇒ 成对的镜像框可以直接算出来（找"手"用）
+  const base=[]; for(let i=0;i<P.count;i++) base.push(P.values[i]);
+  for(let i=0;i<P.count;i++) P.values[i]=P.defaultValues[i];
+  core.update(); const setup=grab();
+  for(let i=0;i<P.count;i++) P.values[i]=base[i];
+  core.update(); try{ window.__app.ticker.start(); }catch(e){}
+  const mm=im.motionManager; const st={};
+  try{ st.keys=Object.keys(mm.state||{});
+    const it=(mm.state&&mm.state.items&&mm.state.items[0])||null;
+    if(it){ st.itemKeys=Object.keys(it); const nums={};
+      for(const k in it){ const v=it[k]; if(typeof v==='number'&&isFinite(v)) nums[k]=+v.toFixed(3); }
+      st.itemNums=nums; }
+    st.hasFadeTime=!!(mm.state&&mm.state.items&&mm.state.items[0]);
+  }catch(e){ st.err=String(e); }
   return JSON.stringify({cux:+cux.toFixed(4), cuy:+cuy.toFixed(4),
                          rect:{left:r.left, top:r.top, w:r.width, h:r.height},
-                         scale:+m.scale.x.toFixed(6), pos:[m.x,m.y], rows});
+                         scale:+m.scale.x.toFixed(6), pos:[m.x,m.y],
+                         rows:cur, setup, state:st});
+})"""
+
+
+# ---------------------------------------------------------------- ⑧ 藏起指定 mesh 后截图（用来确认"这几片是画面上的什么"）
+JS_HIDE = r"""(async (names) => {
+  const m=window.__m, im=m.internalModel, core=im.coreModel, M=core._model;
+  const P=M.parameters, D=M.drawables;
+  window.__cap=null; window.__ambOff=true;
+  try{ im.motionManager.stopAllMotions(); }catch(e){}
+  m.autoUpdate=false;                                  // 页面自己的调度会把参数写回去
+  try{ window.__app.ticker.stop(); }catch(e){}
+  for(let i=0;i<P.count;i++) P.values[i]=P.defaultValues[i];   // setup 姿态，结果可复现
+  const idx=[], miss=[];
+  names.forEach(n=>{ const j=window.__drawableIds.indexOf(n); if(j<0) miss.push(n); else idx.push(j); });
+  window.__hideSet = idx;                              // 由 update 钩子在 core.update() 之后落刀
+  core.update();
+  // WebGL 画布默认 preserveDrawingBuffer=false：不经过一次合成，Page.captureScreenshot
+  // 截到的是上一帧 —— 实测这样截出来的两张图逐像素相同，会把"仪器坏"读成"这块参数没作用"。
+  window.__app.render();
+  await new Promise(r=>requestAnimationFrame(r));
+  window.__app.render();
+  await new Promise(r=>requestAnimationFrame(r));
+  const after=idx.map(j=>+D.opacities[j].toFixed(2));
+  return JSON.stringify({ok:true, hidden:idx.length, miss, after,
+                         stillZero:after.filter(x=>x===0).length});
 })"""
 
 
@@ -436,6 +498,7 @@ def main():
     ap.add_argument("--mapall", action="store_true", help="⑤ 全量「参数→哪些 mesh 显隐」绑定表（落 .diag/l2d_opacity_map_<model>.json）")
     ap.add_argument("--shot", default="", help="⑥ 单参数 A/B 截图，形如 Param25:0,0.5（只为认出画面上是哪一块）")
     ap.add_argument("--dumpgeo", action="store_true", help="⑦ 导出全部 mesh 的屏幕包围盒/面积/透明度，供离线反查「这个像素是哪几片」")
+    ap.add_argument("--hide", default="", help="⑧ 逗号分隔的 drawable 名：setup 姿态下把这几片藏掉再截图（认画面身份用）")
     a = ap.parse_args()
     norest = os.environ.get("NOREST") == "1"
     tag = "norest" if norest else "rest"
@@ -646,9 +709,10 @@ def main():
             print("\n== ⑤ 全量绑定表：%d 个参数 × 量程内 %d 点 = %s 次 core.update，读全部 %d 个 drawable"
                   % (mp["params"], mp["nstep"], mp["updates"], mp["drawables"]))
             print("   能改变任何 mesh 透明度的参数 %d 个（另有 %d 个参数扫完全程都没碰到可见性）；"
-                  "参数×mesh 关联 %d 对；**任何参数都碰不到的 mesh %d 个**"
+                  "参数×mesh 关联 %d 对；**任何参数都碰不到的 mesh %d 个**；"
+                  "剔掉假阳性关联 %d 条（11 点读数全等 = 基准里关着、一动就开，不是绑定）"
                   % (mp["nParamsWithEffect"], mp["params"] - mp["nParamsWithEffect"],
-                     mp["pairs"], mp["nUntouched"]))
+                     mp["pairs"], mp["nUntouched"], mp.get("nFlatRejected", -1)))
             print("   台账 → %s（含每个 mesh 的 11 点透明度曲线，可离线复算）" % fpm)
             print("   覆盖面最广的参数（前 12）：")
             for x in sorted(mp["map"], key=lambda y: -y[6])[:12]:
@@ -711,11 +775,47 @@ def main():
             fp7 = os.path.join(ROOT, ".diag", "l2d_geo_%s.json" % a.model)
             with open(fp7, "w", encoding="utf-8") as fh:
                 json.dump(g7, fh, ensure_ascii=False)
-            print("\n⑦ 几何导出 %d 个 mesh（画布 %.2fx%.2f 单位；canvas 左上 (%.0f,%.0f) %.0fx%.0f px）→ %s"
-                  % (len(g7["rows"]), g7["cux"], g7["cuy"], g7["rect"]["left"], g7["rect"]["top"],
-                     g7["rect"]["w"], g7["rect"]["h"], fp7))
+            print("\n⑦ 几何导出 %d 个 mesh ×2 份（当前姿态 + setup 默认姿态；画布 %.2fx%.2f 单位，"
+                  "canvas %.0fx%.0f px @(%0.f,%0.f)）→ %s"
+                  % (len(g7["rows"]), g7["cux"], g7["cuy"], g7["rect"]["w"], g7["rect"]["h"],
+                     g7["rect"]["left"], g7["rect"]["top"], fp7))
+            print("   motion 状态字段: %s | 条目字段: %s | 数值: %s"
+                  % ((g7.get("state") or {}).get("keys"), (g7.get("state") or {}).get("itemKeys"),
+                     (g7.get("state") or {}).get("itemNums")))
         else:
             print("\n⑦ 几何导出失败: %s" % str(g7)[:200])
+
+    # —— ⑧ 藏起指定 mesh 后截图（先拍一张同姿态基准，再拍藏掉的）
+    hl = [x.strip() for x in a.hide.split(",") if x.strip()]
+    if hl:
+        shots8 = {}
+        for tag, lst in (("base", []), ("hide", hl)):
+            r8 = ev(JS_HIDE + "(%s)" % json.dumps(lst))
+            print("   ⑧ %s → %s" % (tag, str(r8)[:180]))
+            png = cmd("Page.captureScreenshot", {"format": "png"})
+            fp8 = os.path.join(ROOT, ".diag", "l2d_hide_%s_%s.png" % (a.model, tag))
+            with open(fp8, "wb") as fh:
+                fh.write(base64.b64decode(png["data"]))
+            shots8[tag] = fp8
+        try:
+            from PIL import Image, ImageChops
+            i1 = Image.open(shots8["base"]).convert("RGB")
+            i2 = Image.open(shots8["hide"]).convert("RGB")
+            d8 = ImageChops.difference(i1, i2).convert("L")
+            npx8 = sum(1 for x in d8.getdata() if x > 12)
+            if npx8 < 50:
+                print("   ❌ 两张截图只差 %d 像素 ⇒ **截图没反映改动，这条臂坏了**，"
+                      "不要根据它下任何结论（自检：藏 5 片以上必然看得见变化）" % npx8)
+            else:
+                print("   自检：base 与 hide 差 %d 像素（>50 ⇒ 截图确实反映了改动）" % npx8)
+            w = 560; h = int(i1.size[1] * w / i1.size[0])
+            ab = Image.new("RGB", (w * 2 + 12, h), (255, 255, 255))
+            ab.paste(i1.resize((w, h)), (0, 0)); ab.paste(i2.resize((w, h)), (w + 12, 0))
+            fpa = os.path.join(ROOT, ".diag", "l2d_hide_%s_ab.png" % a.model)
+            ab.save(fpa)
+            print("   并排（左=基准 setup 姿态 / 右=藏起 %d 片）→ %s" % (len(hl), fpa))
+        except Exception as e:
+            print("   并排图失败: %r" % (e,))
 
     fp = os.path.join(ROOT, ".diag", "l2d_flicker_%s_%s.json" % (a.model, tag))
     with open(fp, "w", encoding="utf-8") as fh:
