@@ -3497,3 +3497,57 @@ prefab→res 材质），必须按 `(file_id, path_id)` 跨包取回真实对象
 - **判据加三条**（L1 去重材质数 / L2 带 uv1 的 primitive 数 / C3 页号敏感性 ≥0.6），
   加 `--verify` 里的**逐点** lightmap 锚点；三条新踩坑（异步贴图未等待、相对路径叠目录、
   无引用材质让母体差一个）记 **§124 追加**。
+
+**追加（2026-10-09 透明与光照轮）：材质透明、泛光这条轴、以及"亮度对上了但东西不对"**
+
+- **Unity 材质 → glTF `alphaMode` 只有两个可用信号**：混合方程 `_SrcBlend==5 && _DstBlend==10`
+  （SrcAlpha/OneMinusSrcAlpha）与 `_BaseColor.a < 1`。⚠️ **`_Cutoff` 是陷阱**：本场景 348 个材质里
+  289 个带着默认值 0.5（包括明显不透明的墙和木头），拿它当依据会把大半房间变成 alpha 测试。
+  漏掉透明这条的真实后果见 **§126**。
+- **回读断言里加一条结构性的**："baseColorFactor.a<1 却没标 alphaMode" 必须为 0 个——
+  把这类错变成文件级红，而不是靠人眼在截图里发现。
+- **three.js 对 `transparent + DoubleSide` 会画两遍**（源码里 `transparent && side===DoubleSide &&
+  !forceSinglePass` 那个分支先背面再正面），于是"renderer 三角数 == 真值"这条恒等式必然翻倍。
+  正确做法是**把期望值推出来**：前端自己数"哪些网格的材质是 transparent"，恒等式右边 =
+  真值 + 这批网格的三角数。⚠️ 不许把恒等式放宽成 `>=` 或加容差——那是把仪器拆了。
+- **three.js r152+ 按 `texture.channel` 选 UV**：手工赋 `material.lightMap` 时没设 `channel=1`，
+  lightmap 会拿**漫反射 UV0** 采样，而"挂了多少材质/多少几何带 uv1"这类计数判据**完全无感**
+  （本轮真实踩过：L1/L2 全绿而通路是错的）。⇒ 判据要直接量那个可观测状态：
+  `channel===1 && geometry.attributes.uv1`，错的数量必须为 0（判据 L3）。
+- **亮度对齐的度量必须含"形状"，不能是逐键绝对误差平均**：一个把整幅糊成白的档位
+  在 9 键平均距离下拿过最小值 0.086（mean 0.549 已越过参照 0.473，却因其它键补偿而得分好）。
+  改成 **分位数距离 (p05/p25/p50/p75/p95，Wasserstein-1 代理) + 饱和度误差**，再加一条
+  **过曝闸**：亮部(>0.6)占比超过参照 1.6 倍直接判红（C7）。饱和度这项是最后才发现的：
+  亮度分布逐位对上时 sat 仍只有参照的 44%（0.078 vs 0.178）——**度量对颜色是瞎的**。
+- **轴之间有交互，"这条轴没用"的结论带前提**：单扫"灯×π / 去掉 1/d² 衰减"时 mean 0.184 vs
+  基线 0.186（当时结论：调灯没用）；把泛光打开后同一组参数 0.316 → 0.549。
+  ⇒ 端点+中点式的单轴扫描会漏掉非单调/有交互的映射，跨轴组合必须真的扫进网格里。
+- **泛光是渲染端近似，不是包里的数据**（别把它写成"还原了游戏的光"）：本场景 109 个粒子系统
+  只有 14 个激活，且激活那批全是交互标记（`vfx_cross01` ＋号、`vfx_tubiao*` 图标、`vfx_number01`
+  数字、`vfx_trail/line` 轨迹）；`vfx_guangxian02`（光线）是**激活的空容器**，无子节点无渲染器。
+  ⇒ 参照图窗边那道斜射光不在资产里，是屏幕空间后处理。
+- **补光要有据**：把 `RenderSettings` 的三向环境光（`m_AmbientSky/Equator/GroundColor` +
+  `m_AmbientIntensity` + `m_AmbientMode`）与灯的强度统计抄成一份 `room.render.json` 交给前端，
+  别把猜的白色 `AmbientLight 0.6` 当数据（判据 R1/R2 保证读到了）。
+  ⚠️ 这些颜色**按 sRGB 还是按线性进渲染器**是一条会改变结果的轴（本轮线性入明显更贴参照），
+  别默认。Unity 的 trilight 在朝上的面会衰减到 sky 色（本包 sky=0），所以 `flat` 取 equator、
+  `hemi` 取 sky/ground 两种都摆出来对比，并写清两者都不是 trilight 本身。
+- **判据表新增**：R1/R2（包里读到环境光与灯统计）、L3（lightmap 通道）、
+  C4（UV1 vs UV0 的**分布**差 >0.01——整页均值测不出来，实测 mean 只差 0.0046 而 med 差 0.021）、
+  C5（灯=0 且无 lightmap 且无环境光时 mean 必须 ≈0）、C6（泛光必须抬升高光占比且不降 mean）、
+  C7（过曝闸）。
+- **已排除的假设（别重跑）**：① 方向性 lightmap —— 逐页核对 `m_DirLightmap` 全是 `PPtr(0,0)`、
+  `m_ShadowMask` 空，确认前一轮"只有颜色页"的判断；② ASTC 解码坏掉（云发洋红、树发蓝）——
+  逐通道数唯一值：云纹理 R/G/B = 247/227/168 级，室内墙贴图 R51-239/G47-228/B41-215 正常，
+  全量扫描"带真实 alpha 且某通道几乎恒定"只有 2 张且本就是平色材质；③ "窗外海面在场景里只是
+  被剔除"——`mat_db_sea01` / `WaterDepth_sh_day` / `WaterShoreSDF_sh_day` / `Sh_day_water_RampMap`
+  全是**激活但无渲染器的空容器**，海面资产在 `scenesres/res/water/`（`watersurface_single`、
+  `cloud`、`tex_water_*`）与 `res/rooms/*/water_system/`（`rampmap`、`waterdepthsdfmap`）单独成包，
+  运行时才拼进来 ⇒ 那部分**不是还原而是补摆**。
+- **依赖取法**：three 的 postprocessing 走 npm tarball
+  （`https://registry.npmjs.org/three/-/three-0.160.0.tgz`；npmmirror 的 `dist.tarball` 是跳转页，
+  `curl` 必须带 `-L` 否则只拿到 82 字节的 "Redirecting to..."），只取
+  `examples/jsm/postprocessing/{EffectComposer,RenderPass,ShaderPass,MaskPass,ClearPass,UnrealBloomPass,OutputPass,Pass}.js`
+  与 `examples/jsm/shaders/{CopyShader,LuminosityHighPassShader,OutputShader}.js`，版本必须与
+  已 vendored 的 `three.module.min.js` 的 REVISION 对齐（本轮 r160）。
+  ⚠️ 这批文件目前只在 `.diag/three/jsm/`，**未进 vendor 台账**（与 three.js 正本同一欠账）。

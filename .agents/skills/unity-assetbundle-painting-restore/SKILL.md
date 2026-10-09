@@ -1,7 +1,7 @@
 ---
 name: unity-assetbundle-painting-restore 触发词（3D 侧）：跨包 PPtr、assets_file 带下划线、ObjectReader.assetsfile 为 None、.sharedAssets、resS 不是 SerializedFile、externals 下标 ±1、pptr.deref、CAB 索引现扫、unity default resources 内置外链、激活态过滤、m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、跨包解析、SerializedFile 多个、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.13.7
+version: 1.13.8
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -374,6 +374,30 @@ MAD 分不开"该替换/不该替换"，两者数值重叠。这条写进了常�
 - **Unity 的 Area 灯（type 0）只参与烘焙、运行时不发光** ⇒ 不要把它补成实时灯去"照亮画面"；
   它正是"必须有 lightmap"的原因。判据侧要加一条**页号敏感性**：把每个对象的采样点换到错的一页，
   亮度变化 >5% 的对象占比必须高（实测 0.967）——占比低说明页号分配根本不承载信息。
+
+**Unity 材质 → glTF 的透明/双面，与 three.js 的采样通道（场景级；2026-10-09 一轮两条真错）**
+
+- **`alphaMode` 只有两个可用信号**：混合方程 `_SrcBlend==5 && _DstBlend==10`（SrcAlpha/OneMinusSrcAlpha）
+  与 `_BaseColor.a < 1`。⚠️ **`_Cutoff` 是 Shader 默认值陷阱**：实测 348 个材质里 289 个带着 0.5，
+  其中包含明显不透明的墙和木头 ⇒ 拿它当判据会把大半房间变成 alpha 测试。
+  漏掉透明这条的后果：窗玻璃（`a=0.196`）被画成实心黑，整片窗外看不见，而计数/几何/引用类判据**全绿**。
+  配套：回读断言加一条「baseColorFactor.a<1 却没标 alphaMode 必须为 0 个」；
+  受影响面用 `scripts/diag/unity_material_alpha_scan.py` 当场数，不要靠记忆。
+- **three.js r152+ 按 `texture.channel` 选 UV**：手工赋 `material.lightMap` 时必须 `channel = 1`，
+  否则它拿**漫反射 UV0** 采样，而"挂了多少材质 / 多少几何带 uv1"这类计数判据完全无感。
+  ⇒ 判据要直接量那个可观测状态（`channel===1 && geometry.attributes.uv1`），错数必须为 0。
+- **three.js 对 `transparent && side===DoubleSide && !forceSinglePass` 会画两遍**（先背面再正面）
+  ⇒ "renderer 三角数 == 真值"这条恒等式必然翻倍（实测 120961 → 127755）。
+  正确做法是**把期望值推出来**：前端自己数哪些网格是 transparent，右边 = 真值 + 这批网格的三角数。
+  ⚠️ 不许把恒等式放宽成 `>=` 或加容差——那等于把仪器拆了。
+- **覆盖 `THREE.ShaderChunk.*` 之前先确认有人 `#include` 它**：r160 的 lightmap 采样在
+  `lights_fragment_maps` 里面（`irradiance += lightMapIrradiance`，**已经**乘反照率），
+  `lightmap_fragment` 是个没人 include 的死块 ⇒ 改它**静默无效**，看起来"这条轴没用"。
+  唯一抓得住它的是"两条版必须不同"的对照（本轮就是靠它红出来的）。
+- **定位"画面里这块黑是什么"用射线命中，不用亮度猜**：每机位沿视线打 9 点，回报
+  (对象名, 材质名, 距离)。本轮窗中心第一命中 `pre_db_plane01 · mat_db_glass06 @6.36m`，
+  其后才是树 9.7m / 地形 20.7m / 云 255m ⇒ 一次就分清"被挡住"与"根本没内容"，
+  这两种情况在像素分布上长得一模一样。
 
 **从蒙皮包出 glTF（`.glb`）的四条硬事实**（`export()` 只给无骨骼 OBJ，装配层必须自己写）：
 

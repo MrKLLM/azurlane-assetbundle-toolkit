@@ -194,10 +194,23 @@ def material_of(gltf, buf, res, mat_reader, with_textures, tex_cache, texstat, p
         # 由查看端（dorm3d_room_probe.py 的 harness）按 sidecar 挂到 material.lightMap 上。
         entry["extras"] = {"unityLightmapPage": page}
     colors = dict(list(getattr(sp, "m_Colors", None) or []))
+    floats = dict(list(getattr(sp, "m_Floats", None) or []))
     base = colors.get("_BaseColor") or colors.get("_Color")
+    alpha = 1.0
     if base is not None:
+        alpha = float(getattr(base, "a", 1))
         entry["pbrMetallicRoughness"]["baseColorFactor"] = [
             float(getattr(base, k, d)) for k, d in (("r", 1), ("g", 1), ("b", 1), ("a", 1))]
+    # 透明模式：glTF 的 alphaMode 必须从 Unity 材质的**渲染状态**推，不能猜。
+    # 可用信号只有两个：混合方程 (_SrcBlend=SrcAlpha 且 _DstBlend=OneMinusSrcAlpha) 与
+    # baseColor 的 alpha。`_Cutoff` 看着像第三个信号，其实 348 个材质里 289 个都带着默认值 0.5
+    # （包括明显不透明的墙和木头），拿它当依据会把大半房间变成 alpha 测试——所以不用它。
+    # 漏掉这条的真实后果：窗玻璃 mat_db_glass06（alpha 0.196）被画成实心黑玻璃，
+    # 整片窗外海景看不见，还顺带把画面亮度统计压低了一档。
+    if (floats.get("_SrcBlend") is not None and floats.get("_DstBlend") is not None
+            and abs(float(floats["_SrcBlend"]) - 5.0) < 1e-4
+            and abs(float(floats["_DstBlend"]) - 10.0) < 1e-4) or alpha < 0.999:
+        entry["alphaMode"] = "BLEND"
     if with_textures:
         tried = 0
         for slot, env in list(getattr(sp, "m_TexEnvs", None) or []):
@@ -514,6 +527,7 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
              "placeholder_basis": "占位对象按本装配器生成的单位立方体计入总数(24 顶点/12 三角)，"
                                   "其 Unity 侧声明值不可得；世界盒不含占位对象",
              "textures": len(gltf["images"]), "skipped_by": skipped_by, "mirror": mirror,
+             "alpha_blend": sum(1 for m in gltf["materials"] if m.get("alphaMode") == "BLEND"),
              "per_object": [{"object": a["object"], "mesh": a["mesh"], "verts": a["declared_v"],
                              "tris": a["tris"], "submeshes": a["submesh_decl"],
                              "center": a.get("center"), "size": a.get("size"),
@@ -908,6 +922,17 @@ def verify_glb(path, scene=None):
     orphans = [i for i in range(len(g["meshes"])) if i not in used]
     if orphans:
         bad.append("orphan mesh %d 个（不会被渲染）" % len(orphans))
+    # 透明一致性：带着 alpha<1 的因子却标 OPAQUE，等于"半透明材质按实心画"——
+    # 这正是窗玻璃变成一整块黑的原因，所以把它写成回读断言而不是靠人眼发现。
+    badfac = [m.get("name") for m in g.get("materials", [])
+              if (m.get("pbrMetallicRoughness", {}).get("baseColorFactor")
+                  or [1, 1, 1, 1])[3] < 0.999
+              and m.get("alphaMode", "OPAQUE") == "OPAQUE"]
+    if badfac:
+        bad.append("有 %d 个材质 alpha<1 却是 OPAQUE（会被画成实心）: %s" % (len(badfac), badfac[:5]))
+    nblend = sum(1 for m in g.get("materials", []) if m.get("alphaMode") == "BLEND")
+    print("  材质: %d 个，其中 alphaMode=BLEND %d 个（alpha<1 却实心 %d 个）"
+          % (len(g.get("materials", [])), nblend, len(badfac)))
     nprim = 0
     for mi, mesh in enumerate(g["meshes"]):
         ph = (mesh.get("extras") or {}).get("placeholder")

@@ -10,13 +10,20 @@
 判据：
   J1 前端 Mesh 对象数 == 真值 primitive 数
   J2 前端 Σ position.count == 真值 position 计数
-  J3 renderer 画的三角数 == 真值三角数（所有对象 frustumCulled=false，所以应当是恒等而非"至少"）
+  J3 renderer 画的三角数 == 真值三角数 + 半透明双面网格的两遍绘制（期望值自己从文件推，
+     不靠放宽阈值；three.js 对 transparent+DoubleSide 先画背面再画正面）
   J4 前端世界盒（只算非占位对象）vs 真值世界盒，逐轴相对差 < 0.5%
   J5 浏览器 console 零 error
   J6 游戏机位那张截图的落笔占比 >= 0.15（画面里真的有被照亮的内容）
+  L1/L2 挂上 lightMap 的去重材质数、带 uv1 的几何数 vs sidecar/真值
+  L3 每个挂 lightMap 的槽位：texture.channel 必须为 1 且几何带 uv1（r152+ 按 channel 选 UV）
+  R1/R2 补光与灯的统计来自**场景包里的 RenderSettings**，不是手填常数
 反向对照（不是装饰，是把 J1..J6 从恒真里区分出来）：
   C1 指向不存在的 glb ⇒ J1/J2/J3 必须全为 0（否则计数判据根本没在量东西）
   C2 把所有灯摘掉再渲染 ⇒ J6 的落笔占比必须塌到 <0.05（否则"有像素"不等于"有内容"）
+  C3 把每个对象换到错的一页 lightmap ⇒ 亮度必须大面积变化（否则页号是装饰）
+  C4 lightmap 走 UV1 vs 走 UV0 ⇒ 分布必须不同（**用 med 等分布量，整页均值测不出来**）
+  C5 灯=0 且无 lightmap 且无环境光 ⇒ mean 必须 ≈0（否则"亮"是渲染器白送的）
 """
 import argparse
 import base64
@@ -69,9 +76,56 @@ const Q=new URLSearchParams(location.search);
 const W=1280,H=960;
 const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
 renderer.setSize(W,H); renderer.setClearColor(0x101418,1); document.body.appendChild(renderer.domElement);
+// 色调映射与曝光：游戏那侧明显有 tonemap（窗光渐变/木地板高光都不是线性直出的样子）
+const TONES={none:THREE.NoToneMapping, linear:THREE.LinearToneMapping, reinhard:THREE.ReinhardToneMapping,
+             cineon:THREE.CineonToneMapping, aces:THREE.ACESFilmicToneMapping};
+renderer.toneMapping = TONES[Q.get('tone')||'none'];
+renderer.toneMappingExposure = parseFloat(Q.get('exp')||'1');
 const scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(60,W/H,0.02,3000);
+// 泛光：参照图窗边那道斜射光与整幅的乳白感是**屏幕空间后处理**，不在资产里
+// （本场景的 109 个粒子只有 14 个激活，全是＋标记/图标/数字/轨迹，见 §126），
+// 所以它是渲染端的一条轴，而不是"包里的数据没导出来"。
+renderer.info.autoReset=false;      // 自己管计数，见下面 draw()
+let sceneTris=0;
+const _origRender=renderer.render.bind(renderer);
+renderer.render=function(sc,ca){ _origRender(sc,ca); if(sc===scene) sceneTris=renderer.info.render.triangles; };
+let composer=null, bloomPass=null;
+const BLOOM=parseFloat(Q.get('bloom')||'0');
+if(BLOOM>0){
+  const [EC,RP,UB,OP]=await Promise.all([
+    import('three/addons/postprocessing/EffectComposer.js'),
+    import('three/addons/postprocessing/RenderPass.js'),
+    import('three/addons/postprocessing/UnrealBloomPass.js'),
+    import('three/addons/postprocessing/OutputPass.js')]);
+  composer=new EC.EffectComposer(renderer);
+  composer.addPass(new RP.RenderPass(scene,camera));
+  bloomPass=new UB.UnrealBloomPass(new THREE.Vector2(W,H), BLOOM,
+                                   parseFloat(Q.get('bloomr')||'0.6'),
+                                   parseFloat(Q.get('bloomt')||'0.85'));
+  composer.addPass(bloomPass);
+  composer.addPass(new OP.OutputPass());   // 色调映射与 sRGB 输出改由这一道做
+}
+function draw(){ renderer.info.reset(); if(composer) composer.render(); else renderer.render(scene,camera); }
 window.__ERR=null; window.__DONE=false;
 fetch(Q.get('side')||'').then(r=>r.json()).then(j=>{window.__SIDE=j;}).catch(()=>{window.__SIDE=null;}); window.__RESULT=null; window.__VIEWS=[]; window.__cur=0;
+window.__RENDER=null;
+if(Q.get('render')) fetch(Q.get('render')).then(r=>r.json()).then(j=>{window.__RENDER=j;}).catch(()=>{window.__RENDER=null;});
+function frameStats(){ // 与参照截图**同一套**裁剪(左右 8%、上 14%、下 15%)与亮度算法
+  const c=document.createElement('canvas'); c.width=W; c.height=H;
+  const x=c.getContext('2d'); x.drawImage(renderer.domElement,0,0);
+  const x0=Math.floor(W*0.08), x1=Math.floor(W*0.92), y0=Math.floor(H*0.14), y1=Math.floor(H*0.85);
+  const d=x.getImageData(x0,y0,x1-x0,y1-y0).data;
+  const L=[]; let sat=0;
+  for(let i=0;i<d.length;i+=4*7){ const r=d[i],g=d[i+1],b=d[i+2];
+    L.push((0.2126*r+0.7152*g+0.0722*b)/255); sat+=(Math.max(r,g,b)-Math.min(r,g,b))/255; }
+  L.sort((a,b)=>a-b); const n=L.length;
+  const q=t=>L[Math.min(n-1,Math.floor(n*t))];
+  const bs=L.filter(v=>v<=0.6);
+  return {mean:L.reduce((a,b)=>a+b,0)/n, med:q(0.5), p05:q(0.05), p25:q(0.25), p75:q(0.75), p95:q(0.95),
+          hi:L.filter(v=>v>0.75).length/n, lo:L.filter(v=>v<0.25).length/n, sat:sat/n,
+          hi6:L.filter(v=>v>0.6).length/n, base6:bs.length?bs.reduce((a,b)=>a+b,0)/bs.length:0,
+          samples:n};
+}
 function ink(){ // 落笔占比：数**比背景亮**的采样像素。用「与背景不同」是错的——
   // 无光时模型是纯黑，纯黑与深色背景「不同」，会把一片漆黑读成画满了内容。
   const c=document.createElement('canvas'); c.width=W; c.height=H;
@@ -89,7 +143,7 @@ function boxOf(list, onlyReal){
 }
 function loadTex(u){ return new Promise((res,rej)=>{
   new THREE.TextureLoader().load(u, t=>res(t), undefined, e=>rej(e&&e.message||u)); }); }
-async function applyLightmaps(root, side, mode){
+async function applyLightmaps(root, side, mode, inten, chan){
   // 贴图是异步解码的：不等它们落地就截图，拍到的是**没有 lightmap 的那一帧**
   // （本轮真实踩过：五个机位的落笔占比与未挂 lightmap 版**逐位相同**才发现）。
   const pages={};
@@ -101,15 +155,23 @@ async function applyLightmaps(root, side, mode){
     const t=await loadTex('/dorm3d_room/lightmaps/'+p.file);
     t.colorSpace = (mode==='srgb')?THREE.SRGBColorSpace:THREE.NoColorSpace;
     t.flipY=false;                     // Unity lightmap 与我们的 UV 同向，多翻一次就上下错位
+    // **承重的一行**：three.js r152+ 的贴图通道由 `texture.channel` 决定，默认 0 ⇒
+    // `vLightMapUv` 取的是 `uv`（漫反射 UV），而 Unity 的烘焙矩形在第二套 UV。
+    // 我们手工赋 material.lightMap 时绕过了 GLTFLoader 的 assignLightmapOnMaterial
+    // （它会显式设 channel=1），于是 lightmap 一直按错的 UV 采样，而计数类判据看不出来。
+    t.channel = chan;
     pages[p.index]=t;
   }
-  let n=0; const uniq=new Set();
+  let n=0; const uniq=new Set(); let chanOk=0, chanBad=0;
   root.traverse(o=>{ if(!o.isMesh||!o.material) return;
     const ms=Array.isArray(o.material)?o.material:[o.material];
     for(const m of ms){ const pg=(m.userData&&m.userData.lmPage);
       if(pg===undefined||!pages[pg]) continue;
-      m.lightMap=pages[pg]; m.lightMapIntensity=1.0; m.needsUpdate=true; n++; uniq.add(m.uuid); } });
-  return {mats:n, uniqMats:uniq.size, pages:Object.keys(pages).length};
+      m.lightMap=pages[pg]; m.lightMapIntensity=inten; m.needsUpdate=true; n++; uniq.add(m.uuid);
+      // 直接量「采样用的是哪套 UV」这个可观测状态，而不是等亮度自己去暴露
+      if(pages[pg].channel===1 && o.geometry && o.geometry.attributes.uv1) chanOk++; else chanBad++; } });
+  return {mats:n, uniqMats:uniq.size, pages:Object.keys(pages).length, channel:chan,
+          chanOk:chanOk, chanBad:chanBad};
 }
 fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
   window.__TRUTH=truth;
@@ -124,10 +186,59 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
       posTotal += (o.geometry&&o.geometry.attributes.position)?o.geometry.attributes.position.count:0;
       names[nm]=(names[nm]||0)+1; } });
     let lights=0; g.scene.traverse(o=>{ if(o.isLight) lights++; });
+    // 数一遍「会被 two-sided 透明两遍绘制」的三角数：J3 的期望值要用它自己推，
+    // 不能靠把恒等式改成不等式来糊过去。
+    let blendTris=0;
+    for(const o of meshes){ const gi=o.geometry; if(!gi) continue;
+      const tr = gi.index ? gi.index.count/3
+               : (gi.attributes.position ? gi.attributes.position.count/3 : 0);
+      const ms=Array.isArray(o.material)?o.material:[o.material];
+      if(ms.some(m=>m&&m.transparent)) blendTris+=tr; }
+    // hidekw=<正则>：把材质名命中的网格藏掉。消融用——"这块黑到底是玻璃挡着，
+    // 还是外面压根没东西"这类问题，只有把它藏起来看后果才能区分。
+    let hidden=0;
+    if(Q.get('hidekw')){ const re=new RegExp(Q.get('hidekw'),'i');
+      g.scene.traverse(o=>{ if(!o.isMesh||!o.material) return;
+        const ms=Array.isArray(o.material)?o.material:[o.material];
+        if(ms.some(m=>m&&re.test(m.name||''))){ o.visible=false; hidden++; } }); }
     if(Q.get('nolight')==='1'){ const kill=[]; g.scene.traverse(o=>{ if(o.isLight) kill.push(o); });
       kill.forEach(o=>o.parent&&o.parent.remove(o)); }
-    const amb=parseFloat(Q.get('amb')||'0');
-    if(amb>0) scene.add(new THREE.AmbientLight(0xffffff, amb));   // 补光不是包里的数据，只用于对照观感
+    // 灯的量纲：Unity 的 m_Intensity 是「倍数」，three.js r160 默认 useLegacyLights=false
+    // ⇒ 点/聚光按**坎德拉**走 1/d² 衰减，平行光的漫反射又额外除了一个 π。
+    // 直接照搬数值会系统性偏暗，所以这里把「乘多少」当成一条可扫的轴，而不是猜一个常数。
+    const LI=parseFloat(Q.get('li')||'1'), LD=parseFloat(Q.get('ld')||'1');
+    const dcRaw=Q.get('dc');
+    let lightTouched=0;
+    g.scene.traverse(o=>{ if(!o.isLight) return;
+      if(o.isPointLight||o.isSpotLight){ o.intensity*=LI;
+        if(dcRaw!==null) o.decay=parseFloat(dcRaw); }
+      else if(o.isDirectionalLight){ o.intensity*=LD; }
+      lightTouched++; });
+    // 补光：优先用**包里的** RenderSettings 三向环境光（m_AmbientMode/EIntensity/Equator/Ground），
+    // 而不是随手给的白色 AmbientLight。颜色按 sRGB→线性换不换，也是一条轴（ambsrgb）。
+    const AMBM=Q.get('ambm')||'';
+    const ambInfo={mode:AMBM||'none', used:0};
+    if(AMBM==='flat'||AMBM==='hemi'){
+      // 与 sidecar 同理：这条 fetch 与模型加载并发，谁先到不确定 ⇒ 自己等它
+      if(!window.__RENDER && Q.get('render')){
+        window.__RENDER = await fetch(Q.get('render')).then(r=>r.json()).catch(()=>null);
+      }
+      const A=((window.__RENDER||{}).ambient)||{};
+      if(!A.equator||!A.ground){ window.__ERR=(window.__ERR||'')+' 环境光数据缺失（room.render.json 没读到）'; }
+      const conv=(Q.get('ambsrgb')==='1')?(c=>c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4)):(c=>c);
+      const mul=parseFloat(Q.get('ambk')||'1')*(parseFloat(A.intensity)||1);
+      const C=a=>new THREE.Color(conv(a[0]),conv(a[1]),conv(a[2]));
+      // flat 取 equator（Unity trilight 在水平朝上的面上给的就是 equator 这一项），
+      // hemi 取 sky/ground 两端（sky 本包里是 0，会把上半球压成纯黑 —— 两种都摆出来对比）
+      const col=(AMBM==='flat')?(A.equator||[1,1,1]):(A.sky||[1,1,1]);
+      const lc=(AMBM==='flat')?null:(A.ground||[0,0,0]);
+      const L=(AMBM==='flat')?new THREE.AmbientLight(C(col),mul)
+                             :new THREE.HemisphereLight(C(col),C(lc),mul);
+      scene.add(L); ambInfo.used=1; ambInfo.color=col; ambInfo.intensity=mul;
+    } else if(parseFloat(Q.get('amb')||'0')>0){
+      scene.add(new THREE.AmbientLight(0xffffff, parseFloat(Q.get('amb'))));   // 旧的手工补光，仅对照
+      ambInfo.mode='white'; ambInfo.used=1;
+    }
     let uv1geoms=0, pagemats=0;
     g.scene.traverse(o=>{ o.frustumCulled=false;
       if(o.isMesh&&o.geometry&&o.geometry.attributes.uv1) uv1geoms++;
@@ -135,14 +246,17 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
       for(const m of ms){ const pg=m&&m.userData&&m.userData.unityLightmapPage;
         if(pg!==undefined&&pg!==null){ m.userData.lmPage=pg; pagemats++; } } });
     window.__UV1={geoms:uv1geoms, pagemats};
-    let lmApplied={mats:0,uniqMats:0,pages:0};
+    let lmApplied={mats:0,uniqMats:0,pages:0,channel:0};
     if(Q.get('lm')==='1'){
       try {
         // sidecar 与模型是两条并发请求，谁先到不确定 ⇒ 这里**自己等它**，不赌时序
         if(!window.__SIDE && Q.get('side')){
           window.__SIDE = await fetch(Q.get('side')).then(r=>r.json());
         }
-        lmApplied=await applyLightmaps(g.scene, window.__SIDE||{pages:[]}, Q.get('lmc')||'linear');
+        lmApplied=await applyLightmaps(g.scene, window.__SIDE||{pages:[]},
+                                       Q.get('lmc')||'linear',
+                                       parseFloat(Q.get('lmi')||'1'),
+                                       parseInt(Q.get('lmch')||'1',10));
       } catch(e){ window.__ERR=(window.__ERR||'')+' lightmap 载入失败 '+String(e).slice(0,140); }
     }
     window.__LM=lmApplied;
@@ -157,24 +271,46 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
       {name:'az090', pos:[11, 6.5, 0], look:[0,1.2,0], fov:55},
       {name:'az180', pos:[0, 6.5, 11], look:[0,1.2,0], fov:55},
       {name:'top', pos:[7.5, 12.5, 7.5], look:[0,0.6,0], fov:55}];
-    window.__STATS={meshObjects:meshes.length, posTotal, lights,
+    window.__STATS={meshObjects:meshes.length, posTotal, lights, blendTris,
+                    tone:Q.get('tone')||'none', exp:parseFloat(Q.get('exp')||'1'),
                     lmMats:(window.__LM||{}).uniqMats||0, lmSlots:(window.__LM||{}).mats||0,
                     lmPages:(window.__LM||{}).pages||0, sideOk:!!window.__SIDE,
+                    lmChannel:(window.__LM||{}).channel,
+                    lmChanOk:(window.__LM||{}).chanOk||0, lmChanBad:(window.__LM||{}).chanBad||0,
+                    lmIntensity:parseFloat(Q.get('lmi')||'1'),
+                    lmColor:(Q.get('lmc')||'linear'), lightsTouched:lightTouched,
+                    amb:ambInfo, ambSrgb:(Q.get('ambsrgb')==='1'),
+                    renderOk:!!window.__RENDER, li:LI, ld:LD, decay:dcRaw,
+                    hidden:hidden, hidekw:Q.get('hidekw')||'',
+
                     uv1Geoms:(window.__UV1||{}).geoms||0,
-                    renderedTris:renderer.info.render.triangles,
+                    renderedTris:0, bloom:BLOOM,
                     boxAll:boxOf(meshes,false), boxReal:boxOf(meshes,true),
                     innerCount:inner.length, distinctNames:Object.keys(names).length};
-    renderer.render(scene,camera);
-    window.__STATS.renderedTris=renderer.info.render.triangles;
+    draw();
+    window.__STATS.renderedTris=sceneTris;
+    const rc=new THREE.Raycaster();
+    // 每个机位沿视线打 9 个采样点，回报"这个像素上到底是哪个对象/哪个材质"——
+    // 窗那片黑用亮度测不出来源，只有把命中对象列出来才能区分"玻璃挡着"与"外面没东西"。
+    const PICKPTS=[[-0.5,0.35],[0,0.35],[0.5,0.35],[-0.5,0],[0,0],[0.5,0],[-0.5,-0.35],[0,-0.35],[0.5,-0.35]];
+    function picksAt(){ return PICKPTS.map(p=>{ rc.setFromCamera(new THREE.Vector2(p[0],p[1]),camera);
+      const h=rc.intersectObjects(scene.children,true).filter(x=>x.object.visible).slice(0,3);
+      return {ndc:p.map(v=>+v.toFixed(2)), hits:h.map(x=>({n:String(x.object.name||'').slice(0,26),
+              m:String((x.object.material&&x.object.material.name)||'').slice(0,26),
+              d:+x.distance.toFixed(2)}))}; }); }
     window.applyView=i=>{ const v=window.__VIEWS[i];
       camera.position.set(...v.pos); camera.up.set(0,1,0); camera.fov=v.fov;
       camera.lookAt(new THREE.Vector3(...v.look)); camera.updateProjectionMatrix();
-      renderer.render(scene,camera); window.__cur=i; return ink(); };
+      draw(); window.__cur=i;
+      const k=ink(); const f=frameStats();
+      let pk=[]; try{ pk=picksAt(); }catch(e){ pk=[{err:String(e).slice(0,80)}]; }
+      return {ink:k.ink, mean:f.mean, med:f.med, p05:f.p05, p25:f.p25, p75:f.p75, p95:f.p95, hi:f.hi, lo:f.lo,
+              hi6:f.hi6, base6:f.base6, sat:f.sat, picks:pk}; };
     window.__DONE=true;
   }, undefined, e=>{ window.__ERR=String(e&&e.message||e).slice(0,300);
     window.__STATS={meshObjects:0,posTotal:0,lights:0,renderedTris:0,boxAll:null,boxReal:null,
                     innerCount:0,distinctNames:0};
-    window.applyView=()=>({ink:0,sampled:0}); window.__DONE=true; });
+    window.applyView=()=>({ink:0}); window.__DONE=true; });
 }).catch(e=>{ window.__ERR='truth 读取失败 '+String(e).slice(0,120); window.__DONE=true; });
 </script></body></html>"""
 
@@ -294,6 +430,137 @@ def zone_views(glb_path):
     return views, {k: [round(x, 2) for x in centre] for k in ["_centre"]}
 
 
+REF_CROP = (0.08, 0.14, 0.92, 0.85)   # 与 harness 的 frameStats 同一套裁剪
+
+
+def ref_stats(ref_dir):
+    """游戏内截图的亮度分布（裁掉 UI），当作可调档位的量化目标。"""
+    import glob
+    from PIL import Image
+    out = []
+    for f in sorted(glob.glob(os.path.join(ref_dir, "*.png")) + glob.glob(os.path.join(ref_dir, "*.jpg"))):
+        im = Image.open(f).convert("RGB")
+        w, h = im.size
+        c = im.crop((int(w * REF_CROP[0]), int(h * REF_CROP[1]),
+                     int(w * REF_CROP[2]), int(h * REF_CROP[3])))
+        px = list(c.getdata())[::7]
+        L = sorted((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0 for r, g, b in px)
+        n = len(L)
+        q = lambda t: L[min(n - 1, int(n * t))]
+        sat = sum(max(p) - min(p) for p in px) / 255.0 / n
+        out.append({"file": os.path.basename(f)[:10], "mean": sum(L) / n, "med": q(0.5),
+                    "p05": q(0.05), "p25": q(0.25), "p75": q(0.75), "p95": q(0.95),
+                    "hi": sum(1 for v in L if v > 0.75) / n, "lo": sum(1 for v in L if v < 0.25) / n,
+                    # hi6/base6：把"亮部面积不够"与"室内中间调偏暗"这两半**分开量**，
+                    # 否则一个 mean 把两件事混在一起，会误判成"再抬点亮度就行"
+                    "hi6": sum(1 for v in L if v > 0.6) / n,
+                    "base6": (sum(v for v in L if v <= 0.6) / max(1, sum(1 for v in L if v <= 0.6))),
+                    "sat": sat})
+    return out
+
+
+def grade_sweep(browser, base, rel_glb, rel_truth, rel_side, rel_render, views, target, presets):
+    """逐档扫亮度相关的轴（tonemap/曝光/环境光/灯量纲/lightmap 通道与色彩空间），
+    比与参照图的亮度距离；几何计数不许变（那是护栏）。"""
+    vq = urllib.parse.quote(json.dumps(views, ensure_ascii=False))
+    rows = []
+    keys = ("mean", "med", "p05", "p25", "p75", "p95", "hi", "lo", "hi6", "base6", "sat")
+    for p in presets:
+        q = preset_query(p, base, rel_side, rel_render, vq)
+        tag = p.get("tag") or ("%s/%s" % (p.get("tone", "none"), p.get("exp", 1)))
+        # 带 shot=<短名> 的档位顺手出图：哪几档值得人眼看，是档位自己的属性
+        shot = p.get("shot")
+        st = run_case(browser, base, rel_glb, rel_truth,
+                      "grade" + ("_" + str(shot) if shot else ""),
+                      {"names": [v["name"] for v in views]}, capture=bool(shot), extra=q)
+        if not st:
+            continue
+        stt = st["stats"] or {}
+        avg = {k: sum(v.get(k, 0.0) for v in st["views"]) / max(1, len(st["views"])) for k in keys}
+        # 排序用**分位数距离**（p05/p25/p50/p75/p95，Wasserstein-1 的代理）：
+        # 逐键绝对误差平均的那种距离，会被"整幅一起变亮"骗过去——本轮真实踩过，
+        # 一个把画面糊成白的档位拿到过最小距离 0.086。均值距离只留着当对照展示。
+        QS = ("p05", "p25", "med", "p75", "p95")
+        qd = sum(abs(avg[k] - target[k]) for k in QS) / len(QS)
+        # 饱和度必须进距离：只量亮度的话，"白色泛光糊一遍"和"画面里真有一块蓝天碧海"
+        # 在分位数上几乎同分（本轮实测前者 sat 0.078 vs 参照 0.178）。
+        qd += abs(avg["sat"] - target["sat"])
+        md = sum(abs(avg[k] - target[k]) for k in keys) / len(keys)
+        rows.append({"tag": tag, "preset": dict(p), "avg": avg, "dist": qd, "mean_dist": md,
+                     "stats": {k: stt.get(k) for k in ("lmChannel", "amb", "lightsTouched",
+                                                       "renderOk", "sideOk", "lmMats")},
+                     "counts": (stt.get("meshObjects"), stt.get("posTotal"), stt.get("renderedTris")),
+                     "per_view": {v["name"]: round(v.get("mean", 0), 3) for v in st["views"]}})
+    return rows
+
+
+def preset_query(p, base, rel_side, rel_render, vq):
+    q = "&lm=%s&side=%s&views=%s" % (p.get("lm", 1), base + rel_side, vq)
+    if rel_render:
+        q += "&render=%s" % (base + rel_render)
+    for k in ("tone", "exp", "lmc", "lmi", "lmch", "ambm", "ambk", "ambsrgb", "li", "ld", "dc",
+              "bloom", "bloomr", "bloomt"):
+        if p.get(k) is not None:
+            q += "&%s=%s" % (k, p[k])
+    if p.get("nolight"):
+        q += "&nolight=1"
+    return q
+
+
+def render_settings(scene, out_path):
+    """把场景包里的 RenderSettings（三向环境光）与灯的强度/射程抄成一份 json 给前端用。
+
+    为什么单独出这份文件：环境光颜色是**包里的数据**，把它硬写进 harness 就等于
+    用我的猜测当事实；前端读数与源包口径必须能对上同一张表。
+    """
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    sys.path.insert(0, os.path.join(ROOT, "scripts", "diag"))
+    import dorm3d_pptr_resolve as P
+    import UnityPy
+    UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+    scene = scene or P.DEF_SCENE
+    env = UnityPy.load(scene)
+    out = {"scene": os.path.basename(scene), "ambient": None, "lights": {}, "notes": []}
+    _LT = {0: "spot", 1: "directional", 2: "point", 3: "area"}
+    hist = {}
+    for o in env.objects:
+        tn = o.type.name
+        if tn == "RenderSettings":
+            rs = o.read()
+
+            def rgb(v):
+                return [round(float(getattr(v, k, 0.0)), 5) for k in ("r", "g", "b")]
+            out["ambient"] = {
+                "mode": int(getattr(rs, "m_AmbientMode", 0) or 0),
+                "intensity": float(getattr(rs, "m_AmbientIntensity", 1.0) or 1.0),
+                "sky": rgb(getattr(rs, "m_AmbientSkyColor", None)),
+                "equator": rgb(getattr(rs, "m_AmbientEquatorColor", None)),
+                "ground": rgb(getattr(rs, "m_AmbientGroundColor", None)),
+                "probe_nonzero": any(abs(float(getattr(rs.m_AmbientProbe, "sh_%02d_" % s, 0.0) or 0.0)) > 1e-6
+                                     for s in range(27)),
+                "sun": bool(getattr(rs.m_Sun, "path_id", 0)),
+                "fog": bool(getattr(rs, "m_Fog", False)),
+            }
+        elif tn == "Light":
+            L = o.read()
+            tv = getattr(L, "m_Type", 0)
+            kind = _LT.get(int(tv.value) if hasattr(tv, "value") else int(tv), "other")
+            h = hist.setdefault(kind, {"n": 0, "intensity": []})
+            h["n"] += 1
+            try:
+                h["intensity"].append(round(float(getattr(L, "m_Intensity", 0) or 0.0), 3))
+            except Exception:
+                pass
+    for k, h in hist.items():
+        h["intensity"] = {"min": min(h["intensity"]), "max": max(h["intensity"]),
+                          "sum": round(sum(h["intensity"]), 3)}
+    out["lights"] = hist
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
+    return out
+
+
+
 def serve(root_dir):
     class H(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *a, **kw):
@@ -327,7 +594,7 @@ def build_variants(glb):
     return {"game": glb, "bad": "dorm3d_room/__no_such__.glb"}
 
 
-def run_case(browser, base, glb_url, truth_url, tag, shots, extra=""):
+def run_case(browser, base, glb_url, truth_url, tag, shots, extra="", capture=True):
     cmd_id = [0]
     ws = browser["ws"]
 
@@ -374,27 +641,47 @@ def run_case(browser, base, glb_url, truth_url, tag, shots, extra=""):
     errtxt = ev("String(window.__ERR||'')")
     views = []
     n = ev("(window.__VIEWS||[]).length") or 0
+    names = shots.get("names") or []
     for i in range(int(n)):
         ink = ev("JSON.stringify(window.applyView(%d))" % i)
         ink = json.loads(ink) if isinstance(ink, str) else ink
         shot = cmd("Page.captureScreenshot", {"format": "png"}) or {}
         png = shot.get("data")
         if png:
-            with open(os.path.join(WORK, "shot_%s_%s.png" % (tag, shots["names"][i])), "wb") as f:
+            with open(os.path.join(WORK, "shot_%s_%s.png" % (tag, names[i] if i < len(names) else i)), "wb") as f:
                 f.write(base64.b64decode(png))
-        views.append({"name": shots["names"][i], "ink": (ink or {}).get("ink")})
+        views.append({"name": names[i] if i < len(names) else str(i),
+                      **{k: v for k, v in (ink or {}).items() if k != "sampled"}})
     return {"stats": stats, "err": errtxt, "views": views}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--glb", default=".diag/dorm3d_room/room.glb")
-    ap.add_argument("--truth", default=".diag/dorm3d_room/room.glb.truth.json")
+    ap.add_argument("--truth", default=None,
+                    help="真值 json；缺省按 --glb 同名推导（不推导会拿旧版真值比新版模型）")
     ap.add_argument("--skip-controls", action="store_true", help="调试用；正式判定不许跳")
+    ap.add_argument("--grade", action="store_true", help="扫色调映射档位，与游戏截图比亮度")
+    ap.add_argument("--grade-limit", type=int, default=0,
+                    help="只跑前 N 个档位（先验证接线再跑全网格，省一整轮）")
+    ap.add_argument("--grade-tags", default="",
+                    help="只跑标签含这些子串的档位（逗号分隔），如 泛光,包内环境光")
+    ap.add_argument("--peek", action="store_true",
+                    help="朝窗外看的消融机位（配合 hidekw 判断窗那片黑的原因）")
+    ap.add_argument("--scene", default=None,
+                    help="场景包（默认取 dorm3d_pptr_resolve.DEF_SCENE，用来抄 RenderSettings 环境光）")
+
+
+    ap.add_argument("--ref-dir", default=r"C:/Users/KLLM/.qoder-cn/tmp/D--Azur-Lane-Assets/images/"
+                                         "b19275a3-b2ab-4186-a6a1-5a07525583dd")
     ap.add_argument("--zones", action="store_true",
                     help="按场景锚点补拍三个分区域机位（卧室/起居/厨房），不参与判定，只出图")
     a = ap.parse_args()
     glb = os.path.join(ROOT, a.glb) if not os.path.isabs(a.glb) else a.glb
+    if a.truth is None:
+        # 装配器落的是 "<glb>.truth.json"（在 .glb 之后追加），不是换掉扩展名
+        a.truth = a.glb + ".truth.json"
+
     truth_p = os.path.join(ROOT, a.truth) if not os.path.isabs(a.truth) else a.truth
     if not os.path.isfile(glb) or not os.path.isfile(truth_p):
         print("[FAIL] 缺产物: %s / %s" % (a.glb, a.truth))
@@ -478,9 +765,14 @@ def main():
             "J1 Mesh 对象数 == 真值 primitive 数: %s vs %d" % (st.get("meshObjects"), truth["prim_total"]))
         say(st.get("posTotal") == truth["pos_total"],
             "J2 Σ position.count == 真值: %s vs %d" % (st.get("posTotal"), truth["pos_total"]))
-        say(st.get("renderedTris") == truth["tri_total"],
-            "J3 renderer 三角数 == 真值（frustumCulled 全关，应当恒等）: %s vs %d"
-            % (st.get("renderedTris"), truth["tri_total"]))
+        # 半透明 + DoubleSide 的材质，three.js r160 会**画两遍**（先背面再正面，见 WebGLRenderer
+        # 里 `transparent && side===DoubleSide && !forceSinglePass` 那个分支），
+        # 所以恒等式右边必须是「真值 + 这批网格的三角数」，而不是把阈值放宽。
+        # 期望值从文件里自己推：哪张网格用了 transparent 材质，就数它的索引三角形。
+        blend = int(st.get("blendTris") or 0)
+        say(st.get("renderedTris") == truth["tri_total"] + blend,
+            "J3 renderer 三角数 == 真值 + 半透明双面二次绘制（frustumCulled 全关，应当恒等）: "
+            "%s vs %d + %d" % (st.get("renderedTris"), truth["tri_total"], blend))
         box = st.get("boxReal")
         ok_box = True
         if not box:
@@ -528,6 +820,10 @@ def main():
                 "L2 前端带 uv1 属性的几何数 == 真值烘焙 primitive 数: %s vs %d"
                 "（GLTFLoader 一个 primitive 建一个 geometry，所以母体是 primitive 不是对象）"
                 % (lst.get("uv1Geoms"), side.get("lm_prims", -1)))
+            say(lst.get("lmChanBad", 0) == 0 and lst.get("lmChanOk", 0) == lst.get("lmSlots", -1),
+                "L3 每个挂了 lightMap 的槽位，其 channel 必须是 1 且几何带 uv1: 对 %s / 错 %s（母体 %s）"
+                "—— three.js r152+ 按 texture.channel 选 UV，手工赋图时漏设就会拿漫反射 UV 采样"
+                % (lst.get("lmChanOk"), lst.get("lmChanBad"), lst.get("lmSlots")))
             ps = page_sensitivity(side)
             say(ps and ps["ratio"] >= 0.6,
                 "C3 页号敏感性：把每个对象换到**错的一页**后，亮度变化 >5%% 的对象占比 "
@@ -548,8 +844,9 @@ def main():
                 for v in (amb or {}).get("views", [])}
         print("  ℹ 补光版（scene 加 AmbientLight 0.6，**不是包里的数据**，只为看清明暗关系）: "
               "各机位落笔 %s；截图 shot_amb_*.png" % aink)
+        zone_v, _zc = zone_views(glb)
         if a.zones and side:
-            views, _c = zone_views(glb)
+            views = zone_v
             zn = [v["name"] for v in views]
             zq = ("&lm=1&side=%s&views=%s"
                   % (base + rel_side, urllib.parse.quote(json.dumps(views, ensure_ascii=False))))
@@ -560,6 +857,158 @@ def main():
             print("     各机位落笔 %s；截图 shot_zone_*.png"
                   % {v["name"]: (round(v["ink"], 3) if v["ink"] is not None else None)
                      for v in (zc or {}).get("views", [])})
+        if a.peek:
+            pk = [{"name": "out_sea", "pos": [0.0, 1.6, 2.0], "look": [0.0, 1.4, -30.0], "fov": 60},
+                  {"name": "out_side", "pos": [-4.0, 1.6, 0.0], "look": [-30.0, 1.4, 0.0], "fov": 60}]
+            pq = urllib.parse.quote(json.dumps(pk, ensure_ascii=False))
+            print("  ℹ 朝窗外看的消融机位（判断窗那片黑是玻璃挡住还是外面没东西）:")
+            for kw in ("", "glass", "curtain"):
+                ex = "&views=%s" % pq + (("&hidekw=%s" % urllib.parse.quote(kw)) if kw else "")
+                pc = run_case(browser, base, rel_glb, rel_truth, "peek" + (kw or "all"),
+                              {"names": [v["name"] for v in pk]}, extra=ex)
+                st2 = (pc or {}).get("stats") or {}
+                print("     hidekw=%-8s 藏掉 %3s 个网格；各机位 mean=%s"
+                      % (kw or "(不藏)", st2.get("hidden"),
+                         {v["name"]: round(v.get("mean", 0), 3) for v in (pc or {}).get("views", [])}))
+                for v in (pc or {}).get("views", []) if not kw else []:
+                    for p in (v.get("picks") or []):
+                        if p.get("hits"):
+                            print("        %s ndc%-10s %s" % (v["name"], p["ndc"],
+                                                              " | ".join("%s·%s@%s" % (h["n"], h["m"], h["d"])
+                                                                        for h in p["hits"])))
+        if a.grade and side:
+            refs = ref_stats(a.ref_dir)
+            if not refs:
+                print("  ⚠ 参照图目录没有图：%s" % a.ref_dir)
+            else:
+                keys = ("mean", "med", "p05", "p25", "p75", "p95", "hi", "lo", "hi6", "base6", "sat")
+                target = {k: sorted(r[k] for r in refs)[len(refs) // 2] for k in keys}
+                print("  参照图（游戏内截图，裁掉 UI）%d 张：" % len(refs))
+                for r in refs:
+                    print("     %s mean=%.3f med=%.3f p95=%.3f 高光>0.75=%.1f%% 亮部>0.6=%.1f%% "
+                          "其余均值=%.3f 暗部=%.1f%% 饱和=%.3f"
+                          % (r["file"], r["mean"], r["med"], r["p95"], 100 * r["hi"], 100 * r["hi6"],
+                             r["base6"], 100 * r["lo"], r["sat"]))
+                print("     目标(取中位) " + " ".join("%s=%.3f" % (k, target[k]) for k in keys))
+                rel_render = None
+                rs_p = os.path.join(WORK, "room.render.json")
+                try:
+                    info = render_settings(a.scene, rs_p)
+                    rel_render = "dorm3d_room/room.render.json"
+                    print("  包里的环境光: %s" % json.dumps(info.get("ambient"), ensure_ascii=False))
+                    print("  包里的灯: %s" % json.dumps(info.get("lights"), ensure_ascii=False))
+                    say(bool(info.get("ambient")), "R1 场景包里读到了 RenderSettings 环境光（补光有据可依）")
+                    say(bool(info.get("lights")), "R2 场景包里读到了灯统计（%d 类）" % len(info.get("lights") or {}))
+                except Exception as ex:
+                    print("  ⚠ RenderSettings 抄录失败: %s: %s" % (type(ex).__name__, ex))
+                PI = 3.141592653589793
+                presets = [
+                    {"tag": "旧最优(纯tonemap)", "tone": "aces", "exp": "2.3"},
+                    {"tag": "对照:lightmap走UV0", "tone": "aces", "exp": "2.3", "lmch": "0"},
+                    {"tag": "对照:全关", "tone": "none", "exp": "1", "lm": "0",
+                     "ambm": "", "li": "0", "ld": "0"},
+                    {"tag": "包内环境光(sRGB入)", "tone": "aces", "exp": "1", "ambm": "flat", "ambsrgb": "1"},
+                    {"tag": "包内环境光(线性入)", "tone": "aces", "exp": "1", "ambm": "flat"},
+                    {"tag": "只把灯×π", "tone": "aces", "exp": "1", "li": PI, "ld": PI},
+                    {"tag": "灯×π+去1/d²", "tone": "aces", "exp": "1", "li": PI, "ld": PI, "dc": "0"},
+                    {"tag": "环境光+灯×π+去衰减", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "ambsrgb": "1", "li": PI, "ld": PI, "dc": "0"},
+                    {"tag": "同上但线性tonemap", "tone": "none", "exp": "1", "ambm": "flat",
+                     "ambsrgb": "1", "li": PI, "ld": PI, "dc": "0"},
+                    {"tag": "同上但曝光1.4", "tone": "aces", "exp": "1.4", "ambm": "flat",
+                     "ambsrgb": "1", "li": PI, "ld": PI, "dc": "0"},
+                    {"tag": "同上但lightmap×2", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "ambsrgb": "1", "li": PI, "ld": PI, "dc": "0", "lmi": "2"},
+                    {"tag": "同上但lightmap按sRGB", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "ambsrgb": "1", "li": PI, "ld": PI, "dc": "0", "lmc": "srgb"},
+                    {"tag": "半球环境光(sky=0)", "tone": "aces", "exp": "1", "ambm": "hemi",
+                     "ambsrgb": "1", "li": PI, "ld": PI, "dc": "0"},
+                    # 泛光这条轴补的是"亮部面积"，不是"室内打光"——参照图高光占比 15~45%，我们 2~18%
+                    {"tag": "环境光+泛光0.35", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.35"},
+                    {"tag": "环境光+泛光0.6", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.6"},
+                    {"tag": "环境光+泛光0.9", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.9"},
+                    {"tag": "泛光0.6+阈0.7", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.6", "bloomt": "0.7"},
+                    {"tag": "泛光0.6+曝光1.2", "tone": "aces", "exp": "1.2", "ambm": "flat",
+                     "bloom": "0.6"},
+                    {"tag": "泛光0.9+灯×π去衰减", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.9", "li": PI, "ld": PI, "dc": "0"},
+                    # 泛光与"灯×π/去衰减"**有交互**：单独扫灯几乎不动，配上泛光就暴涨
+                    # （本轮实测 mean 0.316 → 0.549）。所以中间这些组合必须真的扫，
+                    # 不能拿"单轴扫过、没用"结论省掉。
+                    {"tag": "泛光0.35+灯×π去衰减", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.35", "li": PI, "ld": PI, "dc": "0", "shot": "b35"},
+                    {"tag": "泛光0.45+灯×π去衰减", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.45", "li": PI, "ld": PI, "dc": "0", "shot": "b45"},
+                    {"tag": "泛光0.6+灯×π去衰减", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.6", "li": PI, "ld": PI, "dc": "0", "shot": "b60"},
+                    {"tag": "泛光0.9+灯×π留衰减", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.9", "li": PI, "ld": PI},
+                ]
+                if a.grade_tags:
+                    want = [t.strip() for t in a.grade_tags.split(",") if t.strip()]
+                    presets = [p for p in presets if any(w in (p.get("tag") or "") for w in want)]
+                    print("  ℹ 按 --grade-tags %s 选了 %d 个档位" % (want, len(presets)))
+                if a.grade_limit:
+                    presets = presets[:a.grade_limit]
+                    print("  ⚠ 只跑前 %d 个档位（--grade-limit），下面的对照/护栏可能没有母体" % len(presets))
+                rows = grade_sweep(browser, base, rel_glb, rel_truth, rel_side, rel_render,
+                                   zone_v, target, presets)
+                print("  档位扫描（三个分区机位取平均）:")
+                for r in sorted(rows, key=lambda x: x["dist"]):
+                    a2 = r["avg"]
+                    print("     %-24s 分位+饱和 %.3f (均值距离 %.3f) | mean %.3f med %.3f p05 %.3f "
+                          "p95 %.3f 亮部>0.6 %.1f%% 其余 %.3f 暗部 %.1f%% sat %.3f"
+                          % (r["tag"], r["dist"], r.get("mean_dist", 0), a2["mean"], a2["med"],
+                             a2["p05"], a2["p95"], 100 * a2["hi6"], a2["base6"], 100 * a2["lo"], a2["sat"]))
+                by_tag = {r["tag"]: r for r in rows}
+                counts = set(r["counts"] for r in rows)
+                say(len(counts) == 1 and rows and rows[0]["counts"] == (st.get("meshObjects"),
+                                                                        st.get("posTotal"),
+                                                                        st.get("renderedTris")),
+                    "护栏：换档位**只许改亮度、不许改几何计数** %s" % (sorted(counts)[:2],))
+                lum = set(round(r["avg"]["mean"], 3) for r in rows)
+                say(len(lum) > 1, "护栏：档位之间亮度确实动了（实得 %d 个不同均值）" % len(lum))
+                # C4：lightmap 走 UV1 与走 UV0 必须**不一样**——一样就说明这条通路
+                # 根本没吃到第二套 UV（前一轮的计数判据对这种错是无感的）。
+                # 注意只能用**分布**量：整页 lightmap 的均值本来就 ≈ 任一子矩形的均值，
+                # 拿 mean 当仪器会测不出错（本轮实测 mean 只差 0.0046，med 差 0.021）。
+                if "旧最优(纯tonemap)" in by_tag and "对照:lightmap走UV0" in by_tag:
+                    a1, a0 = by_tag["旧最优(纯tonemap)"]["avg"], by_tag["对照:lightmap走UV0"]["avg"]
+                    worst = max(keys, key=lambda k: abs(a1[k] - a0[k]))
+                    say(abs(a1[worst] - a0[worst]) > 0.01,
+                        "C4 lightmap 通道敏感性：UV1 vs UV0 的分布差 %.4f（在 %s 上；须 >0.01）"
+                        % (abs(a1[worst] - a0[worst]), worst))
+                if "对照:全关" in by_tag:
+                    m0 = by_tag["对照:全关"]["avg"]["mean"]
+                    say(m0 < 0.02, "C5 全关闭环底噪：灯=0 且无 lightmap 且无环境光时 mean=%.4f（须 <0.02）" % m0)
+                # C6：泛光只许"把亮处铺开"，不许没反应。与同参数的无泛光档逐量比。
+                if "包内环境光(线性入)" in by_tag and "环境光+泛光0.6" in by_tag:
+                    b0 = by_tag["包内环境光(线性入)"]["avg"]
+                    b1 = by_tag["环境光+泛光0.6"]["avg"]
+                    say(b1["hi"] > b0["hi"] + 0.005 and b1["mean"] >= b0["mean"] - 0.005,
+                        "C6 泛光敏感性：高光占比 %.1f%% → %.1f%%（必须升），mean %.3f → %.3f（不许降）"
+                        % (100 * b0["hi"], 100 * b1["hi"], b0["mean"], b1["mean"]))
+                # C7：过曝闸。分位数距离仍可能被"整幅一起提亮"讨好一部分，
+                # 亮部面积超过参照 1.6 倍就直接判红——那是糊白，不是还原。
+                if rows:
+                    best = min(rows, key=lambda x: x["dist"])
+                    over = best["avg"]["hi6"] / max(1e-6, target["hi6"])
+                    say(over <= 1.6,
+                        "C7 过曝闸：最近档亮部(>0.6)占比 %.1f%% vs 参照 %.1f%% = %.2f 倍（须 ≤1.6）"
+                        % (100 * best["avg"]["hi6"], 100 * target["hi6"], over))
+                    print("  最近档位: %s（分位+饱和距离 %.3f）参数 %s —— 出图 shot_best_*.png"
+                          % (best["tag"], best["dist"], json.dumps(best["preset"], ensure_ascii=False)))
+                    run_case(browser, base, rel_glb, rel_truth, "best",
+                             {"names": [v["name"] for v in zone_v]},
+                             extra=preset_query(best["preset"], base, rel_side, rel_render,
+                                                urllib.parse.quote(json.dumps(zone_v, ensure_ascii=False))))
+                    with open(os.path.join(WORK, "grade_sweep.json"), "w", encoding="utf-8") as f:
+                        json.dump({"target": target, "rows": rows}, f, ensure_ascii=False, indent=1)
+
     finally:
         try:
             ws.close()
