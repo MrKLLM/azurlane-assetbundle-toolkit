@@ -7520,6 +7520,11 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
 ② 面板滑杆拖 `Param25`/`Param27` 无变化**不是热加载问题**——滑杆写 `setParameterValueByIndex` 后，
 在播的 clip 下一帧就按曲线把该参数写回（`idle` 一条就驱动 531/532 个参数）⇒ **画廊的「参数·部件」面板
 对几乎所有参数都是无效的**，要手验得先能"暂停动作"（待办，见 §6.36）。
+- ⚠️ **`l2d_motion_audit.py` 的 `curves auth=` 只数了 `m_StreamedClip` 一个容器**（源码里 `idxs` 来自
+  `m_MuscleClip.m_Clip.data.m_StreamedClip`，dense/constant 未计入）⇒  gezi_2 `home` 打印的
+  `auth=203 disk=502` **是口径差，不是"导出多写了 299 条曲线"**。这条先记着，否则下一个会话会把它当 bug 查。
+  它给出的 `ok / misassign 0 / unresolved 0` 只覆盖 streamed 那部分曲线的**名字**，
+  **不覆盖 dense/constant 曲线的名字，也不覆盖任何曲线的取值** ⇒ 不能用它给"`Param25` 取值是否错绑"结案。
 
 **涉及文件（追加-VI）**：`.diag/hide_A_idle_zoom.png`（图证）、
 `scripts/diag/l2d_part_flicker_probe.py`（⑧ 加 `--hideclip`：播着 clip 时藏，绕开 setup 姿态下被遮挡的问题）。
