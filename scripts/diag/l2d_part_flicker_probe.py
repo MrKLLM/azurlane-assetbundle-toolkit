@@ -458,7 +458,7 @@ JS_GEO = r"""(async (dummy) => {
 
 
 # ---------------------------------------------------------------- ⑧ 藏起指定 mesh 后截图（用来确认"这几片是画面上的什么"）
-JS_HIDE = r"""(async (names, clip) => {
+JS_HIDE = r"""(async (names, clip, waitMs) => {
   const m=window.__m, im=m.internalModel, core=im.coreModel, M=core._model;
   const P=M.parameters, D=M.drawables;
   window.__cap=null; window.__ambOff=true;
@@ -470,7 +470,7 @@ JS_HIDE = r"""(async (names, clip) => {
     for(let i=0;i<P.count;i++) P.values[i]=P.defaultValues[i];   // setup 姿态，结果可复现
   } else {
     try{ im.motionManager.startMotion(clip,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){}
-    await new Promise(r=>setTimeout(r,3000));              // 跑到参数稳定段
+    await new Promise(r=>setTimeout(r,waitMs));              // 跑到"角色在画面内"的时刻再藏
     m.autoUpdate=false; try{ window.__app.ticker.stop(); }catch(e){}
   }
   const idx=[], miss=[];
@@ -484,7 +484,22 @@ JS_HIDE = r"""(async (names, clip) => {
   window.__app.render();
   await new Promise(r=>requestAnimationFrame(r));
   const after=idx.map(j=>+D.opacities[j].toFixed(2));
-  return JSON.stringify({ok:true, live, clip:clip||null, hidden:idx.length, miss, after,
+  // 自证：这一测到底播没播上那条 clip、被藏的片藏之前是不是亮着的。
+  // 缺这两条就会把"clip 没播起来 ⇒ 那组本来就暗 ⇒ 藏了当然没变化"读成"这组不影响画面"。
+  let grp=null, p25=null, openBefore=0, onScreen=0;
+  try{ grp=im.motionManager.state.currentGroup; }catch(e){}
+  try{ const i25=P.ids.indexOf('Param25'); if(i25>=0) p25=+P.values[i25].toFixed(3); }catch(e){}
+  // 「藏了没变化」有两种成因：被藏的片全在画外/被遮挡（合法），或截图没反映改动（仪器坏）。
+  // 不分这两条就会把前者误读成后者、或把后者误读成"这组不影响画面"。
+  try{ const V=im.view||{}, hw=(V.Width||4)/2, hh=(V.Height||4)/2;
+       onScreen=idx.filter(j=>{ const p=D.vertexPositions[j];
+         let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+         for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
+         return x1>-hw && x0<hw && y1>-hh && y0<hh; }).length; }catch(e){}
+  try{ window.__hideSet=[]; core.update();
+       openBefore=idx.filter(j=>D.opacities[j]>0.05).length; window.__hideSet=idx; core.update(); }catch(e){}
+  return JSON.stringify({ok:true, live, clip:clip||null, group:grp, Param25:p25, openBefore, onScreen,
+                         hidden:idx.length, miss, after,
                          stillZero:after.filter(x=>x===0).length});
 })"""
 
@@ -507,6 +522,7 @@ def main():
     ap.add_argument("--dumpgeo", action="store_true", help="⑦ 导出全部 mesh 的屏幕包围盒/面积/透明度，供离线反查「这个像素是哪几片」")
     ap.add_argument("--hide", default="", help="⑧ 逗号分隔的 drawable 名：setup 姿态下把这几片藏掉再截图（认画面身份用）")
     ap.add_argument("--hideclip", default="", help="⑧ 配 --hide：改成「播着这条 clip」时藏（setup 姿态下多半被挡住看不出）")
+    ap.add_argument("--hidewait", type=float, default=3.0, help="⑧ 播 clip 后等几秒再藏（要等到角色在画面内的时刻，否则藏了必然零变化）")
     a = ap.parse_args()
     norest = os.environ.get("NOREST") == "1"
     tag = "norest" if norest else "rest"
@@ -798,8 +814,16 @@ def main():
     if hl:
         shots8 = {}
         for tag, lst in (("base", []), ("hide", hl)):
-            r8 = ev(JS_HIDE + "(%s, %s)" % (json.dumps(lst), json.dumps(a.hideclip or "")))
-            print("   ⑧ %s → %s" % (tag, str(r8)[:180]))
+            r8 = ev(JS_HIDE + "(%s, %s, %s)" % (json.dumps(lst), json.dumps(a.hideclip or ""),
+                                       json.dumps(int(a.hidewait * 1000))))
+            try:
+                j8 = json.loads(r8) if isinstance(r8, str) else (r8 or {})
+                print("   ⑧ %-5s clip=%s 在播=%s Param25=%s | 藏前亮着 %d/%d 片(其中在画面内 %s) stillZero=%s"
+                      % (tag, j8.get("clip"), j8.get("group"), j8.get("Param25"),
+                         j8.get("openBefore"), j8.get("hidden"), j8.get("stillZero"),
+                         j8.get("onScreen")))
+            except Exception:
+                print("   ⑧ %s → %s" % (tag, str(r8)[:180]))
             png = cmd("Page.captureScreenshot", {"format": "png"})
             fp8 = os.path.join(ROOT, ".diag", "l2d_hide_%s_%s%s.png"
                                % (a.model, tag, ("_" + a.hideclip) if a.hideclip else ""))

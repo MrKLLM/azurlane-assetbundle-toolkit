@@ -7526,6 +7526,38 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
   它给出的 `ok / misassign 0 / unresolved 0` 只覆盖 streamed 那部分曲线的**名字**，
   **不覆盖 dense/constant 曲线的名字，也不覆盖任何曲线的取值** ⇒ 不能用它给"`Param25` 取值是否错绑"结案。
 
+**§123 追加-VII（同日续：导出侧三道断言全绿 ⇒ 关手是源数据本然；同时暴露 ⑧ 这条臂的结构性缺陷）**
+
+新工具 `scripts/diag/l2d_source_curve_dump.py`（只读，复用 `extract_motions.py` 的三容器解析，不自己推导格式）。
+对 `gezi_2 / home` 跑出的三道断言**全绿**：
+
+- **A 名字↔moc3 索引**：532 个 `CubismParameter` 组件，GameObject 名（我们拿它当曲线 Id）与
+  `.diag/_param_meta_gezi_2.json` 里 `_unmanagedIndex` 位置上的名字 **零不一致** ⇒ 不存在 Id 错位。
+- **B 绑定数求和**：`streamed.curveCount 203 + dense.m_CurveCount 0 + constant 300 = 503 = len(genericBindings)`
+  精确对上 ⇒ 磁盘 502 条参数曲线不是"多写"（另 1 条绑定不是 Parameter）。
+  ⚠️ 顺带证实了追加-VI 那条：审计器打印的 `auth=203` 只数了 streamed 一个容器。
+- **C 逐键取值**：`Param25` 源侧 29 键、`v0=0.5000`、范围 0…0.6，与磁盘 `Segments` **最大偏差 0.00000**；
+  `Param27`（`v0=0.7`）、`Param17`、`l2d_hx` 同样逐键一致。
+
+⇒ **「`home` 一开场就把 A 组手关掉 13 秒」是源数据本然，不是我们导出错绑。** 这条线索到此结案。
+
+- **同时得到一条新的、指向真问题的观测**：`home` 播到 clip t≈3.0s（`Param25` 实测 0.507）时，
+  **A 组 5 片与 B 组 29 片全部是暗的**（⑧ 的 `openBefore=0/29`）⇒ 我们的渲染此刻**真的没有手**，
+  与用户观察一致。而绑定表说 `Param25≥0.2` 应当把 B 组打开 ⇒ **B 组被某个别的门关着**，
+  这才是下一轮要问的具体问题（`Param25` 那条 1-v 只是乘性门之一，台账是在 setup 基线下测的，
+  换到 home 的实际状态就可能多几道门——正是追加-V 记过的"基线依赖"）。
+- ⚠️ **⑧ 这条臂有个结构性缺陷，用它得到的像素差一律不可信**：`base` 与 `hide` 两张图是**两次独立的
+  `startMotion + 等待`**，两次播放的相位/物理不重合 ⇒ 像素差主要来自漂移，不是藏片的效果
+  （实测：B 组 29 片全暗、藏了理应零变化，却报 10,780 像素差；反过来 idle 那次报 1,569 像素，
+  结论"是手"是靠**肉眼看图**成立的，不是靠那个数）。
+  正确做法：**同一次定格**上先拍 base、再落 hideSet 拍第二张，中间不重播。下一轮先修这条。
+- ⚠️ 也别再拿这段录像跟 clip 时间轴对齐：录像 13–18 秒才"倒着飞走"，我们 clip t≈7s 就在飞，
+  **这段录像播的是不是 `home` 尚未确认** ⇒ 一切"游戏 vs 我们"的逐帧比较在此之前都不作数。
+
+**涉及文件（追加-VII）**：`scripts/diag/l2d_source_curve_dump.py`（**新**，源包曲线三道断言 + 逐键比对）、
+`scripts/diag/l2d_part_flicker_probe.py`（⑧ 加 `--hidewait` 与 `openBefore/onScreen/stillZero` 自证；
+但"两次独立播放"的缺陷仍在，见上）。
+
 **涉及文件（追加-VI）**：`.diag/hide_A_idle_zoom.png`（图证）、
 `scripts/diag/l2d_part_flicker_probe.py`（⑧ 加 `--hideclip`：播着 clip 时藏，绕开 setup 姿态下被遮挡的问题）。
 
