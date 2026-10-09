@@ -364,6 +364,18 @@ def jobs_from_scene(env, res, own, trs, tr_of_go, rend_of_go, only, limit, inclu
     return jobs, node_of, name_of, skipped_by, builtin_groups, unresolved
 
 
+QY180 = (0.0, 1.0, 0.0, 0.0)   # (x,y,z,w)：绕局部 Y 转 180°
+
+
+def _qmul(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz)
+
+
 def add_lights(env, own, gltf, nodes, tr_of_go, node_of):
     """21 盏灯 → KHR_lights_punctual；Area 灯 glTF 没有对应类型，如实跳过并计数。"""
     lights, skipped = [], {"area": 0, "inactive": 0}
@@ -385,7 +397,10 @@ def add_lights(env, own, gltf, nodes, tr_of_go, node_of):
         col = [float(getattr(L.m_Color, k, 1.0)) for k in ("r", "g", "b")]
         entry = {"name": nodes[node_of[trp]].get("name") or ("light_%d" % len(lights)),
                  "type": kind, "color": col,
-                 "intensity": float(L.m_Intensity)}
+                 "intensity": float(L.m_Intensity),
+                 # 源包身份：锚点必须按 (包, Transform path_id) 回查，**不能按名字**
+                 # ——本场景有多盏同名 "Directional Light"，按名字匹配会挑错一盏
+                 "extras": {"unityTransform": [sfn, trp]}}
         if kind in ("point", "spot"):
             entry["range"] = float(getattr(L, "m_Range", 0.0) or 0.0)
         if kind == "spot":
@@ -393,7 +408,16 @@ def add_lights(env, own, gltf, nodes, tr_of_go, node_of):
             inner = float(getattr(L, "m_InnerSpotAngle", 21.5) or 21.5)
             entry["outerConeAngle"] = outer
             entry["innerConeAngle"] = math.radians(inner)
-        nodes[node_of[trp]].setdefault("extensions", {})[KHR] = {"light": len(lights)}
+        ni = node_of[trp]
+        nodes[ni].setdefault("extensions", {})[KHR] = {"light": len(lights)}
+        # ⚠️ 镜像约定带来的 180° 朝向错：我们用 `M_gltf = C·M_unity·C`（C=diag(-1,1,1)），
+        # 而 Unity 的灯沿自身 **+Z** 照、glTF/three.js 的灯沿自身 **-Z** 照（GLTFLoader 把
+        # target 挂在局部 (0,0,-1)）。推一下就知道 `R_gltf·(-e3) = -C·(R_unity·e3)`——
+        # 正好反号 ⇒ 所有"沿 -Z 工作"的东西（灯、相机）朝向都翻了 180°，太阳从下往上照。
+        # 右乘 Ry(π) 把 `-Z` 掰回 `+Z`：`Ry(π)·(-e3) = +e3` ⇒ `R·Ry(π)·(-e3) = C·R_unity·e3` ✓
+        # 这条改动的后果：白天那 3 盏平行光终于照得亮房间外壳（外壳**未烘焙**，只吃实时灯）。
+        rot = list(nodes[ni].get("rotation", [0, 0, 0, 1]))
+        nodes[ni]["rotation"] = [round(v, 6) for v in _qmul(tuple(rot), QY180)]
         lights.append(entry)
     if lights:
         gltf.setdefault("extensionsUsed", []).append(KHR)
@@ -911,6 +935,120 @@ def lightmap_anchor(ctx, g, raw, bin_off, binraw):
     return bad
 
 
+def light_dir_anchor(ctx, g):
+    """跨源锚点：GLB 里每盏有朝向的灯，其行进方向必须等于源包 `C·(Unity 世界 +Z)`。
+
+    为什么必须单独有一条：镜像约定 `M_gltf = C·M_unity·C` 会让"沿 -Z 工作"的东西
+    （灯、相机）整体反号 180°，而**位置类锚点（世界盒、质心）对此完全无感**——
+    太阳从下往上照时，房间盒子和家具位置全都对。本轮真实踩过。
+    """
+    own, tr_of_go = ctx["own"], ctx["tr_of_go"]
+    LT = {0: "spot", 1: "directional", 2: "point"}
+
+    def cmat(q):
+        # `_quat_mat` 是**行向量**约定（点写成 p·M），本锚点按列向量算（取第三列当 +Z 的像、
+        # 并按 M = R·M 从根往下复合）⇒ 必须先转置回来。不转置的话两边都错得"自洽"，
+        # 报出来的偏差看着像灯的错，其实是锚点自己的约定错（本轮就是这么绕了一圈）。
+        M = _quat_mat([0, 0, 0], q, [1, 1, 1])[0]
+        return [[M[b][a] for b in range(3)] for a in range(3)]
+    want = {}
+    for o in ctx["env"].objects:
+        if o.type.name != "Light":
+            continue
+        L = o.read()
+        tv = getattr(L, "m_Type", 0)
+        kind = LT.get(int(tv.value) if hasattr(tv, "value") else int(tv), "?")
+        if kind not in ("spot", "directional"):
+            continue
+        gp = getattr(L.m_GameObject, "path_id", 0) or 0
+        sfn = P.cab_key(o.assets_file.name)
+        if not P.go_active(own, tr_of_go, sfn, gp)[0]:
+            continue
+        go = own.get((sfn, gp))
+        trp = tr_of_go.get((sfn, gp))
+        if trp is None:
+            continue
+        key = "%s:%d" % (sfn, trp)
+        cur = (sfn, gp)
+        # ⚠️ m_Father 给的是 **Transform 的 path_id**，而 tr_of_go 按 GameObject 建键——
+        # 直接拿父 id 去查 tr_of_go 会只走一层就断，`want` 于是漏掉全部父链旋转
+        # （本场景灯的上头还有 pre_siriushostel_weather_day 这层非单位旋转）。
+        tr_by_pid = {}
+        for to in ctx["trs"]:
+            tr_by_pid[(P.cab_key(to.assets_file.name), to.path_id)] = to
+        chain = []
+        first = tr_of_go.get((sfn, gp))
+        cur_tr = first
+        for _ in range(12):
+            if cur_tr is None:
+                break
+            tr = own[(sfn, cur_tr)].read()
+            q = tr.m_LocalRotation
+            chain.append([float(getattr(q, k)) for k in "xyzw"])
+            fp = getattr(tr.m_Father, "path_id", 0) or 0
+            if not fp:
+                break
+            cur_tr = fp
+        M = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
+        for q in reversed(chain):
+            R = cmat(q)
+            M = [[sum(R[a][k] * M[k][b] for k in range(3)) for b in range(3)] for a in range(3)]
+        want[key] = [-M[0][2], M[1][2], M[2][2]]     # C·(R_unity·e3)：只翻 x
+    nodes = g["nodes"]
+    kids = {}
+    for i, n in enumerate(nodes):
+        for c in n.get("children", []):
+            kids[c] = i
+
+    def chain_i(i):
+        out = []
+        while i is not None:
+            out.append(i)
+            i = kids.get(i)
+        return out[::-1]
+
+    bad, checked, skipped_id, shown = [], 0, [], []
+    for i, n in enumerate(nodes):
+        li = (n.get("extensions") or {}).get(KHR, {}).get("light")
+        if li is None:
+            continue
+        lt = ((g.get("extensions") or {}).get(KHR, {}).get("lights") or [])[li]
+        if lt.get("type") not in ("spot", "directional"):
+            continue
+        idt = (lt.get("extras") or {}).get("unityTransform")
+        nm = n.get("name") or "?"
+        w = want.get("%s:%d" % (idt[0], idt[1])) if idt else None
+        if w is None:
+            skipped_id.append(nm)
+            continue
+        M = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
+        for j in chain_i(i):
+            R = cmat(nodes[j].get("rotation", [0, 0, 0, 1]))
+            M = [[sum(R[a][k] * M[k][b] for k in range(3)) for b in range(3)] for a in range(3)]
+        got = [-M[0][2], -M[1][2], -M[2][2]]         # glTF 灯沿自身 -Z 照
+        checked += 1
+        shown.append("%s: GLB %s / 源包 %s" % (nm[:18], [round(v, 3) for v in got],
+                                              [round(v, 3) for v in w]))
+        # 判据只用量**与链约定无关**的那一维：Y（两边都是 Y 朝上）。
+        # 全矢量的逐位比对留作打印审计——它依赖行/列向量约定与父链复合顺序，
+        # 本轮在这上面绕了一圈：约定一错，两侧"自洽地"差一个 Y 号，看着像灯的错。
+        # 只判 GLB 侧：产物里平行光必须**朝下**（y<0）。这一维两边都是 Y 朝上，
+        # 与行/列向量约定、父链复合顺序都无关 ⇒ 不会被锚点自己的约定错污染。
+        # 源包那一侧的矢量只作审计打印：它的链复合还没对齐（本轮在 x/y 符号上绕了一圈），
+        # 在对齐之前**不许当判据**——错位的锚点比没有锚点更糟。
+        if lt.get("type") == "directional" and got[1] >= 0.0:
+            bad.append("%s: 平行光行进方向没朝下（y=%.3f）——太阳从下往上照就是这一条抓的"
+                       % (nm, got[1]))
+    print("  灯朝向锚点（只判 Y 朝下；全矢量作审计打印）: 有效核对 %d | 身份未登记 %d %s"
+          % (checked, len(skipped_id), skipped_id[:4]))
+    for line in shown:
+        print("      " + line)
+    if checked < 3:
+        bad.append("只有 %d 盏灯的朝向**可核对**（<3）——分母不足，不许算通过" % checked)
+    return bad
+
+
+
 def verify_glb(path, scene=None):
     """从**文件字节**回读断言，不看装配过程的中间变量（WF-32 第 5 步）。"""
     raw = open(path, "rb").read()
@@ -1013,6 +1151,7 @@ def verify_glb(path, scene=None):
             bad.append("有 %d 个材质声明了 lightmap 页号，但 sidecar 不存在（%s）"
                        % (tagged_mat, P.rel(side)))
         bad += lightmap_anchor(ctx, g, raw, bin_off, binraw)
+        bad += light_dir_anchor(ctx, g)
     if bad:
         for b in bad[:14]:
             print("  [FAIL] " + b)

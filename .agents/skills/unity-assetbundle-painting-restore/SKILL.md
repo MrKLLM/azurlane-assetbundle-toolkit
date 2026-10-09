@@ -1,7 +1,7 @@
 ---
 name: unity-assetbundle-painting-restore 触发词（3D 侧）：跨包 PPtr、assets_file 带下划线、ObjectReader.assetsfile 为 None、.sharedAssets、resS 不是 SerializedFile、externals 下标 ±1、pptr.deref、CAB 索引现扫、unity default resources 内置外链、激活态过滤、m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、跨包解析、SerializedFile 多个、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.13.9
+version: 1.13.10
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -402,6 +402,14 @@ MAD 分不开"该替换/不该替换"，两者数值重叠。这条写进了常�
   ⇒ "renderer 三角数 == 真值"这条恒等式必然翻倍（实测 120961 → 127755）。
   正确做法是**把期望值推出来**：前端自己数哪些网格是 transparent，右边 = 真值 + 这批网格的三角数。
   ⚠️ 不许把恒等式放宽成 `>=` 或加容差——那等于把仪器拆了。
+- **镜像约定会偷偷把"沿 -Z 工作"的对象转 180°**：Unity→glTF 用 `M_gltf = C·M_unity·C`
+  （C=diag(-1,1,1)，四元数 `(x,-y,-z,w)`）换手性时，`R_gltf·(-e3) = -(C·R_unity·e3)` ——
+  **正好反号**。Unity 灯沿自身 +Z 照、glTF/three.js 灯沿 -Z 照（GLTFLoader 把 target 挂在局部
+  `(0,0,-1)`，所以平行光方向确实由节点旋转决定），于是**太阳从下往上照**。
+  ⚠️ 位置类锚点（世界盒、质心、AABB）对一根轴反 180° **完全无感**，本案 264 个镜像锚点全绿。
+  ⇒ 修法：给挂灯的节点右乘 `Ry(π)`（`Ry(π)·(-e3)=+e3`）。相机/切线/旋转动画同理要逐类查。
+  ⇒ 判据要挑**与链约定无关**的那一维（本案只判 GLB 侧平行光 `y<0`，两边 Y 都朝上），
+  易错的矢量比对留作审计打印——错位的锚点比没有锚点更糟。
 - **覆盖 `THREE.ShaderChunk.*` 之前先确认有人 `#include` 它**：r160 的 lightmap 采样在
   `lights_fragment_maps` 里面（`irradiance += lightMapIrradiance`，**已经**乘反照率），
   `lightmap_fragment` 是个没人 include 的死块 ⇒ 改它**静默无效**，看起来"这条轴没用"。
