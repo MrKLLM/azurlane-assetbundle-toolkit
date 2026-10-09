@@ -202,14 +202,19 @@ def material_of(gltf, buf, res, mat_reader, with_textures, tex_cache, texstat, p
         entry["pbrMetallicRoughness"]["baseColorFactor"] = [
             float(getattr(base, k, d)) for k, d in (("r", 1), ("g", 1), ("b", 1), ("a", 1))]
     # 透明模式：glTF 的 alphaMode 必须从 Unity 材质的**渲染状态**推，不能猜。
-    # 可用信号只有两个：混合方程 (_SrcBlend=SrcAlpha 且 _DstBlend=OneMinusSrcAlpha) 与
-    # baseColor 的 alpha。`_Cutoff` 看着像第三个信号，其实 348 个材质里 289 个都带着默认值 0.5
-    # （包括明显不透明的墙和木头），拿它当依据会把大半房间变成 alpha 测试——所以不用它。
-    # 漏掉这条的真实后果：窗玻璃 mat_db_glass06（alpha 0.196）被画成实心黑玻璃，
-    # 整片窗外海景看不见，还顺带把画面亮度统计压低了一档。
-    if (floats.get("_SrcBlend") is not None and floats.get("_DstBlend") is not None
-            and abs(float(floats["_SrcBlend"]) - 5.0) < 1e-4
-            and abs(float(floats["_DstBlend"]) - 10.0) < 1e-4) or alpha < 0.999:
+    # 三个信号（缺一不可，本轮就是漏了第三个才把窗外云层画成一块黑）：
+    #   ① 混合方程 _SrcBlend=SrcAlpha 且 _DstBlend=OneMinusSrcAlpha
+    #   ② baseColor 的 alpha < 1
+    #   ③ **baseColor 贴图自带 alpha 通道**（不是恒 255）——云层/光束这类自定义 shader
+    #      的材质既没有 ① 也没有 ②，透明信息只在贴图的 A 里（实测云纹理 alpha 均值 0.066）。
+    # ⚠️ 不能用 `_Cutoff`：348 个材质里 289 个带着默认值 0.5（包括明显不透明的墙和木头），
+    #    拿它当依据会把大半房间变成 alpha 测试。
+    # 漏掉这条的真实后果：窗玻璃 mat_db_glass06（alpha 0.196）被画成实心黑玻璃；
+    # 而漏掉 ③ 的后果是窗外云层把近乎全黑的 RGB 糊在天空位置上，补摆的穹顶整片被盖住。
+    blend_eq = (float(floats["_SrcBlend"]) == 5.0 and float(floats["_DstBlend"]) == 10.0
+                if floats.get("_SrcBlend") is not None and floats.get("_DstBlend") is not None
+                else False)
+    if blend_eq or alpha < 0.999:
         entry["alphaMode"] = "BLEND"
     if with_textures:
         tried = 0
@@ -237,6 +242,12 @@ def material_of(gltf, buf, res, mat_reader, with_textures, tex_cache, texstat, p
                     continue
                 b = io.BytesIO()
                 img.convert("RGBA").save(b, format="PNG")
+                # 信号③要在**首次解码**时算一次并记下：贴图常常被多个材质复用，
+                # 只写在解码分支里会让走缓存的那些材质漏判（本轮实测漏了树叶与花两种）
+                lo = 255
+                if img.mode.endswith("A"):
+                    lo = img.split()[-1].getextrema()[0]
+                gltf.setdefault("_texalpha", {})[tk] = lo
                 raw = b.getvalue()
                 gltf["images"].append({"bufferView": buf.add(raw), "mimeType": "image/png",
                                        "name": tobj.m_Name})
@@ -245,6 +256,9 @@ def material_of(gltf, buf, res, mat_reader, with_textures, tex_cache, texstat, p
                 ti = tex_cache[tk]
             entry["pbrMetallicRoughness"]["baseColorTexture"] = {"index": ti, "texCoord": 0}
             entry["_unitySlot"] = slot
+            if gltf.get("_texalpha", {}).get(tk, 255) < 250:
+                entry["alphaMode"] = "BLEND"     # 信号③：baseColor 贴图自带 alpha
+                texstat.setdefault("alpha_tex", set()).add(mt.m_Name)
             texstat["hit"] += 1
             break
         if "baseColorTexture" not in entry["pbrMetallicRoughness"]:
@@ -586,7 +600,7 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
                       "builtin_groups": {"%s/%s" % k: v for k, v in bgroups.items()},
                       "placeholders": n_place, "lights": len(lights), "lights_skipped": lskip,
                       "mirror": mirror, "flipuv": flipuv, "with_textures": with_textures}
-    for k in ("_own", "_matkey", "_meshkey"):
+    for k in ("_own", "_matkey", "_meshkey", "_texalpha"):
         gltf.pop(k, None)
     if out:
         G.write_glb(out, gltf, buf.data)
@@ -933,6 +947,25 @@ def verify_glb(path, scene=None):
     nblend = sum(1 for m in g.get("materials", []) if m.get("alphaMode") == "BLEND")
     print("  材质: %d 个，其中 alphaMode=BLEND %d 个（alpha<1 却实心 %d 个）"
           % (len(g.get("materials", [])), nblend, len(badfac)))
+    # 信号③的回读不变式：贴图自带 alpha 却按实心画（云层被糊成黑天空就是这么来的）
+    badtex = []
+    for m in g.get("materials", []):
+        ti = ((m.get("pbrMetallicRoughness") or {}).get("baseColorTexture") or {}).get("index")
+        if ti is None or m.get("alphaMode", "OPAQUE") != "OPAQUE":
+            continue
+        try:
+            im = g["images"][g["textures"][ti]["source"]]
+            bv = g["bufferViews"][im["bufferView"]]
+            from PIL import Image as _Im
+            aa = _Im.open(io.BytesIO(binraw[bv["byteOffset"]:bv["byteOffset"] + bv["byteLength"]]))
+            if aa.mode.endswith("A") and aa.split()[-1].getextrema()[0] < 250:
+                badtex.append(m.get("name"))
+        except Exception:
+            pass
+    if badtex:
+        bad.append("有 %d 个材质的 baseColor 贴图自带 alpha 却是 OPAQUE（会被画成实心）: %s"
+                   % (len(badtex), badtex[:6]))
+    print("  贴图自带 alpha 却实心: %d 个" % len(badtex))
     nprim = 0
     for mi, mesh in enumerate(g["meshes"]):
         ph = (mesh.get("extras") or {}).get("placeholder")

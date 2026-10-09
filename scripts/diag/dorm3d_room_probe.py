@@ -106,6 +106,28 @@ if(BLOOM>0){
   composer.addPass(new OP.OutputPass());   // 色调映射与 sRGB 输出改由这一道做
 }
 function draw(){ renderer.info.reset(); if(composer) composer.render(); else renderer.render(scene,camera); }
+// 窗外背景：本场景包里 `m_SkyboxMaterial` 是空引用，海面/天空的几何**不在这个包**
+// （`res/water/` 只有贴图，`RampMap` 是水深遮条几乎全黑，当不了颜色源）。
+// 所以这一层是**补摆**：几何与摆位是我给的，颜色取自用户给的游戏内截图逐行取色。
+// 它挂在 scene 上而不是模型里，三角数单独计进 J3 的期望值。
+let backdropTris=0;
+if(Q.get('sky')==='1'){
+  const cv=document.createElement('canvas'); cv.width=4; cv.height=512;
+  const cx=cv.getContext('2d'); const gr=cx.createLinearGradient(0,0,0,512);
+  gr.addColorStop(0.00,'rgb(162,207,237)');   // 天顶
+  gr.addColorStop(0.44,'rgb(198,223,243)');   // 地平线上方
+  gr.addColorStop(0.52,'rgb(120,196,223)');   // 海平线
+  gr.addColorStop(0.68,'rgb(171,229,233)');   // 近岸浅水
+  gr.addColorStop(1.00,'rgb(60,110,140)');    // 天底（看不见，避免纯黑）
+  cx.fillStyle=gr; cx.fillRect(0,0,4,512);
+  const t=new THREE.CanvasTexture(cv); t.colorSpace=THREE.SRGBColorSpace;
+  const geo=new THREE.SphereGeometry(1500,24,16);
+  backdropTris=geo.index.count/3;
+  // toneMapped:false ⇒ 落在取到的那串数上（参照图本来就是游戏端 tonemap 之后的成品）
+  const dome=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({map:t,side:THREE.BackSide,
+                                                            toneMapped:false,fog:false}));
+  dome.name='__BACKDROP_手摆_非包内数据'; scene.add(dome);
+}
 window.__ERR=null; window.__DONE=false;
 fetch(Q.get('side')||'').then(r=>r.json()).then(j=>{window.__SIDE=j;}).catch(()=>{window.__SIDE=null;}); window.__RESULT=null; window.__VIEWS=[]; window.__cur=0;
 window.__RENDER=null;
@@ -239,6 +261,29 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
       scene.add(new THREE.AmbientLight(0xffffff, parseFloat(Q.get('amb'))));   // 旧的手工补光，仅对照
       ambInfo.mode='white'; ambInfo.used=1;
     }
+    // cloudw=1：把云层贴图的 RGB 换成纯白、只留 alpha 当云密度。
+    // 依据：`tex_Cloud_*` 在高 alpha 处 RGB=(218,2,136) 品红——那是自定义云着色器的
+    // **分通道数据**，不是颜色（树叶贴图同族：B 通道恒 255）。着色器读不到，
+    // "白色云 + alpha 密度"是按用户参照图（白天白云）做的**推断**，故只活在查看端，
+    // 不写进 GLB——产物必须保持"包里是什么就是什么"。
+    if(Q.get('cloudw')==='1'){
+      const re=/^mat_Layer_(Day|Night)_/i; let n=0;
+      g.scene.traverse(o=>{ if(!o.isMesh||!o.material) return;
+        const ms=Array.isArray(o.material)?o.material:[o.material];
+        for(const m of ms){ if(!re.test(m.name||'')||!m.map||!m.map.image) continue;
+          const im=m.map.image, cw=im.width|0, ch=im.height|0;
+          if(!cw||!ch) continue;
+          const c2=document.createElement('canvas'); c2.width=cw; c2.height=ch;
+          const x2=c2.getContext('2d'); x2.drawImage(im,0,0);
+          const d=x2.getImageData(0,0,cw,ch); const px=d.data;
+          for(let i=0;i<px.length;i+=4){ px[i]=255; px[i+1]=255; px[i+2]=255; }
+          x2.putImageData(d,0,0);
+          const t2=new THREE.CanvasTexture(c2);
+          t2.colorSpace=THREE.SRGBColorSpace; t2.wrapS=t2.wrapT=THREE.RepeatWrapping;
+          t2.repeat.copy(m.map.repeat); t2.offset.copy(m.map.offset);
+          m.map=t2; m.needsUpdate=true; n++; } });
+      window.__CLOUDW=n;
+    }
     let uv1geoms=0, pagemats=0;
     g.scene.traverse(o=>{ o.frustumCulled=false;
       if(o.isMesh&&o.geometry&&o.geometry.attributes.uv1) uv1geoms++;
@@ -282,6 +327,7 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
                     amb:ambInfo, ambSrgb:(Q.get('ambsrgb')==='1'),
                     renderOk:!!window.__RENDER, li:LI, ld:LD, decay:dcRaw,
                     hidden:hidden, hidekw:Q.get('hidekw')||'',
+                    backdropTris:backdropTris, sky:Q.get('sky')||'',
 
                     uv1Geoms:(window.__UV1||{}).geoms||0,
                     renderedTris:0, bloom:BLOOM,
@@ -289,6 +335,7 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
                     innerCount:inner.length, distinctNames:Object.keys(names).length};
     draw();
     window.__STATS.renderedTris=sceneTris;
+    window.__STATS.cloudwMats=window.__CLOUDW||0;
     const rc=new THREE.Raycaster();
     // 每个机位沿视线打 9 个采样点，回报"这个像素上到底是哪个对象/哪个材质"——
     // 窗那片黑用亮度测不出来源，只有把命中对象列出来才能区分"玻璃挡着"与"外面没东西"。
@@ -489,7 +536,9 @@ def grade_sweep(browser, base, rel_glb, rel_truth, rel_side, rel_render, views, 
         rows.append({"tag": tag, "preset": dict(p), "avg": avg, "dist": qd, "mean_dist": md,
                      "stats": {k: stt.get(k) for k in ("lmChannel", "amb", "lightsTouched",
                                                        "renderOk", "sideOk", "lmMats")},
-                     "counts": (stt.get("meshObjects"), stt.get("posTotal"), stt.get("renderedTris")),
+                     # 模型侧计数要扣掉查看端补摆的穹顶，否则"加了 sky"会被误判成改了模型
+                     "counts": (stt.get("meshObjects"), stt.get("posTotal"),
+                                (stt.get("renderedTris") or 0) - int(stt.get("backdropTris") or 0)),
                      "per_view": {v["name"]: round(v.get("mean", 0), 3) for v in st["views"]}})
     return rows
 
@@ -499,7 +548,7 @@ def preset_query(p, base, rel_side, rel_render, vq):
     if rel_render:
         q += "&render=%s" % (base + rel_render)
     for k in ("tone", "exp", "lmc", "lmi", "lmch", "ambm", "ambk", "ambsrgb", "li", "ld", "dc",
-              "bloom", "bloomr", "bloomt"):
+              "bloom", "bloomr", "bloomt", "sky", "cloudw"):
         if p.get(k) is not None:
             q += "&%s=%s" % (k, p[k])
     if p.get("nolight"):
@@ -770,9 +819,10 @@ def main():
         # 所以恒等式右边必须是「真值 + 这批网格的三角数」，而不是把阈值放宽。
         # 期望值从文件里自己推：哪张网格用了 transparent 材质，就数它的索引三角形。
         blend = int(st.get("blendTris") or 0)
-        say(st.get("renderedTris") == truth["tri_total"] + blend,
-            "J3 renderer 三角数 == 真值 + 半透明双面二次绘制（frustumCulled 全关，应当恒等）: "
-            "%s vs %d + %d" % (st.get("renderedTris"), truth["tri_total"], blend))
+        bd = int(st.get("backdropTris") or 0)
+        say(st.get("renderedTris") == truth["tri_total"] + blend + bd,
+            "J3 renderer 三角数 == 真值 + 半透明双面二次绘制 + 补摆穹顶（应当恒等）: "
+            "%s vs %d + %d + %d" % (st.get("renderedTris"), truth["tri_total"], blend, bd))
         box = st.get("boxReal")
         ok_box = True
         if not box:
@@ -947,6 +997,21 @@ def main():
                      "bloom": "0.6", "li": PI, "ld": PI, "dc": "0", "shot": "b60"},
                     {"tag": "泛光0.9+灯×π留衰减", "tone": "aces", "exp": "1", "ambm": "flat",
                      "bloom": "0.9", "li": PI, "ld": PI},
+                    # 补摆窗外背景：验证"缺的那块亮度本来就该由窗外来"这句话
+                    {"tag": "包内灯强+泛光0.6+补摆天海", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.6", "sky": "1"},
+                    {"tag": "包内灯强+泛光0.35+补摆天海", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.35", "sky": "1", "shot": "sky35"},
+                    {"tag": "包内灯强+泛光0.6+补摆天海+曝光1.2", "tone": "aces", "exp": "1.2",
+                     "ambm": "flat", "bloom": "0.6", "sky": "1", "shot": "sky60"},
+                    {"tag": "只补摆天海(无泛光)", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "sky": "1"},
+                    {"tag": "天海+白云(推断)", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.6", "sky": "1", "cloudw": "1", "shot": "cloudw"},
+                    {"tag": "天海+白云+曝光1.3", "tone": "aces", "exp": "1.3", "ambm": "flat",
+                     "bloom": "0.6", "sky": "1", "cloudw": "1", "shot": "cloudw2"},
+                    {"tag": "对照:天海但灯×π去衰减", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.6", "sky": "1", "li": PI, "ld": PI, "dc": "0"},
                 ]
                 if a.grade_tags:
                     want = [t.strip() for t in a.grade_tags.split(",") if t.strip()]
@@ -992,6 +1057,21 @@ def main():
                     say(b1["hi"] > b0["hi"] + 0.005 and b1["mean"] >= b0["mean"] - 0.005,
                         "C6 泛光敏感性：高光占比 %.1f%% → %.1f%%（必须升），mean %.3f → %.3f（不许降）"
                         % (100 * b0["hi"], 100 * b1["hi"], b0["mean"], b1["mean"]))
+                # C9：补摆的天海必须真的抬**饱和度与亮部面积**——这正是我们声称它负责的那两半。
+                if "环境光+泛光0.6" in by_tag and "包内灯强+泛光0.6+补摆天海" in by_tag:
+                    s0 = by_tag["环境光+泛光0.6"]["avg"]
+                    s1 = by_tag["包内灯强+泛光0.6+补摆天海"]["avg"]
+                    say(s1["sat"] > s0["sat"] + 0.01 and s1["hi6"] > s0["hi6"] + 0.02,
+                        "C9 补摆天海敏感性：sat %.3f → %.3f（参照 %.3f），亮部>0.6 %.1f%% → %.1f%%"
+                        "（参照 %.1f%%）" % (s0["sat"], s1["sat"], target["sat"],
+                                            100 * s0["hi6"], 100 * s1["hi6"], 100 * target["hi6"]))
+                # C10：云按"白色+alpha 密度"渲染必须真的改变画面（否则这条推断没作用在被测的量上）
+                if "包内灯强+泛光0.6+补摆天海" in by_tag and "天海+白云(推断)" in by_tag:
+                    w0 = by_tag["包内灯强+泛光0.6+补摆天海"]["avg"]
+                    w1 = by_tag["天海+白云(推断)"]["avg"]
+                    dv = max(abs(w1[k] - w0[k]) for k in keys)
+                    say(dv > 0.01,
+                        "C10 白云推断敏感性：与不替换相比最大分布差 %.4f（须 >0.01，否则这条推断是装饰）" % dv)
                 # C7：过曝闸。分位数距离仍可能被"整幅一起提亮"讨好一部分，
                 # 亮部面积超过参照 1.6 倍就直接判红——那是糊白，不是还原。
                 if rows:

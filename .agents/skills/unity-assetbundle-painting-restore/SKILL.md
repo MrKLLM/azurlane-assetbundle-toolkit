@@ -1,7 +1,7 @@
 ---
 name: unity-assetbundle-painting-restore 触发词（3D 侧）：跨包 PPtr、assets_file 带下划线、ObjectReader.assetsfile 为 None、.sharedAssets、resS 不是 SerializedFile、externals 下标 ±1、pptr.deref、CAB 索引现扫、unity default resources 内置外链、激活态过滤、m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
 description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、跨包解析、SerializedFile 多个、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.13.8
+version: 1.13.9
 ---
 
 # Unity AssetBundle 立绘数据驱动还原
@@ -377,12 +377,24 @@ MAD 分不开"该替换/不该替换"，两者数值重叠。这条写进了常�
 
 **Unity 材质 → glTF 的透明/双面，与 three.js 的采样通道（场景级；2026-10-09 一轮两条真错）**
 
-- **`alphaMode` 只有两个可用信号**：混合方程 `_SrcBlend==5 && _DstBlend==10`（SrcAlpha/OneMinusSrcAlpha）
-  与 `_BaseColor.a < 1`。⚠️ **`_Cutoff` 是 Shader 默认值陷阱**：实测 348 个材质里 289 个带着 0.5，
+- **`alphaMode` 有三个可用信号，缺一个就会把该透的画成实心**：① 混合方程
+  `_SrcBlend==5 && _DstBlend==10`（SrcAlpha/OneMinusSrcAlpha）；② `_BaseColor.a < 1`；
+  ③ **baseColor 贴图自带 alpha（不是恒 255）**。③ 专治云层/光束这类自定义 shader 材质——
+  它们既没有 ① 也没有 ②，透明信息只在贴图的 A 里（实测云纹理 alpha 均值 0.066）。
+  ⚠️ ③ 必须**按贴图记一张表**：只在"首次解码"分支里判，贴图被多材质复用走缓存时就漏
+  （实测漏了树叶与花）。⚠️ **`_Cutoff` 是 Shader 默认值陷阱**：348 个材质里 289 个带着 0.5，
   其中包含明显不透明的墙和木头 ⇒ 拿它当判据会把大半房间变成 alpha 测试。
-  漏掉透明这条的后果：窗玻璃（`a=0.196`）被画成实心黑，整片窗外看不见，而计数/几何/引用类判据**全绿**。
-  配套：回读断言加一条「baseColorFactor.a<1 却没标 alphaMode 必须为 0 个」；
-  受影响面用 `scripts/diag/unity_material_alpha_scan.py` 当场数，不要靠记忆。
+  漏信号 ①② 的后果：窗玻璃（`a=0.196`）画成实心黑，整片窗外看不见；
+  漏信号 ③ 的后果：窗外云层把近乎全黑的 RGB 糊在天空位置上，**补摆的背景一个像素都不露**。
+  配套两条回读不变式：「baseColorFactor.a<1 却没标 BLEND = 0」与
+  「baseColor 贴图自带 alpha 却是 OPAQUE = 0」；受影响面用
+  `scripts/diag/unity_material_alpha_scan.py` 当场数，**不要靠注释里那份清单**。
+- **贴图的 RGB 不一定是颜色**：自定义着色器常把数据塞进通道。实测云纹理在高 alpha 处
+  RGB=(218,2,136) 品红、白桦叶纹理 B 通道恒 241-255 只有 13 个不同值（且同一张贴图同时绑在
+  `_BaseMap`/`_LSABMap`/`_MainTex` 上）。按 albedo 直用就得到**红云与蓝树**。
+  着色器读不到时的正确姿势：把"云=纯白 + alpha 当密度"这类**推断放查看端**，
+  并配一条"开关前后分布必须不同"的对照（实测最大分布差 0.0387）；
+  **不要烧进 GLB**——产物必须保持"包里是什么就是什么"。
 - **three.js r152+ 按 `texture.channel` 选 UV**：手工赋 `material.lightMap` 时必须 `channel = 1`，
   否则它拿**漫反射 UV0** 采样，而"挂了多少材质 / 多少几何带 uv1"这类计数判据完全无感。
   ⇒ 判据要直接量那个可观测状态（`channel===1 && geometry.attributes.uv1`），错数必须为 0。
