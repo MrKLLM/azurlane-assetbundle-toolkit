@@ -29,6 +29,7 @@ import argparse
 import base64
 import http.server
 import json
+import math
 import os
 import socket
 import subprocess
@@ -141,7 +142,9 @@ function frameStats(){ // 与参照截图**同一套**裁剪(左右 8%、上 14%
   for(let i=0;i<d.length;i+=4*7){ const r=d[i],g=d[i+1],b=d[i+2]; tot++;
     const l=(0.2126*r+0.7152*g+0.0722*b)/255; L.push(l);
     sat+=(Math.max(r,g,b)-Math.min(r,g,b))/255;
-    // 天空/海面的判据（两侧同一把尺子，Python 侧 ref_stats 里逐字相同）
+    // 亮且偏蓝的像素占比。⚠️ 这**不是"窗面积"**：厨房参照图里它 14.5% 全是冷白瓷砖墙
+    // （本轮真实误判：据此说过"我们的机位没拍到窗"）。只当"冷亮面有多少"这个诊断量用，
+    // 不许挂判据。两侧同一把尺子（Python ref_stats 逐字相同规则）这点仍然要守。
     if(b/255>r/255+0.08 && b/255>0.55 && l>0.5) sky++; }
   L.sort((a,b)=>a-b); const n=L.length;
   const q=t=>L[Math.min(n-1,Math.floor(n*t))];
@@ -507,12 +510,63 @@ def zone_views(glb_path):
                 cands.append((dot, p, inside(p)))
         ok = [q for q in cands if q[2]] or cands
         dot, pos, _ = max(ok, key=lambda q: q[0])
-        # 朝不到窗外（簇本身背对窗、转过去就出墙）时把视角放宽到 80°，
-        # 让窗从侧面进画面——这是**近似的取景**，不是包里的相机参数（那台相机没有 FOV）。
+
+        def ang_between(p, a, b):
+            ax, az = a[0] - p[0], a[2] - p[2]
+            bx, bz = b[0] - p[0], b[2] - p[2]
+            na = max(1e-6, (ax * ax + az * az) ** 0.5)
+            nb = max(1e-6, (bx * bx + bz * bz) ** 0.5)
+            return math.degrees(math.acos(max(-1.0, min(1.0, (ax * bx + az * bz) / (na * nb)))))
+
+        # 站位不能只在"簇↔房间中心"这条线上挑：厨房那个簇几乎正好背对窗
+        # （实测夹角 149°），线上任何一点都救不了 ⇒ 在屋内网格上搜
+        # "窗方向与簇方向夹角够小、且离簇 1.6~4.5 m"的点。
+        grid = None
+        for gx in range(0, 41):
+            for gz in range(0, 41):
+                p = [box[0][0] + 0.4 + (box[1][0] - box[0][0] - 0.8) * gx / 40.0, 1.45,
+                     box[0][1] + 0.4 + (box[1][1] - box[0][1] - 0.8) * gz / 40.0]
+                dcl = ((c[0] - p[0]) ** 2 + (c[2] - p[2]) ** 2) ** 0.5
+                if not (1.6 <= dcl <= 4.5):
+                    continue
+                a = ang_between(p, c, oc)
+                if a > 72.0:
+                    continue
+                # 分数：夹角越小越好（窗与家具都能进画面），离簇适中
+                score = -a - abs(dcl - 2.6) * 4.0
+                if grid is None or score > grid[0]:
+                    grid = (score, p, a, dcl)
+        if grid:
+            pos = grid[1]
+            ang = grid[2]
+            src = "网格搜索"
+        else:
+            ang = ang_between(pos, c, oc)
+            src = "线位兜底"
+        # 视线取"簇方向"与"窗外方向"的角平分线，fov 张到能同时装下两者各留 20° 余量。
+        # ⚠️ 夹角太大时"劈开"等于把**簇转出画面**（本轮真实回退：厨房与窗相差 149°，
+        # 取角平分线后 shot_zone_kitchen 拍到的是壁炉墙与起居区）。
+        # 只有两个都装得下（ang ≤ fov_max − 2×20° = 52°）才允许劈，否则老实朝簇看。
+        vx, vz = c[0] - pos[0], c[2] - pos[2]
+        vL = max(1e-6, (vx * vx + vz * vz) ** 0.5)
+        ox, oz = oc[0] - pos[0], oc[2] - pos[2]
+        oL = max(1e-6, (ox * ox + oz * oz) ** 0.5)
+        if 20.0 < ang <= 52.0:
+            bx, bz = vx / vL + ox / oL, vz / vL + oz / oL
+            bL = max(1e-6, (bx * bx + bz * bz) ** 0.5)
+            look = [round(pos[0] + bx / bL * vL, 3), 1.0, round(pos[2] + bz / bL * vL, 3)]
+            fov = int(min(92.0, ang + 40.0))
+        else:
+            look = [round(c[0], 3), 0.8, round(c[2], 3)]
+            fov = 62 if ang <= 20.0 else 74
+        # 自证：算完机位再回头量"这簇还在不在画面里"。上一版把视线劈向角平分线，
+        # 厨房那簇就转到画面外去了（截图拍到壁炉墙）——这条当时就该拦住我。
+        ang_cluster = ang_between(pos, c, look)
         views.append({"name": zone, "n": len(pts), "dot_outside": round(dot, 3),
+                      "ang_to_outside": round(ang, 1), "how": src,
+                      "ang_cluster": round(ang_cluster, 1), "half_fov": round(fov / 2.0, 1),
                       "pos": [round(pos[0], 3), pos[1], round(pos[2], 3)],
-                      "look": [round(c[0], 3), 0.8, round(c[2], 3)],
-                      "fov": 62 if dot > 0.3 else 80})
+                      "look": look, "fov": fov})
     return views, {"_centre": [round(x, 2) for x in centre],
                    "_outside": [round(x, 2) for x in oc]}
 
@@ -535,6 +589,7 @@ def ref_stats(ref_dir):
         n = len(L)
         q = lambda t: L[min(n - 1, int(n * t))]
         sat = sum(max(p) - min(p) for p in px) / 255.0 / n
+        # skyf = "亮且偏蓝"占比：**不是窗面积**（厨房参照 14.5% 其实是冷白瓷砖），只作诊断量
         skyf = sum(1 for r, g, b in px
                    if b / 255.0 > r / 255.0 + 0.08 and b / 255.0 > 0.55
                    and (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0 > 0.5) / n
@@ -941,6 +996,8 @@ def main():
               "各机位落笔 %s；截图 shot_amb_*.png" % aink)
         zone_v, _zc = zone_views(glb)
         if a.zones and side:
+            # 取景自证：参照四张的 skyf 全 >0，所以"这个分区的机位拍不到窗"就等于
+            # 该分区的面积类统计量不可比——这条判据红了，亮度结论就不能引用这个分区。
             views = zone_v
             zn = [v["name"] for v in views]
             zq = ("&lm=1&side=%s&views=%s"
@@ -948,8 +1005,14 @@ def main():
             zc = run_case(browser, base, rel_glb, rel_truth, "zone", {"names": zn}, extra=zq)
             print("  ℹ 分区域机位（相机放在房间中央朝各簇看，眼高 1.45；锚点来自场景命名物体）:")
             for v in views:
-                print("     %s: %d 个锚点，朝外点积 %-6s fov=%-3s 相机 %s 看 %s"
-                      % (v["name"], v["n"], v.get("dot_outside"), v["fov"], v["pos"], v["look"]))
+                print("     %s: %d 个锚点，朝外点积 %-6s 夹角 %-5s fov=%-3s 相机 %s 看 %s"
+                      % (v["name"], v["n"], v.get("dot_outside"), v.get("ang_to_outside"),
+                         v["fov"], v["pos"], v["look"]))
+                print("        框内自证（簇方向与视线夹角 / 半视场）: %s"
+                      % {v["name"]: "%s°/%s°" % (v["ang_cluster"], v["half_fov"]) for v in views})
+            bad = [v["name"] for v in views if v["ang_cluster"] > v["half_fov"]]
+            say(not bad, "F1 每个分区机位都必须把该簇框在视野内（夹角 ≤ 半视场）: 越界 %s"
+                % (bad or "无"))
             print("     各机位落笔 %s；截图 shot_zone_*.png"
                   % {v["name"]: (round(v["ink"], 3) if v["ink"] is not None else None)
                      for v in (zc or {}).get("views", [])})
@@ -982,7 +1045,7 @@ def main():
                 print("  参照图（游戏内截图，裁掉 UI）%d 张：" % len(refs))
                 for r in refs:
                     print("     %s mean=%.3f med=%.3f p95=%.3f 高光>0.75=%.1f%% 亮部>0.6=%.1f%% "
-                          "其余均值=%.3f 暗部=%.1f%% 饱和=%.3f 天空=%.1f%%"
+                          "其余均值=%.3f 暗部=%.1f%% 饱和=%.3f 冷亮=%.1f%%"
                           % (r["file"], r["mean"], r["med"], r["p95"], 100 * r["hi"], 100 * r["hi6"],
                              r["base6"], 100 * r["lo"], r["sat"], 100 * r["skyf"]))
                 print("     目标(取中位) " + " ".join("%s=%.3f" % (k, target[k]) for k in keys))
@@ -1072,7 +1135,7 @@ def main():
                 for r in sorted(rows, key=lambda x: x["dist"]):
                     a2 = r["avg"]
                     print("     %-24s 分位+饱和 %.3f (均值距离 %.3f) | mean %.3f med %.3f p05 %.3f "
-                          "p95 %.3f 亮部>0.6 %.1f%% 其余 %.3f 暗部 %.1f%% sat %.3f 天空 %.1f%%"
+                          "p95 %.3f 亮部>0.6 %.1f%% 其余 %.3f 暗部 %.1f%% sat %.3f 冷亮 %.1f%%"
                           % (r["tag"], r["dist"], r.get("mean_dist", 0), a2["mean"], a2["med"],
                              a2["p05"], a2["p95"], 100 * a2["hi6"], a2["base6"], 100 * a2["lo"],
                              a2["sat"], 100 * a2["skyf"]))
