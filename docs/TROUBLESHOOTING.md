@@ -7411,7 +7411,60 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
 - **下一步（未做）**：把「全部参数逐帧」那条臂接通（本轮写坏了：`--allparams` 的管道没接上，
   它报的 0 是"没采到"不是"没跳变"，已从探针里摘掉并留 TODO），
   目标就是点名出「在切动作那一刻走出 1→0.52→0 的那个参数」，再顺它反查 moc3 的
-  ArtMeshOpacity 绑定 —— 那才是"闪一下"的最后一环。
+  ArtMeshOpacity 绑定 —— 那才是"闪一下"的最后一环。**已接通，结论见下面追加-III。**
+
+**§123 追加-III（第八轮：最后一环打通——台阶全部可归因到「moc3 绑定 × clip 合法值」，运行时造假值的假设判死）**
+
+探针 `scripts/diag/l2d_part_flicker_probe.py` 已改成**四臂**并按 `--clips home --step 60 --hold 6` 跑出结论。
+
+- **原始假设判死**：「台阶是运行时在切动作那一刻造出来的假值」——**不成立**。所有台阶都能用
+  「moc3 的 ArtMeshOpacity 绑定映射 × clip / 环境层的合法值」逐帧解释，没有一个读数落在数据之外。
+- **点名的参数 = `Param25`**（量程 [0,1]，default 0）。因果扫描给出的映射是
+  **v=0 → 不透明度 1.00，v≥0.1 → 0.00**（硬隐藏阈，不是线性淡出），受它控制的就是
+  `ArtMesh36/42/43/44/51`。而 `idle` 里 Param25 恒 0、**`home` 的曲线起点就是 0.5**
+  （28 个键：0.5→0.6→0→0.4→0.5→0.6→0，即 home 全程按作者意图开合三次）
+  ⇒「切到 home 那 5 片就没了」是 **clip 之间的内容差**，与 §6.36 里花瓣那条一样属于"本来就该看不见"。
+- **真正可修的是中间那一档 0.49/0.52，而且混合值是错的**：写入者日志显示同一个下标每帧被写**两笔**
+  （都来自 `et.doUpdateParameters@pixi-live2d-display-cubism4.min.js`，淡出条目 + 淡入条目各一笔），
+  **weight 恒为 1、后写覆盖先写**；而淡出条目交出的并不是它自己 clip 的值——`idle` 的 Param25 恒 0，
+  那一帧却收到 0.0165 ⇒ 框架传进 setter 的**已经是混过的结果**。所以这一档既不属于 idle 也不属于 home，
+  对用户就是"部件闪一下"。⚠️ **`weight` 字段不能用来判"是不是交叉淡化"**，只有存值序列能当证据。
+- **另一族「闪」跟切换无关**：`case10..18` 与 `ArtMesh338/377/378/TouchIdle15/0/1` 由**乘性带门**控制——
+  `MB_wutixialuoxunhuangz2`（量程 [0,3]）在 v≈1.5 把 case15 关到 0、v 在 0.3 附近让 ArtMesh338 显形；
+  `Param27` 同理（0.3→1.00、0.4→0.00）。`MB_*` 这条只有 `effect` 驱动（0→21 长坡，补丁 ⑤ 按 ModF
+  回绕成 0→3 锯齿）⇒ **周期性开合，与切动作无关，游戏用同一份数据也有这个开合**。
+- ⚠️ **撤回上一轮的一条推论**：「对照组（不切动作）= 0 次 ⇒ 闪没绑的是『切换动作』这个事件」**不成立**。
+  对照组的带门开合是周期性的，落在窗口相位外就 0 次、落进来就 1 次（本轮同一条 `__none__` 跑出过 0 与 1）。
+  要判"绑事件"，对照组必须覆盖 ≥1 个完整周期，否则它没有否证力。
+- **三条结构性排除（比测量更硬，别再重跑）**：
+  ① `gezi_2.model3.json` 的 `FileReferences` **没有 `Pose`** ⇒ `CubismPose`（那段 `i==e?1:0` 的 `reset()`）
+     在本皮肤根本不会被实例化——追加-II 里"尚未判死"的部件组假设**结构性判死**。
+  ② cubism4 包里**没有任何 `setDrawableOpacity`**，`drawables.opacities` 只由 wasm core 的 `update()` 写，
+     而它的输入只有「参数值 + part 透明度」⇒ part 恒定时台阶**必然**出自参数绑定；"全参数逐帧"这条臂
+     是唯一出口，不是碰运气。
+  ③ `parts.opacities` / `drawables.opacities` 都是 `_csmGetPartOpacities` / `_csmGetDrawableOpacities`
+     建的**实时 wasm 堆视图**，framework 的 `_partOpacities` 就是它 ⇒ 追加-II 那句"195 个 part 全程恒定"
+     不是读了一份冻结副本，那条否证站得住。
+- **仪器侧两条必须记住的坑**：
+  ① 「与台阶同帧变化的参数」是**废判据**——一直在动的物理/呼吸/环境层参数全命中（实测 246/532）。
+     要收紧成**孤立跳变**形状：`|Δ| ≥ 4× 本参数窗口内 |Δ| 中位数`，且前后一帧基本静止（≤0.35 倍）。
+  ② 驱动扫描**只测 min/中/max 三点会漏**：带门是量程中段的事。3 点那一轮只答出 `l2d_hx` 一个，
+     10 点才把 `Param25/Param27` 的硬阈和 `MB_wutixialuoxunhuangz2` 的带门一起扫出来
+     （532 参数 × 11 点 = 5,852 次 `core.update()`，约 30s，可接受）。
+- **判据（点名一个参数要四件同时成立，缺一不许说"锁定了"）**：
+  drawable 台阶所在帧 = 该参数的孤立跳变帧 / 扫描映射里该参数确实能产生这个透明度值 /
+  setter 日志里那一刻有人写它 / clip 数据侧的曲线值能解释台阶的**终值**。本轮 Param25 四条齐。
+- ⏳ **下一轮唯一线索（本轮只取证到"它存在"，未定方案）**：源包 AnimatorController 实测 gezi_2
+  **所有状态 `m_WriteDefaultValues=True`**（`l2d_effect_layer_scan.py --keys gezi_2 --speeds`）
+  ⇒ 游戏侧「clip 没有曲线的参数」一进状态就被钉回 moc3 默认值，而我们的 runtime 是**参数持久制**
+  + 手写 `restTick`（只在回落 idle 时作用）。`home` 只有 502 条参数曲线而 `idle` 有 531 条 ⇒ 差集非空，
+  两边**必然**在某些参数上不一致 ⇒ 这是目前唯一还能造出"运行时假台阶"的通道，本轮没算完这条差集。
+  另：`层0 m_DefaultWeight=0.0`（层权重由运行时 Lua 置），这条只说明"序列化层权重不是权威"，别据此判红。
+
+**涉及文件（追加-III）**：`scripts/diag/l2d_part_flicker_probe.py`（四臂：逐 update 采样 + 全参数台阶形状 +
+写入者栈归因 + 多点因果驱动扫描）、`.diag/l2d_flicker_gezi_2_rest.json`、
+`.diag/flicker_run{2,3,4}.log`、`.diag/clip_driver_curves.txt`（驱动参数的逐 clip 曲线摘要）、
+`.diag/param25_home_keys.txt`（Param25 在 7 条 clip 里的全部键）、`.diag/gezi_controller.txt`（层/状态/writeDefault）。
 
 
 
