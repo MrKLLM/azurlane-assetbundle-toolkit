@@ -136,12 +136,63 @@ def scan_model(key):
     return rec
 
 
+def dump_transitions(ac, names):
+    """逐状态打印出边过渡：时长/是否固定时长/exit time/目标 clip。
+
+    用途：判"游戏从 A 状态切到 B 状态用了多久"。这条时长决定我们该不该把交叉淡化缩短到
+    同一个量级 —— 特别是当两个状态之间存在"两组互斥美术同时为暗"的参数死区时，
+    淡化越长，用户看到的"部件消失"越久。
+    字段名在不同 Unity 版本里有出入，故对每个候选键都试一遍，取不到就打印实际键名（别静默跳过）。
+    """
+    cc = ac.m_Controller
+    machines = deref_list(getattr(cc, "m_StateMachineArray", None))
+    for li, lref in enumerate(deref_list(cc.m_LayerArray)):
+        smi = getattr(lref, "m_StateMachineIndex", None)
+        if smi is None or not (0 <= smi < len(machines)):
+            continue
+        sm = machines[smi]
+        states = deref_list(getattr(sm, "m_StateConstantArray", None))
+
+        def clip_of(st):
+            cid = state_clip_name(st)
+            return names[cid] if (cid is not None and 0 <= cid < len(names)) else None
+
+        sname = {i: clip_of(s) for i, s in enumerate(states)}
+        print("  层%d 状态数 %d" % (li, len(states)))
+        for si, st in enumerate(states):
+            trs = deref_list(getattr(st, "m_TransitionConstantArray", None))
+            for tr in (trs or []):
+                dd = tr.__dict__ if hasattr(tr, "__dict__") else {}
+                g = lambda *ks: next((deref(getattr(tr, k)) for k in ks if hasattr(tr, k) and getattr(tr, k) is not None), None)
+                dst = g("m_DestinationState", "m_DstState")
+                print("     %-18s → %-18s dur=%s fixed=%s exitTime=%s hasExit=%s name=%s"
+                      % (sname.get(si), sname.get(dst if isinstance(dst, int) else -1) if dst is not None else dst,
+                         g("m_TransitionDuration", "m_Duration"),
+                         g("m_FixedDuration", "m_FixedDurationEnabled"),
+                         g("m_ExitTime"), g("m_HasExitTime"), g("m_Name")))
+            if not trs:
+                print("     %-18s （无出边过渡）" % sname.get(si))
+        anyst = deref_list(getattr(sm, "m_AnyStateConstantArray", None))
+        for ai, a in enumerate(anyst or []):
+            trs = deref_list(getattr(a, "m_TransitionConstantArray", None))
+            for tr in (trs or []):
+                dst = getattr(tr, "m_DestinationState", None)
+                print("     AnyState#%d → %-18s dur=%s fixed=%s exitTime=%s"
+                      % (ai, sname.get(deref(dst) if dst is not None else -1),
+                         getattr(tr, "m_TransitionDuration", None),
+                         getattr(tr, "m_FixedDuration", None), getattr(tr, "m_ExitTime", None)))
+        if anyst:
+            print("     （AnyState 条目 %d 个）" % len(anyst))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keys", default="", help="逗号分隔的模型号，默认扫全部有 effect.motion3.json 的")
     ap.add_argument("--out", default="")
     ap.add_argument("--speeds", action="store_true",
                     help="逐层打印每个状态的 clip 名 / m_Speed / Loop（查「我们比游戏快」是不是倍速）")
+    ap.add_argument("--transitions", action="store_true",
+                    help="逐状态打印出边过渡（时长/固定时长/exitTime/AnyState）——定「游戏切动作用了多久」")
     args = ap.parse_args()
 
     if args.keys:
@@ -170,6 +221,23 @@ def main():
                     print('      %s %-16s speed=%-5s loop=%-5s writeDefault=%-5s speedParam=%s mirrorParam=%s'
                           % ("*" if st["default"] else " ", st["clip"], st["speed"], st["loop"],
                              st["write_default"], st["speed_param_active"], st["mirror_param_active"]))
+    if args.transitions:
+        for k in keys:
+            bp = os.path.join(BUNDLES, k)
+            if not os.path.exists(bp):
+                print("== %s 源包不在盘上" % k)
+                continue
+            try:
+                env = UnityPy.load(bp)
+                ac = next((o.read() for o in env.objects if o.type.name == "AnimatorController"), None)
+            except Exception as e:
+                print("== %s 读取失败 %r" % (k, e))
+                continue
+            if ac is None:
+                print("== %s 没有 AnimatorController" % k)
+                continue
+            print("\n== %s 过渡表（游戏切动作耗时在这里）==" % k)
+            dump_transitions(ac, clip_names(ac))
     import collections
     c = collections.Counter(r["verdict"] for r in out)
     print("\n== 判定分布 ==")

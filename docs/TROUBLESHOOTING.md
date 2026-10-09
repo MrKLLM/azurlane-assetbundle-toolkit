@@ -7599,8 +7599,32 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
   transition（`m_TransitionDuration` / `m_FixedDuration` / AnyState）里可直接读，本地 UnityPy、不需网络。
   读出来才知道是"照游戏时长缩短淡化"还是"对这类互斥开关参数直接取新值不混合"。
 
+**§123 追加-X（同日续：根因收口——游戏侧是瞬时切换，源包状态机零条出边过渡）**
+
+`l2d_effect_layer_scan.py --keys gezi_2 --transitions`（新增该模式）读出：**层 0 有 462 个状态，
+每个状态的 `m_TransitionConstantArray` 都是空的**（AnyState 也无出边）。
+⇒ 游戏切动作是运行时 `Animator.Play()` **瞬时切换、不做交叉淡化** ⇒ `Param25` 一帧从 0 跳到 0.5，
+**根本不经过追加-IX 那段"两组手都灭"的死区** ⇒ 游戏永远看不到"手没了一瞬"。
+而我们走库的淡入（`idle` 的 `FadeInTime=2.0` / `FadeOutTime=0.5`），值被平滑插值 ⇒ **必穿死区**
+⇒ 这就是"切动作瞬间两只手一起没"的完整根因链：
+
+> 源数据里 `Param25` 是**两套互斥手部美术的开关**（0=A 组、≥0.2=B 组，中间约 0.1 宽两组全灭）
+> + 游戏**瞬时切换**所以从不落在中间 + 我们**2 秒交叉淡化**所以必经过中间
+> ⇒ 观感 = 切动作时手消失一下，稳定下来又有了。
+
+⚠️ 修法要带历史包袱一起权衡：§6.35 那轮**特意**把库 `_startMotion` 里的 `stopAllMotions()` 去掉、
+恢复交叉淡化，是为了治"交接塌帧/姿态硬跳"。所以"全部改回瞬时"会把它治好的东西再弄坏。三条候选：
+
+| 方案 | 做法 | 代价 |
+|---|---|---|
+| (b) 只 snap 开关类参数 | 交叉淡化照旧，但对"两个 clip 的值跨越全灭区间"的参数按新值 step 写入不 lerp | 要自动判定哪些参数算开关（可复用 `markPhase` 那套在 `createMotion` 里解析曲线 + 追加-IX 的响应扫描）；改动最贴近根因 |
+| (c) 缩短淡化时长 | 全局淡入降到 ~0.1s，死区只存在一帧 | 最省事；但 §6.35 的"塌帧"可能部分回来，且与游戏的"瞬时"仍不同源 |
+| (a) 完全瞬时切换 | 照源包语义 `Play()` | 与游戏最像，但已知会重新引入姿态硬跳，**不推荐** |
+
 **涉及文件（追加-IX）**：`scripts/diag/l2d_part_flicker_probe.py`（④ 加 `--drvclip/--drvwait` 与"挡路者"探测二）、
 `.diag/gate_scan.log`、`.diag/l2d_flicker_gezi_2_rest.json`（含 `drivers.blockers`）。
+
+**涉及文件（追加-X）**：`scripts/diag/l2d_effect_layer_scan.py`（新增 `--transitions` 模式：逐状态打出边过渡）。
 
 **涉及文件（追加-VIII）**：`.diag/game_ref/body_01.png`、`.diag/game_ref/body_02.png`（游戏 91 帧上半身全量表）。
 
