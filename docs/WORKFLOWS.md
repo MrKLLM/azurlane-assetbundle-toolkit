@@ -3228,7 +3228,7 @@ WF-15（承重白名单：标注正本属于"丢了不可复原"那一类）、W
 
 5. **如果"某个部件在任何动作里都不动"，先查它是不是属于**另一条常驻 clip**（源包 AnimatorController
    的独立层），而不是继续在这条 clip 的曲线里找**。查法：`l2d_effect_layer_scan.py --keys <key> --speeds`
-   逐层打印 `weight / blend / 默认状态 clip / m_Speed / Loop`（本轮实测安土所有状态 `m_Speed=1.0`
+   逐层打印 `weight / blend / 默认状态 clip / m_Speed / Loop`（本轮实测 gezi_2（葛兹）所有状态 `m_Speed=1.0`
    ⇒ "我们比游戏快"不是倍速问题，这条排除项要留着别重猜）。落地成前端的**环境层**时三条硬约束：
    - **默认让位**：环境层只写「自己非常值、且任何 pose clip 都不动」的参数（`poseDriven` 之外）。
      上一版默认"照源包语义盖住 pose 层"，运动量是更接近游戏（47.7‰ vs 35.6‰，游戏 125.8‰），
