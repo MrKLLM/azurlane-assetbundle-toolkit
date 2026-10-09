@@ -45,6 +45,7 @@ def main():
     ap.add_argument("--fps", type=int, default=6)
     ap.add_argument("--secs", type=int, default=10)
     ap.add_argument("--out", default="")
+    ap.add_argument("--clip", default="", help="抓之前用 FORCE 播这条 clip（如 home）；不给就按页面自己播的抓")
     ap.add_argument("--amb", choices=["yield", "mask", "off"], default="yield",
                     help="环境层三臂（A/B 对照用）：yield=只写 pose 不碰的参数（前端默认）；"
                          "mask=照源包整层盖住 pose；off=完全关掉环境层")
@@ -119,12 +120,16 @@ def main():
       const m0=app.stage.children[0]; if(!m0) return JSON.stringify({fail:'无模型'});
       window.__m=m0; window.__app=app;
       window.__ambOff=%s; window.__ambMask=%s;
+      if(CLIPV){ try{ m0.internalModel.motionManager.startMotion(CLIPV,0,PIXI.live2d.MotionPriority.FORCE);
+                    window.__clipStarted=true; }catch(e){ window.__clipErr=String(e); } }
       const cv=document.querySelector('#l2wrap canvas');
       const r=cv.getBoundingClientRect();
       window.__box=[Math.round(r.left),Math.round(r.top),Math.round(r.width),Math.round(r.height)];
       return JSON.stringify({ok:true, box:window.__box, pool:window.__poolDbg||null,
+                             clip:CLIPV, clipStarted:!!window.__clipStarted, clipErr:window.__clipErr||null,
                              groups:Object.keys(m0.internalModel.motionManager.definitions||{}).length});
     })()""" % (json.dumps(a.model), json.dumps(a.amb == "off"), json.dumps(a.amb == "mask"))
+    js = js.replace("CLIPV", json.dumps(a.clip or ""))
     info = json.loads(ev(js) or "{}")
     print("装载:", {k: v for k, v in info.items() if k != "box"})
     pw = (info.get("pool") or {}).get("poolW") or []

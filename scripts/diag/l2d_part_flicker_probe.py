@@ -34,8 +34,10 @@
 输出: 终端报告 + .diag/l2d_flicker_<model>_{rest,norest}.json
 """
 import argparse
+import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -199,7 +201,11 @@ JS_PLAY = r"""(async (clip, holdSec, stepMs, maxRows) => {
                            window.__app.render(); await t(stepMs); }
   const cap=window.__cap; window.__cap=null; window.__traceGroups=cap.groups;
   const n=M.parts.count, nd=M.drawables.count, np=P.count;
-  const scan=(mat, ids, kind)=>{
+  const geo=[]; { const DP=M.drawables;
+    for(let i=0;i<nd;i++){ const p=DP.vertexPositions[i]; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+      for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
+      geo.push([+x0.toFixed(2),+y0.toFixed(2),+x1.toFixed(2),+y1.toFixed(2),+((x1-x0)*(y1-y0)).toFixed(4)]); } }
+  const scan=(mat, ids, kind, g)=>{
     const out=[]; let varying=0;
     if(!mat.length) return {dips:out, varying:0};
     for(let i=0;i<mat[0].length;i++){
@@ -218,11 +224,13 @@ JS_PLAY = r"""(async (clip, holdSec, stepMs, maxRows) => {
       }
       const hit=hard||soft;
       if(hit) out.push([kind, (ids&&ids[i]!==undefined)?ids[i]:('#'+i),
-                        hard?'hard':'soft', hit.v, hit.before, cap.ts[hit.k], +(hi-lo).toFixed(3), hit.k]);
+                        hard?'hard':'soft', hit.v, hit.before, cap.ts[hit.k], +(hi-lo).toFixed(3), hit.k,
+                        g?g[i]:null]);
     }
     return {dips:out, varying};
   };
-  const A=scan(cap.partrows, window.__partIds, 'part'), B=scan(cap.drows, window.__drawableIds, 'drawable');
+  const A=scan(cap.partrows, window.__partIds, 'part', null),
+        B=scan(cap.drows, window.__drawableIds, 'drawable', geo);
   const dips=A.dips.concat(B.dips).sort((x,y)=>x[5]-y[5]);
   const DF=new Set(); dips.forEach(d=>{ DF.add(d[7]); DF.add(d[7]-1); });
   // —— ② 全部参数逐帧：谁在台阶那些帧上变了
@@ -373,6 +381,45 @@ JS_MAPALL = r"""(async (nstep) => {
 })"""
 
 
+# ---------------------------------------------------------------- ⑥ 单参数 A/B 截图（只为"这块参数管的是画面上什么"）
+JS_SHOT = r"""(async (name, v) => {
+  const core=window.__m.internalModel.coreModel, mm=window.__m.internalModel.motionManager;
+  const M=core._model, P=M.parameters;
+  window.__cap=null; window.__wset=null; window.__ambOff=true;
+  try{ mm.stopAllMotions(); }catch(e){}
+  // 必须冻住 ticker：两张截图之间若继续跑物理/头发，姿态会漂几像素，
+  // 差图就会全身轮廓亮 —— 那是漂移，不是显隐变化（本轮真实踩过）。
+  try{ window.__app.ticker.stop(); }catch(e){}
+  const i=P.ids.indexOf(name);
+  if(i<0) return JSON.stringify({fail:'参数不在 moc3 里', name});
+  if(window.__shotBase===undefined){ window.__shotBase=[]; for(let k=0;k<P.count;k++) window.__shotBase.push(P.values[k]); }
+  for(let k=0;k<P.count;k++) P.values[k]=window.__shotBase[k];   // 每拍一张都从同一基准出发
+  P.values[i]=v; core.update(); window.__app.render();
+  return JSON.stringify({ok:true, name, v, idx:i, range:[P.minimumValues[i], P.maximumValues[i]],
+                         tickerStopped:window.__app.ticker.started===false||true});
+})"""
+
+
+# ---------------------------------------------------------------- ⑦ 几何导出：把 ArtMesh 编号对应回画面位置
+# 换算必须复用产品那套（gallery_src/index.html 的 P2V：Vx=Px-cux/2, Vy=cuy/2-Py），
+# 不要在探针里另立一套坐标映射 —— 历史上"点胸口触发头部"就是两套空间混用造成的。
+JS_GEO = r"""(async (dummy) => {
+  const m=window.__m, im=m.internalModel, core=im.coreModel, M=core._model;
+  const ppu=im.pixelsPerUnit||1, cux=im.width/ppu, cuy=im.height/ppu;
+  const cv=document.querySelector('canvas'); const r=cv.getBoundingClientRect();
+  const D=M.drawables, rows=[];
+  for(let i=0;i<D.count;i++){
+    const p=D.vertexPositions[i]; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k]; if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
+    rows.push([window.__drawableIds[i], +x0.toFixed(4), +y0.toFixed(4), +x1.toFixed(4), +y1.toFixed(4),
+               +((x1-x0)*(y1-y0)).toFixed(6), +D.opacities[i].toFixed(3), D.renderOrders[i]]);
+  }
+  return JSON.stringify({cux:+cux.toFixed(4), cuy:+cuy.toFixed(4),
+                         rect:{left:r.left, top:r.top, w:r.width, h:r.height},
+                         scale:+m.scale.x.toFixed(6), pos:[m.x,m.y], rows});
+})"""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("model")
@@ -387,6 +434,8 @@ def main():
     ap.add_argument("--drivers", default="", help="④ 驱动扫描的目标 drawable 名（逗号分隔），空 = 跳过")
     ap.add_argument("--nsweep", type=int, default=10, help="④/⑤ 每个参数在量程内扫多少个点（必须 >2，见头注释）")
     ap.add_argument("--mapall", action="store_true", help="⑤ 全量「参数→哪些 mesh 显隐」绑定表（落 .diag/l2d_opacity_map_<model>.json）")
+    ap.add_argument("--shot", default="", help="⑥ 单参数 A/B 截图，形如 Param25:0,0.5（只为认出画面上是哪一块）")
+    ap.add_argument("--dumpgeo", action="store_true", help="⑦ 导出全部 mesh 的屏幕包围盒/面积/透明度，供离线反查「这个像素是哪几片」")
     a = ap.parse_args()
     norest = os.environ.get("NOREST") == "1"
     tag = "norest" if norest else "rest"
@@ -503,8 +552,9 @@ def main():
         ds = r.get("dips") or []
         print("   ① 闪一下的部件 %d 个" % len(ds))
         for d in ds[:14]:
-            print("     [%s] %-26s %-4s 掉到 %.2f（前 %.2f）@第%s帧 t=%.2fs 幅度 %.3f"
-                  % (d[0], str(d[1])[:26], d[2], d[3], d[4], d[7] if len(d) > 7 else "?", d[5], d[6]))
+            loc = ("  位置(%.2f,%.2f)-(%.2f,%.2f) 面积%.3f" % tuple(d[8])) if len(d) > 8 and d[8] else ""
+            print("     [%s] %-26s %-4s 掉到 %.2f（前 %.2f）@第%s帧 t=%.2fs 幅度 %.3f%s"
+                  % (d[0], str(d[1])[:26], d[2], d[3], d[4], d[7] if len(d) > 7 else "?", d[5], d[6], loc))
         if len(ds) > 14:
             print("     …另 %d 个见 JSON" % (len(ds) - 14))
         cs = r.get("cand") or []
@@ -606,6 +656,66 @@ def main():
                       % (str(x[1])[:24], x[2], x[3], x[4], x[6]))
         else:
             print("\n== ⑤ 绑定表未出结果: %s" % str(mp)[:250])
+
+    # —— ⑥ 单参数 A/B 截图：只回答「这个参数管的是画面上哪一块」，不当验收判据
+    sm = re.match(r"^([\w\-]+):(.+)$", a.shot or "")
+    if sm:
+        pname, vals = sm.group(1), [float(x) for x in sm.group(2).split(",") if x.strip() != ""]
+        odir = os.path.join(ROOT, ".diag", "l2d_param_shot_%s" % a.model)
+        os.makedirs(odir, exist_ok=True)
+        shots = []
+        for v in vals:
+            r6 = ev(JS_SHOT + "(%s, %s)" % (json.dumps(pname), json.dumps(v)))
+            print("\n⑥ 置 %s=%s → %s" % (pname, v, str(r6)[:160]))
+            png = cmd("Page.captureScreenshot", {"format": "png"})
+            fp6 = os.path.join(odir, "%s_%g.png" % (pname, v))
+            with open(fp6, "wb") as fh:
+                fh.write(base64.b64decode(png["data"]))
+            shots.append((v, fp6))
+        if len(shots) >= 2:
+            try:
+                from PIL import Image, ImageChops
+                a1 = Image.open(shots[0][1]).convert("RGB")
+                a2 = Image.open(shots[-1][1]).convert("RGB")
+                if a1.size != a2.size:
+                    a2 = a2.resize(a1.size)
+                w = 620
+                h1 = int(a1.size[1] * w / a1.size[0])
+                ab = Image.new("RGB", (w * 2 + 12, h1), (255, 255, 255))
+                ab.paste(a1.resize((w, h1)), (0, 0))
+                ab.paste(a2.resize((w, h1)), (w + 12, 0))
+                fpa = os.path.join(odir, "%s_ab.png" % pname)
+                ab.save(fpa)
+                print("   并排对照（左 %s / 右 %s）→ %s" % (shots[0][0], shots[-1][0], fpa))
+                d = ImageChops.difference(a1, a2).convert("L")
+                mask = d.point(lambda x: 255 if x > 18 else 0)
+                box = mask.getbbox()
+                npx = sum(1 for x in mask.getdata() if x)
+                over = a2.convert("RGB").copy()
+                over.putdata([(255, 0, 0) if m else p for p, m in zip(over.getdata(), mask.getdata())])
+                fpd = os.path.join(odir, "%s_diff.png" % pname)
+                over.save(fpd)
+                print("   两档差 %s 像素（占画面 %.2f%%）包围盒 %s → %s"
+                      % (npx, 100.0 * npx / (a1.size[0] * a1.size[1]), box, fpd))
+            except Exception as e:
+                print("   差图生成失败: %r" % (e,))
+
+    # —— ⑦ 几何导出：把 ArtMesh 编号对应回画面位置
+    if a.dumpgeo:
+        r7 = ev(JS_GEO + "(0)")
+        try:
+            g7 = json.loads(r7) if isinstance(r7, str) and r7.strip().startswith("{") else {"err": str(r7)[:200]}
+        except Exception:
+            g7 = {"err": str(r7)[:200]}
+        if "rows" in g7:
+            fp7 = os.path.join(ROOT, ".diag", "l2d_geo_%s.json" % a.model)
+            with open(fp7, "w", encoding="utf-8") as fh:
+                json.dump(g7, fh, ensure_ascii=False)
+            print("\n⑦ 几何导出 %d 个 mesh（画布 %.2fx%.2f 单位；canvas 左上 (%.0f,%.0f) %.0fx%.0f px）→ %s"
+                  % (len(g7["rows"]), g7["cux"], g7["cuy"], g7["rect"]["left"], g7["rect"]["top"],
+                     g7["rect"]["w"], g7["rect"]["h"], fp7))
+        else:
+            print("\n⑦ 几何导出失败: %s" % str(g7)[:200])
 
     fp = os.path.join(ROOT, ".diag", "l2d_flicker_%s_%s.json" % (a.model, tag))
     with open(fp, "w", encoding="utf-8") as fh:
