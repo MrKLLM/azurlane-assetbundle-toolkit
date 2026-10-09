@@ -7468,6 +7468,39 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
 
 
 
+**§123 追加-IV（同日续：全量「参数→mesh 显隐」绑定表查出的真实分叉 = writeDefault 语义缺失）**
+
+用新臂 ⑤（`l2d_part_flicker_probe.py --mapall`，532 参数 × 量程内 11 点 × 读全部 770 个 drawable，
+5,852 次 `core.update()`，约 1 分钟）出台账 `.diag/l2d_opacity_map_gezi_2.json`，
+再用新工具 `scripts/diag/l2d_opacity_map_query.py` 离线复算，三件事一次答清：
+
+- **花瓣线没有被重开（三条互不相交的 ID 段 + 互不相交的参数族）**：`Paramfh` 只管 14 块
+  （`ArtMesh765/768/773` 那一族）；`MB_wutixialuoxunhuangz(/2)` 各管 76 块（`ArtMesh318…336` 段）；
+  追加-III 那 5 片（`ArtMesh36/42/43/44/51`）的开关是 `Param17/20/21/25/39/139/188` 七选一，
+  其中**只有 `Param25` 是硬阈（v≥0.1 → 0.00）**，其余 6 个都是 `1-v` 线性淡出 ⇒ 与已验收的花瓣无关。
+- **全库规模**：504/532 个参数会管显隐、22,028 组参数×mesh 关联、**113 个 mesh 任何参数都碰不到**
+  （它们只受变形/裁切影响）；覆盖面最广的是 `Param188`(253) 与 `shop_hx`(213)。
+- **writeDefault 差集里真正有差的是 4 个参数**：`idle` 有曲线、`home` 没有、且管 mesh 显隐、且 idle 值≠moc3 默认值的
+  共 12 个 → 其中 7 个是 `MB_*` 物体下落族，**`effect` 层会把它们重新驱动**（游戏 layer0 钉默认、layer1 Override 再覆盖），
+  与我们环境层的取值一致 ⇒ 无差。剩下的**`Param215`（默认 -1/idle 0，管 43 块）、`cswzkz2`（0/1.00，管 4 块）、
+  `empty39`（0/1.00，管 14 块）、`empty42`（0/1.00，管 14 块）**是 `effect` 也完全不驱动的 ⇒
+  **游戏一进 `home` 就把它们钉回默认，我们的 runtime 保留 `idle` 的值**（现有 `restTick` 只在回落 idle 时才作用，
+  且它的白名单是"播过的 clip 驱动、而 idle 不驱动"——方向正好相反）。⇒ 这条能解释"切到某动作后某几块部件不对，
+  切回来又好了"，且**不是** 追加-III 判死的那种"运行时造假值"，而是**语义层缺失**。
+- ⚠️ **台账的两个已知口径限制，别把数当上限**：
+  ① `#mesh` 是相对**扫描基准状态**测的，而 ArtMesh 透明度是**乘性带门**——基准里已经关着的 mesh
+     对任何参数都不响应 ⇒ 表中计数一律是**下界**（同一条 mesh 在别的状态下可能被更多参数管）。
+  ② 参数值是**单点扰动**，多参数联动的隐藏组合（两个参数各推一半才跨过阈值）看不见。
+     要拿它当"完备清单"用，必须先在同一条 mesh 上做第二基准（例如把候选参数先置到默认再扫）。
+- ⚠️ **待证前提**：「Unity Cubism SDK 会替每个未被 clip 动画的参数写默认值」这一步，目前只有
+  `m_WriteDefaultValues=True`（gezi_2 全部状态实测）+ Animator 通用语义做支撑，
+  **没有游戏侧的正面观测**。要坐实只需一条对照：游戏录像里选一个 `home`，看那 4 个参数管的
+  那批 mesh 是否**当场**消失/出现（我们这边要等回落 idle 才变）。
+
+**涉及文件（追加-IV）**：`scripts/diag/l2d_part_flicker_probe.py`（新增臂 ⑤ `--mapall`）、
+`scripts/diag/l2d_opacity_map_query.py`（**新**，台账查询器：`--mesh/--param/--divergent/--ambient`）、
+`.diag/l2d_opacity_map_gezi_2.json`（全量绑定台账）、`.diag/flicker_mapall.log`。
+
 **涉及文件**：`gallery_src/index.html`（补丁 ⑤，与运行目录硬链）、
 `scripts/diag/l2d_motion_param_probe.py`（加 `--dump` 逐样本轨迹落盘 + 「平台时长/下降次数」判据，
 替代原来只看「触到量程」的弱判据）、`scripts/diag/l2d_curve_shape.py`（曲线形状与越界统计）、

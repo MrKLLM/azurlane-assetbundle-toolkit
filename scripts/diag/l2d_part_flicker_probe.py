@@ -14,6 +14,9 @@
      读目标 drawable 透明度，能改变它的就是这个 ArtMesh 的绑定驱动者，并给出**值→透明度映射**（阈值在哪）。
      不解析 moc3 字节（仓库里没有绑定表解析代码），用因果扫描代替反查。
      ⚠️ 扫描点数必须 >2：ArtMeshOpacity 绑定可以是非单调的，只测 min/中/max 会漏掉"只在量程中段显形"的驱动者。
+  ⑤ `--mapall` **全量绑定表**：一次跑完「哪个参数在量程内哪些点上，会让哪几个 mesh 的透明度离开基准」，
+     落 `.diag/l2d_opacity_map_<model>.json`（每条都带 11 点曲线，可离线复算）。回答"这批 mesh 的开关都有谁"
+     "某些参数到底关不关可视性"——与逐个 `--drivers` 同样的 update 次数，但读的是全部 drawable，一次顶 N 次。
 
 ⚠️ 采样基准是**每一次模型 update**（包 `CubismCoreModel.prototype.update`），不是墙钟 setTimeout：
    无头里动作时间推进极不均匀（`Ticker` 对 `dt` 有上限），按墙钟数台阶次数同一条 clip 会跑出 10 与 20
@@ -330,6 +333,46 @@ JS_DRIVERS = r"""(async (names, nstep) => {
 })"""
 
 
+# ---------------------------------------------------------------- ⑤ 全量「参数 → 哪个 mesh 显隐」绑定表
+JS_MAPALL = r"""(async (nstep) => {
+  const core=window.__m.internalModel.coreModel, mm=window.__m.internalModel.motionManager;
+  const M=core._model, P=M.parameters, D=M.drawables;
+  window.__cap=null; window.__wset=null;
+  const ambWas=window.__ambOff; window.__ambOff=true;
+  try{ mm.stopAllMotions(); }catch(e){}
+  const nd=D.count, np=P.count;
+  const base=[]; for(let i=0;i<np;i++) base.push(P.values[i]);
+  const ref=new Float32Array(nd);
+  core.update(); ref.set(D.opacities);
+  const out=[]; let updates=0, pairs=0;
+  const touched=new Uint8Array(nd);
+  for(let i=0;i<np;i++){
+    const mn=P.minimumValues[i], mx=P.maximumValues[i], map=new Map();
+    for(let q=0;q<=nstep;q++){
+      P.values[i]=mn+(mx-mn)*q/nstep; core.update(); updates++;
+      const O=D.opacities;
+      for(let d=0;d<nd;d++){ const x=O[d];
+        if(Math.abs(x-ref[d])>1e-3){
+          const cur=map.get(d);
+          if(cur) cur.push([q,+x.toFixed(3)]); else map.set(d,[[q,+x.toFixed(3)]]);
+        } }
+    }
+    P.values[i]=base[i];
+    if(!map.size) continue;
+    const aff=[]; map.forEach((arr,d)=>{ aff.push([d,arr]); touched[d]=1; });
+    pairs+=aff.length;
+    out.push([i, window.__pid[i], +mn.toFixed(3), +mx.toFixed(3), +P.defaultValues[i].toFixed(3),
+              P.repeats[i], aff.length, aff]);
+  }
+  for(let i=0;i<np;i++) P.values[i]=base[i];
+  core.update(); window.__ambOff=ambWas;
+  const un=[]; for(let d=0;d<nd;d++) if(!touched[d]) un.push(d);
+  return JSON.stringify({nstep, params:np, drawables:nd, updates,
+    nParamsWithEffect:out.length, pairs, nUntouched:un.length, untouched:un,
+    ref:Array.from(ref, x=>+x.toFixed(3)), names:window.__drawableIds, map:out});
+})"""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("model")
@@ -342,7 +385,8 @@ def main():
     ap.add_argument("--wparams", default="", help="③ 改成按参数名归因（逗号分隔），用于扫中④的驱动者")
     ap.add_argument("--nowriters", action="store_true", help="跳过 ③")
     ap.add_argument("--drivers", default="", help="④ 驱动扫描的目标 drawable 名（逗号分隔），空 = 跳过")
-    ap.add_argument("--nsweep", type=int, default=10, help="④ 每个参数在量程内扫多少个点（必须 >2，见头注释）")
+    ap.add_argument("--nsweep", type=int, default=10, help="④/⑤ 每个参数在量程内扫多少个点（必须 >2，见头注释）")
+    ap.add_argument("--mapall", action="store_true", help="⑤ 全量「参数→哪些 mesh 显隐」绑定表（落 .diag/l2d_opacity_map_<model>.json）")
     a = ap.parse_args()
     norest = os.environ.get("NOREST") == "1"
     tag = "norest" if norest else "rest"
@@ -537,6 +581,31 @@ def main():
                 print("   ⚠️ 这些名字不在模型里: %s" % dv["miss"])
         else:
             print("\n== ④ 驱动扫描未出结果: %s" % str(dv)[:250])
+
+    # —— ⑤ 全量绑定表
+    if a.mapall:
+        raw5 = ev(JS_MAPALL + "(%s)" % json.dumps(max(3, a.nsweep)))
+        try:
+            mp = json.loads(raw5) if isinstance(raw5, str) and raw5.strip().startswith("{") else {"err": str(raw5)[:300]}
+        except Exception:
+            mp = {"err": str(raw5)[:300]}
+        if "map" in mp:
+            fpm = os.path.join(ROOT, ".diag", "l2d_opacity_map_%s.json" % a.model)
+            with open(fpm, "w", encoding="utf-8") as fh:
+                json.dump(mp, fh, ensure_ascii=False)
+            print("\n== ⑤ 全量绑定表：%d 个参数 × 量程内 %d 点 = %s 次 core.update，读全部 %d 个 drawable"
+                  % (mp["params"], mp["nstep"], mp["updates"], mp["drawables"]))
+            print("   能改变任何 mesh 透明度的参数 %d 个（另有 %d 个参数扫完全程都没碰到可见性）；"
+                  "参数×mesh 关联 %d 对；**任何参数都碰不到的 mesh %d 个**"
+                  % (mp["nParamsWithEffect"], mp["params"] - mp["nParamsWithEffect"],
+                     mp["pairs"], mp["nUntouched"]))
+            print("   台账 → %s（含每个 mesh 的 11 点透明度曲线，可离线复算）" % fpm)
+            print("   覆盖面最广的参数（前 12）：")
+            for x in sorted(mp["map"], key=lambda y: -y[6])[:12]:
+                print("     %-24s 量程[%.3g,%.3g] default %.3g → 影响 %d 个 mesh"
+                      % (str(x[1])[:24], x[2], x[3], x[4], x[6]))
+        else:
+            print("\n== ⑤ 绑定表未出结果: %s" % str(mp)[:250])
 
     fp = os.path.join(ROOT, ".diag", "l2d_flicker_%s_%s.json" % (a.model, tag))
     with open(fp, "w", encoding="utf-8") as fh:
