@@ -308,7 +308,7 @@ JS_WRITERS = r"""(async (clip, holdSec, stepMs, nameList) => {
 })"""
 
 # ---------------------------------------------------------------- ④：运行时驱动扫描（代替 moc3 反查）
-JS_DRIVERS = r"""(async (names, nstep) => {
+JS_DRIVERS = r"""(async (names, nstep, clip, waitMs) => {
   const core=window.__m.internalModel.coreModel, mm=window.__m.internalModel.motionManager;
   const M=core._model, P=M.parameters, D=M.drawables;
   const di=names.map(n=>window.__drawableIds.indexOf(n));
@@ -317,7 +317,15 @@ JS_DRIVERS = r"""(async (names, nstep) => {
   if(!ok.length) return JSON.stringify({fail:'目标 drawable 都不在模型里', miss});
   window.__cap=null; window.__wset=null;
   const ambWas=window.__ambOff; window.__ambOff=true;
-  try{ mm.stopAllMotions(); }catch(e){}
+  let grp=null;
+  if(clip){                                  // 第二基准：先播这条 clip，跑到角色在画面内再定格
+    try{ mm.startMotion(clip,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){}
+    try{ window.__m.autoUpdate=true; window.__app.ticker.start(); }catch(e){}
+    await new Promise(r=>setTimeout(r,waitMs));
+    try{ mm.stopAllMotions(); }catch(e){}
+    window.__m.autoUpdate=false; try{ window.__app.ticker.stop(); }catch(e){}
+    try{ grp=(mm.state||{}).currentGroup; }catch(e){}
+  } else { try{ mm.stopAllMotions(); }catch(e){} }
   const base=[]; for(let i=0;i<P.count;i++) base.push(P.values[i]);
   const read=()=>ok.map(x=>+D.opacities[x[1]].toFixed(3));
   core.update(); const ref=read();
@@ -338,9 +346,28 @@ JS_DRIVERS = r"""(async (names, nstep) => {
     if(changed) drv.push([window.__pid[i], +mn.toFixed(3), +mx.toFixed(3), +P.defaultValues[i].toFixed(3),
                           P.repeats[i], got]);
   }
+  // ⚠️ 探测一在**乘性多门**下会漏：目标被两道门同时关着时，单独动任何一个参数都抬不起来。
+  //    探测二反过来问"谁在挡路"：其余参数全部保持此刻的实际值，只把第 i 个改回 moc3 默认值；
+  //    目标因此亮起(>0.05) ⇒ 就是"i 在当前这个值"把它关着。这才找得到第二道门。
+  const blockers=[];
+  for(let i=0;i<P.count;i++){
+    const dv=P.defaultValues[i];
+    if(Math.abs(dv-base[i])<1e-6) continue;              // 默认值==当前值 ⇒ 不可能是挡路者
+    P.values[i]=dv; core.update(); updates++;
+    const r=read(); P.values[i]=base[i];
+    if(r.some(x=>x>0.05)) blockers.push([window.__pid[i], +base[i].toFixed(3), +dv.toFixed(3), r]);
+  }
   for(let i=0;i<P.count;i++) P.values[i]=base[i];
-  core.update(); window.__ambOff=ambWas;
-  return JSON.stringify({targets:ok.map(x=>x[0]), ref, miss, params:P.count, nstep, updates, drivers:drv});
+  core.update();
+  // 恒等自检：扫完回到基线输入重读一次，必须与最初基线逐位相同。
+  // 不等 ⇒ 系统里还有"只由历史写入、不随输入重算"的第二套状态（Live2D 里就是 part 透明度），
+  // 这时**任何**基于该基线的结论都不作数（实测本项目就撞上过一次：ref 读两组全灭、扫描中同值却点亮）。
+  const ref2=read(); let drift=0;
+  for(let j=0;j<ref.length;j++) if(Math.abs(ref[j]-ref2[j])>1e-3) drift++;
+  window.__ambOff=ambWas;
+  return JSON.stringify({targets:ok.map(x=>x[0]), ref, ref2, drift, miss, params:P.count, nstep, updates,
+                         baseline:clip?('定格自 clip '+clip):'setup 默认姿态', group:grp,
+                         drivers:drv, blockers});
 })"""
 
 
@@ -517,6 +544,8 @@ def main():
     ap.add_argument("--nowriters", action="store_true", help="跳过 ③")
     ap.add_argument("--drivers", default="", help="④ 驱动扫描的目标 drawable 名（逗号分隔），空 = 跳过")
     ap.add_argument("--nsweep", type=int, default=10, help="④/⑤ 每个参数在量程内扫多少个点（必须 >2，见头注释）")
+    ap.add_argument("--drvclip", default="", help="④ 第二基准：先播这条 clip、等 --drvwait 秒定格后再扫（setup 基线下乘性门会漏）")
+    ap.add_argument("--drvwait", type=float, default=10.0, help="④ 播 clip 后等几秒定格（要等到角色在画面内）")
     ap.add_argument("--mapall", action="store_true", help="⑤ 全量「参数→哪些 mesh 显隐」绑定表（落 .diag/l2d_opacity_map_<model>.json）")
     ap.add_argument("--shot", default="", help="⑥ 单参数 A/B 截图，形如 Param25:0,0.5（只为认出画面上是哪一块）")
     ap.add_argument("--dumpgeo", action="store_true", help="⑦ 导出全部 mesh 的屏幕包围盒/面积/透明度，供离线反查「这个像素是哪几片」")
@@ -690,7 +719,9 @@ def main():
     # —— ④ 驱动扫描
     dl = [x for x in a.drivers.split(",") if x]
     if dl:
-        raw4 = ev(JS_DRIVERS + "(%s, %s)" % (json.dumps(dl), json.dumps(max(3, a.nsweep))))
+        raw4 = ev(JS_DRIVERS + "(%s, %s, %s, %s)" % (json.dumps(dl), json.dumps(max(3, a.nsweep)),
+                                                     json.dumps(a.drvclip or ""),
+                                                     json.dumps(int(a.drvwait * 1000))))
         try:
             dv = json.loads(raw4) if isinstance(raw4, str) and raw4.strip().startswith("{") else {"err": str(raw4)[:300]}
         except Exception:
@@ -716,6 +747,16 @@ def main():
                     print("        %s" % s[:200])
             if dv.get("miss"):
                 print("   ⚠️ 这些名字不在模型里: %s" % dv["miss"])
+            print("   基线 = %s（在播=%s）目标基准透明度 %s"
+                  % (dv.get("baseline"), dv.get("group"), dv.get("ref")))
+            print("   恒等自检: 扫完回到基线输入重读 = %s ⇒ %s"
+                  % (dv.get("ref2"), ("一致 ✅" if not dv.get("drift")
+                                      else "**漂移 %d 个目标 ⇒ 系统里还有不随输入重算的第二套状态，"
+                                           "本基线的结论一律不作数** ❌" % dv.get("drift"))))
+            bl = dv.get("blockers") or []
+            print("   探测二『挡路者』（其余保持基线值、只把这个改回 moc3 默认 ⇒ 目标就亮）：%d 个" % len(bl))
+            for x in bl[:20]:
+                print("     %-24s 基线值 %-8s 默认 %-8s → 目标读数 %s" % (str(x[0])[:24], x[1], x[2], x[3]))
         else:
             print("\n== ④ 驱动扫描未出结果: %s" % str(dv)[:250])
 
