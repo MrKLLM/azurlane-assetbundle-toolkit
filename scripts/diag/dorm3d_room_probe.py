@@ -273,23 +273,41 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
     // **分通道数据**，不是颜色（树叶贴图同族：B 通道恒 255）。着色器读不到，
     // "白色云 + alpha 密度"是按用户参照图（白天白云）做的**推断**，故只活在查看端，
     // 不写进 GLB——产物必须保持"包里是什么就是什么"。
-    if(Q.get('cloudw')==='1'){
-      const re=/^mat_Layer_(Day|Night)_/i; let n=0;
+    // leafw=1：树叶贴图的 B 通道恒 241-255（只有 13 个不同值）= 数据不是颜色，
+    // 且这三张材质**根本没有 _BaseColor**（baseColorFactor 为空）⇒ 没有 tint 能解释蓝色。
+    // 与云同一族的推断：按"通道语义"重画贴图，只活在查看端、不烧进 GLB。
+    // 两条"通道语义"推断各跑各的（曾经写成互斥，结果 leafw 和 cloudw 同时开时叶子纹丝不动，
+    // 是 C11 的"开关前后必须不同"把它抓出来的）。产物保持"包里是什么就是什么"，两条都只活在查看端。
+    const RULES=[];
+    // 云：`tex_Cloud_*` 高 alpha 处 RGB=(218,2,136) 品红 = 自定义着色器的分通道数据，
+    //     按参照图（白天白云）改成"纯白 + alpha 当密度"。
+    if(Q.get('cloudw')==='1') RULES.push({re:/^mat_Layer_(Day|Night)_/i, mode:'cloud', key:'cloudwMats'});
+    // 叶：B 通道恒 241-255（只有 13 个不同值）且这三张材质**根本没有 _BaseColor**
+    //     ⇒ 没有 tint 能解释蓝色，把 B 当数据压掉。
+    if(Q.get('leafw')==='1') RULES.push({re:/^mat_(poplar|oak)\d*_leaf/i, mode:'leaf', key:'leafwMats'});
+    if(RULES.length){
+      const cnt={cloudwMats:0, leafwMats:0};
       g.scene.traverse(o=>{ if(!o.isMesh||!o.material) return;
         const ms=Array.isArray(o.material)?o.material:[o.material];
-        for(const m of ms){ if(!re.test(m.name||'')||!m.map||!m.map.image) continue;
+        for(const m of ms){ if(!m.map||!m.map.image) continue;
+          if(m.userData && m.userData.__chan) continue;   // 同一材质只改一次（叶子重复改会越改越暗）
+          const rule=RULES.filter(r=>r.re.test(m.name||''))[0];
+          if(!rule) continue;
           const im=m.map.image, cw=im.width|0, ch=im.height|0;
           if(!cw||!ch) continue;
           const c2=document.createElement('canvas'); c2.width=cw; c2.height=ch;
           const x2=c2.getContext('2d'); x2.drawImage(im,0,0);
           const d=x2.getImageData(0,0,cw,ch); const px=d.data;
-          for(let i=0;i<px.length;i+=4){ px[i]=255; px[i+1]=255; px[i+2]=255; }
+          for(let i=0;i<px.length;i+=4){
+            if(rule.mode==='leaf'){ px[i+2]=Math.round(Math.min(px[i],px[i+1])*0.25); }
+            else { px[i]=255; px[i+1]=255; px[i+2]=255; } }
           x2.putImageData(d,0,0);
           const t2=new THREE.CanvasTexture(c2);
           t2.colorSpace=THREE.SRGBColorSpace; t2.wrapS=t2.wrapT=THREE.RepeatWrapping;
           t2.repeat.copy(m.map.repeat); t2.offset.copy(m.map.offset);
-          m.map=t2; m.needsUpdate=true; n++; } });
-      window.__CLOUDW=n;
+          m.map=t2; m.needsUpdate=true; cnt[rule.key]++;
+          m.userData.__chan=rule.mode; } });
+      window.__CHAN=cnt;
     }
     let uv1geoms=0, pagemats=0;
     g.scene.traverse(o=>{ o.frustumCulled=false;
@@ -342,7 +360,8 @@ fetch(Q.get('truth')).then(r=>r.json()).then(truth=>{
                     innerCount:inner.length, distinctNames:Object.keys(names).length};
     draw();
     window.__STATS.renderedTris=sceneTris;
-    window.__STATS.cloudwMats=window.__CLOUDW||0;
+    window.__STATS.cloudwMats=(window.__CHAN||{}).cloudwMats||0;
+    window.__STATS.leafwMats=(window.__CHAN||{}).leafwMats||0;
     const rc=new THREE.Raycaster();
     // 每个机位沿视线打 9 个采样点，回报"这个像素上到底是哪个对象/哪个材质"——
     // 窗那片黑用亮度测不出来源，只有把命中对象列出来才能区分"玻璃挡着"与"外面没东西"。
@@ -620,6 +639,18 @@ def grade_sweep(browser, base, rel_glb, rel_truth, rel_side, rel_render, views, 
                       {"names": [v["name"] for v in views]}, capture=bool(shot), extra=q)
         if not st:
             continue
+        if p.get("pick"):
+            print("      [旋钮自证] cloudw 换掉 %s 个材质槽 / leafw 换掉 %s 个"
+                  "（0 ⇒ 这条推断根本没作用到任何材质，别把它当已生效）"
+                  % ((st["stats"] or {}).get("cloudwMats"), (st["stats"] or {}).get("leafwMats")))
+            # 带 pick=1 的档位顺手打印"每个采样点上是什么对象/材质"——
+            # 颜色不对这类问题，只有把命中列出来才能定案（本轮：云仍是红的）
+            for v in st["views"]:
+                for q in (v.get("picks") or []):
+                    if q.get("hits"):
+                        print("      [pick %s] ndc%-10s %s" % (
+                            v["name"], q["ndc"],
+                            " | ".join("%s·%s@%s" % (h["n"], h["m"], h["d"]) for h in q["hits"])))
         stt = st["stats"] or {}
         avg = {k: sum(v.get(k, 0.0) for v in st["views"]) / max(1, len(st["views"])) for k in keys}
         # 排序用**分位数距离**（p05/p25/p50/p75/p95，Wasserstein-1 的代理）：
@@ -633,7 +664,8 @@ def grade_sweep(browser, base, rel_glb, rel_truth, rel_side, rel_render, views, 
         md = sum(abs(avg[k] - target[k]) for k in keys) / len(keys)
         rows.append({"tag": tag, "preset": dict(p), "avg": avg, "dist": qd, "mean_dist": md,
                      "stats": {k: stt.get(k) for k in ("lmChannel", "amb", "lightsTouched",
-                                                       "renderOk", "sideOk", "lmMats")},
+                                                       "renderOk", "sideOk", "lmMats",
+                                                       "cloudwMats", "leafwMats", "backdropTris")},
                      # 模型侧计数要扣掉查看端补摆的穹顶，否则"加了 sky"会被误判成改了模型
                      "counts": (stt.get("meshObjects"), stt.get("posTotal"),
                                 (stt.get("renderedTris") or 0) - int(stt.get("backdropTris") or 0)),
@@ -648,7 +680,7 @@ def preset_query(p, base, rel_side, rel_render, vq):
     if rel_render:
         q += "&render=%s" % (base + rel_render)
     for k in ("tone", "exp", "lmc", "lmi", "lmch", "ambm", "ambk", "ambsrgb", "li", "ld", "dc",
-              "bloom", "bloomr", "bloomt", "sky", "cloudw"):
+              "bloom", "bloomr", "bloomt", "sky", "cloudw", "leafw"):
         if p.get(k) is not None:
             q += "&%s=%s" % (k, p[k])
     if p.get("nolight"):
@@ -1116,9 +1148,13 @@ def main():
                     {"tag": "只补摆天海(无泛光)", "tone": "aces", "exp": "1", "ambm": "flat",
                      "sky": "1"},
                     {"tag": "天海+白云(推断)", "tone": "aces", "exp": "1", "ambm": "flat",
-                     "bloom": "0.6", "sky": "1", "cloudw": "1", "shot": "cloudw"},
+                     "bloom": "0.6", "sky": "1", "cloudw": "1", "shot": "cloudw", "pick": 1},
                     {"tag": "天海+白云+曝光1.3", "tone": "aces", "exp": "1.3", "ambm": "flat",
                      "bloom": "0.6", "sky": "1", "cloudw": "1", "shot": "cloudw2"},
+                    {"tag": "白云+绿叶", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.6", "sky": "1", "cloudw": "1", "leafw": "1", "shot": "leaf"},
+                    {"tag": "白云+不碰叶对照", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.6", "sky": "1", "cloudw": "1"},
                     {"tag": "对照:天海但灯×π去衰减", "tone": "aces", "exp": "1", "ambm": "flat",
                      "bloom": "0.6", "sky": "1", "li": PI, "ld": PI, "dc": "0"},
                 ]
@@ -1182,6 +1218,14 @@ def main():
                     dv = max(abs(w1[k] - w0[k]) for k in keys)
                     say(dv > 0.01,
                         "C10 白云推断敏感性：与不替换相比最大分布差 %.4f（须 >0.01，否则这条推断是装饰）" % dv)
+                # C11：叶子那条通道语义推断必须真的改变画面（差为 0 ⇒ 旋钮是死块，不许当已生效）
+                if "白云+不碰叶对照" in by_tag and "白云+绿叶" in by_tag:
+                    l0 = by_tag["白云+不碰叶对照"]["avg"]
+                    l1 = by_tag["白云+绿叶"]["avg"]
+                    dv = max(abs(l1[k] - l0[k]) for k in keys)
+                    say(dv > 0.005,
+                        "C11 绿叶推断敏感性：与不碰叶相比最大分布差 %.4f（须 >0.005）"
+                        "；sat %.3f → %.3f（参照 %.3f）" % (dv, l0["sat"], l1["sat"], target["sat"]))
                 # C7：过曝闸。分位数距离仍可能被"整幅一起提亮"讨好一部分，
                 # 亮部面积超过参照 1.6 倍就直接判红——那是糊白，不是还原。
                 # 亮部面积超过参照 1.6 倍、或饱和度低于参照 6 成的档位，**先取消候选资格**
