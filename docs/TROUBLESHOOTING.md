@@ -7497,6 +7497,27 @@ moc3 声明的宽（Unity 侧组件可覆盖 min/max，Web 侧读 moc3 就是 10
   **没有游戏侧的正面观测**。要坐实只需一条对照：游戏录像里选一个 `home`，看那 4 个参数管的
   那批 mesh 是否**当场**消失/出现（我们这边要等回落 idle 才变）。
 
+**§123 追加-VI（同日续：A 组身份钉死=两只手；`home` 里 18 秒有约 13 秒没手，转查导出侧绑定）**
+
+用修好的 ⑧（`--hideclip idle --hide ArtMesh36,ArtMesh42,ArtMesh43,ArtMesh44,ArtMesh51`）拿到图证：
+**左=原样、右=藏这 5 片 ⇒ 两只手整只消失、手臂只留到手腕**（差 1569 像素，包围盒 143×133，自检通过）。
+⇒ **A 组 = 手**，追加-V 里"是花瓣"的说法正式作废（那条来自未合成的坏截图）。
+
+于是整条因果闭合到一句话：`Param25` = 0 时有手、**≥0.1 时两只手整只消失**；而 `home` 的曲线
+**起点就写 0.5**，只在 5.83–9.08 秒与 17.13 秒之后回到 0 ⇒ 我们的 `home` 里 **18 秒约有 13 秒没有手**。
+一段舞蹈把双手关掉 13 秒不像作者意图 ⇒ **下一步查导出侧**：源包 `home` 的 AnimationClip 里这条曲线
+到底绑的是哪个参数、取的是什么值（`live2d-motion-extraction-audit` 那套：三容器枚举 + 绑定数断言），
+判"我们错绑"还是"数据本就如此"。
+
+⚠️ 两条不要当证据：① B 组（`Param25` 打开的那 29 片）在 `--hideclip home` 下自检报 **0 像素差**，
+那条分支没成立（疑因 clip 实际没播起来/被调度改回 idle，此时 B 组本来就暗）⇒ "B 组是什么"仍未定；
+② 面板滑杆拖 `Param25`/`Param27` 无变化**不是热加载问题**——滑杆写 `setParameterValueByIndex` 后，
+在播的 clip 下一帧就按曲线把该参数写回（`idle` 一条就驱动 531/532 个参数）⇒ **画廊的「参数·部件」面板
+对几乎所有参数都是无效的**，要手验得先能"暂停动作"（待办，见 §6.36）。
+
+**涉及文件（追加-VI）**：`.diag/hide_A_idle_zoom.png`（图证）、
+`scripts/diag/l2d_part_flicker_probe.py`（⑧ 加 `--hideclip`：播着 clip 时藏，绕开 setup 姿态下被遮挡的问题）。
+
 **涉及文件（追加-IV）**：`scripts/diag/l2d_part_flicker_probe.py`（新增臂 ⑤ `--mapall`）、
 `scripts/diag/l2d_opacity_map_query.py`（**新**，台账查询器：`--mesh/--param/--divergent/--ambient`）、
 `.diag/l2d_opacity_map_gezi_2.json`（全量绑定台账）、`.diag/flicker_mapall.log`。

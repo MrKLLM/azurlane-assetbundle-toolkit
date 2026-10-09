@@ -458,14 +458,21 @@ JS_GEO = r"""(async (dummy) => {
 
 
 # ---------------------------------------------------------------- ⑧ 藏起指定 mesh 后截图（用来确认"这几片是画面上的什么"）
-JS_HIDE = r"""(async (names) => {
+JS_HIDE = r"""(async (names, clip) => {
   const m=window.__m, im=m.internalModel, core=im.coreModel, M=core._model;
   const P=M.parameters, D=M.drawables;
   window.__cap=null; window.__ambOff=true;
-  try{ im.motionManager.stopAllMotions(); }catch(e){}
-  m.autoUpdate=false;                                  // 页面自己的调度会把参数写回去
-  try{ window.__app.ticker.stop(); }catch(e){}
-  for(let i=0;i<P.count;i++) P.values[i]=P.defaultValues[i];   // setup 姿态，结果可复现
+  const live=!!clip;          // live=播着动作藏：setup 姿态下这些组多半被挡住/在画外，看不出身份
+  if(!live){
+    try{ im.motionManager.stopAllMotions(); }catch(e){}
+    m.autoUpdate=false;                       // 页面自己的调度会把参数写回去
+    try{ window.__app.ticker.stop(); }catch(e){}
+    for(let i=0;i<P.count;i++) P.values[i]=P.defaultValues[i];   // setup 姿态，结果可复现
+  } else {
+    try{ im.motionManager.startMotion(clip,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){}
+    await new Promise(r=>setTimeout(r,3000));              // 跑到参数稳定段
+    m.autoUpdate=false; try{ window.__app.ticker.stop(); }catch(e){}
+  }
   const idx=[], miss=[];
   names.forEach(n=>{ const j=window.__drawableIds.indexOf(n); if(j<0) miss.push(n); else idx.push(j); });
   window.__hideSet = idx;                              // 由 update 钩子在 core.update() 之后落刀
@@ -477,7 +484,7 @@ JS_HIDE = r"""(async (names) => {
   window.__app.render();
   await new Promise(r=>requestAnimationFrame(r));
   const after=idx.map(j=>+D.opacities[j].toFixed(2));
-  return JSON.stringify({ok:true, hidden:idx.length, miss, after,
+  return JSON.stringify({ok:true, live, clip:clip||null, hidden:idx.length, miss, after,
                          stillZero:after.filter(x=>x===0).length});
 })"""
 
@@ -499,6 +506,7 @@ def main():
     ap.add_argument("--shot", default="", help="⑥ 单参数 A/B 截图，形如 Param25:0,0.5（只为认出画面上是哪一块）")
     ap.add_argument("--dumpgeo", action="store_true", help="⑦ 导出全部 mesh 的屏幕包围盒/面积/透明度，供离线反查「这个像素是哪几片」")
     ap.add_argument("--hide", default="", help="⑧ 逗号分隔的 drawable 名：setup 姿态下把这几片藏掉再截图（认画面身份用）")
+    ap.add_argument("--hideclip", default="", help="⑧ 配 --hide：改成「播着这条 clip」时藏（setup 姿态下多半被挡住看不出）")
     a = ap.parse_args()
     norest = os.environ.get("NOREST") == "1"
     tag = "norest" if norest else "rest"
@@ -790,10 +798,11 @@ def main():
     if hl:
         shots8 = {}
         for tag, lst in (("base", []), ("hide", hl)):
-            r8 = ev(JS_HIDE + "(%s)" % json.dumps(lst))
+            r8 = ev(JS_HIDE + "(%s, %s)" % (json.dumps(lst), json.dumps(a.hideclip or "")))
             print("   ⑧ %s → %s" % (tag, str(r8)[:180]))
             png = cmd("Page.captureScreenshot", {"format": "png"})
-            fp8 = os.path.join(ROOT, ".diag", "l2d_hide_%s_%s.png" % (a.model, tag))
+            fp8 = os.path.join(ROOT, ".diag", "l2d_hide_%s_%s%s.png"
+                               % (a.model, tag, ("_" + a.hideclip) if a.hideclip else ""))
             with open(fp8, "wb") as fh:
                 fh.write(base64.b64decode(png["data"]))
             shots8[tag] = fp8
@@ -811,7 +820,8 @@ def main():
             w = 560; h = int(i1.size[1] * w / i1.size[0])
             ab = Image.new("RGB", (w * 2 + 12, h), (255, 255, 255))
             ab.paste(i1.resize((w, h)), (0, 0)); ab.paste(i2.resize((w, h)), (w + 12, 0))
-            fpa = os.path.join(ROOT, ".diag", "l2d_hide_%s_ab.png" % a.model)
+            fpa = os.path.join(ROOT, ".diag", "l2d_hide_%s_ab%s.png"
+                               % (a.model, ("_" + a.hideclip) if a.hideclip else ""))
             ab.save(fpa)
             print("   并排（左=基准 setup 姿态 / 右=藏起 %d 片）→ %s" % (len(hl), fpa))
         except Exception as e:
