@@ -8489,9 +8489,35 @@ let posUniq = 0; uniqPos.forEach(pa => { posUniq += pa.count; });
 （都指 §55）。⇒ 判重除了按字符量找肥条目，还要找**同一结论的两个归属**；这类重复不是"放错位置"，
 是"路由表的『有且只有一个归属文件』没落实到单次写入"。
 
+### 补二（同日：把红线装成 pre-commit 闸 3 之后，自测本身又产出四个假绿灯）
+
+装完闸门必须自测，而**自测给的每个"0"都先当假的**。一次自测里实际撞到的四个：
+
+1. **「在预算内」那条分支根本没跑**：只是把已跟踪文件 `git add` 回去、内容与 HEAD 相同 ⇒
+   `git diff --cached` 为空 ⇒ 闸门里"暂存含 PROJECT_STATUS.md 才量"的判据直接跳过 ⇒ 期望 0 实得 0，看着通过。
+   修：测合规分支要**先真往文件尾追加一行**再 add。
+2. **预算数值口径与闸门不一致**（本轮最实的一条）：AGENTS.md 表里最初填的是 `wc -m` 的**字符**数
+   （总 51,880 / 最长行 2,448），而闸门按 `LC_ALL=C` 量**字节**（同一份文件实测 90,555 / 4,618，CJK≈3 字节/字）。
+   照字符数定的 `BYTES_MAX=56000` 会**天天误拦合法提交**，而 `LINE_BYTES_MAX=2600` 早已低于实际的 4,618。
+   ⇒ 定预算必须用**与闸门完全相同的命令**重取，不能从别的工具输出抄。数值已改为 460 / 96,000 / 190 / 4,800。
+3. **临时索引自测后用 `git checkout -- <file>` 还原 = 把污染灌回去**：temp index 里存着刚 `git add` 的
+   1135 行脏版本，checkout 是从索引取 ⇒ 文件停在 1135 行。修：一律 `git checkout HEAD -- <file>`，
+   还原后 `wc -l` + 与 `git show HEAD:<file>` 逐字节 `cmp` 对上，再 `git status --short` 确认只剩别人的改动。
+4. **退出码被管道吃掉**：`./pre-commit 2>&1 | true` 之后 `$?` 是管道末端命令的码，恒 0 ⇒
+   "文档闸回归"那条一度报 0，而它的拦截文案其实已经打印出来了。修：判定用 `./hook >/dev/null 2>&1; echo $?`，中间不加管道。
+
+⇒ 判据：**每个分支都要有一次真实的红 + 一次可信的绿**，且绿的那次能说出"度量那一行确实执行到了"。
+本仓库这套闸门（闸 1 禁产物目录 / 闸 2 代码必须带文档 / 闸 3 体量预算）的七条自测命令已写进
+`scripts/git-hooks/pre-commit` 头部注释，下一轮照抄即可。
+
 ### 涉及文件
 
 - `PROJECT_STATUS.md`（535→450→434 行；头部膨胀台账压成指向 README 的一段；§6.37 账目与坑 ① 就地标记已做完）
+- `AGENTS.md`「PROJECT_STATUS.md 体量红线」节：400 行单指标 → **四项字节口径预算表（棘轮）+ 强制说明 + 收敛点规则**
+- `scripts/git-hooks/pre-commit` 新增**闸 3（体量预算）**，位置排在闸 2 的 `DOC_CHECK_SKIP` 早退之前；
+  新绕行开关 `LINE_CHECK_SKIP=1`；头部注释含七条自测命令与上面的四个假绿灯。生效副本已重装
+  （`cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`）
+- `.agents/skills/enforce-project-rule-as-git-hook` 1.1.0→1.1.1（新增第 7 步「自测自身的四类假绿灯」）
 - `docs/archive/README.md`（**新建**：A1~A28 段号查找表 + 三条查找路径 + 外迁三步 + 行尾注意）
 - `docs/archive/PROJECT_STATUS_S6重条目瘦身_逐字外迁_2026-10-10.md`（**A28 段**，114 行，7 个逐字块）
 - `.diag/s6_heavy_archive_manifest_20261010.json`（本轮清单，7 段的行区间与桩文案）

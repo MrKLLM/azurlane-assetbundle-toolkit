@@ -1,8 +1,12 @@
 #!/bin/sh
-# 提交闸门（两条，都不因 DOC_CHECK_SKIP 而放行第二条）：
+# 提交闸门（三条；闸 3 排在闸 2 的绕行早退之前，所以 DOC_CHECK_SKIP 放不掉它）：
 #   闸 1  暂存区出现 Output/ 或 files/ 下的路径 -> 直接拦（这两个目录整目录 gitignore，
 #         能进暂存区只可能是 git add -f 强加；里面是 44GB 导出产物 + 2.4 万个重导出资产 json，
 #         一旦推上 Gitee+GitHub 双远端，撤回要重写历史）。
+#   闸 3  PROJECT_STATUS.md 超体量预算（总行/总字节/§6 行/最长单行，棘轮只降不升）-> 拦下。
+#         规则出自 AGENTS.md「PROJECT_STATUS.md 体量红线」；预算数值两处要同步改。
+#         上线理由见 docs/TROUBLESHOOTING.md §132：400 那条红线从 399 涨到 534 没出过任何错，
+#         缺的不是数字是执行；且行数对「流水接在同一物理行句尾」这种涨法完全不敏感。
 #   闸 2  暂存区改了 scripts/** 或 gallery_src/** 但没同时暂存任何文档 -> 拦下。
 #         （文档 = PROJECT_STATUS.md / docs/** / AGENTS.md / .agents/skills/**；后两类是 2026-09-27
 #          加技能闸门时才暴露的漏项：改 hook 只带 AGENTS.md 会被自己的闸 2 拦死。）
@@ -13,9 +17,10 @@
 #     cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit）
 #   改逻辑只改正本，改完记得重新 copy。
 #
-# 绕行（确属无需改文档的提交：纯重命名/格式化/试验性提交）：
-#     DOC_CHECK_SKIP=1 git commit ...
-#   绕行只放行闸 2，且会打印一行警告，不静默放行。
+# 绕行（一闸一个开关，互不覆盖；都会打印警告，不静默放行）：
+#     LINE_CHECK_SKIP=1 git commit ...   只放行闸 3（体量预算），需在 message 里写理由
+#     DOC_CHECK_SKIP=1  git commit ...   只放行闸 2（代码必须带文档）：纯重命名/格式化/试验性提交
+#   闸 1 没有绕行开关（产物目录进库是不可逆的远端污染）。
 #
 # 自测用法（不动真实暂存区）：
 #     T=$(mktemp); export GIT_INDEX_FILE=$T; git read-tree HEAD
@@ -24,6 +29,18 @@
 #     git add docs/_selftest.tmp   && ./scripts/git-hooks/pre-commit        # 期望 exit 0
 #     mkdir -p Output/_selftest && touch Output/_selftest/x.json
 #     git add -f Output/_selftest/x.json && ./scripts/git-hooks/pre-commit  # 期望 exit 1（闸 1）
+#     # 闸 3 三条分支都要测（⚠ 测「在预算内」时必须**真的改一行**再 add：
+#     #   内容与 HEAD 相同时 `git diff --cached` 是空的，闸门根本不触发，会得到假绿灯
+#     #   ——2026-10-10 实测踩过，第一次自测就是这么"通过"的）：
+#     printf '%s\n' '自测：合规改动一行' >> PROJECT_STATUS.md
+#     git add PROJECT_STATUS.md && ./scripts/git-hooks/pre-commit; echo $?      # 在预算内 -> 期望 0
+#     { for i in $(seq 1 700); do echo "自测填充行 $i"; done; } >> PROJECT_STATUS.md
+#     git add PROJECT_STATUS.md && ./scripts/git-hooks/pre-commit; echo $?      # 超线 -> 期望 1
+#     LINE_CHECK_SKIP=1 ./scripts/git-hooks/pre-commit; echo $?                 # 绕行 -> 期望 0 且打印警告
+#     DOC_CHECK_SKIP=1 ./scripts/git-hooks/pre-commit; echo $?                  # 期望仍是 1（绕行互不覆盖）
+#     # ⚠ 还原必须走 HEAD，不能用 `git checkout -- <file>`：temp index 里存着你刚 add 的脏版本，
+#     #   从索引取等于把污染再灌回工作树（实测一次自测后文件停在 1135 行）。
+#     git checkout HEAD -- PROJECT_STATUS.md; wc -l PROJECT_STATUS.md           # 期望回到 434
 #     rm -rf Output/_selftest scripts/_selftest.tmp docs/_selftest.tmp $T; unset GIT_INDEX_FILE
 
 staged=$(git diff --cached --name-only --diff-filter=ACMRD)
@@ -50,9 +67,57 @@ EOF
     exit 1
 fi
 
+# ---------- 闸 3：PROJECT_STATUS.md 体量预算（棘轮，只降不升） ----------
+# 必须在闸 2 的 DOC_CHECK_SKIP 提前退出**之前**，否则绕过文档闸会顺带绕过这一条。
+# 量的是**暂存区里那份 blob**（`git show :file`），不是工作树——工作树可能比本次提交更超前或更旧。
+# 字节口径：LC_ALL=C 下 awk/wc 都按字节算，CJK 约 3 字节/字（预算数值按此定，别当字符数理解）。
+if [ -n "$LINE_CHECK_SKIP" ]; then
+    echo "[pre-commit] ⚠️ 已用 LINE_CHECK_SKIP=1 绕过体量预算检查 —— 请在 commit message 里写明绕过理由。" >&2
+elif git diff --cached --name-only --diff-filter=ACMRD | grep -qx 'PROJECT_STATUS.md'; then
+    ps_blob=$(git show :PROJECT_STATUS.md)
+    ps_lines=$(printf '%s\n' "$ps_blob" | LC_ALL=C wc -l)
+    ps_bytes=$(printf '%s\n' "$ps_blob" | LC_ALL=C wc -c)
+    ps_maxline=$(printf '%s\n' "$ps_blob" | LC_ALL=C awk '{ if (length($0)>m) m=length($0) } END { print m+0 }')
+    # §6 = 「## 6.」到「## 7.」之间的行数（未闭环交接现场，历史上最容易涨的一节）
+    ps_s6=$(printf '%s\n' "$ps_blob" | LC_ALL=C awk '/^## 6\./{f=1;next} /^## 7\./{f=0} f{n++} END{print n+0}')
+    over=""
+    # 预算数值以 AGENTS.md「PROJECT_STATUS.md 体量红线」为准；这里改一处就要改另一处。
+    # ⚠ 口径=字节（LC_ALL=C）。2026-10-10 踩过：预算表初稿填的是 `wc -m` 的**字符**数（51,880），
+    #   而闸门量字节（90,555，CJK≈3 字节/字）⇒ 数值差近一倍，等于闸门锁在一个够不着的数字上。
+    LINES_MAX=460; BYTES_MAX=96000; S6_LINES_MAX=190; LINE_BYTES_MAX=4800
+    [ "$ps_lines"  -gt "$LINES_MAX" ]     && over="$over
+    总行数      $ps_lines  / 预算 $LINES_MAX"
+    [ "$ps_bytes"  -gt "$BYTES_MAX" ]     && over="$over
+    总字节      $ps_bytes  / 预算 $BYTES_MAX"
+    [ "$ps_s6"     -gt "$S6_LINES_MAX" ]  && over="$over
+    §6 待办行数 $ps_s6     / 预算 $S6_LINES_MAX   ← 该节是「未闭环交接现场」，涨到顶说明未闭环项在堆积"
+    [ "$ps_maxline" -gt "$LINE_BYTES_MAX" ] && over="$over
+    最长单行    $ps_maxline 字节 / 预算 $LINE_BYTES_MAX   ← §132 的失效模式：流水接在同一行句尾，行数不变、字数翻倍"
+    if [ -n "$over" ]; then
+        cat >&2 <<EOF
+[pre-commit] 提交被拦下：PROJECT_STATUS.md 超出体量预算（棘轮制，只准降不准升）。
+$over
+
+怎么办（三选一，按顺序试）：
+  1) 外迁溢出段（首选，逐字无损、自带四条核对）——见 docs/WORKFLOWS.md WF-39：
+       py -3 scripts/diag/doc_verbatim_archive.py --manifest .diag/xxx.json            # 干跑
+       py -3 scripts/diag/doc_verbatim_archive.py --manifest .diag/xxx.json --apply    # 落盘
+       py -3 scripts/diag/doc_verbatim_archive.py --manifest .diag/xxx.json --verify   # 复核
+     定位该搬哪段用**字符量**而不是行数：
+       LC_ALL=C awk '/^[0-9]+[.)] /{if(cur)printf "%6d %4d  %s\n",ch,ln,cur; cur=$1;ln=0;ch=0} cur{ln++;ch+=length(\$0)} END{if(cur)printf "%6d %4d  %s\n",ch,ln,cur}' PROJECT_STATUS.md | sort -rn | head
+  2) 已达收敛点（再搬就要动交接状态本身，判据见 TROUBLESHOOTING §132 的「补」节）
+     ⇒ 那是**规则问题不是内容问题**：改 AGENTS.md 的预算数值，并在 commit message 里写清调高的理由。
+  3) 本次确属例外（如纯归档提交、或正在做瘦身中间态）：
+       LINE_CHECK_SKIP=1 git commit ...
+     该开关只放行这一条闸，不影响闸 1（禁提交产物目录）与闸 2（代码必须带文档）。
+EOF
+        exit 1
+    fi
+fi
+
 # ---------- 闸 2：改代码必须同步文档 ----------
 if [ -n "$DOC_CHECK_SKIP" ]; then
-    echo "[pre-commit] ⚠️ 已用 DOC_CHECK_SKIP=1 绕过文档同步检查 —— 请确认本次确属无需改文档的提交。" >&2
+    echo "[pre-commit] ⚠️ 已用 DOC_CHECK_SKIP=1 绕过文档同步检查（不含闸 1/闸 3）。" >&2
     exit 0
 fi
 
