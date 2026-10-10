@@ -35,6 +35,11 @@ header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:14px;
   pointer-events:none;z-index:-1;
   -webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);
   backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}
+/* ②-b 同上：导航栏这条也是"只糊不推"，折射图按 ::before 自己的盒子算（宽=栏宽、高=14px、无圆角）。
+   var() 一律带兜底，理由见卡片 ②-b 那段注释。 */
+html.lg header.hglg::before{
+  -webkit-backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14));
+  backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14))}
 /* ③ 斜穿整条栏的反光：静止就在，不跟鼠标（栏子长，跟着鼠标会太吵） */
 header::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:-1;
   background:var(--spec2)}
@@ -126,14 +131,25 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
   backdrop-filter:blur(var(--glass-blur)) saturate(1.5)}
 /* ② 边墙：一圈 12px 的"更厚的玻璃"，折射强度明显高于面板 —— 玻璃拟态最出特征的一笔。
    做法是 backdrop-filter 挂在 ::before 上，再用两层 mask 做 exclude，只留外圈那一环。
-   ⚠️ 厚度从 9px 加到 12px、模糊从 13px 加到 17px：上一版这一圈太薄，看不出"边"和"面"的差别。 */
+   ⚠️ 厚度从 9px 加到 12px、模糊从 13px 加到 17px：上一版这一圈太薄，看不出"边"和"面"的差别。
+   ⚠️ 这一圈**只是模糊**，它推不动背景像素。真折射在下面的 ②-b，这条是它的回退形态。 */
 .card.g::before{content:'';position:absolute;inset:0;z-index:4;pointer-events:none;
-  border-radius:inherit;padding:12px;
+  border-radius:inherit;padding:var(--lg-ring,12px);
   -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
   mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
   -webkit-mask-composite:xor;mask-composite:exclude;
   -webkit-backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08);
   backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08)}
+/* ②-b 真折射：把上面那层"只糊不推"的边墙换成 feDisplacementMap。
+   法线图由 JS 按这张卡的**实测尺寸**现算（见 LG），所以滤镜与遮罩环必须同源：
+   环宽取 --lg-ring、圆角取 --r-card。lgr 类是 JS 在图建好之后才加的。
+   ⚠️ 每个 var() 都必须带兜底值：CSS 变量解析失败是**整条声明作废**（不是只丢那一项），
+      于是 backdrop-filter 直接变成 none——连原来那层模糊都没了。实测踩过：theme.css 被
+      缓存成旧版 → --lg-blur 读空 → blur() 非法 → 边墙整圈没有任何滤镜，两张截图一模一样。
+      --lgf 的兜底故意写成上一版那条模糊，宁缺折射也不能退化成"什么都没有"。 */
+html.lg .card.lgr::before{
+  -webkit-backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.7) brightness(1.06) var(--lgf,blur(17px) saturate(2) brightness(1.08));
+  backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.7) brightness(1.06) var(--lgf,blur(17px) saturate(2) brightness(1.08))}
 /* ③ 反光：只留**常驻的那道斜向反光**（--spec2）。
    ⚠️ 原来这里还叠了一层"跟着鼠标跑的圆斑"（radial-gradient at var(--mx)/var(--my)），
    用户 2026-09-29 明确否掉："不要鼠标发光这个效果" —— 已删，JS 侧也不再写 --mx/--my。
@@ -712,13 +728,141 @@ mainEl.addEventListener('mousemove',e=>{
 });
 mainEl.addEventListener('mouseleave',tiltReset);
 
+/* ---------- 液态玻璃：真折射 ----------
+   为什么非自己画法线图不可：挂在 backdrop-filter 上的 SVG 滤镜，它的 SourceGraphic
+   就是「身后那张已经合成好的背景图」——滤镜**拿不到元素自己的形状**。所以圆角矩形那一圈
+   的坡度只能预先按元素的实测尺寸算成一张图（R=横向推多少、G=纵向推多少），再用 feImage
+   喂给 feDisplacementMap。CSS 模糊永远推不动像素，这就是前几轮"还是毛玻璃"的物理原因。
+   ⚠️ 只给边墙那一圈：实测整块面板都折射 46.7ms/帧(≈21fps)，只有边墙 26.7ms/帧，预算 16.7ms。
+   ⚠️ 卡片高度会随标签换行变化，而图与尺寸绑定 ⇒ 按尺寸分桶（上限 LG.max），
+      桶满就复用**最接近**的那张，宁可边墙差一两像素也不让一半卡有折射、一半没有。 */
+const LGNS='http://www.w3.org/2000/svg', XLINKNS='http://www.w3.org/1999/xlink';
+const LG = { on:!!(window.CSS&&CSS.supports&&CSS.supports('backdrop-filter','blur(1px) url(#lgprobe)')),
+             svg:null, buckets:new Map(), max:2, gen:0, cv:null, mpx:96 };
+if(LG.on) document.documentElement.classList.add('lg');
+function lgTok(){
+  const cs=getComputedStyle(document.documentElement);
+  const num=(n,d)=>{const v=parseFloat(cs.getPropertyValue(n)); return Number.isFinite(v)?v:d;};
+  LG.mpx=Math.max(16,num('--lg-mpx',96));      // 顺手写回：lgMapURI 从这里取，避免一路传参
+  return {depth:num('--lg-depth',26), ring:num('--lg-ring',12), rad:num('--r-card',16)};
+}
+/* 圆角矩形带符号距离场：中心原点，bx/by 是已扣掉圆角的半宽/半高；负值在内部 */
+function lgSDF(x,y,bx,by,r){
+  const dx=Math.abs(x)-bx, dy=Math.abs(y)-by;
+  return Math.min(Math.max(dx,dy),0)+Math.hypot(Math.max(dx,0),Math.max(dy,0))-r;
+}
+function lgMapURI(w,h,rad,ring){
+  w=Math.max(8,Math.round(w)); h=Math.max(8,Math.round(h));
+  rad=Math.max(0,Math.min(rad,Math.min(w,h)/2-0.5));
+  /* 图按 CSS 空间算、再降采样落盘：feImage 会把它拉伸铺满滤镜区，所以低分辨率不改变
+     环的位置，只是让坡度更平滑。⚠️ 梯度必须在 CSS 单位下差分——先在图空间缩小坐标，
+     再用 1 图像素当步长，会把坡度按缩放比一起缩小，等于偷偷改了折射强度。 */
+  const s=Math.min(1, LG.mpx/Math.max(w,h));
+  const mw=Math.max(8,Math.round(w*s)), mh=Math.max(8,Math.round(h*s));
+  const cv=LG.cv||(LG.cv=document.createElement('canvas'));
+  cv.width=mw; cv.height=mh;
+  const ctx=cv.getContext('2d'), im=ctx.createImageData(mw,mh), px=im.data;
+  const bx=w/2-rad, by=h/2-rad, inv=1/Math.max(1,ring);
+  for(let j=0;j<mh;j++){ const cy=(j+0.5)/s-h/2;
+    for(let i=0;i<mw;i++){ const cx=(i+0.5)/s-w/2;
+      const e=-lgSDF(cx,cy,bx,by,rad);                // 到边框的内距离
+      const t=e<=0?0:(e<ring?1-e*inv:0);              // 环带内 1→0，带外不推
+      let nx=0,ny=0;
+      if(t>0){ nx=(lgSDF(cx+1,cy,bx,by,rad)-lgSDF(cx-1,cy,bx,by,rad))*0.5;
+               ny=(lgSDF(cx,cy+1,bx,by,rad)-lgSDF(cx,cy-1,bx,by,rad))*0.5; }
+      const k=((j*mw+i)<<2);
+      px[k]=128+nx*t*127; px[k+1]=128+ny*t*127; px[k+2]=128; px[k+3]=255;
+    } }
+  ctx.putImageData(im,0,0);
+  return cv.toDataURL('image/png');
+}
+function lgDefs(){
+  if(LG.svg) return LG.svg;
+  const s=document.createElementNS(LGNS,'svg');
+  s.setAttribute('aria-hidden','true');
+  s.style.cssText='position:absolute;width:0;height:0;overflow:hidden';
+  document.body.appendChild(s);
+  return LG.svg=s;
+}
+function lgBuild(id,w,h,rad,ring,depth){
+  const f=document.createElementNS(LGNS,'filter');
+  f.setAttribute('id',id);
+  /* 滤镜区域往外扩：位移要从元素外面取像素，贴着边取就会被裁成一条糊带 */
+  f.setAttribute('x','-16%'); f.setAttribute('y','-16%');
+  f.setAttribute('width','132%'); f.setAttribute('height','132%');
+  const fi=document.createElementNS(LGNS,'feImage');
+  fi.setAttribute('x','0'); fi.setAttribute('y','0');
+  fi.setAttribute('width',String(w)); fi.setAttribute('height',String(h));
+  fi.setAttribute('preserveAspectRatio','none'); fi.setAttribute('result','n');
+  const uri=lgMapURI(w,h,rad,ring);
+  fi.setAttribute('href',uri); fi.setAttributeNS(XLINKNS,'xlink:href',uri);
+  const dm=document.createElementNS(LGNS,'feDisplacementMap');
+  dm.setAttribute('in','SourceGraphic'); dm.setAttribute('in2','n');
+  /* 位移 = scale×(通道/255 − 0.5)，图里峰值是 ±127 ⇒ 最大推开 scale/2 像素 */
+  dm.setAttribute('scale',String(depth*2));
+  dm.setAttribute('xChannelSelector','R'); dm.setAttribute('yChannelSelector','G');
+  f.appendChild(fi); f.appendChild(dm); lgDefs().appendChild(f);
+}
+function lgPick(kind,w,h,rad,ring,depth){
+  /* 桶按粗粒度归并。feImage 是**拉伸铺满**滤镜区的，尺寸差十几像素只会让环跟着缩放几个百分点，
+     不会跑位——上一版按精确尺寸分桶（实测 5 桶 5 张图）把帧时从 33ms 顶到 83ms，
+     成本主因是**同时存在几个不同滤镜**，精确分桶是白做的过度设计。 */
+  const key=kind+'|'+Math.round(w/24)+'|'+Math.round(h/48)+'|'+Math.round(depth);
+  const hit=LG.buckets.get(key); if(hit) return hit.id;
+  if(LG.buckets.size>=LG.max){
+    let best=null;
+    LG.buckets.forEach(v=>{ const d=Math.abs(v.h-h)+Math.abs(v.w-w)*2;
+      if(!best||d<best.d) best={d:d,id:v.id}; });
+    if(best) return best.id;
+    return null;
+  }
+  const id='lg'+(++LG.gen);
+  lgBuild(id,w,h,rad,ring,depth);
+  LG.buckets.set(key,{id,w,h});
+  return id;
+}
+function lgApply(el,kind){
+  if(!LG.on||!el) return;
+  const T=lgTok(), r=el.getBoundingClientRect();
+  const w=Math.round(r.width);
+  let h, rad, ring;
+  if(kind==='nav'){ const cs=getComputedStyle(el,'::before');
+    h=Math.round(parseFloat(cs.height)||14); rad=0; ring=h; }   // 栏子那条是 14px 高的实心带
+  else { h=Math.round(r.height); rad=T.rad; ring=T.ring; }
+  const cls=kind==='nav'?'hglg':'lgr';
+  /* 只挡退化尺寸。⚠️ 别顺手写成 h<16：导航栏那条边墙实测就是 14px，会被这道守卫整个挡掉。 */
+  if(w<8||h<8){ el.classList.remove(cls); return; }
+  const id=lgPick(kind,w,h,rad,ring,T.depth);
+  if(!id){ el.classList.remove(cls); return; }
+  /* 必须先写 --lgf 再加类：反了会让 backdrop-filter 在空变量上解析失败，那一圈整个消失 */
+  el.style.setProperty('--lgf','url(#'+id+')');
+  el.classList.add(cls);
+}
+function lgRefresh(){
+  if(!LG.on) return;
+  LG.buckets.clear();
+  if(LG.svg) while(LG.svg.firstChild) LG.svg.removeChild(LG.svg.firstChild);
+  document.querySelectorAll('.card.g').forEach(c=>lgApply(c,'card'));
+  lgApply(document.querySelector('header'),'nav');
+}
+
 /* 毛玻璃（backdrop-filter）只给**进过视口**的卡片挂：1008 张各挂一层背景模糊是必掉的帧，
    而 IntersectionObserver 把同时生效的数量压到同屏那几十张。
    ⚠️ 每次重画网格必须先 disconnect()：观察器会持有它 observe 过的元素，
    卡片是每次筛选都整批新建的，不摘就会一路攒下去（泄漏）。 */
 const GLASS_IO = ('IntersectionObserver' in window) ? new IntersectionObserver(es=>{
   es.forEach(en=>en.target.classList.toggle('g', en.isIntersecting));
+  /* 折射图与元素尺寸绑定，所以只能在卡片**进视口**、尺寸确定的这一刻算；
+     出视口就把类摘掉，下次进来按当时的尺寸重新挑桶。 */
+  if(LG.on) es.forEach(en=>{ const c=en.target;
+    if(c.classList.contains('g')) lgApply(c,'card'); else c.classList.remove('lgr'); });
 },{rootMargin:'140px'}) : null;
+if(LG.on){
+  lgApply(document.querySelector('header'),'nav');
+  let lgPend=0;
+  addEventListener('resize',()=>{ if(lgPend) return;
+    lgPend=requestAnimationFrame(()=>{ lgPend=0; lgRefresh(); }); });
+}
 
 /* ---------- 卡片键盘激活 ----------
    键盘那条路：Enter / Space 激活焦点所在的卡片（整张网格一个委托监听器，不给千张卡各挂）。
