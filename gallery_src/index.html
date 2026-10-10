@@ -496,7 +496,7 @@ main{position:relative;z-index:1}
   <div class="ctl"><label>配色</label><div class="opt" id="gTheme" title="昼 / 夜配色（状态会记住）">
     <button data-t="light">昼</button><button data-t="dark">夜</button>
   </div></div>
-  <div class="ctl"><label>页面</label><div class="opt"><button onclick="location.href='bgm.html'" title="游戏原声 BGM（opus，536 首）在线试听">音乐库</button><button onclick="location.href='backgrounds.html'" title="场景/界面背景图 1897 张，带配置表来的中文命名">背景库</button></div></div>
+  <div class="ctl"><label>页面</label><div class="opt"><button onclick="location.href='bgm.html'" title="游戏原声 BGM（opus，536 首）在线试听">音乐库</button><button onclick="location.href='backgrounds.html'" title="场景/界面背景图 1897 张，带配置表来的中文命名">背景库</button><button onclick="location.href='room3d.html'" title="3D 宿舍：场景包装配的 room.glb（299 个网格 / 5 页烘焙 lightmap / 5 盏灯）">3D 宿舍</button></div></div>
   <div class="hint" id="count"></div>
   <div class="hint" id="modehint"></div>
 </header>
@@ -1521,7 +1521,8 @@ async function renderLive2D(s, sk){
         for(const name in row){ const k=ix[name]; if(k===undefined) continue; o[k]=row[name]; nn++; }
         if(nn) snapHead[g]=o; }
       window.__snapDbg=()=>({url:snapUrl, state:'ok', params:Object.keys(snapP).length,
-        groups:Object.keys(snapHead).length, held:snapHold?snapHold.items.map(x=>[x[0],x[1],Math.round(x[2])]):[],
+        groups:Object.keys(snapHead).length,
+        held:snapHold?snapHold.items.map(x=>[x[0],x[1],Math.round(x[2])]):[],
         off:!!window.__snapOff });
     })();
     const fadeOf=(g,key)=>{ const d=g&&mm.definitions&&mm.definitions[g]&&mm.definitions[g][0];
@@ -1560,6 +1561,12 @@ async function renderLive2D(s, sk){
         const hold=Math.min(win, +hv[1]-0.02); if(hold<0.08) continue;
         items.push([idx,to,hold*1000]); }
       if(items.length) snapHold={items, t0:performance.now()}; });
+    /* 只有第一层（跨 clip 切换时钉住）。第二层「整族全灭就退回上一好值」实测后已撤销：
+       量出来 修法关/开 两种模式下**每一帧都有 18~20 个开关家族整族灭着**（那些家族本就不属于这条动作），
+       ⇒ "整族全灭"在模型级别不区分「该灭」与「闪了一下」，兜住它们一帧都没救回来，
+       反而每次家族正常关闭时把参数白钉 0.4 秒（把已经该消失的美术多留 0.4 秒）。
+       留下的教训记在 §123 追加-XIII：闪烁是**家族内子组**灭、别的成员还亮着，
+       所以判据必须落在子组上，而"哪几片是一组"正是还没判清的那道门。 */
     im.on('afterMotionUpdate',()=>{ const h=snapHold; if(!h) return;
       if(window.__snapOff){ snapHold=null; return; }
       const now=performance.now(); let alive=false;
