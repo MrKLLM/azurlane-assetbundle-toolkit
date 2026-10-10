@@ -329,7 +329,7 @@ JS_WRITERS = r"""(async (clip, holdSec, stepMs, nameList) => {
 })"""
 
 # ---------------------------------------------------------------- ④：运行时驱动扫描（代替 moc3 反查）
-JS_DRIVERS = r"""(async (names, nstep, clip, waitMs) => {
+JS_DRIVERS = r"""(async (names, nstep, clip, waitMs, pin) => {
   const core=window.__m.internalModel.coreModel, mm=window.__m.internalModel.motionManager;
   const M=core._model, P=M.parameters, D=M.drawables;
   const di=names.map(n=>window.__drawableIds.indexOf(n));
@@ -349,7 +349,14 @@ JS_DRIVERS = r"""(async (names, nstep, clip, waitMs) => {
   } else { try{ mm.stopAllMotions(); }catch(e){} }
   const base=[]; for(let i=0;i<P.count;i++) base.push(P.values[i]);
   const read=()=>ok.map(x=>+D.opacities[x[1]].toFixed(3));
+  // 可选：定格后把某几个参数钉成指定值再扫。查「第二道门」必须先把第一道门打开，
+  // 否则在乘性门下任何单参数扫描都看不见效果（本轮 ArtMesh325 就是这么一直漏掉的）。
+  if(pin&&pin.length){ for(const pv of pin){ const k=P.ids.indexOf(pv[0]);
+    if(k>=0){ base[k]=pv[1]; P.values[k]=pv[1]; } } }
   core.update(); const ref=read();
+  const pinEcho=(pin||[]).map(pv=>{ const k=P.ids.indexOf(pv[0]);
+    return [pv[0], k, k>=0? +P.values[k].toFixed(3): null, k>=0? +P.minimumValues[k].toFixed(3): null,
+            k>=0? +P.maximumValues[k].toFixed(3): null]; });
   const drv=[]; let updates=0;
   // ⚠️ 扫描点数必须 >2：moc3 的 ArtMeshOpacity 绑定**可以是非单调的**（花瓣那种只在量程中段显形，
   //   或 [0,a] 内从 1 掉到 0 之后恒 0）。只测 min/中/max 三点会把"只有中段才改变目标"的驱动者整个漏掉
@@ -386,7 +393,8 @@ JS_DRIVERS = r"""(async (names, nstep, clip, waitMs) => {
   const ref2=read(); let drift=0;
   for(let j=0;j<ref.length;j++) if(Math.abs(ref[j]-ref2[j])>1e-3) drift++;
   window.__ambOff=ambWas;
-  return JSON.stringify({targets:ok.map(x=>x[0]), ref, ref2, drift, miss, params:P.count, nstep, updates,
+  return JSON.stringify({targets:ok.map(x=>x[0]), ref, ref2, drift, miss, pinEcho,
+                         params:P.count, nstep, updates,
                          baseline:clip?('定格自 clip '+clip):'setup 默认姿态', group:grp,
                          drivers:drv, blockers});
 })"""
@@ -443,6 +451,117 @@ JS_MAPALL = r"""(async (nstep) => {
   return JSON.stringify({nstep, params:np, drawables:nd, updates,
     nParamsWithEffect:out.length, pairs, nFlatRejected:flat, nUntouched:un.length, untouched:un,
     ref:Array.from(ref, x=>+x.toFixed(3)), names:window.__drawableIds, map:out});
+})"""
+
+
+# ---------------------------------------------------------------- ⑪ 部件门：这条 clip 里"该亮不亮"的片，是被哪个部件关着的？
+# 为什么要它：`PartOpacity` **不随参数重算**——只有动画里带部件曲线的 clip 才会写它。
+# 实测 gezi_2：`idle` 有 150 条部件曲线、`home` **一条都没有** ⇒ 切进 home 后部件停在 idle 最后写的值上。
+# 游戏侧靠 Unity 的 `m_WriteDefaultValues=True`（所有状态都开着）在切换时把"这条状态不动画的属性"刷回默认值，
+# 我们没有这一步 ⇒ "台账说该亮、实态读 0"和恒等自检的"同输入不同输出"都是它。
+# 怎么读：播着目标 clip（不停运动、不冻结，避开上一轮那条"定格基线不自洽"），逐部件读
+# 默认值 / 当前值 / 是否等于默认，并把目标 mesh 所属部件单独列出来。
+JS_PARTCHECK = r"""(async (cfg) => {
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  const im=window.__m.internalModel, core=im.coreModel, mm=im.motionManager;
+  const M=core._model, D=M.drawables, PT=M.parts;
+  const frameN=()=>{ try{ PIXI.Ticker.shared.tick(performance.now()); }catch(e){}
+                     try{ window.__app.render(); }catch(e){} };
+  try{ mm.stopAllMotions(); }catch(e){}
+  if(cfg.clip){ try{ mm.startMotion(cfg.clip,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){} }
+  const nfr=Math.max(1,Math.round(cfg.wait*1000/cfg.stepMs));
+  for(let k=0;k<nfr;k++){ frameN(); await t(cfg.stepMs); }
+  const grp=(()=>{ try{ return mm.state.currentGroup; }catch(e){ return null; } })();
+  const hasDef=!!(PT.defaultValues&&PT.defaultValues.length===PT.count);
+  const off=[], same=[];
+  for(let i=0;i<PT.count;i++){
+    const o=PT.opacities[i], dv=hasDef?PT.defaultValues[i]:1;
+    if(Math.abs(o-dv)>1e-3){ off.push([PT.ids[i], +o.toFixed(3), +dv.toFixed(3),
+                                       +(PT.blendTypes?PT.blendTypes[i]:0)]); }
+  }
+  const targets=cfg.meshes.map(n=>{ const i=D.ids.indexOf(n);
+    if(i<0) return {mesh:n, err:'no-such-drawable'};
+    const pi=D.partMatch?D.partMatch[i]:-1;
+    return {mesh:n, op:+D.opacities[i].toFixed(3), part:(pi>=0&&PT.ids)?PT.ids[pi]:null,
+            partOp:pi>=0?+PT.opacities[pi].toFixed(3):null,
+            partDef:(pi>=0&&hasDef)?+PT.defaultValues[pi].toFixed(3):null,
+            partBlend:pi>=0&&PT.blendTypes?PT.blendTypes[pi]:null}; });
+  return JSON.stringify({clip:cfg.clip, playing:grp, frames:nfr, partCount:PT.count,
+    hasDefaults:hasDef, nonDefault:off.length, nonDefaultList:off.slice(0,60), targets});
+})"""
+
+
+# ---------------------------------------------------------------- ⑫ 找"合取门"：实态下灭着的片，是哪几个参数一起关着的？
+# 为什么需要：探测一（逐个参数扫量程）在**合取门**下必然空手而归——两道门同时关着时，
+# 单独打开任何一道都抬不起来。上一轮 191 个"挡路者"还是假象（判据写成 `读数>0.05`，
+# 被本来就亮着的对照目标满足了）。这里改成二分：把"实态 vs moc3 默认态"里取值不同的参数集合折半，
+# 只把一半还原成默认值，看目标是否亮起 ⇒ 门在那一半里；对半继续，直到只剩最小集合。
+# 每一拍都只调一次 core.update，且全程不停动作、不冻结基线（避开"定格基线不自洽"那条坑）。
+JS_GATEFIND = r"""(async (cfg) => {
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  const im=window.__m.internalModel, core=im.coreModel, mm=im.motionManager;
+  const M=core._model, P=M.parameters, D=M.drawables;
+  const ti=cfg.meshes.map(n=>P&&D.ids.indexOf(n)).filter(i=>i>=0);
+  // 两套 drawable 名字数组必须一致，否则本臂读的是别的片（臂 ⑤ 用 window.__drawableIds，本臂用 D.ids）
+  const idxCheck=cfg.meshes.map(n=>[n, D.ids.indexOf(n),
+      (window.__drawableIds||[]).indexOf(n), D.ids.length, (window.__drawableIds||[]).length,
+      (window.__drawableIds||[]).every((x,j)=>x===(D.ids[j]||'')) ? 'same' : 'DIFFER']);
+  if(!ti.length) return JSON.stringify({fail:'目标都不在模型里', meshes:cfg.meshes});
+  const frameN=()=>{ try{ PIXI.Ticker.shared.tick(performance.now()); }catch(e){}
+                     try{ window.__app.render(); }catch(e){} };
+  window.__cap=null; window.__wset=null;
+  const ambWas=window.__ambOff; window.__ambOff=true;
+  // ⚠️ 不配 --gclip 时基线必须先写 moc3 默认值：无头里页面停在 idle 的哪一帧是随机的，
+  //    "停在当前姿态直接扫"同一条命令会给出 273 与 0 两种答案（本轮真实踩过，别拿它下结论）。
+  if(!cfg.clip){ for(let i=0;i<P.count;i++) P.values[i]=P.defaultValues[i]; core.update(); }
+  //    ↑ 且必须和臂 ⑤ 一样把渲染循环停掉：留着 ticker 时同一姿态下读到的显隐会不一样（本轮实测）。
+  let tkWas=true; try{ tkWas=window.__app.ticker.started!==false; window.__app.ticker.stop(); }catch(e){}
+  try{ window.__m.autoUpdate=false; }catch(e){}
+  try{ mm.stopAllMotions(); }catch(e){}
+  if(cfg.clip){ try{ mm.startMotion(cfg.clip,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){}
+    window.__m.autoUpdate=true; try{ window.__app.ticker.start(); }catch(e){}
+    await new Promise(r=>setTimeout(r,cfg.waitMs));
+    try{ mm.stopAllMotions(); }catch(e){}
+    window.__m.autoUpdate=false; try{ window.__app.ticker.stop(); }catch(e){} }
+  const live=[]; for(let i=0;i<P.count;i++) live.push(P.values[i]);
+  for(const pv of (cfg.pin||[])){ const k=P.ids.indexOf(pv[0]); if(k>=0) live[k]=pv[1]; }
+  const read=(vals)=>{ for(let i=0;i<P.count;i++) if(Math.abs(P.values[i]-vals[i])>1e-9) P.values[i]=vals[i];
+                       core.update(); return ti.map(j=>+D.opacities[j].toFixed(3)); };
+  const dflt=P.defaultValues;
+  const diff=[]; for(let i=0;i<P.count;i++) if(Math.abs(live[i]-dflt[i])>1e-6) diff.push(i);
+  // 两个端点：① 全默认（保留 pin）② 全实态（保留 pin）
+  const defPinned=Array.from(dflt); for(const pv of (cfg.pin||[])){ const k=P.ids.indexOf(pv[0]); if(k>=0) defPinned[k]=live[k]; }
+  const atDefault=read(defPinned), atLive=read(live);
+  let cur=diff.slice(), found=[];
+  let steps=0;
+  while(cur.length && steps<400){
+    steps++;
+    const half=Math.ceil(cur.length/2), A=cur.slice(0,half), B=cur.slice(half);
+    let next=null;
+    if(cur.length===1){ const r=read((()=>{const v=defPinned.slice(); v[cur[0]]=live[cur[0]]; return v;})());
+      if(r.some(x=>x>0.5)) found.push([window.__pid[cur[0]], +live[cur[0]].toFixed(3), +dflt[cur[0]].toFixed(3), r]);
+      break; }
+    // 还原 A（A 用默认、其余候选用实态）能亮 ⇒ 门在 A；否则若在 B 同理；都不行 ⇒ 合取，两边都要留
+    const vA=defPinned.slice(); for(const i of cur) vA[i]=live[i]; for(const i of A) vA[i]=dflt[i];
+    const vB=defPinned.slice(); for(const i of cur) vB[i]=live[i]; for(const i of B) vB[i]=dflt[i];
+    const rA=read(vA), rB=read(vB);
+    const okA=rA.some(x=>x>0.5), okB=rB.some(x=>x>0.5);
+    if(okA && !okB){ cur=A; }
+    else if(okB && !okA){ cur=B; }
+    else if(okA && okB){ break; }        // 两半各自都能开门 ⇒ 冗余门，保留现状并记下来
+    else { break; }                       // 合取：必须两半同时还原才行 ⇒ 停止二分，报告当前集合
+  }
+  const finalSet=cur.slice();
+  const vAll=defPinned.slice(); for(const i of finalSet) vAll[i]=live[i];
+  const rAll=read(vAll);
+  for(let i=0;i<P.count;i++) P.values[i]=live[i];
+  core.update(); window.__ambOff=ambWas;
+  try{ window.__m.autoUpdate=true; }catch(e){}
+  try{ if(tkWas) window.__app.ticker.start(); }catch(e){}
+  return JSON.stringify({clip:cfg.clip, meshes:cfg.meshes, targets:ti, idxCheck,
+    nDiff:diff.length, atDefault:atDefault, atLive:atLive,
+    minSet:finalSet.map(i=>[window.__pid[i], +live[i].toFixed(3), +dflt[i].toFixed(3)]),
+    minSetRead:rAll, steps});
 })"""
 
 
@@ -669,8 +788,17 @@ def main():
     ap.add_argument("--nsweep", type=int, default=10, help="④/⑤ 每个参数在量程内扫多少个点（必须 >2，见头注释）")
     ap.add_argument("--drvclip", default="", help="④ 第二基准：先播这条 clip、等 --drvwait 秒定格后再扫（setup 基线下乘性门会漏）")
     ap.add_argument("--drvwait", type=float, default=10.0, help="④ 播 clip 后等几秒定格（要等到角色在画面内）")
+    ap.add_argument("--gatefind", default="", help="⑫ 合取门二分：逗号分隔的 mesh 名（实态下灭着的那些）")
+    ap.add_argument("--gclip", default="home", help="⑫ 定格自哪条 clip 的实态（空=用页面当前姿态）")
+    ap.add_argument("--gwait", type=float, default=4.0, help="⑫ 播几秒后取实态")
+    ap.add_argument("--gpin", default="", help="⑫ 两端都钉住的参数，形如 Param25:0.5（先打开第一道门）")
+    ap.add_argument("--drvpin", default="", help="④ 定格后把参数钉成指定值再扫，形如 Param25:0.5（查第二道门时先打开第一道门）")
     ap.add_argument("--mapall", action="store_true", help="⑤ 全量「参数→哪些 mesh 显隐」绑定表（落 .diag/l2d_opacity_map_<model>.json）")
     ap.add_argument("--deform", default="", help="⑨ 变形者闸：逗号分隔参数名，或 @文件（每行一个/JSON 列表）。落 .diag/l2d_deform_<model>.json")
+    ap.add_argument("--partcheck", default="", help="⑪ 部件门：逗号分隔的 mesh 名，读它们所属部件的默认值/当前值；配 --pcclip/--pcwait 决定播着哪条 clip 时读")
+    ap.add_argument("--pcclip", default="home", help="⑪ 先看哪条 clip 的实态（默认 home）")
+    ap.add_argument("--pcalso", default="idle", help="⑪ 对照组：再播这条 clip 读一遍（空=不读）")
+    ap.add_argument("--pcwait", type=float, default=4.0, help="⑪ 播几秒后读（不停运动、不冻结）")
     ap.add_argument("--snapab", default="", help="⑩ snap A/B：形如 idle->home，同一趟跑 修法关/开 两个模式，逐次 update 记时间轴（验收判据用这个，不用截图）")
     ap.add_argument("--snapA", default="ArtMesh36,ArtMesh42,ArtMesh43,ArtMesh44,ArtMesh51",help="⑩ A 组 mesh 名（切换前应亮着的那组）")
     ap.add_argument("--snapB", default="ArtMesh325,ArtMesh326,ArtMesh327,ArtMesh328,ArtMesh329,ArtMesh330",help="⑩ B 组 mesh 名（切换后应亮着的那组）")
@@ -849,9 +977,11 @@ def main():
     # —— ④ 驱动扫描
     dl = [x for x in a.drivers.split(",") if x]
     if dl:
-        raw4 = ev(JS_DRIVERS + "(%s, %s, %s, %s)" % (json.dumps(dl), json.dumps(max(3, a.nsweep)),
+        pin4 = [[x.split(":")[0], float(x.split(":")[1])]
+                for x in re.split(r"[,\s]+", a.drvpin or "") if ":" in x]
+        raw4 = ev(JS_DRIVERS + "(%s, %s, %s, %s, %s)" % (json.dumps(dl), json.dumps(max(3, a.nsweep)),
                                                      json.dumps(a.drvclip or ""),
-                                                     json.dumps(int(a.drvwait * 1000))))
+                                                     json.dumps(int(a.drvwait * 1000)), json.dumps(pin4)))
         try:
             dv = json.loads(raw4) if isinstance(raw4, str) and raw4.strip().startswith("{") else {"err": str(raw4)[:300]}
         except Exception:
@@ -879,6 +1009,8 @@ def main():
                 print("   ⚠️ 这些名字不在模型里: %s" % dv["miss"])
             print("   基线 = %s（在播=%s）目标基准透明度 %s"
                   % (dv.get("baseline"), dv.get("group"), dv.get("ref")))
+            if dv.get("pinEcho") is not None:
+                print("   钉值回显 [参数名, 索引, 钉后实际值, min, max]: %s" % dv.get("pinEcho"))
             print("   恒等自检: 扫完回到基线输入重读 = %s ⇒ %s"
                   % (dv.get("ref2"), ("一致 ✅" if not dv.get("drift")
                                       else "**漂移 %d 个目标 ⇒ 系统里还有不随输入重算的第二套状态，"
@@ -971,6 +1103,69 @@ def main():
             print("   时间轴 → %s / .diag/l2d_snapab_%s_{off,on}.txt" % (f10, a.model))
         else:
             print("\n== ⑩ snap A/B 未出结果: %s" % str(ab)[:300])
+
+    # —— ⑪ 部件门：同一趟里分别"播着 A 条 clip"与"播着 B 条 clip"读部件实态
+    if a.partcheck:
+        meshes = [x.strip() for x in a.partcheck.split(",") if x.strip()]
+        pcs = []
+        for c in [a.pcclip, a.pcalso]:
+            if not c:
+                continue
+            raw11 = ev(JS_PARTCHECK + "({clip:%s, meshes:%s, wait:%s, stepMs:%s})"                       % (json.dumps(c), json.dumps(meshes), a.pcwait, max(16, a.step)))
+            try:
+                pcs.append(json.loads(raw11) if isinstance(raw11, str) and raw11.strip().startswith("{")
+                             else {"clip": c, "err": str(raw11)[:300]})
+            except Exception:
+                pcs.append({"clip": c, "err": str(raw11)[:300]})
+        f11 = os.path.join(ROOT, ".diag", "l2d_partcheck_%s.json" % a.model)
+        with open(f11, "w", encoding="utf-8") as fh:
+            json.dump({"meshes": meshes, "runs": pcs}, fh, ensure_ascii=False)
+        print("\n== ⑪ 部件门（目标 %s）→ %s" % (",".join(meshes[:4]), f11))
+        for r in pcs:
+            if "err" in r:
+                print("   clip=%s 未出结果: %s" % (r.get("clip"), r["err"]))
+                continue
+            print("   播 %s（在播=%s，%d 帧后读）部件 %d 个，非默认的 %d 个；默认值可读=%s"
+                  % (r["clip"], r["playing"], r["frames"], r["partCount"], r["nonDefault"], r["hasDefaults"]))
+            for x in r["targets"]:
+                print("     %-14s op=%-6s 部件=%-22s 部件当前=%-6s 默认=%-6s blend=%s"
+                      % (str(x.get("mesh"))[:14], x.get("op"), str(x.get("part"))[:22],
+                         x.get("partOp"), x.get("partDef"), x.get("partBlend")))
+            if r["nonDefaultList"]:
+                print("     非默认部件前 12: %s" % ", ".join(
+                    "%s(现%.2f/默%.2f)" % (n[0][:18], n[1], n[2]) for n in r["nonDefaultList"][:12]))
+
+    # —— ⑫ 合取门二分：实态下灭着的片，是哪几个参数一起关着的（逐个扫量程在合取门下必然空手而归）
+    if a.gatefind:
+        meshes = [x.strip() for x in a.gatefind.split(",") if x.strip()]
+        gpin = [[x.split(":")[0], float(x.split(":")[1])]
+                for x in re.split(r"[,\s]+", a.gpin or "") if ":" in x]
+        cfg12 = {"meshes": meshes, "clip": a.gclip or "", "waitMs": int(max(0.0, a.gwait) * 1000),
+                 "pin": gpin}
+        raw12 = ev(JS_GATEFIND + "(" + json.dumps(cfg12) + ")")
+        try:
+            g12 = json.loads(raw12) if isinstance(raw12, str) and raw12.strip().startswith("{") else {"err": str(raw12)[:300]}
+        except Exception:
+            g12 = {"err": str(raw12)[:300]}
+        f12 = os.path.join(ROOT, ".diag", "l2d_gatefind_%s.json" % a.model)
+        with open(f12, "w", encoding="utf-8") as fh:
+            json.dump({"cfg": cfg12, "res": g12}, fh, ensure_ascii=False)
+        if "err" in g12 or "fail" in g12:
+            print("\n== ⑫ 合取门未出结果: %s" % str(g12)[:300])
+        else:
+            ok12 = max(g12["minSetRead"] or [0]) > 0.5
+            print("\n== ⑫ 合取门二分（目标 %s，clip=%s，pin=%s）"
+                  % (",".join(meshes), cfg12["clip"] or "setup", cfg12["pin"]))
+            print("   名字数组自证 [名, D.ids 下标, __drawableIds 下标, 长度, 是否逐位相同]: %s"
+                  % (g12.get("idxCheck"),))
+            print("   与默认值不同的参数 %d 个 | 全默认+pin 读数 %s | 全实态+pin 读数 %s"
+                  % (g12["nDiff"], g12["atDefault"], g12["atLive"]))
+            print("   二分收敛到 %d 个参数（%d 步）；只还原这一组时读数 %s → %s"
+                  % (len(g12["minSet"]), g12["steps"], g12["minSetRead"],
+                     "门就在这组里" if ok12 else "仍不够 = 合取门，需要更多参数同时还原"))
+            for x in g12["minSet"][:20]:
+                print("     %-24s 实态 %-9s 默认 %-9s" % (str(x[0])[:24], x[1], x[2]))
+            print("   台账 → %s" % f12)
 
     # —— ⑨ 变形者闸：这个参数在自己量程内挪不挪几何（挪 = 不能 snap，会把姿态硬跳放回来）
     if a.deform:
