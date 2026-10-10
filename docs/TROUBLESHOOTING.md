@@ -8268,3 +8268,79 @@ PASS  再开回来 ⇒ 逐字节回到原画面
 
 - `scripts/diag/doc_verbatim_archive.py`（基线守卫与四条核对的行尾口径）
 - 触发场景：`PROJECT_STATUS.md` 534 行 > 400 行红线，需外迁 §6 的 3D 宿舍房间轮流水（65 行）
+
+
+## §131. 「唯一顶点数」报出 224：`BufferAttribute` 根本没有 `uuid`，按它去重会把十个属性塌成一个键（2026-10-10 画廊角色）
+
+### 现象
+
+页面给角色做聚合计数，想同时报两个口径（Unity 子网格共用同一份顶点缓冲 ⇒
+按 primitive 求和会数两遍）：
+
+```js
+const uniqPos = new Map();
+... uniqPos.set(pa.uuid, pa.count);
+const posUniq = [...uniqPos.values()].reduce((a,b)=>a+b, 0);
+```
+
+结果 `posTotal=45058` 对、`posUnique=224`。**224 是最后一个网格（脖子）的顶点数**——
+Map 里只剩一个键。判据「唯一顶点 == GLB 独立解析的 22606」当场报红。
+
+### 根因
+
+`THREE.BufferAttribute` **没有 `uuid` 属性**（three.js 里带 `uuid` 的是
+`Object3D` / `Material` / `Texture` / `BufferGeometry`，属性对象不在其列）。
+于是 `pa.uuid` 对 10 个属性全是 `undefined` ⇒ `Map.set(undefined, count)` 反复覆盖同一个键，
+最后只剩遍历到的那一个。
+
+这类 bug 的阴险之处：**代码看着完全合理、语法没错、跑起来也不报错**，
+只是"按某个身份去重"静默退化成"只留最后一个"。报出来的数还特别像回事
+（224 恰好是脖子网格的真实顶点数，所以不会让人怀疑是聚合坏了，反而怀疑模型少加载了）。
+
+### 修法
+
+按**对象身份**去重，用 `Set` 装属性对象本身，再遍历求和：
+
+```js
+const uniqPos = new Set();
+if(pa){ posPrim += pa.count; uniqPos.add(pa); }
+let posUniq = 0; uniqPos.forEach(pa => { posUniq += pa.count; });
+```
+
+### 同一条判据顺带抓出的第二件事：站位只抄了位置、没抄旋转
+
+`room.character.json` 第一版每个 `PlayerPoint` 只有 `pos`。⇒ 换到「椅子」站位时她仍沿用
+`Player` 根的朝向，坐椅子会面朝错方向。补抄每个点自己的 `+Z` 之后，
+四个站位的 yaw 是 `[0.0, 0.0, 2.2396, 2.4391]`（床边 / 椅子各带一个真实朝向）。
+⇒ 判据也跟着加了两条：**站位 yaw 不得全相同**（全相同就说明只抄了位置），
+以及**页面落点与朝向必须逐个等于 sidecar 声明值**。
+
+### 还有一条判据要配"可测的前置条件"，不许无条件要求画面改变
+
+「切每个站位都必须改变画面」这条一开始是**无条件**的，结果「表演点」判红——
+她在那个站位确实动了（坐标逐字对上 sidecar），只是**站在当前机位的画面外**。
+⇒ 判据不能放宽成"差不多就行"，而要把它依赖的条件量测出来：页面投影她的位置到 NDC，
+导出 `onScreen`；探针**只在她于画面内时**要求画面改变，画面外就打印一句
+"她在当前机位画面外（ndc [-3.861, 0.129]）⇒ 不要求画面改变"。
+这样"没改变"要么是真坏了、要么被明确解释，不会被平均掉。
+
+### 判据（可复用）
+
+- **按某个字段去重之前，先证明那个字段存在且互不相同。**
+  一行就够：`assert attrs.every(a => a.id !== undefined && new Set(ids).size === n)`。
+  没有这个断言，"塌成一个键"会伪装成"模型只加载了一部分"，把排查引向完全错误的方向。
+- **聚合数报"两个口径"时，两个都要有独立来源。** 这里 `45,058`（按 primitive）与
+  `22,606`（唯一 accessor）都从 GLB 独立重算一遍再比；只报一个就会拿一个口径去对
+  另一个口径的期望值，报出解释不了的假红。
+- **"GLB ↔ 源包"这条腿要当场跑，不能引用上一轮的结论**：探针直接起
+  `dorm3d_to_gltf.py --verify <glb> --against <源包>` 并要求 exit 0。
+  否则"页面 ↔ GLB"两边共享同一个装配错误就是全绿（§128 同族）。
+- **视觉前置条件不成立的判据，要先量那个前置条件**（在不在画面内、有没有被遮挡、
+  帧数有没有推进），再决定判据是否适用；判据的红/绿必须能区分"产品坏了"和"这次不该有反应"。
+
+### 涉及文件
+
+- `gallery_src/room3d.html`（`loadChar` 的去重与两口径、`placeChar` 的站位朝向与 NDC 导出）
+- `scripts/dorm3d_room_to_gltf.py`（`character_placement` 补抄每个 `PlayerPoint` 的 `+Z`）
+- `scripts/diag/room3d_page_probe.py`（§5d 角色段：当场 `--verify`、两口径、站位落点与朝向、
+  `onScreen` 前置条件、开关可逆）

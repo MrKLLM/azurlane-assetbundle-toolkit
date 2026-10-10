@@ -586,6 +586,15 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
                   open(side, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         # 环境光/灯强度单独落一份：查看端要按包内口径渲染，不能把颜色硬写进页面
         render_settings(scene, os.path.splitext(out)[0] + ".render.json")
+        # 角色摆位单独落一份：她在另一套包里，页面只认这份 sidecar 给的坐标
+        cp = character_placement(scene)
+        json.dump(cp, open(os.path.splitext(out)[0] + ".character.json", "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=1)
+        if verbose:
+            print("  角色摆位 %s: %s%s" % (
+                "可用" if cp.get("available") else "不可用（" + str(cp.get("reason")) + "）",
+                "Player@%s" % (cp.get("player_root") or {}).get("pos"),
+                " / 站位 " + ", ".join("%s%s" % (p["label"], p["pos"]) for p in cp.get("points") or [])))
     truth["lights"] = len(lights)
     truth["lights_skipped"] = lskip
     truth["lm_pages"] = len(pages)
@@ -1144,6 +1153,104 @@ def render_settings(scene, out_path):
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
     return out
+
+
+def base_scene_path(scene):
+    """房间场景旁边那份 `_base_scene` —— 角色与相机摆位在**它**里面，不在 `_scene` 里。
+
+    ⚠️ 这条区分是本轮实测出来的：`map_siriushostel_01_scene`（623 个命名对象）里
+    **没有任何角色**，只有两盏叫 `CharacterLight` 的**后期体积**（挂在
+    `Settings/…/VolumesWithLights/GlobalVolume` 下）——按名字把它当角色锚点会把她摆错地方。
+    真正的锚点在 `_base_scene`（1,025 个对象）：根节点 `Player` + 六个 `PlayerPoint`
+    （父节点分别叫 `Bed` / `Chair` / `DormLvPerfomance01` / `Default` / `IKExecutionOrder`）。
+    """
+    p = scene[:-len("_scene")] + "_base_scene" if scene.endswith("_scene") else ""
+    return p if p and os.path.isfile(p) else ""
+
+
+def character_placement(scene):
+    """从 `_base_scene` 抄出角色摆位（Unity 世界 TRS → 镜像成 glTF 口径），不落盘只回字典。
+
+    镜像与全项目同一套：`M_gltf = C·M_unity·C`，`C=diag(-1,1,1)`，
+    因为它是每个节点局部 TRS 上的对合，所以**逐级镜像后再复合**与"整体镜像"等价：
+    位置 x 取反、四元数 (x,y,z,w)→(x,-y,-z,w)、缩放不变。
+    """
+    import dorm3d_pptr_resolve as PP
+    bp = base_scene_path(scene)
+    if not bp:
+        return {"available": False, "reason": "没找到 _base_scene（角色摆位无权威依据）",
+                "scene": os.path.basename(scene)}
+    env = UnityPy.load(bp)
+    own, trs, tr_of_go, _ = scene_tables(env)
+    TR = {o.path_id: o for o in trs}
+
+    def go_name(pid):
+        for (_s, q), o in own.items():
+            if q == pid:
+                try:
+                    return o.read().m_Name
+                except Exception:
+                    return "?"
+        return "?"
+
+    def tr_name(tr_obj):
+        gp = getattr(tr_obj.read().m_GameObject, "path_id", 0) or 0
+        return go_name(gp)
+
+    memo = {}
+
+    def world(pid):
+        if pid in memo:
+            return memo[pid]
+        tr = TR[pid].read()
+        t, r, s = tr.m_LocalPosition, tr.m_LocalRotation, tr.m_LocalScale
+        # 先镜像局部 TRS，再按与装配器相同的行向量约定复合
+        M = _quat_mat([-float(t.x), float(t.y), float(t.z)],
+                      [float(r.x), -float(r.y), -float(r.z), float(r.w)],
+                      [float(s.x), float(s.y), float(s.z)])
+        fp = getattr(tr.m_Father, "path_id", 0) or 0
+        if fp in TR:
+            PM = world(fp)
+            M = _mul(PM[0], PM[1], M[0], M[1])
+        memo[pid] = M
+        return M
+
+    WANT = {"Bed": "床边", "Chair": "椅子", "DormLvPerfomance01": "表演点", "Default": "默认"}
+    root, points = None, []
+    for pid in TR:
+        nm = tr_name(TR[pid])
+        fp = getattr(TR[pid].read().m_Father, "path_id", 0) or 0
+        pn = tr_name(TR[fp]) if fp in TR else ""
+        if nm == "Player" and not fp:
+            A_, t_ = world(pid)
+            # `_quat_mat`/`_mul` 是**行向量**约定（点写成 p·M），所以"+Z 的像"是第三行；
+            # 局部 TRS 已经逐级镜像过，这里**不许**再翻一次 x（翻了等于镜像两遍 = 没镜像）。
+            f = list(A_[2])
+            root = {"pos": [round(v, 4) for v in t_],
+                    "fwd": [round(v, 4) for v in f],
+                    "yaw_from_fwd": round(math.atan2(f[0], f[2]), 4)}
+        elif nm == "PlayerPoint" and pn in WANT:
+            A_, t_ = world(pid)
+            # 站位**自己带朝向**（坐椅子要面朝椅子），只抄位置等于把四个点当成同一个姿势
+            f = list(A_[2])
+            points.append({"key": pn, "label": WANT[pn],
+                           "pos": [round(v, 4) for v in t_],
+                           "fwd": [round(v, 4) for v in f],
+                           "yaw_from_fwd": round(math.atan2(f[0], f[2]), 4)})
+    seen, uniq = set(), []
+    for p in points:
+        if p["key"] in seen:
+            continue
+        seen.add(p["key"])
+        uniq.append(p)
+    return {"available": bool(root or uniq), "base_scene": os.path.basename(bp),
+            "player_root": root, "points": uniq,
+            "convention": "位置由 _base_scene 的 Transform 链复算并按 C·M·C 镜像；"
+                          "y=0 是脚底（PlayerPoint 全部落在 y=0）",
+            "notes": ["动画未导出：本包 48 个 AnimationClip 的曲线全为 0 条、数据在 m_MuscleClipSize"
+                      "（Humanoid 肌肉格式），要骨骼动画得先攻 Avatar muscle→bone 映射 ⇒ 页面只能是 setup pose",
+                      "模型自身朝前轴未证：yaw 由场景给的 +Z 推，若目视发现背对，"
+                      "那是**模型局部轴**与场景约定不一致，校正量必须标注为观感校正、不许写进包内数据"]}
 
 
 def light_dir_anchor(ctx, g):

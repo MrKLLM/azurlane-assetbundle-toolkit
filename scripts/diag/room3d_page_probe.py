@@ -85,7 +85,8 @@ def reachability():
         '页面里探针钩子与 vendor 路径都在（不是旧版残留）')
     for rel, lo in [('dorm3d/room.glb', 20_000_000), ('dorm3d/room.glb.truth.json', 5_000),
                     ('dorm3d/room.lightmaps.json', 5_000), ('dorm3d/room.render.json', 300),
-                    ('dorm3d/room.views.json', 300),
+                    ('dorm3d/room.views.json', 300), ('dorm3d/room.character.json', 400),
+                    ('dorm3d/tianlangxing.glb', 5_000_000),
                     ('vendor/three/three.module.min.js', 100_000),
                     ('vendor/three/jsm/controls/OrbitControls.js', 2_000),
                     ('vendor/three/jsm/postprocessing/UnrealBloomPass.js', 2_000),
@@ -264,6 +265,93 @@ def pick_view(ev, i):
               pos:window.__ROOM3D.camPos, on:b.classList.contains('on')};})()""" % i)
 
 
+def send_key(cmd, ch, down=True):
+    """发**真实键盘事件**（CDP Input.dispatchKeyEvent），不是在页面里 eval 改状态。
+
+    判据要打在"产品真的收到了这个输入"上：eval 里直接 walk.keys.add('w') 只能证明
+    我写的分支会动，证明不了 keydown 监听器接得住真按键（浏览器焦点/修饰键/重复事件都在中间）。
+    """
+    up = 'keyUp' if not down else 'keyDown'
+    vk = {'Shift': 16, 'w': 87, 'a': 65, 's': 83, 'd': 68, 'q': 81, 'e': 69}.get(ch, ord(ch.upper()))
+    cmd('Input.dispatchKeyEvent', {'type': up, 'key': ch.lower() if ch != 'Shift' else 'Shift',
+                                   'code': 'ShiftLeft' if ch == 'Shift' else 'Key' + ch.upper(),
+                                   'windowsVirtualKeyCode': vk, 'nativeVirtualKeyCode': vk})
+
+
+def hold_key(cmd, ev_, ch, frames=6):
+    """按住一个键，**等 rAF 真的走过若干帧**再松手。
+
+    ⚠️ 不能"按住 0.8 秒"就完事：无头浏览器的 rAF 是稀疏的（这是本项目记过的"hidden 标签页
+    不出帧"同族坑）。实测按住 W 0.8 秒只前进了**一个 tick**（位移 0.110 m = 恰好一帧的量），
+    于是"位移 > 0.05"这种判据会在**产品其实没正常跑**的情况下侥幸通过，
+    或者反过来把好的实现判红。⇒ 判据必须落在"帧数确实推进了"上，再谈位移。
+    """
+    f0 = ev_('window.__ROOM3D.frames') or 0
+    send_key(cmd, ch, True)
+    adv = 0
+    for _ in range(80):
+        adv = (ev_('window.__ROOM3D.frames') or 0) - f0
+        if adv >= frames:
+            break
+        time.sleep(0.1)
+    send_key(cmd, ch, False)
+    time.sleep(0.3)
+    return ev_('window.__ROOM3D.camPos'), ev_('window.__ROOM3D.keysSeen'), adv
+
+
+def dist(a, b):
+    if not a or not b:
+        return 1e9
+    return max(abs(x - y) for x, y in zip(a, b))
+
+
+def char_glb_counts():
+    """角色 GLB 的独立计数。⚠️ 顶点必须报**两个口径**，否则会拿 45,058 去对 22,606 报假红：
+    Unity 的子网格是"同一份顶点缓冲 + 各自索引区间"，装配器为每个 submesh 出一个 primitive、
+    都指向同一个 POSITION accessor ⇒ 按 primitive 求和会把共用顶点数两遍。
+    """
+    path = os.path.join(GAL, 'dorm3d', 'tianlangxing.glb')
+    raw = open(path, 'rb').read()
+    jl, jt = struct.unpack_from('<II', raw, 12)
+    g = json.loads(raw[20:20 + jl].decode('utf-8'))
+    acc = g.get('accessors', [])
+    prim = uniq = 0
+    seen = set()
+    for m in g.get('meshes', []):
+        for p in m.get('primitives', []):
+            ai = p.get('attributes', {}).get('POSITION')
+            if ai is None:
+                continue
+            prim += acc[ai]['count']
+            if ai not in seen:
+                seen.add(ai)
+                uniq += acc[ai]['count']
+    return {"primitives": sum(len(m.get('primitives', [])) for m in g.get('meshes', [])),
+            "pos_per_primitive": prim, "pos_unique": uniq,
+            "skins": len(g.get('skins', [])),
+            "mesh_nodes": sum(1 for n in g.get('nodes', []) if 'mesh' in n),
+            "materials": len(g.get('materials', []))}
+
+
+def char_source_verify():
+    """`GLB ↔ 源包` 这条腿**当场跑**，不引用上一轮的结论。
+
+    为什么不能引用：装配器的 `--verify` 是逐网格比"GLB 里的 POSITION 计数 == 源包声明值"，
+    那是唯一能抓住"顶点/子网格切错"的判据；产物是上一轮建的，这一轮如果只比
+    "页面 ↔ GLB"，两边共享同一个错就全绿（生成器与校验器共享假设，§128 同族）。
+    """
+    glb = os.path.join(GAL, 'dorm3d', 'tianlangxing.glb')
+    res = os.path.join(ROOT, 'files', 'AssetBundles', 'dorm3d', 'character',
+                       'tianlangxing_db', 'res', 'tianlangxing_noshoes')
+    if not (os.path.isfile(glb) and os.path.isfile(res)):
+        return 2, '缺 GLB 或源包'
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'scripts', 'dorm3d_to_gltf.py'),
+                        res, '--verify', glb, '--against', res],
+                       capture_output=True, text=True, timeout=600)
+    tail = [l for l in (r.stdout or '').splitlines() if '断言' in l or 'FAIL' in l or '不符' in l]
+    return r.returncode, (tail or [(r.stderr or '')[-160:]])[-1][:170]
+
+
 def main():
     if not CHROME:
         print('[FAIL] 找不到 Chrome/Edge（设 AL_CHROME）')
@@ -366,6 +454,157 @@ def main():
         settle(ev)
         pick_view(ev, 0)
         settle(ev)
+
+        print('== 5c. 行走漫游：真键盘/真鼠标事件必须改变相机，切回环绕后必须失效 ==')
+        settle(ev)
+        h0, _, _ = stable(ev)
+        p0 = ev('window.__ROOM3D.camPos')
+        mb = ev("""(()=>{const b=document.querySelector('#mOpt button[data-m="walk"]');
+          if(!b) return {nf:1}; b.click();
+          return {mode:window.__ROOM3D.mode, hint:document.getElementById('opHint').textContent,
+                  cls:b.classList.contains('on')};})()""")
+        say(isinstance(mb, dict) and mb.get('mode') == 'walk' and mb.get('cls'),
+            f'切进行走模式：{json.dumps(mb, ensure_ascii=False)[:110]}')
+        if not (isinstance(mb, dict) and mb.get('mode') == 'walk'):
+            say(False, '进不了行走模式 ⇒ 后面 6 条行走判据全部不作结论')
+        else:
+            time.sleep(0.5)
+            p1, ks, adv = hold_key(cmd, ev, 'w', 6)
+            moved = dist(p0, p1)
+            say(adv >= 3, f'行走模式下 rAF 确实推进了 {adv} 帧（不足 3 帧 ⇒ 下面所有位移判据都是空的）')
+            # dist() 缺值时返回 1e9 表示"不可比"，绝不能被 `> 0.05` 读成"走过了"
+            say(bool(p0) and bool(p1) and moved > 0.05,
+                f'按住 W 走 6 帧：相机从 {p0} 走到 {p1}（最大位移 {moved:.3f} m）')
+            say(isinstance(ks, list) and 'shift' not in ks, f'松开后按键集合已清空：{ks}')
+            pa = ev('window.__ROOM3D.camPos'); time.sleep(0.45)
+            pb = ev('window.__ROOM3D.camPos')
+            say(pa == pb and bool(pa), f'松手后不漂：两次读相机位置相同（{pa}）')
+            cp = ev('window.__ROOM3D.camPos')
+            y0 = cp[1] if cp else None
+            _p, _k, adv2 = hold_key(cmd, ev, 'q', 10)
+            cp2 = ev('window.__ROOM3D.camPos')
+            y1 = cp2[1] if cp2 else None
+            say(y1 is not None and y1 >= 0.05 - 1e-6,
+                f'按住 Q 走 10 帧往下钻：视点被夹在 {y1} m（不许穿到地板下，起始 {y0}）')
+            yaw0 = ev('window.__ROOM3D.yaw')
+            cmd('Input.dispatchMouseEvent', {'type': 'mousePressed', 'x': 700, 'y': 500,
+                                             'button': 'left', 'buttons': 1, 'clickCount': 1})
+            for i in range(1, 9):
+                cmd('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': 700 + 22 * i, 'y': 500 + 4 * i,
+                                                 'button': 'left', 'buttons': 1})
+            cmd('Input.dispatchMouseEvent', {'type': 'mouseReleased', 'x': 880, 'y': 532,
+                                             'button': 'left', 'buttons': 0, 'clickCount': 1})
+            time.sleep(0.4)
+            yaw1 = ev('window.__ROOM3D.yaw')
+            say(yaw0 is not None and yaw1 is not None and abs((yaw1 or 0) - (yaw0 or 0)) > 0.05,
+                f'按住左键拖 176px：朝向 yaw 从 {yaw0} 变到 {yaw1}')
+            say(json.dumps(ev(HASH_JS), sort_keys=True) != h0, '行走模式下的移动/转向确实改变了画面')
+            sp0 = ev('window.__ROOM3D.walkSpeed')
+            cmd('Input.dispatchMouseEvent', {'type': 'mouseWheel', 'x': 700, 'y': 500,
+                                             'deltaX': 0, 'deltaY': -300})
+            time.sleep(0.3)
+            sp1 = ev('window.__ROOM3D.walkSpeed')
+            say(sp1 is not None and sp0 is not None and abs(sp1 - sp0) > 0.05,
+                f'滚轮改移动速度：{sp0} → {sp1} m/s')
+            # 反向对照：切回环绕后，同样的按键必须**不再**改变相机
+            ev("""(()=>{const b=document.querySelector('#mOpt button[data-m="orbit"]'); b.click();})()""")
+            time.sleep(0.5)
+            say(ev('window.__ROOM3D.mode') == 'orbit', '切回环绕模式')
+            q0 = ev('window.__ROOM3D.camPos')
+            _p, _k, adv3 = hold_key(cmd, ev, 'w', 6)
+            q1 = ev('window.__ROOM3D.camPos')
+            say(adv3 >= 3, f'环绕模式下 rAF 仍在推进（{adv3} 帧）⇒ "相机不动"不是因为没跑帧')
+            say(dist(q0, q1) < 1e-6,
+                f'反向对照：环绕模式下按住 W 相机**不动**（{q0} → {q1}，位移 {dist(q0, q1):.1e}）'
+                '—— 行走监听器没有偷偷常驻')
+            r = ev("""(()=>{const b=document.querySelector('.sw[data-k="reset"]');
+              if(!b) return {nf:1};
+              const before=window.__ROOM3D.camPos; b.click();
+              return {before:before, after:window.__ROOM3D.camPos,
+                      home:window.__ROOM3D.home?window.__ROOM3D.home.pos:null};})()""")
+            time.sleep(0.4)
+            rp = ev('window.__ROOM3D.camPos')
+            home = (r or {}).get('home') if isinstance(r, dict) else None
+            say(bool(home) and dist(rp, home) < 1e-3,
+                f'复位视角：点完落在 home.pos 上（现在 {rp} vs 声明 {home}，点击前 {isinstance(r,dict) and r.get("before")}）')
+
+        print('== 5d. 角色（天狼星）：GLB↔源包当场验 + 页面↔GLB 两口径 + 站位逐个落点 ==')
+        rc, note = char_source_verify()
+        say(rc == 0, f'角色 GLB ↔ 源包逐网格顶点数当场核对（exit={rc}）：{note}')
+        try:
+            cpl = json.load(io.open(os.path.join(GAL, 'dorm3d', 'room.character.json'), encoding='utf-8'))
+        except Exception as e:
+            cpl = {'available': False, '_err': str(e)[:120]}
+        say(bool(cpl.get('available')) and len(cpl.get('points') or []) == 4,
+            f"摆位 sidecar：available={cpl.get('available')} 站位 {len(cpl.get('points') or [])} 个"
+            f"（{[p['label'] for p in cpl.get('points') or []]}）")
+        yaws = sorted({round(p.get('yaw_from_fwd', 0), 3) for p in cpl.get('points') or []})
+        say(len(yaws) >= 2, f'站位各自带朝向（出现的 yaw 值 {yaws}）——'
+            '若四个点 yaw 全相同，说明只抄了位置没抄旋转，坐椅子就会面朝错方向')
+        cg = char_glb_counts()
+        print('   角色 GLB 独立计数:', json.dumps(cg, ensure_ascii=False))
+        settle(ev)
+        pre, _, _ = stable(ev)
+        r = ev("""(()=>{const b=document.querySelector('.sw[data-k="char"]'); if(!b) return {nf:1};
+          const v0=window.__ROOM3D.on.char; b.click();
+          return {v0:v0};})()""")
+        # 角色模型 9.6 MB，要等它真的解出来（判据落在 S.char.loaded，不是等固定秒数）
+        ok_load = ev("""(async()=>{const t=m=>new Promise(r=>setTimeout(r,m));
+          for(let i=0;i<200 && !(window.__ROOM3D.char&&window.__ROOM3D.char.loaded);i++) await t(150);
+          const c=window.__ROOM3D.char||{};
+          return {loaded:!!c.loaded, err:window.__ROOM3D.err, meshes:c.meshes,
+                  posTotal:c.posTotal, posUnique:c.posUnique, skinned:c.skinned,
+                  pos:c.pos, spot:c.spot, on:window.__ROOM3D.on.char,
+                  spots:[...document.querySelectorAll('#spots .sw')].map(b=>b.dataset.s)};})()""")
+        say(isinstance(ok_load, dict) and ok_load.get('on') is True and ok_load.get('loaded') is True
+            and not ok_load.get('err'),
+            f'开角色：点击落地且模型真解出来（{json.dumps(ok_load, ensure_ascii=False)[:150]}）')
+        if isinstance(ok_load, dict) and ok_load.get('loaded'):
+            say(ok_load.get('meshes') == cg['primitives'],
+                f"网格 {ok_load['meshes']} == GLB primitive {cg['primitives']}")
+            say(ok_load.get('posTotal') == cg['pos_per_primitive'] and ok_load.get('posUnique') == cg['pos_unique'],
+                f"顶点两口径：页面 按primitive {ok_load['posTotal']} / 唯一 {ok_load['posUnique']}"
+                f" == GLB {cg['pos_per_primitive']} / {cg['pos_unique']}"
+                '（只报一个就会拿 45,058 去对 22,606 报假红）')
+            say(ok_load.get('skinned') == cg['primitives'],
+                f"蒙皮网格 {ok_load['skinned']}（每个 primitive 都该是 SkinnedMesh，"
+                '少一个就是 skin 挂错节点）')
+            pr_ = (cpl.get('player_root') or {}).get('pos')
+            say(pr_ and dist(ok_load.get('pos'), pr_) < 1e-3,
+                f"初始落在场景 Player 的包内坐标 {pr_}（页面 {ok_load.get('pos')}）")
+            for p in cpl.get('points') or []:
+                before, _, _ = stable(ev)
+                got = ev("""(()=>{const b=document.querySelector('#spots .sw[data-s="%s"]');
+                  if(!b) return {nf:1}; b.click();
+                  return {spot:window.__ROOM3D.char.spot, pos:window.__ROOM3D.char.pos,
+                          yaw:window.__ROOM3D.char.yaw,
+                          onScreen:window.__ROOM3D.char.onScreen, ndc:window.__ROOM3D.char.ndc};})()"""
+                         % p['key'])
+                settle(ev)
+                after, _, _ = stable(ev)
+                landed = (isinstance(got, dict) and got.get('spot') == p['key']
+                          and dist(got.get('pos'), p['pos']) < 1e-3)
+                yaw_ok = (isinstance(got, dict) and got.get('yaw') is not None
+                          and abs(got['yaw'] - round(p.get('yaw_from_fwd', 0), 4)) < 1e-3)
+                say(landed and yaw_ok,
+                    f"切站位 {p['label']}：落到包内坐标 {p['pos']} 且朝向 {p.get('yaw_from_fwd')} rad"
+                    f"（页面 {isinstance(got,dict) and got.get('pos')} / {isinstance(got,dict) and got.get('yaw')}）")
+                # 画面改变只在"她确实在画面里"时才是有效判据——站位可能在相机背后，
+                # 那时画面不变是正确的，把判据放宽成"永远要变"反而会逼出假绿。
+                if isinstance(got, dict) and got.get('onScreen'):
+                    say(after != before and after is not None,
+                        f"  且她在画面内（ndc {got.get('ndc')}）⇒ 画面确实改变")
+                else:
+                    print(f"     · {p['label']}：她在当前机位画面外（ndc {isinstance(got,dict) and got.get('ndc')}）"
+                          "⇒ 不要求画面改变")
+            say(json.dumps(ev(HASH_JS), sort_keys=True) != pre, '开角色 ⇒ 画面里真的多了一个人')
+            ev("""(()=>{const b=document.querySelector('.sw[data-k="char"]'); b.click();})()""")
+            settle(ev)
+            say(stable(ev)[0] == pre, '关掉角色 ⇒ 逐字节回到开之前（可逆，不是留了个残影）')
+            ev("""(()=>{const b=document.querySelector('.sw[data-k="char"]'); b.click();})()""")
+            settle(ev, 700)     # 模型已在缓存里，这次只是把 visible 翻回来
+        else:
+            say(False, '角色没载入成功 ⇒ 后面 6 条角色判据不作结论')
 
         print('== 6. 三个"推断"开关各自必须改变画面（先证明点击落地，再谈画面）==')
         h, tries, raw0 = stable(ev)

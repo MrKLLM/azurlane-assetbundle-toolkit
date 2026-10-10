@@ -3801,3 +3801,73 @@ prefab→res 材质），必须按 `(file_id, path_id)` 跨包取回真实对象
 （改从产品目录取产物、机位算法转调装配器）、`scripts/diag/room3d_page_probe.py`、
 `scripts/diag/check_vendor_closure.py`、`gallery_src/vendor/MANIFEST.json`。
 调试截图：`.diag/dorm3d_room/view_*.png`、`page_with_inference.png`。
+
+
+**追加（2026-10-10 第二轮）：行走漫游 + 角色接进页面——两条"包里读不出来"的东西要分开标注**
+
+### 行走漫游
+
+实测轨道操作三条都通（左键旋转 / 右键平移 / 滚轮缩放，逐条用真实鼠标事件量过画面变化），
+所以"想移动机位"要的是**走进屋里**，不是换一种环绕方式。
+
+- **手搓，不用 `PointerLockControls`**：① 那要多纳管一个 vendor 文件，而"按名字挑文件、
+  没验 import 闭包"正是同一天刚踩的整页静默不初始化（§128）；② 指针锁定在无头浏览器与
+  内嵌视图里不可靠，验收会退化成"我没法测"。⇒ 按住左键拖动转向 + WASD/QE + Shift 加速 +
+  滚轮调速度，零新依赖、每条行为都可测。
+- **朝向只从一个来源推**：先把 `yaw/pitch` 写进 `camera.rotation`（`'YXZ'` 序），
+  再问 `camera.getWorldDirection()` 拿前方、与世界上方向叉乘出右方。
+  自己按三角函数推轴就是 §127 那个灯朝向 bug 的形状。
+- **`dt` 上限给 0.1 不是 0.05**：无头浏览器 rAF 稀疏，夹太狠会让"按住 0.8 秒"只走出**一个 tick**
+  （实测位移 0.110 m = 恰好一帧），移动速度就随帧率下降而变慢——那是产品 bug，不是测试该迁就的行为。
+- **判据必须落在"帧数确实推进了"上**：页面导出 `S.frames`，探针先断言按住期间 ≥3 帧，
+  再谈位移。否则"没位移"到底是产品坏了还是根本没跑帧，两者同形。
+- 反向对照：**切回环绕后按住 W 相机必须不动**（证明行走监听器没有常驻生效）。
+
+### 角色（天狼星）
+
+**她不在房间场景包里**：`map_siriushostel_01_scene` 的 623 个命名对象里一个角色都没有，
+只有两盏叫 `CharacterLight` 的**后期体积**（挂在 `Settings/…/VolumesWithLights/GlobalVolume` 下）
+——按名字把它当角色锚点就会把她摆到错地方。真正的东西分两处：
+
+| 内容 | 来源 | 落到哪 |
+|---|---|---|
+| 模型（153 节点 / 5 网格 / 5 蒙皮 / 10 primitive / 9 内嵌贴图，9,654 KB） | `dorm3d/character/tianlangxing_db/{res,prefabs}/tianlangxing_noshoes` | `Output/gallery_v2/dorm3d/tianlangxing.glb`（`dorm3d_to_gltf.py`，与房间同一套镜像约定） |
+| 摆位：根节点 `Player` + 四个 `PlayerPoint`（父节点 `Bed`/`Chair`/`DormLvPerfomance01`/`Default`） | `map_siriushostel_01_base_scene`（1,025 个对象，**不是** `_scene`） | `room.character.json`，构建期由 `character_placement()` 落盘 |
+
+- **镜像与全项目一致**：`M_gltf = C·M_unity·C`（`C=diag(-1,1,1)`）是**每个节点局部 TRS 上的对合**，
+  所以"逐级镜像后再复合"与"整体镜像"等价：位置 x 取反、四元数 `(x,y,z,w)→(x,-y,-z,w)`、缩放不变。
+  ⚠️ 复合完之后再翻一次 x 等于镜像两遍 = 没镜像（本轮差点写进去）。
+  矩阵是**行向量约定**（点写成 `p·M`），"+Z 的像"取**第三行**，不是第三列。
+- **摆位有跨源锚点，不用目视赌**：`床边` 的 `PlayerPoint`（从 `_base_scene` 的 Transform 链复算）
+  与房间 GLB 里 `Bed` 节点的世界位置（从 GLB 节点 TRS 复算）相距 **1.63 m**——
+  正是"站在床边"的量级；x 镜像若算错会差 4 m 以上。两条路径独立，一个错了就对不上。
+- **顶点必须报两个口径**：Unity 子网格是"同一份顶点缓冲 + 各自索引区间"，
+  装配器为每个 submesh 出一个 primitive、都指向同一个 POSITION accessor ⇒
+  按 primitive 求和 45,058（face 2260 被数 5 遍），唯一 accessor 求和 22,606
+  （= 源包逐网格声明值之和，`--verify` 那条腿守的就是这个）。只报一个必然报假红。
+- **两处"包里读不出来"的东西要分开标注，不许混进"包内数据"**：
+  ① **动画**：48 个 `AnimationClip` 曲线全为 0 条、数据在 `m_MuscleClipSize`（Humanoid 肌肉格式）
+  ⇒ 页面只能是 setup pose，HUD 直接写"setup pose（动画未导出，Humanoid 肌肉格式）"；
+  ② **模型自身前轴**：没有任何字段声明她的局部前方是 +Z 还是 -Z ⇒ 留一个 `MODEL_YAW_FIX` 常量，
+  初值 0，靠目视定；非 0 时 HUD 要打印"含目视校正 X rad，非包内数据"。
+  本轮目视结果：`默认` 站位正面朝镜头 ⇒ 与场景约定一致，校正量保持 0。
+- **站位各自带朝向**：第一版只抄了 `pos`，坐椅子会面朝错方向；补抄每个 `PlayerPoint` 的 `+Z` 后
+  yaw 是 `[0.0, 0.0, 2.2396, 2.4391]`。判据跟着加两条：站位 yaw 不得全相同、
+  页面落点与朝向必须逐个等于 sidecar 声明值。详见 **§131**。
+
+### 判据（这一轮新增的几条）
+
+- 角色开/关必须**逐字节可逆**（证明没有残影），且"开角色 ⇒ 画面里真的多了一个人"。
+- 切站位时"画面必须改变"这条**只在她于画面内时**成立——页面把她的位置投影到 NDC 导出
+  `onScreen`，画面外就打印一句"不要求画面改变"。判据的红/绿必须能区分
+  "产品坏了"与"这次本来就不该有反应"。
+- `GLB ↔ 源包` 这条腿**当场跑**（探针起 `dorm3d_to_gltf.py --verify … --against …` 要求 exit 0），
+  不引用上一轮的结论。
+
+### 涉及文件（本轮）
+
+`gallery_src/room3d.html`（行走模式 + 角色组）、`scripts/dorm3d_room_to_gltf.py`
+（`character_placement()` / `base_scene_path()` / 构建期落 `room.character.json`）、
+`scripts/diag/room3d_page_probe.py`（§5c 行走 13 条 + §5d 角色 15 条）、
+`Output/gallery_v2/dorm3d/tianlangxing.glb` + `room.character.json`。
+根因与踩坑见 **§131**。

@@ -90,14 +90,23 @@ canvas{display:block}
     <button class="sw" data-k="cloudw" title="云层贴图的 RGB 是分通道数据（高 alpha 处是品红），自定义云着色器读不到；按白天白云参照图改成纯白+alpha 当密度">白云<i>推断</i></button>
     <button class="sw" data-k="leafw" title="树叶贴图 B 通道恒 241-255 且这三张材质没有 _BaseColor，蓝色不是颜色；把 B 当数据压掉">绿叶<i>推断</i></button>
   </div>
+  <div class="grp"><span>角色 · 包内</span>
+    <button class="sw" data-k="char" title="她不在房间场景包里，在 dorm3d/character/ 另一套包；坐标取自 _base_scene 的 Player / PlayerPoint">天狼星</button>
+    <span id="spots"></span>
+  </div>
   <div class="grp"><span>渲染</span>
     <span class="rng"><label for="rBloom">泛光</label><input id="rBloom" type="range" min="0" max="1.2" step="0.05" value="0.60"><b id="vBloom">0.60</b></span>
     <span class="rng"><label for="rExp">曝光</label><input id="rExp" type="range" min="0.6" max="2.2" step="0.05" value="1.20"><b id="vExp">1.20</b></span>
   </div>
   <div class="grp" id="views"><span>机位</span></div>
+  <div class="grp"><span>操作</span>
+    <div class="opt" id="mOpt" title="环绕=绕中心转；行走=进屋里走（WASD 移动、按住左键转向、QE 升降、Shift 加速）">
+      <button data-m="orbit" class="on">环绕</button><button data-m="walk">行走</button>
+    </div>
+  </div>
   <button class="sw" data-k="reset" title="回到当前机位的初始位置">复位视角</button>
   <span class="hint" style="flex:1"></span>
-  <span class="hint">拖拽旋转 · 滚轮缩放 · 右键平移</span>
+  <span class="hint" id="opHint">拖拽旋转 · 滚轮缩放 · 右键平移</span>
 </div>
 
 <div id="stage">
@@ -118,8 +127,9 @@ const URLS = {glb: P+'room.glb', truth: P+'room.glb.truth.json', side: P+'room.l
 /* 探针落点：只认这里的内容，不认 MIME / 不认 HTTP 200 */
 const S = {done:false, err:'', meshObjects:0, posTotal:0, lights:0, lmSlots:0, lmMats:0, lmPages:0,
            lmChannel:null, chanOk:0, chanBad:0, cloudwMats:0, leafwMats:0, backdropTris:0,
-           on:{lm:true, sky:false, cloudw:false, leafw:false}, declared:null, ambient:null,
-           sceneTris:0, home:null, views:[], view:null, viewFov:null};
+           on:{lm:true, sky:false, cloudw:false, leafw:false, char:false}, declared:null, ambient:null,
+           sceneTris:0, home:null, views:[], view:null, viewFov:null, char:null,
+           mode:'orbit', camPos:null, yaw:null, pitch:null, walkSpeed:null, keysSeen:[], frames:0};
 window.__ROOM3D = S;
 
 const stage=document.getElementById('stage'), ldEl=document.getElementById('load');
@@ -268,6 +278,86 @@ async function setLightmap(on){
   S.lmChannel=1; S.chanOk=ok; S.chanBad=bad;
 }
 
+/* ── 角色（天狼星）──
+   她**不在房间场景包里**：`map_siriushostel_01_scene` 623 个命名对象里一个角色都没有，
+   只有两盏叫 `CharacterLight` 的后期体积（按名字当角色锚点就会摆错）。模型在
+   `dorm3d/character/tianlangxing_db/`，坐标在 `map_siriushostel_01_base_scene` 的
+   `Player` / `PlayerPoint` 上 ⇒ 两者都由构建期 sidecar `room.character.json` 交过来。
+   ⚠️ 动画没导出：本包 48 个 AnimationClip 曲线全为 0 条、数据在 `m_MuscleClipSize`
+   （Humanoid 肌肉格式），所以这里只能是 setup pose 站姿 —— HUD 上必须写明，不许看着像活的。 */
+const CHAR = {glb: P+'tianlangxing.glb', place: P+'room.character.json'};
+/* 模型自身的"前轴"是哪一根，包里没有任何声明能告诉我 ⇒ 这个校正量是**目视定的**，
+   不是包内数据。若它非零，HUD 要如实标出来，别让它冒充场景给的朝向。 */
+const MODEL_YAW_FIX = 0;
+let charObj=null, charPlace=null;
+async function loadChar(){
+  if(charObj) return true;
+  charPlace = await fetch(CHAR.place).then(r=>r.json()).catch(()=>null);
+  if(!charPlace || !charPlace.available)
+    throw new Error('缺 room.character.json —— 角色摆位没有权威依据，不许猜坐标');
+  prog(0.9,'载入角色模型…');
+  const g = await new Promise((res,rej)=>new GLTFLoader().load(CHAR.glb, res, undefined,
+    e=>rej(new Error('角色 GLB 解析失败 '+(e&&e.message||'')))));
+  charObj = g.scene; charObj.name = '__天狼星_包内角色';
+  /* 顶点要报**两个口径**：Unity 的子网格是"同一份顶点缓冲 + 各自的索引区间"，
+     装配器给每个 submesh 出一个 primitive、都指向同一个 POSITION accessor ⇒
+     按 primitive 求和会把共用顶点数两遍（face 2260 数 5 遍 = 45,058），
+     而源包声明的 22,606 是唯一值。只报一个就会拿 45,058 去对 22,606 报假红。 */
+  let meshes=0, posPrim=0, skins=0; const uniqPos=new Set();
+  /* ⚠️ 按**对象身份**去重，不要写 `pa.uuid`：THREE.BufferAttribute 根本没有 uuid
+     （只有 Object3D / Material / Texture / BufferGeometry 有）⇒ `Map.set(pa.uuid,…)`
+     会把 10 个属性全塞进同一个 `undefined` 键，最后只剩一个网格的顶点数
+     （实测报出 224，看着像"只加载了脖子"，其实是聚合器静默塌成一个键）。 */
+  charObj.traverse(o=>{ o.frustumCulled=false;
+    if(o.isSkinnedMesh) skins++;
+    if(o.isMesh){ meshes++;
+      const pa=o.geometry&&o.geometry.attributes.position;
+      if(pa){ posPrim+=pa.count; uniqPos.add(pa); } } });
+  let posUniq=0; uniqPos.forEach(pa=>{ posUniq+=pa.count; });
+  scene.add(charObj);
+  S.char={loaded:true, meshes, skinned:skins, posTotal:posPrim, posUnique:posUniq,
+          spot:null, pos:null, yaw:null,
+          anim:'setup pose（动画未导出，Humanoid 肌肉格式）'};
+  buildSpotButtons();
+  placeChar('Player');
+  return true;
+}
+function placeChar(key){
+  if(!charObj||!charPlace) return;
+  const src = key==='Player' ? (charPlace.player_root||{})
+                             : (charPlace.points.filter(p=>p.key===key)[0]||{});
+  const p = src.pos; if(!p) return;
+  charObj.position.set(p[0], p[1], p[2]);
+  /* 朝向优先用**这个站位自己带的**（PlayerPoint 各自有旋转，坐椅子要面朝椅子），
+     没有才回落到 Player 根的朝向。 */
+  const yaw0 = (src.yaw_from_fwd!==undefined ? src.yaw_from_fwd
+                : ((charPlace.player_root&&charPlace.player_root.yaw_from_fwd)||0));
+  const yaw = yaw0 + MODEL_YAW_FIX;
+  charObj.rotation.set(0, yaw, 0);
+  charObj.updateMatrixWorld(true);
+  /* 她在不在当前画面里，是个**可测的前置条件**，不该拿"画面必须改变"当无条件判据：
+     站位可以正好在相机背后，那时"画面没变"是对的，判据就该只量落点。 */
+  const sp=new THREE.Vector3(p[0], (p[1]||0)+1.2, p[2]).project(camera);
+  S.char.spot=key; S.char.pos=p.slice(); S.char.yaw=+yaw.toFixed(4);
+  S.char.onScreen = Math.abs(sp.x)<=1 && Math.abs(sp.y)<=1 && sp.z<1;
+  S.char.ndc=[+sp.x.toFixed(3), +sp.y.toFixed(3)];
+  S.char.yawFix=MODEL_YAW_FIX;
+  document.querySelectorAll('#spots .sw').forEach(b=>b.classList.toggle('on', b.dataset.s===key));
+  draw(); hudUpdate();
+}
+function buildSpotButtons(){
+  const box=document.getElementById('spots');
+  if(box.childElementCount || !charPlace) return;
+  const list=[{key:'Player', label:'场景 Player'}].concat(charPlace.points||[]);
+  list.forEach(s=>{
+    const b=document.createElement('button');
+    b.className='sw'; b.dataset.s=s.key; b.textContent=s.label||s.key;
+    b.title='坐标来自 _base_scene 的 '+(s.key==='Player'?'Player 根节点':'PlayerPoint（父='+s.key+'）');
+    b.addEventListener('click',()=>placeChar(s.key));
+    box.appendChild(b);
+  });
+}
+
 let side=null, truth=null, allMats=[], lmRecs=[], views=[];
 const ZONE_CN={bedroom:'卧室', living:'起居室', kitchen:'厨房'};
 async function fill(g){
@@ -334,6 +424,8 @@ async function boot(){
   controls=new OrbitControls(camera, renderer.domElement);
   controls.enableDamping=true;
   buildViewButtons();
+  bindWalkLook(renderer.domElement);
+  S.mode='orbit'; S.walkSpeed=walk.speed;
   if(views.length) setView(0); else goPack();     // 机位表缺件时退回包内 Camera，不停在原地不动
   await setLightmap(true);
   draw();
@@ -352,8 +444,16 @@ function hudUpdate(){
     (S.ambient?'<br>环境光 <b>trilight 模式 '+S.ambient.mode+'</b> × '+S.ambient.intensity+'（取自包内 RenderSettings）':'')+
     '<br>当前机位 <b>'+(S.view==='pack'?'包内 Camera':(ZONE_CN[S.view]||S.view||'—'))+'</b>'+
     ' · FOV '+S.viewFov+'（'+(S.view==='pack'?'包里没这个字段，60° 是观感值':'构建期按锚点算的，见 room.views.json')+'）'+
+    '<br>操作 <b>'+(S.mode==='walk'?'行走':'环绕')+'</b>'+
+    (S.mode==='walk'?' · 视点高 '+(S.camPos?S.camPos[1].toFixed(2):'—')+' m · 速度 '+(S.walkSpeed||0)+' m/s · 朝向 '+S.yaw+'/'+S.pitch:'')+
     '<br>推断重画：云 <b>'+S.cloudwMats+'</b> 张材质 · 叶 <b>'+S.leafwMats+'</b> 张材质'+
     (S.on.sky?'<br><span class="warn">当前画面含手摆窗外天海 —— 非包内数据</span>':'')+
+    (S.char&&S.char.loaded?'<br>角色 <b>'+S.char.meshes+'</b> 个网格 / 唯一顶点 <b>'+S.char.posUnique+'</b>'+
+      '（按 primitive 求和 '+S.char.posTotal+'——Unity 子网格共用同一份顶点缓冲，两个口径不许混用）'+
+      ' / 蒙皮 <b>'+S.char.skinned+'</b>'+
+      ' · 站位 <b>'+(S.char.spot||'—')+'</b> @ '+JSON.stringify(S.char.pos&&S.char.pos.map(v=>+v.toFixed(2)))+
+      ' · 朝向 '+S.char.yaw+' rad'+(S.char.yawFix?'（含目视校正 '+S.char.yawFix+' rad，非包内数据）':'')+
+      '<br><span class="warn">'+S.char.anim+'</span>':'')+
     (S.err?'<br><span class="warn">'+S.err+'</span>':'');
 }
 
@@ -363,7 +463,7 @@ function goPack(){
   camera.fov=60; camera.updateProjectionMatrix();
   camera.position.set(cp[0],cp[1],cp[2]);
   controls.target.set(cp[0]+fwd[0]*3, cp[1]+fwd[1]*3, cp[2]+fwd[2]*3);
-  controls.update();
+  if(walk.on) lookFrom(camera.position.toArray(), controls.target.toArray()); else controls.update();
   S.view='pack'; S.viewFov=60; S.home={pos:camera.position.toArray(), target:controls.target.toArray()};
   document.querySelectorAll('#views .sw').forEach(x=>x.classList.toggle('on', x.textContent==='包内机位'));
   draw(); hudUpdate();
@@ -388,7 +488,8 @@ function setView(i){
   camera.fov=v.fov; camera.updateProjectionMatrix();
   camera.position.set(v.pos[0], v.pos[1], v.pos[2]);
   controls.target.set(v.look[0], v.look[1], v.look[2]);
-  controls.update();
+  if(walk.on){ camera.position.y=Math.max(0.05, camera.position.y); lookFrom(v.pos, v.look); }
+  else controls.update();
   S.view=v.name; S.viewFov=v.fov;
   S.home={pos:v.pos.slice(), target:v.look.slice()};
   S.camPos=camera.position.toArray(); S.camTarget=controls.target.toArray();
@@ -396,19 +497,126 @@ function setView(i){
   draw(); hudUpdate();
 }
 
+/* ── 行走漫游 ──
+   为什么手搓而不用 PointerLockControls：
+   ① 那要多纳管一个 vendor 文件，而"按名字挑文件、没验 import 闭包"正是上一轮整页静默
+      不初始化的根因（§128）；② 指针锁定在无头浏览器与内嵌视图里不可靠，验收会退化成
+      "我没法测"。⇒ 按住左键拖动转向 + WASD/QE，零新依赖、每条行为都可测。
+   朝向只从一个来源推：先把 yaw/pitch 写进 camera.rotation，再问 camera.getWorldDirection()
+   拿前方 —— 自己按三角函数推轴是本轮灯朝向那个 bug 的形状（§127）。 */
+const walk={on:false, yaw:0, pitch:0, keys:new Set(), speed:2.2, last:0, drag:null};
+const EYE=1.45;                       // 与构建期机位同一个视点高度
+const _fwd=new THREE.Vector3(), _right=new THREE.Vector3(), _mv=new THREE.Vector3();
+function lookFrom(pos, tgt){
+  const d=[tgt[0]-pos[0], tgt[1]-pos[1], tgt[2]-pos[2]];
+  const L=Math.hypot(d[0],d[1],d[2])||1;
+  walk.yaw=Math.atan2(-d[0], -d[2]);
+  walk.pitch=Math.max(-1.48, Math.min(1.48, Math.asin(d[1]/L)));
+  publishLook();
+}
+/* yaw/pitch 要**每次被设定时**都发布，不能只在拖拽回调里发布：
+   否则探针读到的初始 yaw 是 null，"拖拽改变了朝向"这条判据就退化成"从 null 变成数"——
+   那是任何一次赋值都能造出来的假绿。 */
+function publishLook(){
+  S.yaw=+walk.yaw.toFixed(4); S.pitch=+walk.pitch.toFixed(4);
+  S.camPos=camera.position.toArray();
+}
+function setMode(m){
+  walk.on=(m==='walk');
+  controls.enabled=!walk.on;
+  document.querySelectorAll('#mOpt button').forEach(b=>b.classList.toggle('on', b.dataset.m===m));
+  document.getElementById('opHint').textContent=walk.on
+    ? '按住左键转向 · WASD 移动 · QE 升降 · Shift 加速 · 滚轮调速度'
+    : '拖拽旋转 · 滚轮缩放 · 右键平移';
+  if(walk.on){ lookFrom(camera.position.toArray(), controls.target.toArray()); walk.last=performance.now(); }
+  else { controls.target.copy(_fwd.set(0,0,-1).applyQuaternion(camera.quaternion).multiplyScalar(3).add(camera.position)); }
+  S.mode=m; hudUpdate();
+}
+function stepWalk(now){
+  /* dt 上限给到 0.1 而不是 0.05：无头浏览器与低帧率机器上 rAF 间隔可以远超 50ms，
+     夹太狠会让"按住 0.8 秒"只走出一个 tick 的距离（实测 0.110 m = 恰好一帧），
+     移动速度就变成随帧率下降而变慢——那是产品 bug，不是测试该迁就的行为。 */
+  const dt=Math.max(0, Math.min(0.1, (now-walk.last)/1000)); walk.last=now;
+  camera.rotation.set(walk.pitch, walk.yaw, 0, 'YXZ');
+  const k=walk.keys, sp=walk.speed*(k.has('shift')?2.4:1)*dt;
+  camera.getWorldDirection(_fwd); _fwd.y=0;
+  if(_fwd.lengthSq()<1e-9) _fwd.set(0,0,-1);
+  _fwd.normalize();
+  _right.crossVectors(_fwd, new THREE.Vector3(0,1,0)).normalize();
+  _mv.set(0,0,0);
+  if(k.has('w')||k.has('arrowup'))    _mv.add(_fwd);
+  if(k.has('s')||k.has('arrowdown'))  _mv.sub(_fwd);
+  if(k.has('d')||k.has('arrowright')) _mv.add(_right);
+  if(k.has('a')||k.has('arrowleft'))  _mv.sub(_right);
+  if(_mv.lengthSq()) _mv.normalize().multiplyScalar(sp);
+  if(k.has('e')) _mv.y+=sp;
+  if(k.has('q')) _mv.y-=sp;
+  camera.position.add(_mv);
+  if(camera.position.y<0.05) camera.position.y=0.05;      // 不钻到地板下面
+  publishLook();
+}
+window.addEventListener('keydown',e=>{
+  if(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  const key=String(e.key||'').toLowerCase();
+  if(key===' ') return;
+  if(['arrowup','arrowdown','arrowleft','arrowright'].indexOf(key)>=0) e.preventDefault();
+  walk.keys.add(key==='shift'?'shift':key);
+  S.keysSeen=[...walk.keys];
+});
+window.addEventListener('keyup',e=>{ walk.keys.delete(String(e.key||'').toLowerCase()); });
+window.addEventListener('blur',()=>{ walk.keys.clear(); });   // 切走窗口别把按键卡住
+
+function bindWalkLook(cv){
+  cv.addEventListener('pointerdown',e=>{
+    if(!walk.on||e.button!==0) return;
+    walk.drag={x:e.clientX, y:e.clientY}; cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove',e=>{
+    if(!walk.on||!walk.drag) return;
+    walk.yaw  -= (e.clientX-walk.drag.x)*0.0030;
+    walk.pitch = Math.max(-1.48, Math.min(1.48, walk.pitch-(e.clientY-walk.drag.y)*0.0030));
+    walk.drag={x:e.clientX, y:e.clientY};
+    camera.rotation.set(walk.pitch, walk.yaw, 0, 'YXZ');
+    publishLook();
+  });
+  const up=()=>{ walk.drag=null; };
+  cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
+  cv.addEventListener('wheel',e=>{
+    if(!walk.on) return;
+    e.preventDefault();
+    walk.speed=Math.max(0.4, Math.min(12, walk.speed*(1-e.deltaY*0.0012)));
+    S.walkSpeed=+walk.speed.toFixed(2); hudUpdate();
+  },{passive:false});
+}
+
 async function toggle(k){
-  if(k==='reset'){ if(S.home){ camera.position.fromArray(S.home.pos); controls.target.fromArray(S.home.target); controls.update(); } draw(); return; }
+  if(k==='reset'){ if(S.home){ camera.position.fromArray(S.home.pos);
+      controls.target.fromArray(S.home.target);
+      if(walk.on) lookFrom(S.home.pos, S.home.target); else controls.update();
+    } draw(); return; }
   const v=!S.on[k]; S.on[k]=v;
   document.querySelector('.sw[data-k="'+k+'"]').classList.toggle('on', v);
-  if(k==='sky'){ buildBackdrop(); backdrop.visible=v; }
+  if(k==='char'){
+    try{ if(v) await loadChar(); else { charObj.visible=false; } }
+    catch(e){ S.err=String(e&&e.message||e).slice(0,200); }
+    if(v && charObj) charObj.visible=true;
+  }
+  else if(k==='sky'){ buildBackdrop(); backdrop.visible=v; }
   else if(k==='lm'){ await setLightmap(v); }
   else { applyRule(RULES.filter(r=>r.k===k)[0], v); }
   draw(); hudUpdate();
 }
 
-function loop(){ requestAnimationFrame(loop); controls.update(); draw(); S.sceneTris=sceneTrisSeen; }
+function loop(){ requestAnimationFrame(loop); S.frames++;
+  if(walk.on){ stepWalk(performance.now()); }
+  else { controls.update(); S.camPos=camera.position.toArray(); }
+  draw(); S.sceneTris=sceneTrisSeen; }
 
 document.querySelectorAll('.sw[data-k]').forEach(b=>b.addEventListener('click',()=>toggle(b.dataset.k)));
+document.getElementById('mOpt').addEventListener('click',e=>{
+  const m=e.target.dataset.m; if(!m) return;
+  if(!controls){ document.querySelectorAll('#mOpt button').forEach(b=>b.classList.toggle('on', b.dataset.m===m)); return; }
+  setMode(m); });
 document.getElementById('rBloom').addEventListener('input',e=>{
   knob.bloom=parseFloat(e.target.value); document.getElementById('vBloom').textContent=knob.bloom.toFixed(2);
   if(bloomPass) bloomPass.strength=knob.bloom; draw(); });
