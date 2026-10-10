@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D 宿舍 · 碧蓝航线资产浏览器</title>
+<script>/* 与 index.html 同一条规则：先定主题再渲染，否则刷新闪一下默认色 */try{document.documentElement.dataset.theme=localStorage.getItem('gallery.theme')||'light'}catch(e){document.documentElement.dataset.theme='light'}</script>
+<!-- 配色/圆角只有正本 theme.css。⚠️ 组件规则里不许出现字面颜色；
+     WebGL 的清屏色也从 token 取（themeColor），昼/夜才会一起动。 -->
+<link rel="stylesheet" href="theme.css">
+<script type="importmap">
+{"imports":{
+  "three":"./vendor/three/three.module.min.js",
+  "three/addons/":"./vendor/three/jsm/"
+}}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{font-family:'Segoe UI',"Microsoft YaHei",system-ui,sans-serif;color:var(--txt);
+  min-height:100vh;overflow:hidden;display:flex;flex-direction:column;
+  background:linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%) fixed}
+
+header{flex:0 0 auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 20px;
+  background:var(--nav-bg);border-bottom:1px solid var(--nav-line);
+  backdrop-filter:blur(var(--nav-blur)) saturate(1.5);-webkit-backdrop-filter:blur(var(--nav-blur)) saturate(1.5);z-index:20}
+header h1{font-size:18px;font-weight:650;color:var(--title);letter-spacing:.4px}
+header .back{font-size:13px;color:var(--txt2);text-decoration:none;padding:6px 12px;border-radius:var(--r-chip);
+  border:1px solid var(--chip-line);background:var(--chip);
+  transition:color var(--t-col) var(--ease-ios),transform .16s var(--ease-ios)}
+header .back:hover{color:var(--on-txt)}
+header .back:active{transform:scale(.97)}
+header .sub{font-size:12px;color:var(--dim)}
+header .sp{flex:1}
+.opt{display:inline-flex;background:var(--chip);border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:3px;gap:2px}
+.opt button{border:0;background:transparent;color:var(--txt2);font-size:12.5px;padding:5px 12px;
+  border-radius:var(--r-chip);cursor:pointer;transition:all var(--t-col) var(--ease-ios)}
+.opt button.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+
+.bar{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 20px;
+  background:var(--panel);border-bottom:1px solid var(--line)}
+.sw{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--txt2);background:var(--chip);
+  border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:5px 12px;cursor:pointer;user-select:none;
+  transition:all var(--t-col) var(--ease-ios)}
+.sw.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+.sw:active{transform:scale(.97)}
+.sw i{font-style:normal;font-size:10px;padding:1px 6px;border-radius:var(--r-chip);
+  background:color-mix(in srgb,var(--pop) 22%,transparent);color:var(--pop-d)}
+.grp{display:inline-flex;align-items:center;gap:8px;padding:0 10px;border-left:1px solid var(--line)}
+.grp>span{font-size:11.5px;color:var(--dim)}
+.rng{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--txt2)}
+.rng input[type=range]{width:100px;accent-color:var(--brand)}
+.rng b{font-weight:600;color:var(--on-txt);min-width:30px;text-align:right;font-variant-numeric:tabular-nums}
+.hint{font-size:11.5px;color:var(--dim)}
+
+#stage{flex:1 1 auto;position:relative;min-height:0}
+canvas{display:block}
+#hud{position:absolute;left:14px;bottom:12px;font-size:11.5px;color:var(--txt2);background:var(--bar);
+  border:1px solid var(--line);border-radius:var(--r-in);padding:8px 11px;line-height:1.65;
+  max-width:min(560px,62vw);pointer-events:none;font-variant-numeric:tabular-nums}
+#hud .warn{color:var(--pop-d)}
+#hud b{color:var(--on-txt);font-weight:600}
+#load{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:12px;background:var(--panel);z-index:5}
+#load .track{width:min(420px,70vw);height:6px;border-radius:var(--r-chip);overflow:hidden;
+  background:color-mix(in srgb,var(--brand) 14%,transparent)}
+#load .fill{height:100%;width:0;background:var(--grad-brand);transition:width .18s var(--ease-ios)}
+#load .txt{font-size:12.5px;color:var(--dim)}
+#load.err .txt{color:var(--pop-d)}
+#load.hide{display:none}
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="index.html">← 返回</a>
+  <h1>3D 宿舍 · 天狼星旅馆</h1>
+  <span class="sub">room.glb 由场景包直接装配：网格 / 贴图 / 烘焙 lightmap / 灯 都是包内数据</span>
+  <span class="sp"></span>
+  <div class="opt" id="gTheme" title="昼 / 夜配色（状态会记住）">
+    <button data-t="light">昼</button><button data-t="dark">夜</button>
+  </div>
+</header>
+
+<div class="bar">
+  <div class="grp"><span>包内</span>
+    <button class="sw on" data-k="lm" title="Unity 烘焙的 lightmap（5 页 ASTC），走第二套 UV">烘焙光照 lightmap</button>
+  </div>
+  <div class="grp"><span>推断 · 非包内</span>
+    <button class="sw" data-k="sky" title="场景包 m_SkyboxMaterial 是空引用，海面/天空几何不在这个包；几何与摆位是我给的，颜色取自游戏内截图">窗外天海<i>推断</i></button>
+    <button class="sw" data-k="cloudw" title="云层贴图的 RGB 是分通道数据（高 alpha 处是品红），自定义云着色器读不到；按白天白云参照图改成纯白+alpha 当密度">白云<i>推断</i></button>
+    <button class="sw" data-k="leafw" title="树叶贴图 B 通道恒 241-255 且这三张材质没有 _BaseColor，蓝色不是颜色；把 B 当数据压掉">绿叶<i>推断</i></button>
+  </div>
+  <div class="grp"><span>渲染</span>
+    <span class="rng"><label for="rBloom">泛光</label><input id="rBloom" type="range" min="0" max="1.2" step="0.05" value="0.60"><b id="vBloom">0.60</b></span>
+    <span class="rng"><label for="rExp">曝光</label><input id="rExp" type="range" min="0.6" max="2.2" step="0.05" value="1.20"><b id="vExp">1.20</b></span>
+  </div>
+  <div class="grp" id="views"><span>机位</span></div>
+  <button class="sw" data-k="reset" title="回到当前机位的初始位置">复位视角</button>
+  <span class="hint" style="flex:1"></span>
+  <span class="hint">拖拽旋转 · 滚轮缩放 · 右键平移</span>
+</div>
+
+<div id="stage">
+  <div id="load"><div class="track"><div class="fill" id="ldFill"></div></div><div class="txt" id="ldTxt">准备载入…</div></div>
+  <div id="hud"></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+
+/* 产物正本目录（与本页同级，都在 gallery_v2 下） */
+const P = './dorm3d/';
+const URLS = {glb: P+'room.glb', truth: P+'room.glb.truth.json', side: P+'room.lightmaps.json',
+              render: P+'room.render.json', views: P+'room.views.json', lm: P+'lightmaps/'};
+
+/* 探针落点：只认这里的内容，不认 MIME / 不认 HTTP 200 */
+const S = {done:false, err:'', meshObjects:0, posTotal:0, lights:0, lmSlots:0, lmMats:0, lmPages:0,
+           lmChannel:null, chanOk:0, chanBad:0, cloudwMats:0, leafwMats:0, backdropTris:0,
+           on:{lm:true, sky:false, cloudw:false, leafw:false}, declared:null, ambient:null,
+           sceneTris:0, home:null, views:[], view:null, viewFov:null};
+window.__ROOM3D = S;
+
+const stage=document.getElementById('stage'), ldEl=document.getElementById('load');
+const ldFill=document.getElementById('ldFill'), ldTxt=document.getElementById('ldTxt'), hud=document.getElementById('hud');
+const prog=(f,m)=>{ ldFill.style.width=Math.round(Math.min(1,Math.max(0,f))*100)+'%'; if(m) ldTxt.textContent=m; };
+function fail(m){ S.err=String(m&&m.message||m).slice(0,300); S.done=true;
+  ldEl.classList.add('err'); ldEl.classList.remove('hide'); ldTxt.textContent='载入失败：'+S.err; }
+
+/* 清屏色从 token 取：写死色号的话切到「夜」时画布外围不跟着变，等于第二份配色真相 */
+function themeColor(){
+  const cs=getComputedStyle(document.body).backgroundColor||'';
+  const p=(cs.match(/[\d.]+/g)||[0,0,0]).map(Number);
+  return new THREE.Color(p[0]/255,p[1]/255,p[2]/255);
+}
+
+const renderer=new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+renderer.toneMapping=THREE.ACESFilmicToneMapping;   // 游戏那侧明显有 tonemap（窗光渐变/木地板高光都不是线性直出）
+renderer.toneMappingExposure=1.2;
+renderer.info.autoReset=false;
+let sceneTrisSeen=0;
+const _render=renderer.render.bind(renderer);
+renderer.render=function(sc,ca){ _render(sc,ca); if(sc===scene) sceneTrisSeen=renderer.info.render.triangles; };
+
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(60, 1, 0.02, 4000);
+let controls=null, composer=null, bloomPass=null;
+const knob={bloom:0.60};
+
+function resize(){
+  const w=stage.clientWidth||1, h=stage.clientHeight||1;
+  renderer.setSize(w,h); renderer.domElement.style.width='100%'; renderer.domElement.style.height='100%';
+  camera.aspect=w/h; camera.updateProjectionMatrix();
+  if(composer){ composer.setSize(w,h); if(bloomPass) bloomPass.setSize(w,h); }
+}
+window.addEventListener('resize', resize);
+
+/* 泛光：窗边那道斜射光与整幅的乳白感是**屏幕空间后处理**，不在资产里
+   （本场景 109 个粒子只有 14 个激活，全是＋标记/图标/数字/轨迹，见 TROUBLESHOOTING §126），
+   所以它是渲染端的一条轴。恒走 composer ⇒ 色调映射与 sRGB 输出只由 OutputPass 做一次，
+   否则「泛光拉到 0」会同时换掉色调路径，那个开关就自证不了了。 */
+async function ensureComposer(){
+  const [EC,RP,UB,OP]=await Promise.all([
+    import('three/addons/postprocessing/EffectComposer.js'),
+    import('three/addons/postprocessing/RenderPass.js'),
+    import('three/addons/postprocessing/UnrealBloomPass.js'),
+    import('three/addons/postprocessing/OutputPass.js')]);
+  const w=stage.clientWidth||1, h=stage.clientHeight||1;
+  composer=new EC.EffectComposer(renderer);
+  composer.addPass(new RP.RenderPass(scene,camera));
+  bloomPass=new UB.UnrealBloomPass(new THREE.Vector2(w,h), knob.bloom, 0.6, 0.85);
+  composer.addPass(bloomPass);
+  composer.addPass(new OP.OutputPass());
+  composer.setSize(w,h);
+}
+function draw(){ renderer.info.reset(); if(composer) composer.render(); else renderer.render(scene,camera); }
+
+/* 窗外天海：本场景包 m_SkyboxMaterial 是空引用，海面/天空的几何**不在这个包**
+   （res/water/ 只有贴图，RampMap 是水深遮条几乎全黑，当不了颜色源）。
+   ⇒ 这一层是补摆：几何与摆位我给的，颜色取自游戏内截图逐行取色。默认关，且开关上标"推断"。 */
+let backdrop=null;
+function buildBackdrop(){
+  if(backdrop) return;
+  const cv=document.createElement('canvas'); cv.width=4; cv.height=512;
+  const cx=cv.getContext('2d'); const gr=cx.createLinearGradient(0,0,0,512);
+  gr.addColorStop(0.00,'rgb(162,207,237)');   // 天顶
+  gr.addColorStop(0.44,'rgb(198,223,243)');   // 地平线上方
+  gr.addColorStop(0.52,'rgb(120,196,223)');   // 海平线
+  gr.addColorStop(0.68,'rgb(171,229,233)');   // 近岸浅水
+  gr.addColorStop(1.00,'rgb(60,110,140)');    // 天底（看不见，避免纯黑）
+  cx.fillStyle=gr; cx.fillRect(0,0,4,512);
+  const t=new THREE.CanvasTexture(cv); t.colorSpace=THREE.SRGBColorSpace;
+  const geo=new THREE.SphereGeometry(1500,24,16);
+  S.backdropTris=geo.index.count/3;
+  // toneMapped:false ⇒ 落在取到的那串数上（参照图本来就是游戏端 tonemap 之后的成品）
+  backdrop=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({map:t,side:THREE.BackSide,toneMapped:false,fog:false}));
+  backdrop.name='__BACKDROP_手摆_非包内数据'; backdrop.visible=false; scene.add(backdrop);
+}
+
+/* 两条"通道语义"推断各跑各的（写成互斥时，两个同时开叶子纹丝不动，被"开关前后必须不同"抓出来）。
+   同一材质只改一次（叶子重复改会越改越暗）；关掉时必须还原原图，否则开关不可逆。
+   产物保持"包里是什么就是什么" ⇒ 重画只活在查看端，不烧进 GLB。 */
+const RULES=[
+  {k:'cloudw', re:/^mat_Layer_(Day|Night)_/i,
+   paint:p=>{ p[0]=255; p[1]=255; p[2]=255; }},                      // RGB 是分通道数据，alpha 才是云密度
+  {k:'leafw',  re:/^mat_(poplar|oak)\d*_leaf/i,
+   paint:p=>{ p[2]=Math.round(Math.min(p[0],p[1])*0.25); }}          // B 通道恒 241-255 = 数据不是颜色
+];
+const origMap=new Map();
+function applyRule(rule,on){
+  let n=0;
+  for(const m of allMats){
+    if(on){
+      if(m.userData.__rule!==undefined || !rule.re.test(m.name||'')) continue;
+      if(!m.map||!m.map.image||!m.map.image.width) continue;
+      const im=m.map.image, cw=im.width|0, ch=im.height|0;
+      const c2=document.createElement('canvas'); c2.width=cw; c2.height=ch;
+      const x2=c2.getContext('2d',{willReadFrequently:true}); x2.drawImage(im,0,0);
+      const d=x2.getImageData(0,0,cw,ch), px=d.data;
+      for(let i=0;i<px.length;i+=4) rule.paint(px);
+      x2.putImageData(d,0,0);
+      origMap.set(m.uuid, m.map);
+      const t2=new THREE.CanvasTexture(c2); t2.colorSpace=THREE.SRGBColorSpace;
+      t2.wrapS=t2.wrapT=THREE.RepeatWrapping; t2.repeat.copy(m.map.repeat); t2.offset.copy(m.map.offset);
+      m.map=t2; m.needsUpdate=true; m.userData.__rule=rule.k; n++;
+    } else if(m.userData.__rule===rule.k){
+      if(origMap.has(m.uuid)){ m.map=origMap.get(m.uuid); m.needsUpdate=true; }
+      delete m.userData.__rule;
+    }
+  }
+  S[rule.k+'Mats']= on? n : 0;
+}
+
+/* 烘焙 lightmap：glTF 核心没有 lightmap，页号在 material.extras.unityLightmapPage（three.js 落到
+   material.userData），UV 是我们烘进 TEXCOORD_1 的。
+   ⚠️ 承重的一行是 `t.channel=1`：r152+ 的贴图通道由 texture.channel 决定，默认 0 ⇒ vLightMapUv 取的是
+   漫反射 UV。手工赋 material.lightMap 绕过了 GLTFLoader 的 assignLightmapOnMaterial（它会显式设 1），
+   采样一直按错的 UV 走，而**计数类判据看不出来**（本轮真实踩过，L3/C4 才把它抓到）。 */
+const lmPages={};
+function loadTex(u){ return new Promise((res,rej)=>{
+  new THREE.TextureLoader().load(u, t=>res(t), undefined, e=>rej(new Error('lightmap 贴图载入失败 '+u))); }); }
+async function ensurePages(){
+  if(Object.keys(lmPages).length) return;
+  prog(0.3,'载入烘焙 lightmap 贴图…');
+  for(const p of side.pages){
+    const t=await loadTex(URLS.lm+p.file);
+    t.colorSpace=THREE.NoColorSpace;    // 包内 ASTC 是 LDR 数据页，按线性取
+    t.flipY=false;                      // Unity lightmap 与我们的 UV 同向，多翻一次就上下错位
+    t.channel=1;
+    lmPages[p.index]=t;
+  }
+}
+async function setLightmap(on){
+  if(!side) return;
+  if(!on){ let n=0; for(const m of allMats){ if(m.lightMap){ m.lightMap=null; m.needsUpdate=true; n++; } }
+    S.lmSlots=0; S.lmMats=0; S.chanOk=0; S.chanBad=0; return; }
+  await ensurePages();
+  let n=0, ok=0, bad=0; const uniq=new Set();
+  for(const rec of lmRecs){
+    const pg=rec.m.userData.lmPage;
+    if(pg===undefined || !lmPages[pg]) continue;
+    rec.m.lightMap=lmPages[pg]; rec.m.lightMapIntensity=1; rec.m.needsUpdate=true; n++; uniq.add(rec.m.uuid);
+    // 直接量「采样用的是哪套 UV」这个可观测状态，而不是等亮度自己去暴露
+    if(lmPages[pg].channel===1 && rec.g && rec.g.attributes.uv1) ok++; else bad++;
+  }
+  S.lmSlots=n; S.lmMats=uniq.size; S.lmPages=Object.keys(lmPages).length;
+  S.lmChannel=1; S.chanOk=ok; S.chanBad=bad;
+}
+
+let side=null, truth=null, allMats=[], lmRecs=[], views=[];
+const ZONE_CN={bedroom:'卧室', living:'起居室', kitchen:'厨房'};
+async function fill(g){
+  scene.add(g.scene);
+  const clean=s=>String(s||'').replace(/__mesh_\d+$/,'');
+  const ph=new Set(truth.per_object.filter(p=>p.placeholder).map(p=>clean(p.mesh)));
+  let meshes=0, pos=0;
+  g.scene.traverse(o=>{
+    o.frustumCulled=false;              // 大房间 + 自由机位：按包围盒剔除会整块消失
+    if(!o.isMesh) return;
+    meshes++;
+    const nm=clean(o.name)||clean(o.geometry&&o.geometry.name)||'';
+    o.userData.ph = ph.has(nm) || /__PLACEHOLDER$/.test(nm);
+    pos += (o.geometry&&o.geometry.attributes.position)?o.geometry.attributes.position.count:0;
+    for(const m of (Array.isArray(o.material)?o.material:[o.material])){
+      if(!m) continue;
+      allMats.push(m);
+      const pg=m.userData&&m.userData.unityLightmapPage;
+      if(pg!==undefined&&pg!==null){ m.userData.lmPage=pg; lmRecs.push({m, g:o.geometry}); }
+    }
+  });
+  let lights=0; g.scene.traverse(o=>{ if(o.isLight) lights++; });
+  S.meshObjects=meshes; S.posTotal=pos; S.lights=lights;
+  S.declared={prim:truth.prim_total, pos:truth.pos_total, tri:truth.tri_total,
+              materials:truth.materials, lmMaterials:truth.lm_materials, blend:truth.alpha_blend};
+  // 台账逐字对不上就是产物坏了，不要"看着能跑"就当通过
+  if(pos!==truth.pos_total) throw new Error('顶点数与台账不符 '+pos+' != '+truth.pos_total);
+  if(meshes!==truth.prim_total) throw new Error('网格对象数与台账不符 '+meshes+' != '+truth.prim_total);
+  /* 环境光用**包里的** RenderSettings 三向环境光（m_AmbientMode/EIntensity/Equator/Ground），
+     而不是随手一个白色 AmbientLight。trilight 在水平朝上的面上给的就是 equator 这一项。 */
+  if(rs && rs.ambient && rs.ambient.equator){
+    const A=rs.ambient, c=new THREE.Color(A.equator[0],A.equator[1],A.equator[2]);
+    scene.add(new THREE.AmbientLight(c,(A.intensity||1)));
+    S.ambient={mode:A.mode, intensity:A.intensity, color:A.equator};
+  } else throw new Error('缺 room.render.json —— 环境光无法按包内口径渲染');
+  prog(0.55,'装配场景…');
+}
+
+let rs=null;
+async function boot(){
+  prog(0.02,'读取台账…');
+  [truth, side, rs] = await Promise.all([
+    fetch(URLS.truth).then(r=>r.json()), fetch(URLS.side).then(r=>r.json()),
+    fetch(URLS.render).then(r=>r.json()).catch(()=>null)]);
+  /* 机位表是构建产物的一部分（room.views.json）。缺了不致命：退回包里那台 Camera。 */
+  views = ((await fetch(URLS.views).then(r=>r.json()).catch(()=>null))||{}).views || [];
+  S.views = views.map(v=>({name:v.name, fov:v.fov, ang:v.ang_to_outside, how:v.how, n:v.n}));
+  await new Promise(res=>{
+    new GLTFLoader().load(URLS.glb, async g=>{
+      try{ await fill(g); }catch(e){ fail(e); } res();
+    }, ev=>{ if(ev.total) prog(0.05+0.6*(ev.loaded/ev.total),
+         '载入模型 '+(ev.loaded/1048576).toFixed(1)+' / '+(ev.total/1048576).toFixed(1)+' MB'); },
+       e=>{ fail('GLB 解析失败 '+(e&&e.message||e)); res(); });
+  });
+  if(S.err) return;
+  buildBackdrop();
+  stage.insertBefore(renderer.domElement, stage.firstChild);
+  await ensureComposer();
+  resize();
+  /* 初始机位：优先用**构建期算出的分区域机位**（room.views.json，由场景里按名字命名的锚点算出，
+     亮度对齐验收就是在这三个机位上做的）。包里那台 Camera 的位置贴着一面墙，直接当默认机位
+     第一屏会糊成一片白 —— 它保留成「包内机位」按钮，不冒充"游戏里就是这个视角"。
+     ⚠️ FOV 不是包里的权威值（那台 Camera 的 TypeTree 没有 m_FieldOfView/m_Near/m_Far）。 */
+  controls=new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping=true;
+  buildViewButtons();
+  if(views.length) setView(0); else goPack();     // 机位表缺件时退回包内 Camera，不停在原地不动
+  await setLightmap(true);
+  draw();
+  S.sceneTris=sceneTrisSeen;
+  S.done=true; ldEl.classList.add('hide');
+  hudUpdate(); loop();
+}
+
+function hudUpdate(){
+  const d=S.declared||{};
+  hud.innerHTML =
+    '网格对象 <b>'+S.meshObjects+'</b> / 台账 '+(d.prim||0)+' · 顶点 <b>'+S.posTotal+'</b> / 台账 '+(d.pos||0)+
+    ' · 灯 <b>'+S.lights+'</b> 盏（包内强度）'+
+    '<br>lightmap 槽位 <b>'+S.lmSlots+'</b> · 页 <b>'+S.lmPages+'</b> · UV 通道校验 <b>'+S.chanOk+'</b> 通过 / <b>'+S.chanBad+'</b> 失败'+
+    (S.chanBad?'<br><span class="warn">有槽位没走 UV1 —— lightmap 采样用错了套 UV</span>':'')+
+    (S.ambient?'<br>环境光 <b>trilight 模式 '+S.ambient.mode+'</b> × '+S.ambient.intensity+'（取自包内 RenderSettings）':'')+
+    '<br>当前机位 <b>'+(S.view==='pack'?'包内 Camera':(ZONE_CN[S.view]||S.view||'—'))+'</b>'+
+    ' · FOV '+S.viewFov+'（'+(S.view==='pack'?'包里没这个字段，60° 是观感值':'构建期按锚点算的，见 room.views.json')+'）'+
+    '<br>推断重画：云 <b>'+S.cloudwMats+'</b> 张材质 · 叶 <b>'+S.leafwMats+'</b> 张材质'+
+    (S.on.sky?'<br><span class="warn">当前画面含手摆窗外天海 —— 非包内数据</span>':'')+
+    (S.err?'<br><span class="warn">'+S.err+'</span>':'');
+}
+
+function goPack(){
+  const cp=(truth.camera&&truth.camera.pos)||[0,1.5,0];
+  const fwd=(truth.camera&&truth.camera.fwd)||[0,0,1];
+  camera.fov=60; camera.updateProjectionMatrix();
+  camera.position.set(cp[0],cp[1],cp[2]);
+  controls.target.set(cp[0]+fwd[0]*3, cp[1]+fwd[1]*3, cp[2]+fwd[2]*3);
+  controls.update();
+  S.view='pack'; S.viewFov=60; S.home={pos:camera.position.toArray(), target:controls.target.toArray()};
+  document.querySelectorAll('#views .sw').forEach(x=>x.classList.toggle('on', x.textContent==='包内机位'));
+  draw(); hudUpdate();
+}
+function buildViewButtons(){
+  const box=document.getElementById('views');
+  views.forEach((v,i)=>{
+    const b=document.createElement('button');
+    b.className='sw'; b.dataset.v=String(i); b.textContent=ZONE_CN[v.name]||v.name;
+    b.title='锚点 '+v.n+' 个 · 视线与窗外方向夹角 '+v.ang_to_outside+'° · 站位来自'+v.how;
+    b.addEventListener('click',()=>setView(i));
+    box.appendChild(b);
+  });
+  const pb=document.createElement('button');
+  pb.className='sw'; pb.textContent='包内机位';
+  pb.title='包里那台 Camera 的位置（它贴着一面墙，第一屏会发白）；FOV 不是包里的权威值';
+  pb.addEventListener('click',goPack);
+  box.appendChild(pb);
+}
+function setView(i){
+  const v=views[i]; if(!v) return;
+  camera.fov=v.fov; camera.updateProjectionMatrix();
+  camera.position.set(v.pos[0], v.pos[1], v.pos[2]);
+  controls.target.set(v.look[0], v.look[1], v.look[2]);
+  controls.update();
+  S.view=v.name; S.viewFov=v.fov;
+  S.home={pos:v.pos.slice(), target:v.look.slice()};
+  S.camPos=camera.position.toArray(); S.camTarget=controls.target.toArray();
+  document.querySelectorAll('#views .sw').forEach(x=>x.classList.toggle('on', x.dataset.v===String(i)));
+  draw(); hudUpdate();
+}
+
+async function toggle(k){
+  if(k==='reset'){ if(S.home){ camera.position.fromArray(S.home.pos); controls.target.fromArray(S.home.target); controls.update(); } draw(); return; }
+  const v=!S.on[k]; S.on[k]=v;
+  document.querySelector('.sw[data-k="'+k+'"]').classList.toggle('on', v);
+  if(k==='sky'){ buildBackdrop(); backdrop.visible=v; }
+  else if(k==='lm'){ await setLightmap(v); }
+  else { applyRule(RULES.filter(r=>r.k===k)[0], v); }
+  draw(); hudUpdate();
+}
+
+function loop(){ requestAnimationFrame(loop); controls.update(); draw(); S.sceneTris=sceneTrisSeen; }
+
+document.querySelectorAll('.sw[data-k]').forEach(b=>b.addEventListener('click',()=>toggle(b.dataset.k)));
+document.getElementById('rBloom').addEventListener('input',e=>{
+  knob.bloom=parseFloat(e.target.value); document.getElementById('vBloom').textContent=knob.bloom.toFixed(2);
+  if(bloomPass) bloomPass.strength=knob.bloom; draw(); });
+document.getElementById('rExp').addEventListener('input',e=>{
+  renderer.toneMappingExposure=parseFloat(e.target.value);
+  document.getElementById('vExp').textContent=renderer.toneMappingExposure.toFixed(2); draw(); });
+document.getElementById('gTheme').addEventListener('click',e=>{
+  const t=e.target.dataset.t; if(!t) return;
+  document.documentElement.dataset.theme=t; try{localStorage.setItem('gallery.theme',t)}catch(x){}
+  syncTheme(); });
+function syncTheme(){
+  document.querySelectorAll('#gTheme button').forEach(b=>b.classList.toggle('on', b.dataset.t===document.documentElement.dataset.theme));
+  renderer.setClearColor(themeColor(),1); if(composer) composer.setSize(stage.clientWidth||1, stage.clientHeight||1); draw();
+}
+syncTheme();
+boot().catch(e=>fail(e));
+</script>
+</body>
+</html>

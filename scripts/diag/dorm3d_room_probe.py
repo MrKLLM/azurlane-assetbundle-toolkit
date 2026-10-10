@@ -52,6 +52,8 @@ import chrome_tree                               # noqa: E402
 import paths as AP                               # noqa: E402
 
 WORK = os.path.join(ROOT, ".diag", "dorm3d_room")
+HARNESS_REL = ".diag/dorm3d_room/harness.html"   # 相对静态根的 URL 路径
+DEF_GLB = "Output/gallery_v2/dorm3d/room.glb"    # 产物正本：不在 .diag（那是临时区）
 CHROME = AP.tool("AL_CHROME", "chrome", r"C:/Program Files/Google/Chrome/Application/chrome.exe",
                  r"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe")
 PORT, PROFILE = cdp_slot.slot(ROOT, "d3droom")
@@ -181,7 +183,7 @@ async function applyLightmaps(root, side, mode, inten, chan){
     // /dorm3d_room/dorm3d_room/lightmaps/... 而 404（TextureLoader 的 onError 会 reject，
     // 正好被上面的 catch 抓住 —— 之前用不 await 的 tl.load() 时它静默返回占位贴图，
     // 于是"挂了 lightMap 的版"与"没挂的版"落笔占比逐位相同）
-    const t=await loadTex('/dorm3d_room/lightmaps/'+p.file);
+    const t=await loadTex((Q.get('lmbase')||'/dorm3d_room/lightmaps/')+p.file);
     t.colorSpace = (mode==='srgb')?THREE.SRGBColorSpace:THREE.NoColorSpace;
     t.flipY=false;                     // Unity lightmap 与我们的 UV 同向，多翻一次就上下错位
     // **承重的一行**：three.js r152+ 的贴图通道由 `texture.channel` 决定，默认 0 ⇒
@@ -443,151 +445,13 @@ def page_sensitivity(side, work=WORK):
             "samples": samples}
 
 
-ZONE_ANCHORS = {
-    "bedroom": ["Bed", "Cabinet", "ChairFrontDesk", "FittingRoom"],
-    "living": ["Sofa", "Table", "Chair_1", "Chair_2", "Fireplace", "Lamp"],
-    "kitchen": ["Kitchen", "TableKitchen", "ChairKitchen"],
-}
-
-
 def zone_views(glb_path):
-    """按**场景里按名字命名的锚点**算分区域机位（不是手调坐标）。
-
-    相机放在"簇中心 -> 房间中心"这条线上、退到簇外 3.2 单位，眼高 1.45，看向簇心 0.8 高处。
-    锚点世界位置从 GLB 的节点 TRS 复算（与 --verify 的镜像锚点同一套矩阵代码）。
-    """
-    import struct
+    """机位算法已迁到装配器：产物构建时就要落 room.views.json，页面不能反过来依赖诊断脚本。"""
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import dorm3d_room_to_gltf as A
-    raw = open(glb_path, "rb").read()
-    jl, _t = struct.unpack_from("<II", raw, 12)
-    g = json.loads(raw[20:20 + jl].decode("utf-8"))
-    nodes = g["nodes"]
-    kids = {}
-    for i, n in enumerate(nodes):
-        for c in n.get("children", []):
-            kids[c] = i
+    return A.zone_views(glb_path)
 
-    def world(i, memo={}):
-        if i in memo:
-            return memo[i]
-        n = nodes[i]
-        M = A._quat_mat(n.get("translation", [0, 0, 0]), n.get("rotation", [0, 0, 0, 1]),
-                        n.get("scale", [1, 1, 1]))
-        p = kids.get(i)
-        if p is not None:
-            PM = world(p)
-            M = A._mul(PM[0], PM[1], M[0], M[1])
-        memo[i] = M
-        return M
 
-    pos_of = {}
-    for i, n in enumerate(nodes):
-        if n.get("name") in sum(ZONE_ANCHORS.values(), []):
-            pos_of.setdefault(n["name"], []).append(world(i)[1])
-    allp = [q for v in pos_of.values() for q in v]
-    centre = [sum(q[k] for q in allp) / len(allp) for k in range(3)]
-    # "外面在哪一侧"：用窗外内容（船/地形/云/树/礁石）的世界位置质心定方向，
-    # 而不是手填一个 -z。窗在相机视野里 ⇒ 才谈得上"天空占画面比例"这个量。
-    import re
-    outside = []
-    for i, n in enumerate(nodes):
-        nm = (n.get("name") or "")
-        if re.search(r"ship01|terrain_0|Cloud_Layer|stylizedrock|poplar04|oak01", nm):
-            outside.append(world(i)[1])
-    if outside:
-        oc = [sum(q[k] for q in outside) / len(outside) for k in range(3)]
-    else:
-        oc = [centre[0], centre[1], centre[2] - 100.0]
-    near = [q for q in allp if max(abs(q[0]), abs(q[2])) <= 12.0]
-    box = [[min(q[k] for q in near) for k in (0, 2)], [max(q[k] for q in near) for k in (0, 2)]] \
-        if near else [[-8, -8], [8, 8]]
-
-    def inside(p):
-        return box[0][0] - 0.5 <= p[0] <= box[1][0] + 0.5 and box[0][1] - 0.5 <= p[2] <= box[1][1] + 0.5
-
-    views = []
-    for zone, names in ZONE_ANCHORS.items():
-        pts = [q for nm in names for q in pos_of.get(nm, [])]
-        if not pts:
-            continue
-        c = [sum(q[k] for q in pts) / len(pts) for k in range(3)]
-        ux, uz = oc[0] - c[0], oc[2] - c[2]
-        uL = max(1e-6, (ux * ux + uz * uz) ** 0.5)
-        dx, dz = centre[0] - c[0], centre[2] - c[2]
-        L = max(1e-6, (dx * dx + dz * dz) ** 0.5)
-        back = min(3.6, max(1.6, L * 0.9))
-        # 两个候选：朝外那侧的对面（能把窗拍进画面）与原来的"朝房间中心"侧。
-        # 取"在屋内"且视线与朝外方向点积最大的那个——点积就是"窗有多进画面"。
-        cands = []
-        for sgn in (-1.0, 1.0):
-            for base in ((ux / uL, uz / uL), (dx / L, dz / L)):
-                p = [c[0] + sgn * base[0] * back, 1.45, c[2] + sgn * base[1] * back]
-                vx, vz = c[0] - p[0], c[2] - p[2]
-                vL = max(1e-6, (vx * vx + vz * vz) ** 0.5)
-                dot = (vx / vL) * (ux / uL) + (vz / vL) * (uz / uL)
-                cands.append((dot, p, inside(p)))
-        ok = [q for q in cands if q[2]] or cands
-        dot, pos, _ = max(ok, key=lambda q: q[0])
-
-        def ang_between(p, a, b):
-            ax, az = a[0] - p[0], a[2] - p[2]
-            bx, bz = b[0] - p[0], b[2] - p[2]
-            na = max(1e-6, (ax * ax + az * az) ** 0.5)
-            nb = max(1e-6, (bx * bx + bz * bz) ** 0.5)
-            return math.degrees(math.acos(max(-1.0, min(1.0, (ax * bx + az * bz) / (na * nb)))))
-
-        # 站位不能只在"簇↔房间中心"这条线上挑：厨房那个簇几乎正好背对窗
-        # （实测夹角 149°），线上任何一点都救不了 ⇒ 在屋内网格上搜
-        # "窗方向与簇方向夹角够小、且离簇 1.6~4.5 m"的点。
-        grid = None
-        for gx in range(0, 41):
-            for gz in range(0, 41):
-                p = [box[0][0] + 0.4 + (box[1][0] - box[0][0] - 0.8) * gx / 40.0, 1.45,
-                     box[0][1] + 0.4 + (box[1][1] - box[0][1] - 0.8) * gz / 40.0]
-                dcl = ((c[0] - p[0]) ** 2 + (c[2] - p[2]) ** 2) ** 0.5
-                if not (1.6 <= dcl <= 4.5):
-                    continue
-                a = ang_between(p, c, oc)
-                if a > 72.0:
-                    continue
-                # 分数：夹角越小越好（窗与家具都能进画面），离簇适中
-                score = -a - abs(dcl - 2.6) * 4.0
-                if grid is None or score > grid[0]:
-                    grid = (score, p, a, dcl)
-        if grid:
-            pos = grid[1]
-            ang = grid[2]
-            src = "网格搜索"
-        else:
-            ang = ang_between(pos, c, oc)
-            src = "线位兜底"
-        # 视线取"簇方向"与"窗外方向"的角平分线，fov 张到能同时装下两者各留 20° 余量。
-        # ⚠️ 夹角太大时"劈开"等于把**簇转出画面**（本轮真实回退：厨房与窗相差 149°，
-        # 取角平分线后 shot_zone_kitchen 拍到的是壁炉墙与起居区）。
-        # 只有两个都装得下（ang ≤ fov_max − 2×20° = 52°）才允许劈，否则老实朝簇看。
-        vx, vz = c[0] - pos[0], c[2] - pos[2]
-        vL = max(1e-6, (vx * vx + vz * vz) ** 0.5)
-        ox, oz = oc[0] - pos[0], oc[2] - pos[2]
-        oL = max(1e-6, (ox * ox + oz * oz) ** 0.5)
-        if 20.0 < ang <= 52.0:
-            bx, bz = vx / vL + ox / oL, vz / vL + oz / oL
-            bL = max(1e-6, (bx * bx + bz * bz) ** 0.5)
-            look = [round(pos[0] + bx / bL * vL, 3), 1.0, round(pos[2] + bz / bL * vL, 3)]
-            fov = int(min(92.0, ang + 40.0))
-        else:
-            look = [round(c[0], 3), 0.8, round(c[2], 3)]
-            fov = 62 if ang <= 20.0 else 74
-        # 自证：算完机位再回头量"这簇还在不在画面里"。上一版把视线劈向角平分线，
-        # 厨房那簇就转到画面外去了（截图拍到壁炉墙）——这条当时就该拦住我。
-        ang_cluster = ang_between(pos, c, look)
-        views.append({"name": zone, "n": len(pts), "dot_outside": round(dot, 3),
-                      "ang_to_outside": round(ang, 1), "how": src,
-                      "ang_cluster": round(ang_cluster, 1), "half_fov": round(fov / 2.0, 1),
-                      "pos": [round(pos[0], 3), pos[1], round(pos[2], 3)],
-                      "look": look, "fov": fov})
-    return views, {"_centre": [round(x, 2) for x in centre],
-                   "_outside": [round(x, 2) for x in oc]}
 
 
 REF_CROP = (0.08, 0.14, 0.92, 0.85)   # 与 harness 的 frameStats 同一套裁剪
@@ -676,7 +540,9 @@ def grade_sweep(browser, base, rel_glb, rel_truth, rel_side, rel_render, views, 
 
 
 def preset_query(p, base, rel_side, rel_render, vq):
-    q = "&lm=%s&side=%s&views=%s" % (p.get("lm", 1), base + rel_side, vq)
+    q = "&lm=%s&side=%s&views=%s&lmbase=%s" % (
+        p.get("lm", 1), base + rel_side, vq,
+        base + os.path.join(rel_side[:rel_side.rindex("/")], "lightmaps").replace(os.sep, "/") + "/")
     if rel_render:
         q += "&render=%s" % (base + rel_render)
     for k in ("tone", "exp", "lmc", "lmi", "lmch", "ambm", "ambk", "ambsrgb", "li", "ld", "dc",
@@ -686,60 +552,6 @@ def preset_query(p, base, rel_side, rel_render, vq):
     if p.get("nolight"):
         q += "&nolight=1"
     return q
-
-
-def render_settings(scene, out_path):
-    """把场景包里的 RenderSettings（三向环境光）与灯的强度/射程抄成一份 json 给前端用。
-
-    为什么单独出这份文件：环境光颜色是**包里的数据**，把它硬写进 harness 就等于
-    用我的猜测当事实；前端读数与源包口径必须能对上同一张表。
-    """
-    sys.path.insert(0, os.path.join(ROOT, "scripts"))
-    sys.path.insert(0, os.path.join(ROOT, "scripts", "diag"))
-    import dorm3d_pptr_resolve as P
-    import UnityPy
-    UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
-    scene = scene or P.DEF_SCENE
-    env = UnityPy.load(scene)
-    out = {"scene": os.path.basename(scene), "ambient": None, "lights": {}, "notes": []}
-    _LT = {0: "spot", 1: "directional", 2: "point", 3: "area"}
-    hist = {}
-    for o in env.objects:
-        tn = o.type.name
-        if tn == "RenderSettings":
-            rs = o.read()
-
-            def rgb(v):
-                return [round(float(getattr(v, k, 0.0)), 5) for k in ("r", "g", "b")]
-            out["ambient"] = {
-                "mode": int(getattr(rs, "m_AmbientMode", 0) or 0),
-                "intensity": float(getattr(rs, "m_AmbientIntensity", 1.0) or 1.0),
-                "sky": rgb(getattr(rs, "m_AmbientSkyColor", None)),
-                "equator": rgb(getattr(rs, "m_AmbientEquatorColor", None)),
-                "ground": rgb(getattr(rs, "m_AmbientGroundColor", None)),
-                "probe_nonzero": any(abs(float(getattr(rs.m_AmbientProbe, "sh_%02d_" % s, 0.0) or 0.0)) > 1e-6
-                                     for s in range(27)),
-                "sun": bool(getattr(rs.m_Sun, "path_id", 0)),
-                "fog": bool(getattr(rs, "m_Fog", False)),
-            }
-        elif tn == "Light":
-            L = o.read()
-            tv = getattr(L, "m_Type", 0)
-            kind = _LT.get(int(tv.value) if hasattr(tv, "value") else int(tv), "other")
-            h = hist.setdefault(kind, {"n": 0, "intensity": []})
-            h["n"] += 1
-            try:
-                h["intensity"].append(round(float(getattr(L, "m_Intensity", 0) or 0.0), 3))
-            except Exception:
-                pass
-    for k, h in hist.items():
-        h["intensity"] = {"min": min(h["intensity"]), "max": max(h["intensity"]),
-                          "sum": round(sum(h["intensity"]), 3)}
-    out["lights"] = hist
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=1)
-    return out
-
 
 
 def serve(root_dir):
@@ -806,7 +618,7 @@ def run_case(browser, base, glb_url, truth_url, tag, shots, extra="", capture=Tr
             return {"__err": str(r["exceptionDetails"].get("text"))[:200]}
         return r.get("result", {}).get("value")
 
-    url = "%sdorm3d_room/harness.html?m=%s&truth=%s%s" % (base, base + glb_url, base + truth_url, extra)
+    url = "%s%s?m=%s&truth=%s%s" % (base, HARNESS_REL, base + glb_url, base + truth_url, extra)
     if shots.get("nolight"):
         url += "&nolight=1"
     ev("location.href='%s'" % url)
@@ -838,7 +650,7 @@ def run_case(browser, base, glb_url, truth_url, tag, shots, extra="", capture=Tr
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--glb", default=".diag/dorm3d_room/room.glb")
+    ap.add_argument("--glb", default=DEF_GLB)
     ap.add_argument("--truth", default=None,
                     help="真值 json；缺省按 --glb 同名推导（不推导会拿旧版真值比新版模型）")
     ap.add_argument("--skip-controls", action="store_true", help="调试用；正式判定不许跳")
@@ -876,7 +688,7 @@ def main():
     truth = json.load(open(truth_p, encoding="utf-8"))
     os.makedirs(WORK, exist_ok=True)
     open(os.path.join(WORK, "harness.html"), "w", encoding="utf-8").write(HARNESS)
-    httpd, sport = serve(os.path.join(ROOT, ".diag"))
+    httpd, sport = serve(ROOT)          # 根=仓库根：产物在 Output/ 下，探针自留件在 .diag/ 下
     base = "http://127.0.0.1:%d/" % sport
     names = [v for v in ("game", "az000", "az090", "az180", "top")]
     proc = subprocess.Popen([CHROME, "--headless=new", "--remote-debugging-port=%d" % PORT,
@@ -884,7 +696,7 @@ def main():
                              "--no-first-run", "--no-default-browser-check",
                              "--disable-background-timer-throttling", "--use-angle=swiftshader",
                              "--window-size=%d,%d" % (1280, 960),
-                             base + "dorm3d_room/harness.html?m=%s&truth=%s"
+                             base + HARNESS_REL + "?m=%s&truth=%s"
                              % (base + "dorm3d_room/" + os.path.basename(glb),
                                 base + "dorm3d_room/" + os.path.basename(truth_p))],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -930,8 +742,8 @@ def main():
                     if r.get("id") == cid[0]:
                         return r
             _c(m)
-        rel_glb = "dorm3d_room/" + os.path.basename(glb)
-        rel_truth = "dorm3d_room/" + os.path.basename(truth_p)
+        rel_glb = os.path.relpath(glb, ROOT).replace(os.sep, "/")
+        rel_truth = os.path.relpath(truth_p, ROOT).replace(os.sep, "/")
         good = run_case(browser, base, rel_glb, rel_truth, "good", {"names": names})
         if not good:
             return 1
@@ -987,8 +799,9 @@ def main():
             say(nl_ink is not None and nl_ink < 0.05,
                 "C2 摘掉所有灯之后落笔占比必须塌（证明 J6 量的是被照亮的内容）: 实得 %s"
                 % (None if nl_ink is None else round(nl_ink, 4)))
-        rel_side = "dorm3d_room/" + os.path.splitext(os.path.basename(glb))[0] + ".lightmaps.json"
-        side_p = os.path.join(WORK, os.path.basename(rel_side))
+        side_p0 = os.path.splitext(glb)[0] + ".lightmaps.json"
+        rel_side = os.path.relpath(side_p0, ROOT).replace(os.sep, "/")
+        side_p = side_p0        # sidecar 跟着正本走（在 Output 下），不再假设它在 .diag 里
         side = json.load(open(side_p, encoding="utf-8")) if os.path.isfile(side_p) else None
         if side:
             lmcase = run_case(browser, base, rel_glb, rel_truth, "lm", {"names": names},
@@ -1082,10 +895,14 @@ def main():
                              r["base6"], 100 * r["lo"], r["sat"], 100 * r["skyf"]))
                 print("     目标(取中位) " + " ".join("%s=%.3f" % (k, target[k]) for k in keys))
                 rel_render = None
-                rs_p = os.path.join(WORK, "room.render.json")
+                rs_p = os.path.join(os.path.dirname(glb), "room.render.json")
+                if not os.path.isfile(rs_p):
+                    rs_p = os.path.join(WORK, "room.render.json")
                 try:
-                    info = render_settings(a.scene, rs_p)
-                    rel_render = "dorm3d_room/room.render.json"
+                    import dorm3d_room_to_gltf as A
+                    info = (json.load(open(rs_p, encoding="utf-8")) if os.path.isfile(rs_p)
+                            else A.render_settings(a.scene, rs_p))
+                    rel_render = os.path.relpath(rs_p, ROOT).replace(os.sep, "/")
                     print("  包里的环境光: %s" % json.dumps(info.get("ambient"), ensure_ascii=False))
                     print("  包里的灯: %s" % json.dumps(info.get("lights"), ensure_ascii=False))
                     say(bool(info.get("ambient")), "R1 场景包里读到了 RenderSettings 环境光（补光有据可依）")

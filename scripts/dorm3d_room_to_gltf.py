@@ -584,6 +584,8 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
                    "lm_objects": len(lm_rows), "lm_baked": lm_baked, "lm_no_uv1": lm_nouv1,
                    "lm_prims": lm_prims, "lm_st_unique": len({tuple(r["st"]) for r in lm_rows})},
                   open(side, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        # 环境光/灯强度单独落一份：查看端要按包内口径渲染，不能把颜色硬写进页面
+        render_settings(scene, os.path.splitext(out)[0] + ".render.json")
     truth["lights"] = len(lights)
     truth["lights_skipped"] = lskip
     truth["lm_pages"] = len(pages)
@@ -635,6 +637,23 @@ def build(scene, out=None, only=None, limit=None, with_textures=True,
                   % (P.rel(tp), prim_total, pos_total, tri_total,
                      [[round(v, 3) for v in wmin], [round(v, 3) for v in wmax]] if wmin else "空",
                      wb_skipped))
+        # 分区域机位也落一份 sidecar：页面要能直接开到"卧室/起居/厨房"这三个**验收过**的机位。
+        # 算法的权威实现只有装配器这一份 —— 页面反向依赖诊断脚本的话，产物本身就跑不起来。
+        # 包里那台 Camera 的位置是"复位视角"，但它贴着一面墙，第一屏会糊成一片白，不能当默认机位。
+        try:
+            zv, zc = zone_views(out)
+            vp = os.path.splitext(out)[0] + ".views.json"
+            json.dump({"views": zv, "context": zc,
+                       "convention": "机位由场景里**按名字命名的锚点**算出（床/沙发/灶台那簇），"
+                                     "站位在屋内网格里搜「窗方向与该簇方向夹角最小」的点；"
+                                     "眼高 1.45 是人的视点，不是包里的数据",
+                       "note": "FOV 不是包里的权威值（那台 Camera 的 TypeTree 没有 m_FieldOfView）"},
+                      open(vp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+            if verbose:
+                print("  机位 %s: %s" % (P.rel(vp), ", ".join(
+                    "%s(夹角 %.0f°/fov %d)" % (v["name"], v["ang_to_outside"], v["fov"]) for v in zv)))
+        except Exception as ex:
+            print("  ⚠ 分区域机位算失败（页面会退回包内 Camera）: %s: %s" % (type(ex).__name__, ex))
     if verbose:
         print("索引 %d 包 / %.1f 秒 | 工单 %d（门控剔除 %d，无 Transform %d）| 节点 %d | "
               "网格 %d（占位 %d）| 材质 %d | 贴图 %d | 灯 %d（跳过 %s）"
@@ -935,6 +954,198 @@ def lightmap_anchor(ctx, g, raw, bin_off, binraw):
     return bad
 
 
+ZONE_ANCHORS = {
+    "bedroom": ["Bed", "Cabinet", "ChairFrontDesk", "FittingRoom"],
+    "living": ["Sofa", "Table", "Chair_1", "Chair_2", "Fireplace", "Lamp"],
+    "kitchen": ["Kitchen", "TableKitchen", "ChairKitchen"],
+}
+
+
+def zone_views(glb_path):
+    """按**场景里按名字命名的锚点**算分区域机位（不是手调坐标）。
+
+    相机放在"簇中心 -> 房间中心"这条线上、退到簇外 3.2 单位，眼高 1.45，看向簇心 0.8 高处。
+    锚点世界位置从 GLB 的节点 TRS 复算（与 --verify 的镜像锚点同一套矩阵代码）。
+    """
+    import struct
+    raw = open(glb_path, "rb").read()
+    jl, _t = struct.unpack_from("<II", raw, 12)
+    g = json.loads(raw[20:20 + jl].decode("utf-8"))
+    nodes = g["nodes"]
+    kids = {}
+    for i, n in enumerate(nodes):
+        for c in n.get("children", []):
+            kids[c] = i
+
+    def world(i, memo={}):
+        if i in memo:
+            return memo[i]
+        n = nodes[i]
+        M = _quat_mat(n.get("translation", [0, 0, 0]), n.get("rotation", [0, 0, 0, 1]),
+                        n.get("scale", [1, 1, 1]))
+        p = kids.get(i)
+        if p is not None:
+            PM = world(p)
+            M = _mul(PM[0], PM[1], M[0], M[1])
+        memo[i] = M
+        return M
+
+    pos_of = {}
+    for i, n in enumerate(nodes):
+        if n.get("name") in sum(ZONE_ANCHORS.values(), []):
+            pos_of.setdefault(n["name"], []).append(world(i)[1])
+    allp = [q for v in pos_of.values() for q in v]
+    centre = [sum(q[k] for q in allp) / len(allp) for k in range(3)]
+    # "外面在哪一侧"：用窗外内容（船/地形/云/树/礁石）的世界位置质心定方向，
+    # 而不是手填一个 -z。窗在相机视野里 ⇒ 才谈得上"天空占画面比例"这个量。
+    import re
+    outside = []
+    for i, n in enumerate(nodes):
+        nm = (n.get("name") or "")
+        if re.search(r"ship01|terrain_0|Cloud_Layer|stylizedrock|poplar04|oak01", nm):
+            outside.append(world(i)[1])
+    if outside:
+        oc = [sum(q[k] for q in outside) / len(outside) for k in range(3)]
+    else:
+        oc = [centre[0], centre[1], centre[2] - 100.0]
+    near = [q for q in allp if max(abs(q[0]), abs(q[2])) <= 12.0]
+    box = [[min(q[k] for q in near) for k in (0, 2)], [max(q[k] for q in near) for k in (0, 2)]] \
+        if near else [[-8, -8], [8, 8]]
+
+    def inside(p):
+        return box[0][0] - 0.5 <= p[0] <= box[1][0] + 0.5 and box[0][1] - 0.5 <= p[2] <= box[1][1] + 0.5
+
+    views = []
+    for zone, names in ZONE_ANCHORS.items():
+        pts = [q for nm in names for q in pos_of.get(nm, [])]
+        if not pts:
+            continue
+        c = [sum(q[k] for q in pts) / len(pts) for k in range(3)]
+        ux, uz = oc[0] - c[0], oc[2] - c[2]
+        uL = max(1e-6, (ux * ux + uz * uz) ** 0.5)
+        dx, dz = centre[0] - c[0], centre[2] - c[2]
+        L = max(1e-6, (dx * dx + dz * dz) ** 0.5)
+        back = min(3.6, max(1.6, L * 0.9))
+        # 两个候选：朝外那侧的对面（能把窗拍进画面）与原来的"朝房间中心"侧。
+        # 取"在屋内"且视线与朝外方向点积最大的那个——点积就是"窗有多进画面"。
+        cands = []
+        for sgn in (-1.0, 1.0):
+            for base in ((ux / uL, uz / uL), (dx / L, dz / L)):
+                p = [c[0] + sgn * base[0] * back, 1.45, c[2] + sgn * base[1] * back]
+                vx, vz = c[0] - p[0], c[2] - p[2]
+                vL = max(1e-6, (vx * vx + vz * vz) ** 0.5)
+                dot = (vx / vL) * (ux / uL) + (vz / vL) * (uz / uL)
+                cands.append((dot, p, inside(p)))
+        ok = [q for q in cands if q[2]] or cands
+        dot, pos, _ = max(ok, key=lambda q: q[0])
+
+        def ang_between(p, a, b):
+            ax, az = a[0] - p[0], a[2] - p[2]
+            bx, bz = b[0] - p[0], b[2] - p[2]
+            na = max(1e-6, (ax * ax + az * az) ** 0.5)
+            nb = max(1e-6, (bx * bx + bz * bz) ** 0.5)
+            return math.degrees(math.acos(max(-1.0, min(1.0, (ax * bx + az * bz) / (na * nb)))))
+
+        # 站位不能只在"簇↔房间中心"这条线上挑：厨房那个簇几乎正好背对窗
+        # （实测夹角 149°），线上任何一点都救不了 ⇒ 在屋内网格上搜
+        # "窗方向与簇方向夹角够小、且离簇 1.6~4.5 m"的点。
+        grid = None
+        for gx in range(0, 41):
+            for gz in range(0, 41):
+                p = [box[0][0] + 0.4 + (box[1][0] - box[0][0] - 0.8) * gx / 40.0, 1.45,
+                     box[0][1] + 0.4 + (box[1][1] - box[0][1] - 0.8) * gz / 40.0]
+                dcl = ((c[0] - p[0]) ** 2 + (c[2] - p[2]) ** 2) ** 0.5
+                if not (1.6 <= dcl <= 4.5):
+                    continue
+                a = ang_between(p, c, oc)
+                if a > 72.0:
+                    continue
+                # 分数：夹角越小越好（窗与家具都能进画面），离簇适中
+                score = -a - abs(dcl - 2.6) * 4.0
+                if grid is None or score > grid[0]:
+                    grid = (score, p, a, dcl)
+        if grid:
+            pos = grid[1]
+            ang = grid[2]
+            src = "网格搜索"
+        else:
+            ang = ang_between(pos, c, oc)
+            src = "线位兜底"
+        # 视线取"簇方向"与"窗外方向"的角平分线，fov 张到能同时装下两者各留 20° 余量。
+        # ⚠️ 夹角太大时"劈开"等于把**簇转出画面**（本轮真实回退：厨房与窗相差 149°，
+        # 取角平分线后 shot_zone_kitchen 拍到的是壁炉墙与起居区）。
+        # 只有两个都装得下（ang ≤ fov_max − 2×20° = 52°）才允许劈，否则老实朝簇看。
+        vx, vz = c[0] - pos[0], c[2] - pos[2]
+        vL = max(1e-6, (vx * vx + vz * vz) ** 0.5)
+        ox, oz = oc[0] - pos[0], oc[2] - pos[2]
+        oL = max(1e-6, (ox * ox + oz * oz) ** 0.5)
+        if 20.0 < ang <= 52.0:
+            bx, bz = vx / vL + ox / oL, vz / vL + oz / oL
+            bL = max(1e-6, (bx * bx + bz * bz) ** 0.5)
+            look = [round(pos[0] + bx / bL * vL, 3), 1.0, round(pos[2] + bz / bL * vL, 3)]
+            fov = int(min(92.0, ang + 40.0))
+        else:
+            look = [round(c[0], 3), 0.8, round(c[2], 3)]
+            fov = 62 if ang <= 20.0 else 74
+        # 自证：算完机位再回头量"这簇还在不在画面里"。上一版把视线劈向角平分线，
+        # 厨房那簇就转到画面外去了（截图拍到壁炉墙）——这条当时就该拦住我。
+        ang_cluster = ang_between(pos, c, look)
+        views.append({"name": zone, "n": len(pts), "dot_outside": round(dot, 3),
+                      "ang_to_outside": round(ang, 1), "how": src,
+                      "ang_cluster": round(ang_cluster, 1), "half_fov": round(fov / 2.0, 1),
+                      "pos": [round(pos[0], 3), pos[1], round(pos[2], 3)],
+                      "look": look, "fov": fov})
+    return views, {"_centre": [round(x, 2) for x in centre],
+                   "_outside": [round(x, 2) for x in oc]}
+
+def render_settings(scene, out_path):
+    """把场景包里的 RenderSettings（三向环境光）与灯的强度/射程抄成一份 json 给前端用。
+
+    为什么单独出这份文件：环境光颜色是**包里的数据**，把它硬写进 harness 就等于
+    用我的猜测当事实；前端读数与源包口径必须能对上同一张表。
+    """
+    scene = scene or P.DEF_SCENE
+    env = UnityPy.load(scene)
+    out = {"scene": os.path.basename(scene), "ambient": None, "lights": {}, "notes": []}
+    _LT = {0: "spot", 1: "directional", 2: "point", 3: "area"}
+    hist = {}
+    for o in env.objects:
+        tn = o.type.name
+        if tn == "RenderSettings":
+            rs = o.read()
+
+            def rgb(v):
+                return [round(float(getattr(v, k, 0.0)), 5) for k in ("r", "g", "b")]
+            out["ambient"] = {
+                "mode": int(getattr(rs, "m_AmbientMode", 0) or 0),
+                "intensity": float(getattr(rs, "m_AmbientIntensity", 1.0) or 1.0),
+                "sky": rgb(getattr(rs, "m_AmbientSkyColor", None)),
+                "equator": rgb(getattr(rs, "m_AmbientEquatorColor", None)),
+                "ground": rgb(getattr(rs, "m_AmbientGroundColor", None)),
+                "probe_nonzero": any(abs(float(getattr(rs.m_AmbientProbe, "sh_%02d_" % s, 0.0) or 0.0)) > 1e-6
+                                     for s in range(27)),
+                "sun": bool(getattr(rs.m_Sun, "path_id", 0)),
+                "fog": bool(getattr(rs, "m_Fog", False)),
+            }
+        elif tn == "Light":
+            L = o.read()
+            tv = getattr(L, "m_Type", 0)
+            kind = _LT.get(int(tv.value) if hasattr(tv, "value") else int(tv), "other")
+            h = hist.setdefault(kind, {"n": 0, "intensity": []})
+            h["n"] += 1
+            try:
+                h["intensity"].append(round(float(getattr(L, "m_Intensity", 0) or 0.0), 3))
+            except Exception:
+                pass
+    for k, h in hist.items():
+        h["intensity"] = {"min": min(h["intensity"]), "max": max(h["intensity"]),
+                          "sum": round(sum(h["intensity"]), 3)}
+    out["lights"] = hist
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
+    return out
+
+
 def light_dir_anchor(ctx, g):
     """跨源锚点：GLB 里每盏有朝向的灯，其行进方向必须等于源包 `C·(Unity 世界 +Z)`。
 
@@ -1163,7 +1374,8 @@ def verify_glb(path, scene=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scene", default=P.DEF_SCENE)
-    ap.add_argument("--out")
+    ap.add_argument("--out", default="Output/gallery_v2/dorm3d/room.glb",
+                    help="产物正本；放 Output 下（.diag 是临时区，不能住唯一副本）")
     ap.add_argument("--only", help="逗号分隔的 GameObject 名，做 1-8 个样本")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--no-textures", action="store_true", help="只出几何（先量体积与耗时）")

@@ -1,5 +1,5 @@
 {
-  "_purpose": "画廊前端运行时库台账。这 4 个第三方 JS 落在 Output/gallery_v2/vendor/（整目录 gitignore），git 里原本 0 份、无版本记录、无来源，换机器或清过 Output 就得重走当年「出网受限下载不到」那段排查（docs/WORKFLOWS.md 的 Spine/Live2D 段落）。本文件是唯一可复现记录，随仓库入库。",
+  "_purpose": "画廊前端运行时库台账。这 19 个第三方 JS 落在 Output/gallery_v2/vendor/（整目录 gitignore），git 里原本 0 份、无版本记录、无来源，换机器或清过 Output 就得重走当年「出网受限下载不到」那段排查（docs/WORKFLOWS.md 的 Spine/Live2D 段落）。本文件是唯一可复现记录，随仓库入库。⚠️ 台账里列全 ≠ 依赖闭包完整：ES module 缺一个相对 import 会让整页静默不初始化，闭包由 scripts/diag/check_vendor_closure.py 独立核对。",
   "_provision": "py -3 scripts/fetch_gallery_vendor.py            # 缺失或哈希不符才拉，按 sha256 校验后才落盘",
   "_check": "py -3 scripts/fetch_gallery_vendor.py --check   # 只校验不回写；漂移/缺件即非零退出（可进回归清单）",
   "_integrity_note": "所有 sha256 于 2026-09-26 由本机在用的运行目录副本实测；标 verified=true 的 URL 已当日重新下载并按哈希逐字节对拍命中。",
@@ -62,6 +62,155 @@
         { "url": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/3.8/spine-ts/build/spine-all.js", "verified": false, "observed": "本机 HTTP000" }
       ],
       "gap": "**四个里唯一没有可用下载源的**：本机这份来自第三方 spine-viewer 工具自带的运行时，与上游官方构建不同名同哈希。⚠️ tools/ 整目录也在 gitignore 里，所以这份文件在本机只有 2 个副本、git 里 0 份。若 tools/spine-viewer 被清且无外网对应哈希，Spine 标签会退化。彻底封掉这个缺口只有两条路：把 501KB 提交进仓库（需先确认 Spine Runtimes License 是否允许），或换成能按哈希校验的上游 3.8 构建并回归 Spine 播放。**未拍板，见 PROJECT_STATUS.md 的「运行时库台账」条。**"
+    },
+    {
+      "path": "Output/gallery_v2/vendor/three/three.module.min.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 670681,
+      "sha256": "3e690ac7d180b0aadf0891bea39eec643e29e2d3e75c99b18689518665f69ba6",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/controls/OrbitControls.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 29868,
+      "sha256": "5a44a9e86a2a0fb11933eed69bc2cd33c76a496854c1aed6ed776efa87d7b064",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/loaders/GLTFLoader.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 108522,
+      "sha256": "d073b438e6a07e1359741dd5d6c76c953420cc0d4fd84eb1bdde94315540e6a3",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/postprocessing/ClearPass.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 875,
+      "sha256": "b2a7e0a47231d96c91509016b4b67e23b3aea5f2f1fc30d38c7ed614f9bf354c",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/ClearPass.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/postprocessing/EffectComposer.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 4651,
+      "sha256": "d234e578618fa816955ebdc059c049c577e203e650e33cf22bde3f232c29e669",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/postprocessing/MaskPass.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 2231,
+      "sha256": "328cf7db0da5d9be83ffe39d54b01d5ac1fddf108cc98182ddbb056f5c8b537f",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/MaskPass.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/postprocessing/OutputPass.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 2398,
+      "sha256": "13817fc7a87f662d29d2c5e00f44d3a4588c9afac4a372de0cacb0e44e368ffd",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/OutputPass.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/postprocessing/Pass.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 1706,
+      "sha256": "b3c6128340eaa37e40a6a2f1b738e894c855239417d50959759b34a2b5e89f92",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/Pass.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/postprocessing/RenderPass.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 1915,
+      "sha256": "1c90c085312871c4bcdccfcf519499c6276dd503363fcf7cb7f703add45cf4a2",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/RenderPass.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/postprocessing/ShaderPass.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 1576,
+      "sha256": "3b28a1ee27e0eb96c0eab137a1f442ccf127a926904eced2d51e125ec44af781",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/ShaderPass.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/postprocessing/UnrealBloomPass.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 12406,
+      "sha256": "8f09315c0cec117a0ca2494d3e3586035b3c4323d6dcb037537cc51b04c3cdba",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/shaders/CopyShader.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 571,
+      "sha256": "4e3346db194db56a596cd074e9bdb39fb5eb52040c333e0d29dc4eb1324d3b1d",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/shaders/CopyShader.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/shaders/LuminosityHighPassShader.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 1192,
+      "sha256": "3d841cc594a0c1767d1b0185720b32761a0133c5f1b70b56658e28f2fb9b7900",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/shaders/LuminosityHighPassShader.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/shaders/OutputShader.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 1393,
+      "sha256": "53a52e430c27bc36ceaab8ae90a2b4af7b02672d7ee4b29d6ba3c28e09c92c2a",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/shaders/OutputShader.js", "verified": true } ],
+      "note": "本轮对拍：verified"
+    }
+,
+    {
+      "path": "Output/gallery_v2/vendor/three/jsm/utils/BufferGeometryUtils.js",
+      "version": "three 0.160.0（REVISION 160）",
+      "bytes": 31906,
+      "sha256": "9be041e96308775d00e2695cc607645b9a9b64fd7c0e759dd8f7c00a8d92becb",
+      "license": "MIT（three.js 上游 LICENSE；文件头 SPDX-License-Identifier: MIT）",
+      "sources": [ { "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/utils/BufferGeometryUtils.js", "verified": true } ],
+      "note": "⚠️ GLTFLoader.js 的直接依赖（from '../utils/BufferGeometryUtils.js'）。前 14 个 three 文件是按名字挑的、没验 import 闭包 ⇒ 页面整块不初始化（浏览器 module 404，window.__ROOM3D 根本不定义）。闭包闸：py -3 scripts/diag/check_vendor_closure.py"
     }
   ]
 }

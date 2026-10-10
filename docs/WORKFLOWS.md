@@ -682,7 +682,9 @@
 | `Output/ship_meta.json` | `build_gallery_index`（元数据主源） | ✅ 可再生：`build_ship_meta.py --write` |
 | `Output/WikiData/ship_data.json` | `build_gallery_index` 兜底 | ✅ 可再生：`scrape_wiki_fast.py`（需外网） |
 | `Output/Paintings_v2`、`Spine_v2`、`Live2D`、`CG_v2`、`Audio`、`gallery_v2/` | 画廊 | ✅ 全量可再生。**耗时按 2026-10-01 实测外推：立绘 4488 张 ≈ 1.5 小时（1.25 秒/张）、Spine 269 个 ≈ 8 分钟、CG 231 张 ≈ 5 分钟、Live2D ≈ 30 分钟、音频全量 ≈ 75 分钟 ⇒ 一把梭全量 4~6 小时，共约 41GB 写入**（旧版这里写的"数十小时"是老 AssetStudio 时代的数，已纠正）。正因为它不再是"跑不起"，**才更要把范围收窄成增量**——见步骤 5 与 §71 |
-| `Output/gallery_v2/vendor/`（4 个第三方 JS，1.3MB） | 画廊 Live2D/Spine 标签的运行时 | ✅ 可再生（2026-09-26 起）：台账 `gallery_src/vendor/MANIFEST.json`（版本+字节+sha256+来源）+ `py -3 scripts/fetch_gallery_vendor.py`。**库本体不入库**（含 Live2D 专有许可的 Redistributable Code）。⚠️ 唯 `spine/spine-all.js`(3.8.75) 无可按哈希校验的下载源（本机这份与上游官方构建不同），只能从 `tools/spine-viewer/spine-runtime/` 取——**它也在 gitignore，别清** |
+| `Output/gallery_v2/vendor/`（19 个第三方 JS，约 2.2MB） | 画廊 Live2D/Spine 标签 + **3D 宿舍页**（`room3d.html` 用 three.js r160 + GLTFLoader + postprocessing）的运行时 | ✅ 可再生（2026-09-26 起）：台账 `gallery_src/vendor/MANIFEST.json`（版本+字节+sha256+来源）+ `py -3 scripts/fetch_gallery_vendor.py`。**库本体不入库**（含 Live2D 专有许可的 Redistributable Code）。⚠️ 唯 `spine/spine-all.js`(3.8.75) 无可按哈希校验的下载源（本机这份与上游官方构建不同），只能从 `tools/spine-viewer/spine-runtime/` 取——**它也在 gitignore，别清**。⚠️ **台账列全 ≠ import 闭包完整**：ES module 缺一个相对 import 会让整页**静默不初始化**（2026-10-10 真实事故：`GLTFLoader.js` 依赖 `../utils/BufferGeometryUtils.js`，18/18 全绿而页面空白，见 §128）⇒ 改 vendor 后必跑 `py -3 scripts/diag/check_vendor_closure.py`（含 `--break-demo` 自测） |
+| `Output/gallery_v2/dorm3d/`（`room.glb` 31MB + `lightmaps/` 3MB + 四张 sidecar） | **画廊「3D 宿舍」页**（`room3d.html` 用相对路径 `./dorm3d/…` 直引）+ 验收探针 `room3d_page_probe.py` | ✅ 可再生：`py -3 scripts/dorm3d_room_to_gltf.py`（默认就写到这里，19 秒）+ lightmap 页由同一次构建落盘。sidecar 各自的作用见 **WF-38 追加（2026-10-10）** |
+| `files/AssetBundles/dorm3d/`（474 个包 / 146MB，gitignore） | 上面那次重建的**唯一输入**（场景包 + 它跨包引用的家具/贴图/光照包），也是 `dorm3d_pptr_resolve.py` 建 CAB 索引的根 | ⚠️ 半可再生：要从设备侧重新拉（MuMu `mumu_sync --only`，见 `al-device-forensics-mumu`），且**必须与 `Output/dependency_manifest.json` 同时刻的版本**才对得上——清单换了版本而这里没换，跨包 PPtr 会指到别的包上。删之前先确认还能拉回来 |
 | `Output/Raw/`（背景层 1,899 png / 2.0 GB） | **画廊「背景库」页**（`backgrounds.html` 直链 `../Raw/<类目>/<名>.png`）+ `Output/gallery_v2/bg_meta.json` 的 `img` 字段 | ⚠️ **2026-10-07 起从"可删的悬空层"升级为页面依赖**：删它 = 背景库全空（缩略图 `bg_thumbs/` 还在，点进去才是空）。可再生：`py -3 scripts/export_assets.py --target <类目>`；**只补个别包用 `--only <包名>`**（整类目重导会覆写已验证产物，为个别缺口不划算）。⚠️ 这层是**冻结导出层**，源包更新后不会自动跟上（实测两张 09-24 拉进来的包到 10-07 还没出图，见 §115 第 6 条）。命名源不在这层里，在 `inputs/gamecfg/bg_scene_refs.json`。见 **§115 / WF-30** |
 | `gallery_src/` 前端正本 ↔ `Output/gallery_v2/` 同名副本 | 画廊前端 | ✅ 同一份数据两个路径名（硬链）。**清单以 `scripts/deploy_gallery.py` 的 `FILES` 为准，别在这里抄数字**（2026-09-26 那版写死"4 个"，之后加 `bgm.html`、`backgrounds.html` 都没回来改，早就对不上了）。断链探测器：`py -3 scripts/deploy_gallery.py --check`；**新增子页必须同时进 `FILES`**，否则它既不被硬链也不被漂移检查看见（= 回到"改了忘部署"那个老静默失效，见 §115 第 5 条） |
 
@@ -3730,3 +3732,72 @@ prefab→res 材质），必须按 `(file_id, path_id)` 跨包取回真实对象
   而它的答案同样在 Skylight 里 ⇒ 一并归到上面那条限制。
 - 顺手记一条**取数陷阱**：`GameObject.m_Name` 会带尾随空格（本场景有 `"Skylight "` 与 `"Skylight"`
   两个），按名字等值匹配组件会静默漏掉一半；要么 `strip()` 要么用 path_id。
+
+
+**追加（2026-10-10）：把 `room.glb` 接进画廊——机位表要在构建期落盘，vendor 台账全绿 ≠ import 闭包完整**
+
+**目标**：房间不再是"我这边跑脚本才看得见"的产物，而是画廊里一页能转能看的场景。
+
+**产物正本迁址**：装配器的 `--out` 默认值就是 `Output/gallery_v2/dorm3d/room.glb`。
+`.diag/` 是临时区，**不能住唯一副本**——房间产物与四张 sidecar 全部落在运行目录的
+`dorm3d/` 子目录下，页面用与自身同级的相对路径引它们：
+
+| 文件 | 谁生成 | 页面拿它做什么 |
+|---|---|---|
+| `room.glb` | `dorm3d_room_to_gltf.py` | 几何/贴图/材质/灯 |
+| `room.glb.truth.json` | 同上 | 页面自报计数与 Unity 侧台账对账（对不上直接抛错，不停在"看着能跑"） |
+| `room.lightmaps.json` | 同上 | 5 页 lightmap 文件名 + 材质→页号 |
+| `room.render.json` | 同上（`render_settings()`） | **包内** RenderSettings 三向环境光（trilight mode 3 / equator 色 / ×1.5）—— 环境光不许硬写进页面 |
+| `room.views.json` | 同上（`zone_views()`） | 三个分区域机位（卧室/起居室/厨房），构建期算好落盘 |
+
+⚠️ **机位表必须在构建期落盘**：`zone_views()` 原先只住在诊断脚本里，页面要用它就得反向依赖
+`scripts/diag/`——那等于"产物本身跑不起来"。⇒ 算法正本迁到装配器，诊断脚本转调，构建时写 sidecar。
+包里那台 Camera 的位置（`truth.camera.pos`）贴着一面墙，当默认机位第一屏会糊成一片白，
+所以它只保留成「包内机位」按钮，**不冒充"游戏里就是这个视角"**。
+
+**页面形状**（`gallery_src/room3d.html`，单文件，照 `backgrounds.html` 的规矩）：
+- 只引 `theme.css` 的 token，组件规则里不写字面颜色；**WebGL 清屏色也从 token 取**
+  （`themeColor()` 读 `body` 的 computed background），否则切「夜」时画布外围不跟着变，
+  等于第二份配色真相。
+- importmap 用**页面相对路径**：`"three":"./vendor/three/three.module.min.js"`、
+  `"three/addons/":"./vendor/three/jsm/"`（与 vendor 台账里 Live2D 那条"不能用资源前缀拼 vendor"
+  同一条规则）。
+- 承重的一行仍是 `t.channel=1`（lightmap 走第二套 UV），且页面**自己量给自己看**：
+  每个挂上 lightMap 的槽位都当场核对 `channel===1 && geometry.attributes.uv1`，
+  把 `chanOk/chanBad` 导出到 `window.__ROOM3D` 并印在 HUD 上。
+- 三条"推断"（窗外天海 / 白云 / 绿叶）**默认全关**，按钮上带 `推断` 角标，开着时 HUD 明写
+  "当前画面含手摆窗外天海 —— 非包内数据"。重画只活在查看端，**不烧进 GLB**；
+  且关掉必须还原原图（`origMap` 存原始 `m.map`），否则"开关"是单向滤镜、自证就假了。
+- 泛光滑杆恒走 composer（`strength=0` 也只是不加光），否则"泛光拉到 0"会同时换掉色调路径，
+  那个开关就自证不了。
+
+**必须同时改的三处登记**（漏一处就回到老静默失效）：
+1. `scripts/deploy_gallery.py` 的 `FILES`（新页不进这里 ⇒ 既不被硬链也不被漂移检查看见）。
+2. `gallery_src/index.html` 顶部「页面」按钮组加入口。
+3. `gallery_src/vendor/MANIFEST.json` + 跑 `check_vendor_closure.py`（见 §128：
+   **台账列全 ≠ import 闭包完整**，缺一个相对 import 会让整页静默不初始化）。
+
+**验收判据**（`scripts/diag/room3d_page_probe.py`，34 条，打在真实页面上而不是 harness）：
+- 字节级可达（含 `Range` 206 分段）——服务器"活着但半死"会吐 0 字节，光看 200 不够。
+- **三方一致**：页面自报 ↔ 按 glTF 规范独立解析 GLB 本体 ↔ Unity 侧台账。
+  ⚠️ GLB 本体那一栏必须按 **GLTFLoader 的实例化口径**算：单 primitive 的 mesh 直接挂节点，
+  多 primitive 拆成子 Mesh，**同一 mesh 被多个节点引用会各实例化一份**。
+  实测本产物 primitive 本体只有 279 个，按节点展开是 299 个 Mesh / 219244 顶点，
+  正好等于台账的 `prim_total/pos_total`——拿 279 去比会**假红灯**，
+  红到一定程度人就会去放松判据（那才是真正的失效）。两种口径同时报出来。
+- lightmap：`channel===1`、`chanBad===0`、`lmSlots===chanOk`（没有漏量的槽位）、
+  `lmMats`（唯一材质数 112）与槽位数（212，因材质复用而更大）**不许混用**。
+- 机位表：sidecar 三个分区齐、`ang_cluster ≤ half_fov`（这一簇真的在画面里）、
+  页面相机落在 sidecar 声明的坐标（偏差 <1e-3）、点每个机位画面都改变。
+- 三个推断开关：先判"点击真的落地"（`S.on[k]` 由 False 翻 True），再判"画面改变"，
+  再判"关回去逐字节相同（可逆）"——见 §129，少了第一条，"开关无效"与"探针没点到"同形。
+- 反向对照：关 lightmap、泛光 0.6→0、曝光 1.2→2.0 都必须改变画面；不改变的旋钮是死块。
+- 取样必须落在稳定帧上：`stable()` 重试到连续两次逐字节相同，取不到就显式判红并停
+  （**绝不允许 `None` 参与比较**，那会同时造出假红与假绿）。
+
+**涉及文件**：`gallery_src/room3d.html`、`gallery_src/index.html`、`scripts/deploy_gallery.py`、
+`scripts/dorm3d_room_to_gltf.py`（`--out` 默认值、`render_settings()`、`zone_views()`、
+构建期落 `room.render.json` / `room.views.json`）、`scripts/diag/dorm3d_room_probe.py`
+（改从产品目录取产物、机位算法转调装配器）、`scripts/diag/room3d_page_probe.py`、
+`scripts/diag/check_vendor_closure.py`、`gallery_src/vendor/MANIFEST.json`。
+调试截图：`.diag/dorm3d_room/view_*.png`、`page_with_inference.png`。

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""按 gallery_src/vendor/MANIFEST.json 补齐/校验画廊前端的第三方运行时库（4 个 JS）。
+"""按 gallery_src/vendor/MANIFEST.json 补齐/校验画廊前端的第三方运行时库（条数以台账为准）。
 
 台账里每个文件都带 sha256；**只有哈希对得上才落盘**，所以配错的 URL 或换源的
 另一份构建都不可能悄悄把画廊前端弄坏（这是本脚本存在的唯一理由）。
+⚠️ 但"台账里的都在盘上"**不等于**"页面能跑"——ES module 缺一个相对 import 会让整页静默
+不初始化，那条由 `scripts/diag/check_vendor_closure.py` 单独核对（见 TROUBLESHOOTING §128）。
 
     py -3 scripts/fetch_gallery_vendor.py            # 缺件或哈希不符才拉
     py -3 scripts/fetch_gallery_vendor.py --check    # 只校验，不写盘、不出网；漂移即 exit 1

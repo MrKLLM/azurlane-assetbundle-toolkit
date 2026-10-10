@@ -68,11 +68,19 @@ def main():
     doc_abs = os.path.join(ROOT, doc)
     disk = open(doc_abs, 'rb').read()
     ref = git('show', f'{base}:{doc}')
-    if not verify and md5(disk) != md5(ref):
-        print(f'中止：{doc} 与基线 {base} 不一致（md5 {md5(disk)[:12]} vs {md5(ref)[:12]}）'
+    # ⚠️ `core.autocrlf=true` 时这两份**永远不可能逐字节相同**：git 里存的是 LF，
+    #   工作树检出的是 CRLF（2026-10-10 实测 disk 534 个 CRLF vs blob 0 个），
+    #   拿字节 md5 当"有没有并行会话插队"的守卫就会**恒假** —— 闸门直接废掉。
+    #   守卫要判的是**内容**，所以两侧都先归一化行尾再比；写回时保留工作树原本的行尾风格。
+    crlf_work = b'\r\n' in disk
+    disk_norm = disk.replace(b'\r\n', b'\n')
+    ref_norm = ref.replace(b'\r\n', b'\n')
+    if not verify and md5(disk_norm) != md5(ref_norm):
+        print(f'中止：{doc} 与基线 {base} 内容不一致（归一化行尾后 md5 '
+              f'{md5(disk_norm)[:12]} vs {md5(ref_norm)[:12]}）'
               f'—— 并行会话可能刚落盘，重新对齐行号再来')
         return 2
-    base_lines = ref.decode('utf-8').split('\n')
+    base_lines = ref_norm.decode('utf-8').split('\n')
     n_base = len(base_lines)
 
     # ---- 取段 ----
@@ -136,7 +144,7 @@ def main():
     arc_new = (arc_old.rstrip('\n') + '\n' if arc_old else '') + block
 
     if verify:
-        if disk.decode('utf-8') != new_text:
+        if disk_norm.decode('utf-8') != new_text:
             print('中止：--verify 下磁盘内容 ≠ 基线 + 本次外迁应有的结果（写入后有人又改了这个文件，'
                   '行号与结论都要重新对齐）')
             return 2
@@ -147,16 +155,21 @@ def main():
 
     # ④ 写盘前重取 md5（防并行会话在中间落盘）
     if not verify:
-        if md5(open(doc_abs, 'rb').read()) != md5(ref):
+        if md5(open(doc_abs, 'rb').read().replace(b'\r\n', b'\n')) != md5(ref_norm):
             print('中止：写盘前发现主文档已被改动')
             return 2
         open(arc_abs, 'wb').write(arc_new.encode('utf-8'))
-        open(doc_abs, 'wb').write(new_text.encode('utf-8'))
+        # 保留工作树原本的行尾风格：CRLF 检出下把整文件写成 LF，会在 git diff 里炸出
+        # "全文件重写"的噪声（Windows 真实踩过），也会把下一次逐字比对的基线搞混。
+        out_bytes = (new_text.replace('\n', '\r\n') if crlf_work else new_text).encode('utf-8')
+        open(doc_abs, 'wb').write(out_bytes)
 
-    # ---- 四条核对（全部读回磁盘，不看内存） ----
+    # ---- 四条核对（全部读回磁盘，不看内存）----
+    # 读回时统一归一化行尾，否则 CRLF 工作树下每条行尾都多个 '\r'，
+    # ① 的"逐行可查"会把每一行都判成丢失（假红灯）。
     fails = []
-    d_now = open(doc_abs, encoding='utf-8').read()
-    a_now = open(arc_abs, encoding='utf-8').read()
+    d_now = open(doc_abs, encoding='utf-8').read().replace('\r\n', '\n')
+    a_now = open(arc_abs, encoding='utf-8').read().replace('\r\n', '\n')
     # ① 基线每条非空行可查（在新主文档或归档里）
     base_nonblank = [l for l in base_lines if l.strip()]
     lost = [l for l in base_nonblank

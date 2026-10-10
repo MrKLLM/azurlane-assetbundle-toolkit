@@ -7,7 +7,7 @@ Output/gallery_v2/ 是运行目录（gitignore，含 index.json/index.js/thumbs/
 """
 """三种模式：
   （默认）    逐文件比对，正本与运行目录副本不一致时用正本覆盖（修复用）
-  --check     只比对不写盘；**要求 4 个文件都是同一份数据（硬链）**，断链或内容漂移都非零退出
+  --check     只比对不写盘；**要求 FILES 里每个文件都与运行目录同一份数据（硬链）**，断链或内容漂移都非零退出
               （提交前/回归前自查）
   --relink    把运行目录副本换成指向正本的硬链接 —— 同一份磁盘数据挂两个路径名，
               此后改正本即刻生效、不再有"忘部署"这类静默失败。
@@ -22,7 +22,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.join(ROOT, 'gallery_src')
 DST = os.path.join(ROOT, 'Output', 'gallery_v2')
-FILES = ['index.html', 'cg_export.html', 'bgm.html', 'backgrounds.html', 'theme.css',
+FILES = ['index.html', 'cg_export.html', 'bgm.html', 'backgrounds.html', 'room3d.html', 'theme.css',
          '_gallery_server.py', '启动资产浏览器.bat']
 MODE = next((a for a in sys.argv[1:] if a.startswith('--')), '')
 
