@@ -57,6 +57,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--yes', action='store_true', help='真正删除（默认干跑）')
     ap.add_argument('--min-age', type=int, default=30, help='只删最后修改早于 N 分钟前的 profile，默认 30')
+    ap.add_argument('--only', default=None,
+                    help='只处理目录名含这个片段的 profile（如 --only r3d 只清自己这条线的）。'
+                         '跨会话共用工作树时**必须**用它：不带 --only 的 --yes 会把别的会话'
+                         '留下的 profile 一起删掉（实测 .diag 下 301 个 / 26.7 GB 属于十几个会话）。'
+                         '三条硬判据不因 --only 放松——它只是缩小候选集。')
     args = ap.parse_args()
 
     if not os.path.isdir(DIAG):
@@ -69,6 +74,8 @@ def main():
         p = os.path.join(DIAG, d)
         if not (d.startswith('chrome_') and os.path.isdir(p)):
             continue
+        if args.only and args.only not in d:
+            continue          # --only 只缩小候选集，三条硬判据一条不放松
         if d in live or '*' in live:
             kept_busy.append(d)
             continue
