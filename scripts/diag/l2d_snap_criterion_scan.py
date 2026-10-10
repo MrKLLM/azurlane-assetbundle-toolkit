@@ -52,16 +52,22 @@ OFF = 0.05        # 「灭掉」的阈值
 
 
 def parse_segments(curve):
-    """[t0,v0,ty0, (贝塞尔再 4 个控制点) t1,v1,ty1, … , tn,vn] → keys=[(t,v),…]"""
+    """[t0,v0, ty, (ty==1 再 4 个控制浮点) t1,v1, ty, … , tn,vn] → keys=[(t,v),…]
+
+    ⚠️ 段类型码以**运行时解码器**为准（`pixi-live2d-display` 的 `CubismMotionSegmentType`）：
+    `0=线性 1=贝塞尔(再跟 4 个浮点) 2=阶梯 3=反向阶梯`。本函数旧版把「多 4 个浮点」写成
+    `ty in (2,3)` —— 2/3 其实是阶梯（只跟一对）。当前产物清一色 ty=0 所以一直没暴露，
+    但一旦有贝塞尔或阶梯段就会整条错位。对照实现见 `scripts/diag/l2d_streamed_key_forensics.py` 的 `seg_walk`。
+    """
     s = curve.get("Segments", [])
-    keys, i = [], 0
-    while i + 1 < len(s):
+    keys, i, n = [], 0, len(s)
+    while i + 1 < n:
         keys.append((s[i], s[i + 1]))
-        if i + 2 < len(s):
-            ty = int(s[i + 2])
-            i += 3 + (4 if ty in (2, 3) else 0)
-        else:
-            i += 2
+        i += 2
+        if i >= n:
+            break
+        ty = int(s[i])
+        i += 1 + (4 if ty == 1 else 0)
     return keys
 
 

@@ -45,6 +45,27 @@
   ⑯ `--coldmap Param25:0,0.1,0.2` **冷态逐值全模型图**：每个值都从 moc3 默认**一次跳到**，
      正序 + 倒序各一遍。**两遍不一致 = 有滞回 ⇒ ⑤ 的台账不能当函数表**（本项目实测：正序爬完再回默认，
      那 29 片仍是 1，复位不回滚）。`--focus` 只盯指定片，否则打印每档新亮/新灭名单。
+  ⑰ `--coldmapall auto` **冷态全量台账 + 阈值二分**：把 ⑯ 的形状铺到整批参数，并且
+     ⑴ 每次探测前先复位、把「复位后仍不等于冷基线」的片数记成 `drift`（滞回的直接计数，不用事后再对拍）；
+     ⑵ 每 20 个参数**换一次新页面**（滞回跨参数累积，冷基线只能靠新会话保证；跨会话冷基线是否逐位相同由 `--coldmerge` 验）；
+     ⑶ 阈值不再取 11 点网格的中点：对每个「相邻网格签名不同」的区间**二分到 eps**，两侧各收一遍；
+        区间里还夹着第三种签名的记 `tertiary`（不发布该阈值）。
+     正序与倒序**各起一次进程**（`--coldmapall auto` / `--coldmapall auto --coldrev`），
+     再 `--coldmerge`（不开浏览器）按三条判据发布 `.diag/l2d_cold_ledger_<model>.json`，
+     下游 `l2d_snap_criterion_scan.py --ledger @该文件`。
+  ⑱ `--latchreset Param25` **棘轮能不能复位**：⑰ 实跑发现 `drift`/`nChg` **只增不减**、还跨参数带着走
+     ⇒ 一页里只有**第一次**探测是冷的。这一臂先做一次干净单读当基准，再故意污染，然后逐个试复位手段
+     （直写片缓冲 / 直写+update / 只写参数默认 / 框架 setter / 写 part 默认 / 组合），
+     复位成功还要**再探同一值、签名须与干净单读逐位相同**才算数；同时列出 core 上真实存在的 reset 类 API。
+     它决定 ⑰ 的代价：能复位 ⇒ 按组扫；不能复位 ⇒ 一页一探测，全库批量当场判死。
+     ★实测：**六种复位全部打不掉、连打 200 拍也不回、同值重探幂等、不同值钉住的是不同的片**
+       ⇒ 显隐是**路径函数**而不是参数的函数（§123 追加-XV）⇒ ⑰ 那种「重生成函数表」的路整体作废。
+  ⑲ `--latchlaw Param25` **锁存律**：既然不存在函数表，唯一还能拿到的对应关系是「一次边沿写了什么」。
+     **一页只探一个值**：冷基线 → 一次跳到 v（= 该值的干净响应 R(v)）→ 回默认打一拍并连打 N 拍
+     （仍不等于冷基线的那些 = 该值留下的锁存写入 L(v)，带读数，分得清"钉在亮"还是"钉在灭"）。
+     值表就是成本（每页 20~40s）⇒ 必须跑在脱离宿主的进程里；每页即时落盘，中途崩了留半成品。
+     产物 `.diag/l2d_latchlaw_<model>_<param>.json`，用法 `--latchlaw Param25`（默认 12 个值）
+     或 `--latchlaw "Param25:0,0.05,0.1"`。
 
 ⚠️ URL 必须带 cache-buster（`?v=<epoch>`）：headless 用固定 `--user-data-dir`，改过前端之后 Chrome 会端出
    磁盘缓存里的旧 `index.html` —— 症状是"补丁明明落盘了、跑出来的行为与改动前逐帧相同"。
@@ -700,7 +721,206 @@ JS_COLDMAP = r"""(async (cfg) => {
 })"""
 
 
-# ---------------------------------------------------------------- ⑬ 台账矛盾判定：同一趟里把「扫 Param25」与「钉 Param25」对读
+# ---------------------------------------------------------------- ⑰ 冷态全量台账：把 ⑯ 的形状铺到整批参数，并做阈值二分
+# 为什么必须新做一条而不是复用 ⑤：⑤ 的台账是**逐档爬**出来的（0→0.1→0.2…），⑬/⑯ 已证它带不可逆滞回，
+# 于是 ⑤ 的「翻转点」只是 11 点网格的中点、不是绑定阈值（§123 追加-XIV）。这一臂的形状是：
+#   每一次读数都先把**全部参数写回 moc3 默认**、再把目标参数**一跳**到位（绝不分档爬）；
+#   每次探测前先读一次「复位后的状态」——它若还不等于冷基线，就是**滞回污染的直接计数**（`drift`），
+#   这条臂因此自带"这一格能不能发布"的判据，而不是靠事后两遍对拍才发现；
+#   阈值不再取网格中点：对每个「相邻网格签名不同」的区间做**二分**（从两侧各自收敛），
+#   落到 eps 以内记成真阈值；两侧收敛到同一个第三种签名 ⇒ 标 `tertiary`（区间里还有第三个状态）。
+# 发布口径（在 Python 侧的 `--coldmerge` 里判）：**正序与倒序两次独立页面会话逐格签名一致、且 drift 恒 0** 才收。
+JS_COLDMAPALL = r"""(async (cfg) => {
+  const im=window.__m.internalModel, core=im.coreModel, M=core._model;
+  const P=M.parameters, D=M.drawables;
+  window.__cap=null; window.__wset=null; window.__hideSet=null;
+  window.__ambOff=true; window.__snapOff=true;
+  try{ window.__app.ticker.stop(); }catch(e){}
+  try{ im.autoUpdate=false; }catch(e){}
+  try{ im.motionManager.stopAllMotions(); }catch(e){}
+  const nd=D.count, DEF=Array.from(P.defaultValues);
+  const setv=(vals)=>{ for(let i=0;i<P.count;i++) if(Math.abs(P.values[i]-vals[i])>1e-9) P.values[i]=vals[i];
+                       core.update(); };
+  const snap=()=>{ const a=new Float32Array(nd); a.set(D.opacities); return a; };
+  if(!window.__cold0){ setv(DEF.slice()); window.__cold0=snap(); }
+  const cold0=window.__cold0, EPS=5e-4, CAP=cfg.cap||240;
+  const litOf=(a)=>{ let c=0; for(let j=0;j<nd;j++) if(a[j]>0.5) c++; return c; };
+  const chgOf=(a)=>{ const s=[]; let h=2166136261>>>0;
+    for(let j=0;j<nd;j++) if(Math.abs(a[j]-cold0[j])>EPS){
+      const o=+a[j].toFixed(3); s.push([j,o]);
+      h=(h^j)>>>0; h=Math.imul(h,16777619)>>>0; h=(h^o)>>>0; h=Math.imul(h,16777619)>>>0; }
+    return {s:s.slice(0,CAP), n:s.length, h:h}; };
+  let updates=0;
+  const probe=(k,v)=>{ setv(DEF.slice()); updates++;
+    const drift=chgOf(snap()).n;                     // 复位后仍不等于冷基线 = 滞回污染
+    const d=DEF.slice(); d[k]=v; setv(d); updates++;
+    const a=snap(); const c=chgOf(a);
+    setv(DEF.slice()); updates++;
+    return {v:+v.toFixed(6), lit:litOf(a), chg:c, drift}; };
+  const results=[];
+  for(const pname of cfg.params){
+    const k=P.ids.indexOf(pname);
+    if(k<0){ results.push({param:pname, fail:'不在 moc3'}); continue; }
+    const mn=P.minimumValues[k], mx=P.maximumValues[k];
+    if(!(mx>mn)){ results.push({param:pname, fail:'量程退化'}); continue; }
+    const n=cfg.nstep, order=[]; for(let q=0;q<=n;q++) order.push(q);
+    if(cfg.reverse) order.reverse();
+    const byq={}, seq=[];
+    for(const q of order){ const v=mn+(mx-mn)*q/n; const r=probe(k,v); r.q=q;
+                           byq[q]=r; seq.push(q); }
+    const bounds=[];
+    const epsMin=Math.max(cfg.epsAbs||(mx-mn)/1024, (mx-mn)/Math.pow(2,cfg.maxBis));
+    // 二分到 eps；区间中点若落进**第三种签名**（本项目实测：0.05 那档是「半透明手」，既不是 A 也不是 B），
+    // 就把它当成一条真边界、左右两半各自再收 —— 不是停下来报错，因为「中间那个状态」正是闪烁的本体。
+    // 但递归会炸成本 ⇒ 每个参数一个总探针预算，用完就把当区间原样记下（`budget:true`，不发布该阈值）。
+    let budget=cfg.maxProbes||90;
+    const bisect=(lo,hi,slo,shi,depth)=>{
+      let a=lo, ha=slo, b=hi, hb=shi, it=0;
+      while(b-a>epsMin && it<cfg.maxBis && budget>0){ it++; budget--;
+        const mid=0.5*(a+b), hm=probe(k,mid).chg.h;
+        if(hm===ha){ a=mid; ha=hm; }
+        else if(hm===hb){ b=mid; hb=hm; }
+        else {
+          bounds.push({lo:+mid.toFixed(6), hi:+mid.toFixed(6), eps:0, probes:it,
+                       tertiary:[+mid.toFixed(6), hm]});
+          if(depth<3){ bisect(lo,mid,ha,hm,depth+1); bisect(mid,hi,hm,hb,depth+1); }
+          return;
+        }
+      }
+      bounds.push({lo:a, hi:b, eps:+epsMin.toFixed(6), probes:it, tertiary:null,
+                   budget:(b-a>epsMin)});
+    };
+    for(let q=0;q<n;q++){
+      const A=byq[q], B=byq[q+1];
+      if(!A||!B||A.chg.h===B.chg.h) continue;
+      bisect(A.v, B.v, A.chg.h, B.chg.h, 0);
+    }
+    const grid=[]; for(let q=0;q<=n;q++){ const r=byq[q];
+      grid.push({v:r.v, lit:r.lit, drift:r.drift, nChg:r.chg.n, chg:r.chg.s, h:r.chg.h}); }
+    results.push({param:pname, idx:k, mn, mx, dflt:+P.defaultValues[k].toFixed(4),
+                  maxDrift:Math.max.apply(null, grid.map(g=>g.drift)), grid, bounds});
+  }
+  window.__hideSet=null; window.__ambOff=false;
+  try{ im.autoUpdate=true; }catch(e){}
+  try{ window.__app.ticker.start(); }catch(e){}
+  return JSON.stringify({cold0lit:litOf(cold0), cold0:Array.from(cold0, x=>+x.toFixed(3)),
+                         drawables:nd, names:window.__drawableIds, params:results.length,
+                         updates, reverse:!!cfg.reverse, nstep:cfg.nstep, results});
+})"""
+
+
+# ---------------------------------------------------------------- ⑱ 棘轮能不能复位（⑰ 的代价判死之前必须先答这一题）
+# 为什么必须先答：⑰ 第一次实跑就看见 `drift` 与 `nChg` **只增不减**、还跨参数往下带
+#   （Param25 0→29 ⇒ Param27 29→53 ⇒ Param52 恒 53）。若这个累加**没有任何复位手段**，
+#   那"冷态台账"在一页里只成立于第一次探测 ⇒ 99 参数 × 11 点 = 一千多次换页，全库批量当场判死；
+#   反之只要有一种复位能把缓冲打回冷基线，⑰ 就能照原方案跑。所以这一臂只问一件事：**复位手段有没有、哪种有**。
+# 一趟之内做完（每步都读全模型签名，签名 = 与冷基线差 >5e-4 的片号与读数）：
+#   P1 干净单读：本会话**第一次**探测就取目标值 → 这份签名当作"该值的冷读数"基准（之后所有对比都对着它）
+#   P2 故意污染：把同一参数打到高值再回默认
+#   P3 复位候选逐个试，每个都读"复位后是否等于冷基线"：
+#      A 直写 `drawables.opacities` 回冷基线（不 update）
+#      B 直写回冷基线 **再** core.update()（看 update 会不会把它重新加回去 = 累加式的直接证据）
+#      C 只写全参数回 moc3 默认 + update（⑰ 现在用的那种，已知不管用）
+#      D 走框架 setter `core.setParameterValue` 逐个写默认 + update
+#      E 写 part 缓冲回默认（若 part 也参与这条链）
+#   P4 复测：在每种"看起来复位成功"的状态下再探一次同一目标值，签名须等于 P1 才算函数值可复现
+#   另：把 core/model 上真实存在的 reset 类 API 名列出来（不猜着调，只报告有什么）
+JS_LATCHRESET = r"""(async (cfg) => {
+  const im=window.__m.internalModel, core=im.coreModel, M=core._model;
+  const P=M.parameters, D=M.drawables, PT=M.parts;
+  window.__cap=null; window.__wset=null; window.__hideSet=null;
+  window.__ambOff=true; window.__snapOff=true;
+  try{ window.__app.ticker.stop(); }catch(e){}
+  try{ im.autoUpdate=false; }catch(e){}
+  try{ im.motionManager.stopAllMotions(); }catch(e){}
+  const nd=D.count, DEF=Array.from(P.defaultValues);
+  const upd=()=>{ core.update(); };
+  const setP=(vals)=>{ for(let i=0;i<P.count;i++) if(Math.abs(P.values[i]-vals[i])>1e-9) P.values[i]=vals[i]; };
+  const snap=()=>{ const a=new Float32Array(nd); a.set(D.opacities); return a; };
+  setP(DEF.slice()); upd();
+  const cold0=snap();
+  const EPS=5e-4;
+  const sig=(a)=>{ const s=[]; for(let j=0;j<nd;j++) if(Math.abs(a[j]-cold0[j])>EPS) s.push(j+':'+a[j].toFixed(3)); return s; };
+  const lit=(a)=>{ let c=0; for(let j=0;j<nd;j++) if(a[j]>0.5) c++; return c; };
+  const k=P.ids.indexOf(cfg.param);
+  if(k<0) return JSON.stringify({fail:'参数不在 moc3'});
+  const mn=P.minimumValues[k], mx=P.maximumValues[k];
+  const at=(v)=>{ setP(DEF.slice()); P.values[k]=v; upd(); return snap(); };
+  const steps=[];
+  const CAPS=cfg.cap||40;                       // ⑲ 要整份名单，默认 40 是给人看的
+  const rec=(tag,a,extra)=>{ steps.push(Object.assign({tag, lit:lit(a), nSig:sig(a).length,
+                                                       sig:sig(a).slice(0,CAPS)}, extra||{})); };
+
+  // —— mode='seq'：协议 A/B。同一批值、同一条复位路径，只换「一次探测打几拍 core.update()」：
+  //    two = 先写全默认打一拍、再写目标值打一拍（⑰ 现在的做法）
+  //    one = 直接把参数数组写成「全默认 + 目标值」，只打一拍（⑱ 现在的做法）
+  //    每步之后都复位并读"还差几片" ⇒ 若 one 全程 0 而 two 递增，棘轮就是**多打一拍造出来的**，台账可救；
+  //    若两者一样递增，棘轮与协议无关 ⇒ 真锁存，一页只有第一次探测可信。
+  if(cfg.mode==='seq'){
+    const seq=(cfg.seq&&cfg.seq.length)?cfg.seq.slice(0,24):[0,0.05,0.1,0.2,0.5,1.0];
+    const proto=cfg.protocol==='one'?'one':'two';
+    for(const sv of seq){
+      const v=Math.max(mn,Math.min(mx, sv));
+      let a;
+      if(proto==='two'){ setP(DEF.slice()); upd(); P.values[k]=v; upd(); a=snap(); }
+      else { setP(DEF.slice()); P.values[k]=v; upd(); a=snap(); }
+      const s1=sig(a);
+      setP(DEF.slice()); upd();
+      const s2=sig(snap());
+      // 复位后再连打 N 拍：若残留随拍数消失，那是**慢收敛**不是锁存；恒在才叫锁存
+      for(let z=0;z<(cfg.pump||0);z++) upd();
+      const s3=sig(snap());
+      rec('probe v=' + v, a, {value:v});
+      rec('reset v=' + v, snap(), {afterOf:v, proto:proto, pump:cfg.pump||0});
+      steps[steps.length-1].sig=s2.slice(0,CAPS);
+      steps[steps.length-1].nOn=s2.length;
+      steps[steps.length-1].nSig=s2.length;
+      steps[steps.length-1].afterPump=s3.length;
+      steps[steps.length-1].pumpSig=s3.slice(0,CAPS);
+      steps[steps.length-2].nOn=s1.length;
+    }
+    window.__hideSet=null; window.__ambOff=false;
+    try{ im.autoUpdate=true; }catch(e){}
+    try{ window.__app.ticker.start(); }catch(e){}
+    return JSON.stringify({mode:'seq', protocol:proto, param:cfg.param, mn, mx,
+                           cold0lit:lit(cold0), names:window.__drawableIds, steps, seq});
+  }
+
+  rec('P1 本会话第一次探测（当作该值的冷读数）', at(cfg.target), {v:cfg.target});
+  const clean=sig(at(cfg.target)).join('|');        // 同值第二读：已经带上了 P1 之后回默认的痕迹
+  rec('P1b 回默认后再读同一值（第二读）', at(cfg.target), {secondOf:clean});
+  rec('P1c 只回默认、不探值', (()=>{ setP(DEF.slice()); upd(); return snap(); })());
+  rec('P2 污染：打到 cfg.hot 再回默认', (()=>{ at(cfg.hot); setP(DEF.slice()); upd(); return snap(); })());
+  const afterHot=sig(snap()).length;
+  rec('R-A 直写片缓冲回冷基线（不 update）', (()=>{ for(let j=0;j<nd;j++) D.opacities[j]=cold0[j]; return snap(); })(),
+      {restoresTo:cold0.length});
+  rec('R-B 直写片缓冲回冷基线 + update', (()=>{ for(let j=0;j<nd;j++) D.opacities[j]=cold0[j]; upd(); return snap(); })());
+  rec('R-C 只写全参数回默认 + update', (()=>{ setP(DEF.slice()); upd(); return snap(); })());
+  rec('R-D 框架 setter 逐个写默认 + update', (()=>{ for(let i=0;i<P.count;i++){ try{ core.setParameterValue(i, DEF[i]); }catch(e){ return snap(); } } upd(); return snap(); })());
+  rec('R-E 写 part 缓冲回默认 + update', (()=>{ try{ for(let i=0;i<PT.count;i++) PT.opacities[i]=1; }catch(e){} upd(); return snap(); })());
+  rec('R-F A+B+C 组合', (()=>{ setP(DEF.slice()); for(let j=0;j<nd;j++) D.opacities[j]=cold0[j]; upd(); return snap(); })());
+  const okReset=[];
+  for(const s of steps){ if(s.tag.startsWith('R-') && s.nSig===0) okReset.push(s.tag); }
+  const p4=[];
+  for(const t of okReset){                                  // 复位成功后再探同一值，签名必须等于 P1
+    const a=at(cfg.target); p4.push({after:t, sameAsP1: sig(a).join('|')===clean, lit:lit(a), nSig:sig(a).length});
+    setP(DEF.slice()); for(let j=0;j<nd;j++) D.opacities[j]=cold0[j]; upd();
+  }
+  const api=(()=>{ const o={};
+    const dump=(n,obj)=>{ try{ o[n]=Object.getOwnPropertyNames(obj||{}).filter(x=>/reset|clear|init|default/i.test(x)); }catch(e){ o[n]=['<读不到>']; } };
+    dump('coreModel', Object.getPrototypeOf(core)); dump('model', Object.getPrototypeOf(M));
+    dump('coreCtor', window.CubismCore&&window.CubismCore.Model&&window.CubismCore.Model.prototype);
+    o.coreStatic = window.CubismCore? Object.getOwnPropertyNames(window.CubismCore).filter(x=>/reset|clean|delete/i.test(x)) : null;
+    return o; })();
+  window.__hideSet=null; window.__ambOff=false;
+  try{ im.autoUpdate=true; }catch(e){}
+  try{ window.__app.ticker.start(); }catch(e){}
+  return JSON.stringify({param:cfg.param, idx:k, target:cfg.target, hot:cfg.hot, cold0lit:lit(cold0),
+                         afterHotNSig:afterHot, steps, okReset, p4, api});
+})"""
+
+
+# ---------------------------------------------------------------- ⑬ 台账矛盾判定：同一趟里把「扫 Param25」与「钉 Param25」合进同一次运行、同一套索引
 # 为什么要它（§6.37 交接的第一件事）：臂 ⑤ 的显隐台账说「全默认 + Param25=0.5 ⇒ ArtMesh325=1.0」，
 # 臂 ⑫ 用**逐位相同**的参数数组直读同一个下标(378) 得 **0**，且三个目标全灭（不是单片偶发）。
 # ⑫ 自己报 `nDiff:1` ⇒ 输入侧只差 Param25，所以差异只能来自**参数之外、不随 core.update() 重算的那套输入**，
@@ -1096,6 +1316,159 @@ JS_HIDE = r"""(async (names, clip, waitMs) => {
 })"""
 
 
+def sig2pairs(s):
+    """JS 侧签名 ['idx:op', …] → [[idx, op], …]（解析不了的条目直接丢，不拿 None 参与比较）。"""
+    out = []
+    for x in (s or []):
+        try:
+            i, o = str(x).split(":")
+            out.append([int(i), float(o)])
+        except Exception:
+            pass
+    return out
+
+
+def cold_merge(model):
+    """⑰ 合并正序/倒序两遍冷态读数 → 可发布的台账。发布判据三条，缺一不收：
+      ① **逐格签名一致**：同一个 (参数, 网格点) 在两次独立页面会话里读到的「哪些片变成多少」完全相同；
+      ② **复位 drift 恒 0**：每次探测前都先把全部参数写回 moc3 默认，若复位后仍不等于冷基线，
+         这一格就是滞回污染下的读数，不能当函数值；
+      ③ **两遍二分收敛到同一个阈值**：边界条数相同、且每对边界的中点相差不超过两遍里较大的 eps。
+    产物与 ⑤ 的台账同形状（`nstep/ref/names/map`），另带 `bounds`（二分到 eps 的**真阈值**，
+    不是网格中点）与 `rejected`（没收的参数和原因）。下游：`l2d_snap_criterion_scan.py --ledger @该文件`。"""
+    base = os.path.join(ROOT, ".diag")
+    fF = os.path.join(base, "l2d_coldmapall_%s_fwd.json" % model)
+    fR = os.path.join(base, "l2d_coldmapall_%s_rev.json" % model)
+    miss = [f for f in (fF, fR) if not os.path.exists(f)]
+    if miss:
+        print("MISSING\n  %s" % "\n  ".join(miss))
+        print("⇒ 先跑 --coldmapall auto（正序）与 --coldmapall auto --coldrev（倒序），两次独立进程 = 两次独立页面会话")
+        return 2
+    F = json.load(open(fF, encoding="utf-8"))
+    R = json.load(open(fR, encoding="utf-8"))
+    dF = {r["param"]: r for r in F.get("results", []) if r.get("param")}
+    dR = {r["param"]: r for r in R.get("results", []) if r.get("param")}
+    cold0 = F.get("cold0") or []
+    dnames = F.get("names") or []
+    nd = F.get("drawables") or len(cold0)
+    nstep = int(F.get("nstep", 10))
+
+    # 每换一次页面就是一次新的冷会话 ⇒ 各组的冷基线必须相同，否则"冷"这个前提根本不成立
+    for side, D17 in (("正序", F), ("倒序", R)):
+        gs = [g for g in D17.get("groups", []) if g.get("cold0")]
+        if len(gs) > 1:
+            b0 = gs[0]["cold0"]
+            diff = [g["group"] for g in gs[1:] if g["cold0"] != b0]
+            if diff:
+                print("[FAIL] %s第 %s 组的新页面冷基线与第 1 组不同 ⇒ 冷基线不可复现，这次扫描整体不发布"
+                      % (side, diff))
+                return 1
+            print("%s：跨 %d 次新会话的冷基线**逐位相同**（亮 %s 片）" % (side, len(gs), gs[0].get("cold0lit")))
+
+    def gridops(res):
+        g = {}
+        for row in res["grid"]:
+            g[row["q"]] = {int(j): float(v) for j, v in row["chg"]}
+        return g
+
+    def bkey(b):
+        return None if (b.get("tertiary") or b.get("budget")) else (b["lo"] + b["hi"]) / 2.0
+
+    published, rejected = [], []
+    for p in sorted(set(dF) | set(dR)):
+        if p not in dF or p not in dR:
+            rejected.append([p, "只有一遍里有（另一遍在这一批之前就中断了）"])
+            continue
+        A, B = dF[p], dR[p]
+        if A.get("fail") or B.get("fail"):
+            rejected.append([p, "扫描失败：%s" % (A.get("fail") or B.get("fail"))])
+            continue
+        ga, gb = gridops(A), gridops(B)
+        bad = [q for q in range(nstep + 1)
+               if sorted(ga.get(q, {}).items()) != sorted(gb.get(q, {}).items())]
+        if bad:
+            rejected.append([p, "两遍逐格签名不一致（%d/%d 格）⇒ 有滞回" % (len(bad), nstep + 1)])
+            continue
+        drA = max([row["drift"] for row in A["grid"]] or [0])
+        drB = max([row["drift"] for row in B["grid"]] or [0])
+        if drA or drB:
+            rejected.append([p, "复位不回滚：drift 正序最大 %d / 倒序最大 %d" % (drA, drB)])
+            continue
+        ba, bb = A.get("bounds", []), B.get("bounds", [])
+        if len(ba) != len(bb):
+            rejected.append([p, "两遍找到的边界条数不同（%d vs %d）" % (len(ba), len(bb))])
+            continue
+        far = [(x["lo"], x["hi"], y["lo"], y["hi"]) for x, y in zip(ba, bb)
+               if bkey(x) is not None and bkey(y) is not None
+               and abs(bkey(x) - bkey(y)) > max(x.get("eps", 0), y.get("eps", 0))]
+        if far:
+            rejected.append([p, "两遍二分收敛到不同阈值 %s" % (far[:3],)])
+            continue
+        changed = {}
+        for q in range(nstep + 1):
+            for j, op in ga[q].items():
+                changed.setdefault(j, {})[q] = op
+        aff = []
+        for j, cur in sorted(changed.items()):
+            ops = [cur.get(q, cold0[j] if j < len(cold0) else 0.0) for q in range(nstep + 1)]
+            if len(set(ops)) == 1:
+                continue                       # 全格常量 ⇒ 量不出阈值，不算翻转绑定
+            aff.append([j, [[q, ops[q]] for q in range(nstep + 1)]])
+        if not aff:
+            rejected.append([p, "两遍一致但没有任何片在网格内变化过"])
+            continue
+        published.append({"param": p, "idx": A["idx"], "mn": A["mn"], "mx": A["mx"], "dflt": A["dflt"],
+                          "aff": aff,
+                          "bounds": [{"lo": b["lo"], "hi": b["hi"], "eps": b.get("eps"),
+                                      "mid": (None if bkey(b) is None else round(bkey(b), 5)),
+                                      "budget": bool(b.get("budget")),
+                                      "tertiary": b.get("tertiary")} for b in ba]})
+
+    ledger = {"model": model, "schema": "cold-17", "nstep": nstep, "drawables": nd,
+              "ref": cold0, "names": dnames,
+              "generatedBy": "l2d_part_flicker_probe.py --coldmerge",
+              "note": "每格都从 moc3 默认一跳；正序/倒序两次独立页面会话逐格一致 + 复位 drift 恒 0 + 两遍二分同阈值 才发布；"
+                      "bounds.mid 是真阈值（不是网格中点），tertiary 表示区间里还有第三个状态",
+              "map": [[i, p["param"], round(p["mn"], 3), round(p["mx"], 3), p["dflt"], 0,
+                       len(p["aff"]), p["aff"]] for i, p in enumerate(published)],
+              "bounds": {p["param"]: p["bounds"] for p in published},
+              "rejected": rejected,
+              "stats": {"scanned": len(set(dF) | set(dR)), "published": len(published),
+                        "rejected": len(rejected), "updates": [F.get("updates"), R.get("updates")]}}
+    out = os.path.join(base, "l2d_cold_ledger_%s.json" % model)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(ledger, fh, ensure_ascii=False)
+
+    print("\n== ⑰ 冷态台账合并：扫过 %d 个参数 → **发布 %d 个**、退回 %d 个"
+          % (ledger["stats"]["scanned"], len(published), len(rejected)))
+    print("   两遍各自 update 次数 %s；冷基线亮着 %s 片；台账 → %s"
+          % (ledger["stats"]["updates"], F.get("cold0lit"), out))
+    for p in published[:40]:
+        fl = [b["mid"] for b in ledger["bounds"][p["param"]] if b["mid"] is not None]
+        ter = sum(1 for b in ledger["bounds"][p["param"]] if b["tertiary"])
+        print("   %-22s 量程[%.3g,%.3g] 会翻的片 %3d  真阈值 %s%s"
+              % (p["param"], p["mn"], p["mx"], len(p["aff"]),
+                 [round(x, 4) for x in fl][:8], ("  +tertiary %d" % ter if ter else "")))
+    if len(published) > 40:
+        print("   …另 %d 个参数只在台账文件里" % (len(published) - 40,))
+    if rejected:
+        print("   退回（不进台账）:")
+        for r in rejected[:40]:
+            print("     %-22s %s" % (r[0][:22], r[1]))
+        if len(rejected) > 40:
+            print("     …另 %d 条" % (len(rejected) - 40,))
+    old = os.path.join(ROOT, "Output", "Live2D", model, "%s.snapswitch.json" % model)
+    if published and os.path.exists(old):
+        oj = json.load(open(old, encoding="utf-8"))
+        print("   —— 与现役表（⑤ 的网格中点阈值）对照:")
+        for name, spec in sorted((oj.get("params") or {}).items()):
+            new = ledger["bounds"].get(name)
+            nf = [b["mid"] for b in new if b["mid"] is not None] if new else None
+            print("     %-22s 旧 %s → 新 %s" % (name, [round(x, 3) for x in (spec.get("flips") or [])][:8],
+                                              ("不在新台账" if nf is None else [round(x, 4) for x in nf][:8])))
+    return 0 if published else 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("model")
@@ -1117,6 +1490,25 @@ def main():
     ap.add_argument("--reconcold", default="", help="⑮ 冷态逐拍：逗号分隔的 mesh 名；全新页面上一次跳到 --rpin 再逐拍读，判「显隐是第几拍才结算」")
     ap.add_argument("--coldmap", default="", help="⑯ 冷态逐值全模型图：形如 Param25:0,0.1,0.2,0.4,0.6（每个值都从默认一次跳到，正序+倒序各一遍）")
     ap.add_argument("--focus", default="", help="⑯ 只盯这几片（逗号分隔 mesh 名），否则打印每档新亮/新灭名单前 10")
+    ap.add_argument("--coldmapall", default="", help="⑰ 冷态全量台账：auto=取 ⑤ 台账里会改显隐的那批参数当**候选名单**（不用它的阈值）；"
+                                                    "或逗号分隔参数名；或 @文件。每点从 moc3 默认一跳 + 阈值二分。配 --coldrev 跑倒序那遍")
+    ap.add_argument("--coldrev", action="store_true", help="⑰ 跑**倒序**那一遍（要另起一次进程 = 独立页面会话）")
+    ap.add_argument("--coldnstep", type=int, default=10, help="⑰ 网格段数（默认 10 段 = 11 点，与 ⑤ 同网格便于对照）")
+    ap.add_argument("--coldreload", type=int, default=20, help="⑰ 每这么多个参数重载一次页面：滞回会跨参数累积，冷基线只能靠新会话保证")
+    ap.add_argument("--coldbis", type=int, default=12, help="⑰ 每个边界最多二分几刀（eps = 量程/2^此值，且不低于 --coldeps）")
+    ap.add_argument("--coldeps", type=float, default=0.0, help="⑰ 阈值绝对容差，0 = 用 量程/2^--coldbis")
+    ap.add_argument("--coldprobes", type=int, default=90, help="⑰ 每个参数二分最多花多少次探测（预算用完则该阈值不发布）")
+    ap.add_argument("--coldmerge", action="store_true", help="⑰ 只合并：读 _fwd/_rev 两遍，逐格签名一致且 drift 恒 0 才发布 → .diag/l2d_cold_ledger_<model>.json（不开浏览器）")
+    ap.add_argument("--latchreset", default="", help="⑱ 棘轮能不能复位：参数名（先换新页面，P1 必须是本会话第一次探测）")
+    ap.add_argument("--lrtarget", type=float, default=0.05, help="⑱ 冷读数目标值（默认 0.05 = 实测『半透明手』那一档）")
+    ap.add_argument("--lrhot", type=float, default=1.0, help="⑱ 污染用的高值")
+    ap.add_argument("--lrmode", default="reset", choices=["reset", "seq"], help="⑱ reset=逐个试复位手段；seq=同一批值只换「一次探测打几拍 update」做 A/B")
+    ap.add_argument("--lrprotocol", default="two", choices=["one", "two"], help="⑱ seq 模式：two=先复位打一拍再打目标值一拍（⑰ 现做法）；one=写成目标状态只打一拍")
+    ap.add_argument("--lrseq", default="0,0.05,0.1,0.2,0.5,1.0", help="⑱ seq 模式扫的值（按参数量程钳）")
+    ap.add_argument("--lrpump", type=int, default=60, help="⑱ seq 模式：复位后再连打几拍（分「锁存」与「慢收敛」）")
+    ap.add_argument("--latchlaw", default="", help="⑲ 锁存律：参数名（可写成 Param25:0,0.05,0.1 指定值表），**每个值换一次新页面**")
+    ap.add_argument("--lawseq", default="0,0.02,0.05,0.08,0.1,0.15,0.2,0.3,0.4,0.5,0.6,1.0",
+                    help="⑲ 默认值表（覆盖不到具体形状时自己加值，一页一值 ⇒ 值表就是成本）")
     ap.add_argument("--rpin", default="Param25:0.5", help="⑬ 钉住的参数，形如 Param25:0.5")
     ap.add_argument("--settle", type=int, default=4, help="⑬ S7/S8 逐拍读几拍（判「显隐是不是滞后一拍才结算」）")
     ap.add_argument("--gclip", default="home", help="⑫ 定格自哪条 clip 的实态（空=用页面当前姿态）")
@@ -1141,6 +1533,9 @@ def main():
     a = ap.parse_args()
     norest = os.environ.get("NOREST") == "1"
     tag = "norest" if norest else "rest"
+
+    if a.coldmerge:
+        return cold_merge(a.model)
 
     srv = subprocess.Popen([sys.executable, "-m", "http.server", str(SRV_PORT),
                             "-b", "127.0.0.1", "-d", os.path.join(ROOT, "Output")],
@@ -1232,6 +1627,26 @@ def main():
     if not arm.get("updateHook") or not arm.get("setHook"):
         print("[FAIL] 钩子没装上，后面所有臂都不可信")
         return 2
+
+    def reload_boot():
+        """重载页面并重新装钩子 + boot。⑰ 专用：滞回会**跨参数累积**，冷基线只能靠新会话保证。"""
+        cmd("Page.navigate", {"url": url + "&r=%d" % int(time.time() * 1000)})
+        href = ""
+        for _ in range(120):
+            try:
+                href = str(ev("String(location.href)"))
+                if href.startswith(url) and str(ev("String(document.readyState)")) == "complete":
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+        ev("window.__installHooks=function(){ return %s; }" % JS_INSTALL)
+        rb = ev(boot_src)
+        try:
+            j = json.loads(rb) if isinstance(rb, str) and rb.strip().startswith("{") else {"fail": str(rb)[:220]}
+        except Exception:
+            j = {"fail": "boot 返回不是 JSON", "raw": str(rb)[:220]}
+        return j
 
     out = {"model": a.model, "norest": norest, "boot": info, "clips": {}}
     for clip in [c for c in a.clips.split(",") if c]:
@@ -1505,6 +1920,178 @@ def main():
                     if not focus16:
                         print("        新亮 %s | 新灭 %s" % (r["on"][:10], r["off"][:10]))
             print("   台账 → %s" % f16)
+
+    # —— ⑱ 棘轮复位判定（先换新页面：P1 必须是本会话的第一次探测，否则"冷读数"这个说法不成立）
+    if a.latchreset:
+        j18 = reload_boot()
+        if not j18.get("ok"):
+            print("   [FAIL] ⑱ 重载后启动失败：%s" % str(j18)[:180])
+        else:
+            raw18 = ev(JS_LATCHRESET + "({param:%s, target:%s, hot:%s, mode:%s, protocol:%s, seq:%s, pump:%d})"
+                       % (json.dumps(a.latchreset), json.dumps(a.lrtarget), json.dumps(a.lrhot),
+                          json.dumps(a.lrmode), json.dumps(a.lrprotocol),
+                          json.dumps([float(x) for x in a.lrseq.split(",") if x.strip() != ""]),
+                          max(0, a.lrpump)))
+            try:
+                r18 = json.loads(raw18) if isinstance(raw18, str) and raw18.strip().startswith("{") else {"err": str(raw18)[:280]}
+            except Exception:
+                r18 = {"err": str(raw18)[:280]}
+            f18 = os.path.join(ROOT, ".diag", "l2d_latchreset_%s_%s%s.json"
+                               % (a.model, a.lrmode, "_%s" % a.lrprotocol if a.lrmode == "seq" else ""))
+            with open(f18, "w", encoding="utf-8") as fh:
+                json.dump({"cfg": {"param": a.latchreset, "target": a.lrtarget, "hot": a.lrhot,
+                                   "mode": a.lrmode, "protocol": a.lrprotocol, "seq": a.lrseq},
+                           "res": r18}, fh, ensure_ascii=False)
+            if "steps" not in r18:
+                print("\n== ⑱ 未出结果：%s" % str(r18)[:280])
+            elif a.lrmode == "seq":
+                print("\n== ⑱ seq 协议 A/B：`%s` 量程[%.3g,%.3g] 协议=%s，冷基线亮 %s 片"
+                      % (a.latchreset, r18.get("mn", 0), r18.get("mx", 0), r18.get("protocol"), r18.get("cold0lit")))
+                st18 = r18["steps"]
+                for i in range(0, len(st18) - 1, 2):
+                    p, q = st18[i], st18[i + 1]
+                    print("   v=%-8s 探测：亮 %-5s 差异 %-4s | 复位后：亮 %-5s 残留 %-4d → 连打 %d 拍后残留 %s %s"
+                          % (p["value"], p["lit"], p.get("nOn"), q["lit"], q["nSig"], r18.get("pump", a.lrpump),
+                             q.get("afterPump"), (q["sig"][:6] if q["nSig"] else "")))
+                res = [s["nSig"] for s in st18 if s["tag"].startswith("reset")]
+                pmp = [s.get("afterPump") for s in st18 if s["tag"].startswith("reset")]
+                print("   ⇒ 协议 %s 复位残留 %s；连打 %d 拍之后 %s  %s"
+                      % (r18.get("protocol"), res, a.lrpump, pmp,
+                         ("残留随拍数归零 ⇒ 是慢收敛，不是锁存"
+                          if any(res) and not any(pmp) else
+                          ("全程 0 ⇒ 没有锁存" if not any(res) else
+                           "拍数打不掉 ⇒ 锁存成立（对本引擎而言显隐不是参数的函数）"))))
+            else:
+                print("\n== ⑱ 棘轮复位判定：`%s` 目标值 %s、污染值 %s，冷基线亮 %s 片"
+                      % (a.latchreset, a.lrtarget, a.lrhot, r18.get("cold0lit")))
+                print("   %-42s %-6s %-6s %s" % ("步骤", "亮着", "差异片", "备注"))
+                for s in r18["steps"]:
+                    print("   %-42s %-6s %-6d %s" % (s["tag"], s["lit"], s["nSig"],
+                          ("sig %s" % s["sig"][:4]) if s["nSig"] else ""))
+                print("   打到 %s 再回默认之后，仍不等于冷基线的片数：%s" % (r18.get("hot"), r18.get("afterHotNSig")))
+                print("   ⇒ 能把缓冲打回冷基线的复位手段：%s" % (r18.get("okReset") or "一个都没有"))
+                for x in r18.get("p4", []):
+                    print("      复位[%s] 后再探同一值：与 P1 冷读数%s（亮 %s 片，差异 %s）"
+                          % (x["after"], "**相同 ⇒ 可复现**" if x["sameAsP1"] else "**不同 ⇒ 仍被历史决定**",
+                             x["lit"], x["nSig"]))
+                print("   core/model 上真实存在的 reset 类 API：%s" % json.dumps(r18.get("api"), ensure_ascii=False)[:300])
+                print("   结论要看：没有任何复位成功 ⇒ ⑰ 只能「一页一探测」，全库批量判死；"
+                      "有且签名可复现 ⇒ ⑰ 按原方案跑，复位步骤写进 probe。")
+
+    # —— ⑲ 锁存律：**一页只探一个值**（⑱ 证了显隐是路径函数之后，这是唯一还能拿到「边沿→写入」对应关系的形状）
+    #    每页做三件事：冷基线 → 一次跳到 v（这份签名 = 该值的**干净响应** R(v)）→ 回默认打一拍 + 连打 pump 拍
+    #    （仍不等于冷基线的那些 = 该值留下的**锁存写入** L(v)，逐条带读数，能分清"钉在亮"还是"钉在灭"）。
+    #    值表就是成本：一页 ~20~40s，12 个值 ≈ 5~8 分钟，所以要跑在脱离宿主的进程里。
+    if a.latchlaw:
+        pname19 = a.latchlaw.split(":")[0]
+        vs19 = ([float(x) for x in a.latchlaw.partition(":")[2].split(",") if x.strip()]
+                if ":" in a.latchlaw else [float(x) for x in a.lawseq.split(",") if x.strip()])
+        out19 = os.path.join(ROOT, ".diag", "l2d_latchlaw_%s_%s.json" % (a.model, pname19))
+        law19 = {"model": a.model, "param": pname19, "values": vs19, "pump": max(0, a.lrpump),
+                 "protocol": "one（写成目标状态只打一拍）", "names": None, "rows": []}
+        print("\n== ⑲ 锁存律：`%s` 一页一个值，共 %d 页（约 %d 分钟）"
+              % (pname19, len(vs19), max(1, len(vs19) * 30 // 60)))
+        for vi, vv in enumerate(vs19):
+            j19 = reload_boot()
+            if not j19.get("ok"):
+                print("   [FAIL] 第 %d/%d 页（v=%s）重载失败：%s" % (vi + 1, len(vs19), vv, str(j19)[:160]))
+                break
+            raw19 = ev(JS_LATCHRESET + "({param:%s, mode:'seq', protocol:'one', seq:[%s], pump:%d, cap:400})"
+                       % (json.dumps(pname19), json.dumps(vv), max(0, a.lrpump)))
+            try:
+                r19 = json.loads(raw19) if isinstance(raw19, str) and raw19.strip().startswith("{") else {"err": str(raw19)[:240]}
+            except Exception:
+                r19 = {"err": str(raw19)[:240]}
+            if "steps" not in r19 or len(r19["steps"]) < 2:
+                print("   [FAIL] 第 %d/%d 页未出结果：%s" % (vi + 1, len(vs19), str(r19)[:240]))
+                break
+            if law19["names"] is None:
+                law19["names"] = r19.get("names")
+            p19, q19 = r19["steps"][0], r19["steps"][1]
+            cold19 = r19.get("cold0lit")
+            pr = sig2pairs(p19["sig"])
+            on19 = [[i, o] for i, o in pr if o > 0.5]
+            off19 = [[i, o] for i, o in pr if o <= 0.5]
+            lat19 = sig2pairs(q19["sig"])
+            law19["rows"].append({"v": vv, "cold0lit": cold19, "lit": p19["lit"],
+                                  "on": on19, "off": off19, "nOn": len(on19), "nOff": len(off19),
+                                  "latch": lat19, "latchN": q19["nSig"],
+                                  "latchAfterPump": q19.get("afterPump"),
+                                  "latchPumpList": sig2pairs(q19.get("pumpSig"))})
+            with open(out19, "w", encoding="utf-8") as fh:
+                json.dump(law19, fh, ensure_ascii=False)
+            nm = law19["names"] or []
+            ld = ["%s=%s" % ((nm[i] if i < len(nm) else "#%d" % i), o) for i, o in lat19[:6]]
+            print("   v=%-7s 亮 %-4s（冷基线 %s）点亮 %-4d 灭掉 %-4d | 复位残留 %-4d（连打 %d 拍后 %s）%s"
+                  % (vv, p19["lit"], cold19, len(on19), len(off19), q19["nSig"], a.lrpump,
+                     q19.get("afterPump"), ("  " + ", ".join(ld) if ld else "")))
+        print("   台账 → %s（每页都即时落盘，中途崩了也留已完成的部分）" % out19)
+        if len(law19["rows"]) >= 2:
+            mono = all(law19["rows"][i]["latchN"] <= law19["rows"][i + 1]["latchN"]
+                       for i in range(len(law19["rows"]) - 1))
+            print("   ⇒ 每页都是新会话，残留只可能是**该值自己**写的；残留随 v 单调不减：%s（%s）"
+                  % ("是" if mono else "否", "单调 ⇒ 高值把低值该灭的也钉住" if mono else "非单调 ⇒ 锁存集合不是包含关系"))
+
+    # —— ⑰ 冷态全量台账（把 ⑯ 的形状铺到整批参数；跑这条时**不要**同时传别的会改状态的臂）
+    if a.coldmapall:
+        spec17 = a.coldmapall.strip()
+        lf5 = os.path.join(ROOT, ".diag", "l2d_opacity_map_%s.json" % a.model)
+        if spec17 in ("auto", "@auto"):
+            if not os.path.exists(lf5):
+                print("\n== ⑰ auto 的候选名单来自 ⑤ 的台账（只借它挑「哪些参数碰得到显隐」，不借它的阈值）：先跑 --mapall")
+                return 2
+            cand17 = [e[1] for e in json.load(open(lf5, encoding="utf-8")).get("map", [])]
+        elif spec17.startswith("@") and os.path.exists(spec17[1:]):
+            tx17 = open(spec17[1:], encoding="utf-8").read().strip()
+            cand17 = list(json.loads(tx17)) if tx17.startswith("[") else \
+                [x.strip() for x in tx17.replace(",", "\n").splitlines() if x.strip()]
+        else:
+            cand17 = [x.strip() for x in spec17.split(",") if x.strip()]
+        sfx17 = "rev" if a.coldrev else "fwd"
+        out17 = os.path.join(ROOT, ".diag", "l2d_coldmapall_%s_%s.json" % (a.model, sfx17))
+        agg17 = {"model": a.model, "reverse": bool(a.coldrev), "nstep": a.coldnstep,
+                 "cold0": None, "names": None, "drawables": None, "cold0lit": None,
+                 "updates": 0, "groups": [], "results": []}
+        CH17 = max(1, a.coldreload)
+        ng17 = (len(cand17) + CH17 - 1) // CH17
+        print("\n== ⑰ 冷态全量台账（%s序）：候选 %d 个参数，每 %d 个换一次新页面 ⇒ %d 组"
+              % ("倒" if a.coldrev else "正", len(cand17), CH17, ng17))
+        for gi in range(ng17):
+            grp = cand17[gi * CH17:(gi + 1) * CH17]
+            j17 = reload_boot()          # **每组都换新页面**，第一组也不例外：boot 之前那些臂已经播过动作
+            if not j17.get("ok"):
+                print("   [FAIL] 第 %d 组重载后启动失败：%s ⇒ 已扫的部分原样落盘"
+                      % (gi + 1, str(j17)[:180]))
+                break
+            tg17 = time.time()
+            raw17 = ev(JS_COLDMAPALL + "({params:%s, nstep:%d, reverse:%s, maxBis:%d, epsAbs:%g, cap:240, maxProbes:%d})"
+                       % (json.dumps(grp), a.coldnstep, json.dumps(bool(a.coldrev)),
+                          max(4, a.coldbis), a.coldeps, max(8, a.coldprobes)))
+            try:
+                r17 = json.loads(raw17) if isinstance(raw17, str) and raw17.strip().startswith("{") else {"err": str(raw17)[:280]}
+            except Exception:
+                r17 = {"err": str(raw17)[:280]}
+            if "results" not in r17:
+                print("   [FAIL] 第 %d/%d 组未出结果：%s" % (gi + 1, ng17, str(r17)[:280]))
+                break
+            if agg17["cold0"] is None:
+                agg17["cold0"], agg17["names"] = r17.get("cold0"), r17.get("names")
+                agg17["drawables"], agg17["cold0lit"] = r17.get("drawables"), r17.get("cold0lit")
+            agg17["groups"].append({"group": gi + 1, "cold0": r17.get("cold0"),
+                                    "cold0lit": r17.get("cold0lit"), "updates": r17.get("updates")})
+            dirty = [x["param"] for x in r17["results"] if x.get("maxDrift")]
+            touched = [x["param"] for x in r17["results"]
+                       if any(g["nChg"] for g in x.get("grid", []))]
+            agg17["results"] += r17["results"]
+            agg17["updates"] += r17.get("updates", 0)
+            with open(out17, "w", encoding="utf-8") as fh:
+                json.dump(agg17, fh, ensure_ascii=False)
+            print("   ⑰ 第 %d/%d 组：参数 %d，updates=%d，会改显隐 %d 个，冷基线亮 %s 片，"
+                  "复位不回滚的参数 %d%s  本组 %.0fs"
+                  % (gi + 1, ng17, len(grp), r17.get("updates", 0), len(touched),
+                     r17.get("cold0lit"), len(dirty), (" 例 %s" % dirty[:4] if dirty else ""),
+                     time.time() - tg17))
+        print("   半成品/成品 → %s（合并判据另跑 --coldmerge）" % out17)
 
     # —— ⑮ 冷态逐拍（放在所有会改状态的臂**之前**，否则"冷"字不成立）
     if a.reconcold:
