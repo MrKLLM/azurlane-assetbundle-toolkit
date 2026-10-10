@@ -31,6 +31,20 @@
      每次模型 update 记一行 [相对秒, currentGroup, 全模型亮着数, A 组峰值, B 组峰值, 台账集亮着数/峰值, 参数值…]。
      验收看的是**"该参数能影响的全部 mesh 里有几盏亮"**随帧的曲线（修法开时不得出现 0），不是截图。
      ⚠️ A/B 两组名要自己给对：在实态里从不亮的一组会让"A∧B 同时灭"变成常真、失去区分度。
+  ⑪ `--partcheck` 部件门：读目标片所属部件的当前值。**⚠️ 本臂已判定不可信**：`D.partMatch` 这个键名
+     在 wasm 视图里不存在（真名是 `parentPartIndices`）、`parts.defaultValues` 也不存在，
+     所以它报的"非默认部件 0 个"是 `undefined` 参与减法的产物 —— 那次"部件门否证"不算数（由 ⑬ 重做）。
+  ⑫ `--gatefind` 合取门二分。⚠️ 它的 `atDefault` 与 ⑤ 的台账在同参数下读出不同值 ⇒ 见 ⑬/⑮/⑯。
+  ⑬ `--recon` **台账矛盾判定**：同一趟同一套索引里对读「⑤ 的逐档扫」与「⑫ 的整数组钉」，
+     外加四把排除：part 是输入还是输出、core 有没有派生参数链、三种读法（旧视图/重取视图/框架 getter）
+     是否一致、直写缓冲与走框架 setter 是否一致。全部一致 ⇒ 结论只能是**历史依赖**。
+  ⑭ `--reconshot` 同参数两历史各截一张图比像素（分「引擎真锁存」与「读错缓冲」两种落法）。
+     ⚠️ 只调 `core.update()+app.render()` 时"像素不变"证明不了"缓冲不管渲染"——每片 alpha 是在
+     **`model.update()`** 里同步的，所以两种驱动都要跑（`via=model` 那趟必须排在前面，否则不冷）。
+  ⑮ `--reconcold` **冷态逐拍**：一次跳到目标值后逐拍读 ⇒ 判"显隐是第几拍才结算"。
+  ⑯ `--coldmap Param25:0,0.1,0.2` **冷态逐值全模型图**：每个值都从 moc3 默认**一次跳到**，
+     正序 + 倒序各一遍。**两遍不一致 = 有滞回 ⇒ ⑤ 的台账不能当函数表**（本项目实测：正序爬完再回默认，
+     那 29 片仍是 1，复位不回滚）。`--focus` 只盯指定片，否则打印每档新亮/新灭名单。
 
 ⚠️ URL 必须带 cache-buster（`?v=<epoch>`）：headless 用固定 `--user-data-dir`，改过前端之后 Chrome 会端出
    磁盘缓存里的旧 `index.html` —— 症状是"补丁明明落盘了、跑出来的行为与改动前逐帧相同"。
@@ -565,6 +579,312 @@ JS_GATEFIND = r"""(async (cfg) => {
 })"""
 
 
+# ---------------------------------------------------------------- ⑭ 状态定格 + 截图（把"缓冲读数"与"屏幕像素"对上）
+# 为什么要它：⑬ 证到「同一份参数数组，29 片的透明度冷态读 0、暖态读 1，且回不去」。
+# 这句话有两种截然不同的落法：**(引擎真的按历史决定可见性**（那台账就不是函数表，snapswitch 的前提塌），
+# 还是 **我们读的这块缓冲根本不是渲染用的那份**（那从台账起的所有结论都作废）。
+# 只有一种办法分开它们：同参数、两种历史，各截一张图比像素。
+JS_SET_STATE = r"""(async (cfg) => {
+  const core=window.__m.internalModel.coreModel, mm=window.__m.internalModel.motionManager;
+  const M=core._model, P=M.parameters, D=M.drawables, PT=M.parts;
+  window.__cap=null; window.__wset=null; window.__hideSet=null;
+  window.__ambOff=true; window.__snapOff=true;          // 环境层与 snap 层都会写参数，定格期间全关
+  try{ window.__app.ticker.stop(); }catch(e){}
+  try{ window.__m.autoUpdate=false; }catch(e){}
+  try{ mm.stopAllMotions(); }catch(e){}
+  const DEF=Array.from(P.defaultValues);
+  const withPin=(src)=>{ const v=src.slice();
+    for(const pv of cfg.pin){ const k=P.ids.indexOf(pv[0]); if(k>=0) v[k]=pv[1]; } return v; };
+  const target=(cfg.state==='B')? withPin(DEF): DEF;
+  let wrote=0; for(let i=0;i<P.count;i++) if(Math.abs(P.values[i]-target[i])>1e-9){ P.values[i]=target[i]; wrote++; }
+  // 两种驱动必须分开测：pixi 侧每片的 alpha 是在 **model.update()** 里从 core 缓冲同步过去的，
+  // 只调 core.update() + app.render() 时"像素不变"只能证明"没触发同步"，不能证明"缓冲不管渲染"。
+  const used=(cfg.via==='model' && typeof window.__m.update==='function')? 'model' : 'core';
+  for(let k=0;k<(cfg.repeat||1);k++){
+    if(used==='model'){ try{ window.__m.update(1/60); }catch(e){ core.update(); } }
+    else core.update();
+  }
+  try{ window.__app.render(); }catch(e){}
+  let litPixi=null;
+  try{ litPixi=window.__m.children.filter(c=>c.visible!==false && (c.alpha||0)>0.05).length; }catch(e){}
+  return JSON.stringify({state:cfg.state, via:used, wrote, updates:cfg.repeat||1,
+    litPixi,
+    pin:(()=>{ const o={}; for(const pv of cfg.pin){ const k=P.ids.indexOf(pv[0]);
+      o[pv[0]]=(k<0? null: +P.values[k].toFixed(4)); } return o; })(),
+    targets:cfg.meshes.map(n=>{ const j=D.ids.indexOf(n); return j<0? null : +D.opacities[j].toFixed(3); }),
+    partNon1:(()=>{ let c=0; for(let i=0;i<PT.count;i++) if(Math.abs(PT.opacities[i]-1)>1e-6) c++; return c; })()});
+})"""
+
+
+# ---------------------------------------------------------------- ⑮ 冷态逐拍：一次跳变之后，显隐要第几拍才结算？
+# 为什么单独一条臂：⑬/⑭ 的读数全都建立在"每档扫完就打一拍"的时序上，而冷态实测出现
+# 「同一份参数，1 拍读 0、多拍读 1」⇒ 台账记的**阈值位置**可能是"第几拍"的假象，不是绑定阈值。
+# 这条臂在**全新页面**上只做一件事：冻住 → 全默认 → 一次跳到 pin → 逐拍读 N 拍 → 一次跳回默认 → 再逐拍读 N 拍。
+# 中途绝不"先扫一遍"，所以没有预热污染；判据是「第几拍才变」而不是「变不变」。
+JS_RECONCOLD = r"""(async (cfg) => {
+  const im=window.__m.internalModel, core=im.coreModel, mm=im.motionManager;
+  const M=core._model, P=M.parameters, D=M.drawables, PT=M.parts;
+  window.__cap=null; window.__wset=null; window.__hideSet=null;
+  window.__ambOff=true; window.__snapOff=true;
+  try{ window.__app.ticker.stop(); }catch(e){}
+  try{ window.__m.autoUpdate=false; }catch(e){}
+  try{ mm.stopAllMotions(); }catch(e){}
+  const ti=cfg.meshes.map(n=>D.ids.indexOf(n));
+  const DEF=Array.from(P.defaultValues);
+  const pinIx=cfg.pin.map(pv=>[pv[0], P.ids.indexOf(pv[0]), pv[1]]);
+  const withPin=(src)=>{ const v=src.slice(); for(const e of pinIx) if(e[1]>=0) v[e[1]]=e[2]; return v; };
+  const rd=()=>ti.map(j=>j<0? null : +D.opacities[j].toFixed(3));
+  const pinv=()=>pinIx.map(e=>e[1]<0? null : +P.values[e[1]].toFixed(4));
+  const setv=(vals)=>{ let w=0; for(let i=0;i<P.count;i++) if(Math.abs(P.values[i]-vals[i])>1e-9){ P.values[i]=vals[i]; w++; } return w; };
+  const seq=[];
+  setv(DEF); core.update(); seq.push(['base', 0, rd(), pinv()]);
+  const want=withPin(DEF); setv(want);
+  for(let k=1;k<=cfg.n;k++){ core.update(); seq.push(['up', k, rd(), pinv()]); }
+  setv(DEF);
+  for(let k=1;k<=cfg.n;k++){ core.update(); seq.push(['down', k, rd(), pinv()]); }
+  // 第二拍之后若才变 ⇒ 台账的"阈值"里混着"第几拍"；若从第一拍起就可逆 ⇒ ⑬ 的多拍扫没问题，
+  // 而之前的冷/暖差异是别的东西（那时才回头找）。
+  window.__hideSet=null; window.__ambOff=cfg.ambOff||false;
+  try{ window.__m.autoUpdate=true; }catch(e){}
+  try{ window.__app.ticker.start(); }catch(e){}
+  return JSON.stringify({meshes:cfg.meshes, idx:ti, pin:cfg.pin, n:cfg.n, seq});
+})"""
+
+
+# ---------------------------------------------------------------- ⑯ 冷态逐值全模型图：每个值都从默认**一次跳到**，绝不分档爬
+# 为什么必须要它：⑮ 证到「一次跳到 0.5 只灭掉 ArtMesh36，B 组手全程不动」，
+# 而臂 ⑤ 的台账（逐档 0→0.1→0.2…爬上去）却说 Param25 是 A/B 两组的互斥开关、还带 0.1 宽的"死区"。
+# 两者只差在**到达路径**：爬档会留下滞回。⇒ 台账不能当函数表用，按它生成的 snapswitch 表前提也塌了。
+# 这一臂只做"每个值都从 moc3 默认一次跳到、读全模型"，并且**正序+倒序各跑一遍**：
+# 两遍结果一致才叫函数表；不一致就是滞回，且滞回本身就是"中途一闪"的来源。
+JS_COLDMAP = r"""(async (cfg) => {
+  const im=window.__m.internalModel, core=im.coreModel, mm=im.motionManager;
+  const M=core._model, P=M.parameters, D=M.drawables, PT=M.parts;
+  window.__cap=null; window.__wset=null; window.__hideSet=null;
+  window.__ambOff=true; window.__snapOff=true;
+  try{ window.__app.ticker.stop(); }catch(e){}
+  try{ window.__m.autoUpdate=false; }catch(e){}
+  try{ mm.stopAllMotions(); }catch(e){}
+  const DEF=Array.from(P.defaultValues);
+  const k=P.ids.indexOf(cfg.param);
+  if(k<0) return JSON.stringify({fail:'参数不在 moc3 里', param:cfg.param});
+  const nd=D.count, ids=Array.from(D.ids);
+  const setv=(vals)=>{ let w=0; for(let i=0;i<P.count;i++) if(Math.abs(P.values[i]-vals[i])>1e-9){ P.values[i]=vals[i]; w++; } core.update(); return w; };
+  const snap=()=>{ const a=new Float32Array(nd); a.set(D.opacities); return a; };
+  const passes=[];
+  for(const order of [cfg.values, cfg.values.slice().reverse()]){
+    const rows=[]; let base=null;
+    for(const v of order){
+      setv(DEF); base=snap();                      // 每次先回默认（一跳的起点必须相同）
+      const vals=DEF.slice(); vals[k]=v; setv(vals);
+      const cur=snap();
+      const on=[], off=[];
+      for(let j=0;j<nd;j++){
+        if(cur[j]>0.5 && base[j]<=0.5) on.push(ids[j]);
+        if(cur[j]<=0.5 && base[j]>0.5) off.push(ids[j]);
+      }
+      let lit=0; for(let j=0;j<nd;j++) if(cur[j]>0.5) lit++;
+      rows.push({v, lit, nOn:on.length, nOff:off.length,
+                 on:cfg.focus? on.filter(x=>cfg.focus.some(f=>x===f)) : on.slice(0,20),
+                 off:cfg.focus? off.filter(x=>cfg.focus.some(f=>x===f)) : off.slice(0,20),
+                 focus:cfg.focus.map(n=>{ const j=ids.indexOf(n); return j<0? null : +cur[j].toFixed(2); })});
+    }
+    passes.push(rows);
+  }
+  const same=JSON.stringify(passes[0].map(r=>[r.lit,r.nOn,r.nOff]))
+            ===JSON.stringify(passes[1].slice().reverse().map(r=>[r.lit,r.nOn,r.nOff]));
+  window.__hideSet=null; try{ window.__m.autoUpdate=true; }catch(e){}
+  try{ window.__app.ticker.start(); }catch(e){}
+  return JSON.stringify({param:cfg.param, idx:k, values:cfg.values, focus:cfg.focus,
+                         drawables:nd, passes, forwardBackwardAgree:same});
+})"""
+
+
+# ---------------------------------------------------------------- ⑬ 台账矛盾判定：同一趟里把「扫 Param25」与「钉 Param25」对读
+# 为什么要它（§6.37 交接的第一件事）：臂 ⑤ 的显隐台账说「全默认 + Param25=0.5 ⇒ ArtMesh325=1.0」，
+# 臂 ⑫ 用**逐位相同**的参数数组直读同一个下标(378) 得 **0**，且三个目标全灭（不是单片偶发）。
+# ⑫ 自己报 `nDiff:1` ⇒ 输入侧只差 Param25，所以差异只能来自**参数之外、不随 core.update() 重算的那套输入**，
+# 而 Live2D 里只有一个候选：part 透明度。⚠️ 上一轮"部件门已否证"用的是**坏仪器**（臂 ⑪ 那次
+# `hasDefaults=False`、每个目标 `part:null`、"非默认部件 0 个"是 `undefined` 参与减法比较的产物），
+# 所以部件门从来没被真正测过。这一臂在同一次运行、同一套索引里做四件事：
+#   ① 自证 part 缓冲到底可不可读、`core.update()` 会不会把我们写进去的值覆盖掉（part 是输入还是输出）；
+#   ② 四档状态对读：全默认 / 全默认+pin / 全默认+pin 且 part 全写 1 / 复刻 ⑤ 的 11 点扫；
+#   ③ **写路径粘性判定**：终态参数数组完全相同，只换"到达它的路径"（⑫ 的整数组写 vs ⑤ 的单参数写），
+#      两次读数不同 ⇒ 状态里确有第二套输入；相同 ⇒ 矛盾在别处（回到索引/缓冲假设）；
+#   ④ 每个目标的 drawable→part 归属链（wasm 视图暴露得出哪条就用哪条，暴露不出就如实报"读不到"）。
+# ⚠️ 目标名单必须自带一条阳性对照：台账说 Param25=0.5 时 A 组(ArtMesh36)=0、B 组=1，
+#    再放一片"两条 clip 里都恒定亮着"的 ArtMesh364 —— 它若也读 0，说明整模型都被挡，不是这道门。
+JS_RECON = r"""(async (cfg) => {
+  const im=window.__m.internalModel, core=im.coreModel, mm=im.motionManager;
+  const M=core._model, P=M.parameters, D=M.drawables, PT=M.parts;
+  // 先清掉别的臂留下的钩子：__hideSet 会在每次 core.update() 之后把指定片写成 0（[] 也是 truthy）
+  window.__cap=null; window.__wset=null; window.__hideSet=null;
+  const ambWas=window.__ambOff; window.__ambOff=true;
+  const snapWas=window.__snapOff; window.__snapOff=true;      // 修法 (b) 那层会写参数，判定期间关掉
+  let tkWas=true; try{ tkWas=window.__app.ticker.started!==false; window.__app.ticker.stop(); }catch(e){}
+  try{ window.__m.autoUpdate=false; }catch(e){}
+  try{ mm.stopAllMotions(); }catch(e){}
+  const ti=cfg.meshes.map(n=>D.ids.indexOf(n));
+  const miss=cfg.meshes.filter((n,j)=>ti[j]<0);
+  if(ti.every(x=>x<0)) return JSON.stringify({fail:'目标都不在模型里', meshes:cfg.meshes});
+  const pinIx=cfg.pin.map(pv=>[pv[0], P.ids.indexOf(pv[0]), pv[1]]);
+  const rows=[]; const reads=[];
+  const tgt=()=>ti.map(j=>j<0? null : +D.opacities[j].toFixed(3));
+  const pstats=()=>{ const O=PT.opacities;
+    if(!O||!O.length||typeof O[0]!=='number') return {readable:false, type:String(O&&O.constructor&&O.constructor.name)};
+    let non1=0, mn=Infinity, mx=-Infinity;
+    for(let i=0;i<PT.count;i++){ const v=O[i]; if(Math.abs(v-1)>1e-6) non1++; if(v<mn)mn=v; if(v>mx)mx=v; }
+    return {readable:true, n:PT.count, non1, mn:+mn.toFixed(3), mx:+mx.toFixed(3)}; };
+  const writeAll=(vals)=>{ let d=0;
+    for(let i=0;i<P.count;i++) if(Math.abs(P.values[i]-vals[i])>1e-9){ P.values[i]=vals[i]; d++; }
+    core.update(); return d; };
+  const DEF=Array.from(P.defaultValues);
+  const withPin=(src)=>{ const v=src.slice(); for(const e of pinIx) if(e[1]>=0) v[e[1]]=e[2]; return v; };
+  // 归属链：wasm 视图里带 part 字样的数组有哪些
+  const partKeys=Object.keys(D).filter(k=>/part/i.test(k));
+  const chain=partKeys.length? partKeys.map(k=>({key:k, vals:ti.map(j=>D[k]?D[k][j]:null)})) : null;
+  const protoMeth=Object.getOwnPropertyNames(Object.getPrototypeOf(core)).filter(n=>/part/i.test(n));
+  const push=(tag,vals)=>{ const d=writeAll(vals);
+    rows.push({tag, wrote:d, part:pstats(), op:tgt(),
+               pin:(()=>{ const o={}; for(const e of pinIx) o[e[0]]=e[1]<0?null:+P.values[e[1]].toFixed(4); return o; })()}); };
+
+  push('S1 全默认', DEF);
+  const coldVec=Array.from(D.opacities);          // 冷态全模型显隐快照（S14 的基准）
+  // 目标片的结构属性：core 里唯一带脏标记的通道是**蒙版**，先确认这些片是不是蒙版相关片
+  const dkeys=Object.keys(D);
+  const pick=(k)=>ti.map(j=>{ const a=D[k]; if(!a) return null;
+    const v=a[j]; return (typeof v==='number')? +v.toFixed(3) : v; });
+  const attrs=cfg.meshes.map((n,q)=>({name:n, idx:ti[q],
+    type:pick('types')[q], blend:pick('blendTypes')[q]!==null?pick('blendTypes')[q]:pick('blendModes')[q],
+    maskCounts:pick('maskCounts')[q], maskRef:pick('maskReferenceCounts')[q],
+    part:pick('parentPartIndices')[q], tex:pick('textures')[q],
+    verts:(D.vertexPositions&&D.vertexPositions[ti[q]])?D.vertexPositions[ti[q]].length/2:null,
+    indices:(D.indices&&D.indices[ti[q]])?D.indices[ti[q]].length:null}));
+  push('S2 全默认+pin', withPin(DEF));
+  // S3：把全部 part 写成 1 再 update —— 同时回答"core 会不会把它覆盖回去"
+  { const before=pstats(); const O=PT.opacities;
+    if(O&&O.length) for(let i=0;i<PT.count;i++) O[i]=1;
+    const mid=pstats(); core.update(); const after=pstats();
+    rows.push({tag:'S3 part 全写 1 后', wrote:0, part:after, op:tgt(),
+               partProbe:{before, afterWrite:mid, afterUpdate:after, overwritten:after.non1!==0},
+               pin:(()=>{ const o={}; for(const e of pinIx) o[e[0]]=e[1]<0?null:+P.values[e[1]].toFixed(4); return o; })()}); }
+  // S4：复刻臂 ⑤ 的扫法（先归全默认，再只动这一个参数，逐档扫**该参数自己的量程**）
+  //     ⚠️ 第一版把扫点写成 `pin 值 × q/nstep`，等于只扫了 [0, pin]，坐标标签全错 ⇒ 按量程重扫。
+  writeAll(DEF); { const s=[]; const e0=pinIx[0];
+      for(let q=0;q<=cfg.nstep;q++){
+        for(const e of pinIx) if(e[1]>=0)
+          P.values[e[1]]=P.minimumValues[e[1]]+(P.maximumValues[e[1]]-P.minimumValues[e[1]])*q/cfg.nstep;
+        core.update();
+        s.push([+(P.minimumValues[e0[1]]+(P.maximumValues[e0[1]]-P.minimumValues[e0[1]])*q/cfg.nstep).toFixed(3), tgt()]); }
+    reads.push({tag:'S4 ⑤ 式按量程扫', s}); }
+  // S5/S6：终态参数数组**逐位相同**，只换写路径 —— 这一步才是矛盾的判生死线
+  push('S5 ⑫ 式整数组写(同 S2)', withPin(DEF));
+  writeAll(DEF); { let d=0; for(const e of pinIx) if(e[1]>=0){ P.values[e[1]]=e[2]; d++; }
+    core.update();
+    rows.push({tag:'S6 ⑤ 式单参数写', wrote:d, part:pstats(), op:tgt(),
+               pin:(()=>{ const o={}; for(const e of pinIx) o[e[0]]=e[1]<0?null:+P.values[e[1]].toFixed(4); return o; })()}); }
+  // S7：**逐拍结算**判据 —— S2 与 S5/S6 的输入已证逐位相同、读数却不同，而两者唯一的差别是
+  //     S5/S6 之前这个模型已经被 update 过很多拍 ⇒ 假设「有一条 core 在 update 里自己写的参数，
+  //     它滞后一拍，而目标片的显隐是 Param25 与它的合取」。这里从零基线**一次跳到 pin**，
+  //     每拍除了读目标，还把「我们写进去的值」与「update 之后缓冲里的值」逐位对比 ⇒ 点名谁被改写。
+  const diffAfterUpdate=(want)=>{ const out=[];
+    for(let i=0;i<P.count;i++){ const v=P.values[i];
+      if(Math.abs(v-want[i])>1e-4){ out.push([P.ids[i], +want[i].toFixed(3), +v.toFixed(3)]); } }
+    return out; };
+  writeAll(DEF); { const seq=[]; const want=withPin(DEF);
+    for(const e of pinIx) if(e[1]>=0) P.values[e[1]]=e[2];
+    for(let k=0;k<cfg.settle;k++){ core.update();
+      seq.push([k+1, tgt(), pstats().non1, diffAfterUpdate(withPin(DEF))]); }
+    reads.push({tag:'S7 一次跳到 pin 后逐拍读（第 3 列=update 之后被 core 改写的参数）', s:seq}); }
+  // S8：反方向（一次跳回默认）逐拍读 —— 只测上升沿会把"单向滞后"当成对称结论
+  writeAll(withPin(DEF)); { const seq=[];
+    for(let k=0;k<cfg.settle;k++){
+      for(const e of pinIx) if(e[1]>=0) P.values[e[1]]=DEF[e[1]];
+      core.update(); seq.push([k+1, tgt(), pstats().non1, diffAfterUpdate(DEF)]); }
+    reads.push({tag:'S8 一次跳回默认后逐拍读', s:seq}); }
+  // S9：**纯函数判定**（最硬的一条）—— A=全默认 与 B=全默认+pin 交替来回，每拍读目标。
+  //     若 325 只取决于参数数组，A 每次都读同一个值、B 也同理；
+  //     若同一状态在交替中读出不同值 ⇒ `core.update()` 对显隐**不是**参数的纯函数，
+  //     台账与直读的矛盾就不是"谁写错了"，而是这类扫描本身带历史依赖 ⇒ 修法必须换一层。
+  //     同时逐位比对第 k 次与第 1 次的参数数组（`arrDrift`），排除"数组其实在漂"这条解释。
+  { const seq=[]; let firstA=null, firstB=null, arrDriftA=0, arrDriftB=0;
+    for(let k=0;k<cfg.settle;k++){
+      writeAll(DEF); const a=Array.from(P.values);
+      if(k===0) firstA=a.slice(); else for(let i=0;i<P.count;i++) if(Math.abs(a[i]-firstA[i])>1e-9) arrDriftA++;
+      const ra=tgt();
+      writeAll(withPin(DEF)); const b=Array.from(P.values);
+      if(k===0) firstB=b.slice(); else for(let i=0;i<P.count;i++) if(Math.abs(b[i]-firstB[i])>1e-9) arrDriftB++;
+      seq.push([k, ra, tgt()]);
+    }
+    reads.push({tag:'S9 A/B 交替对读（A=全默认 / B=全默认+pin）', s:seq,
+                arrDriftA, arrDriftB}); }
+  // S10：**读数来源三分对照** —— S9 已证「同一份参数数组、冷态读 0 / 暖态读 1」，只剩两种解释：
+  //     (i) 真有一套装在 core 里、不随参数重算的状态；(ii) **我们手里这个视图是旧的**——
+  //     live2dcubismcore 的 `Model.sync()` 在 wasm 内存增长后会**重建** typed-array 视图，
+  //     我们是在 ⑬ 开头一次性抓的 `D/M/PT`，之后每次 update 都可能拿着指向已释放内存的旧视图，
+  //     读出来的是"上一次的残留"而不是当前值 ⇒ 台账整条线都建在坏仪器上。
+  //     三种读法：旧视图 `D.opacities` / **每拍重新取** `core._model.drawables.opacities` /
+  //     框架自己的 getter（`getDrawableOpacityByIndex` 一类）。只要有一处不同 ⇒ 仪器问题，
+  //     三处全同 ⇒ (i) 成立，才继续找那套状态。
+  const apiName=['getDrawableOpacityByIndex','getDrawableOpacity'].find(n=>typeof core[n]==='function');
+  const rawFresh=()=>{ const M2=core._model;
+    return ti.map(j=>j<0? null : +M2.drawables.opacities[j].toFixed(3)); };
+  const apiRead=apiName? (()=>ti.map(j=>j<0? null : +core[apiName](j).toFixed(3))) : null;
+  { const seq=[]; let mismatch=0;
+    for(let k=0;k<cfg.settle;k++){
+      writeAll(DEF);
+      const r=[tgt(), rawFresh(), apiRead? apiRead(): null];
+      if(apiRead){ if(JSON.stringify(r[0])!==JSON.stringify(r[1])||JSON.stringify(r[1])!==JSON.stringify(r[2])) mismatch++; }
+      else if(JSON.stringify(r[0])!==JSON.stringify(r[1])) mismatch++;
+      seq.push(['A'+k, r]);
+      writeAll(withPin(DEF));
+      const r2=[tgt(), rawFresh(), apiRead? apiRead(): null];
+      seq.push(['B'+k, r2]);
+    }
+    reads.push({tag:'S10 三种读法对照（旧视图 / 每拍重取视图 / 框架 getter）', s:seq,
+                api:apiName||'无此方法', mismatch}); }
+  // S12：**同一条交替，但改用框架 setter**（`core.setParameterValueByIndex`）而不是直写 wasm 缓冲。
+  //     真实播放走的就是这条（motion 求值器逐参数调它，还要过页面补丁 ⑤/⑦）。
+  //     若 S12 可逆、而 S9/S10 带单向锁存 ⇒ 之前所有「参数→显隐」台账都是**绕过框架**测出来的，
+  //     不代表播放路径 ⇒ 按它生成的 snapswitch 表与修法 (b) 的前提就都站不住。
+  const setByApi=(vals)=>{ let d=0;
+    for(let i=0;i<P.count;i++) if(Math.abs(P.values[i]-vals[i])>1e-9){ d++;
+      try{ core.setParameterValueByIndex(i, vals[i]); }catch(e){} }
+    core.update(); return d; };
+  { const seq=[]; let firstA=null, firstB=null, driftA=0, driftB=0;
+    for(let k=0;k<cfg.settle;k++){
+      const wa=setByApi(DEF); const a=Array.from(P.values);
+      if(k===0) firstA=a.slice(); else for(let i=0;i<P.count;i++) if(Math.abs(a[i]-firstA[i])>1e-9) driftA++;
+      const ra=tgt();
+      const wb=setByApi(withPin(DEF)); const b=Array.from(P.values);
+      if(k===0) firstB=b.slice(); else for(let i=0;i<P.count;i++) if(Math.abs(b[i]-firstB[i])>1e-9) driftB++;
+      seq.push([k, ra, tgt(), wa, wb]);
+    }
+    reads.push({tag:'S12 A/B 交替但走框架 setter（第 4/5 列=本次实际写了几格）', s:seq,
+                apiSetter:true, driftA, driftB}); }
+  // 输入侧自证：S5 与 S6 之后参数数组必须逐位相同，否则上面两行根本不可比
+  const vA=Array.from(P.values); writeAll(withPin(DEF)); const vB=Array.from(P.values);
+  let pdiff=0; for(let i=0;i<P.count;i++) if(Math.abs(vA[i]-vB[i])>1e-9) pdiff++;
+  // 全默认写完之后 update 自己会改写哪些参数（= moc3 里的派生参数/key-assign 算子清单）
+  writeAll(DEF); const rewr=diffAfterUpdate(DEF);
+  // S14：**冷/暖全模型对照** —— S9~S12 已证"同一份参数数组、显隐读不出来"。这里把范围放大到全部片：
+  //     冷态（第一次全默认）与暖态（被扫过之后再次全默认）逐片比 ⇒ 锁存究竟只是个别片的状态，
+  //     还是一大片"脏标记没被重算"。这个数直接决定台账能不能当**函数表**用。
+  const warmVec=Array.from(D.opacities); const cwd=[];
+  for(let j=0;j<D.count;j++) if(Math.abs(warmVec[j]-coldVec[j])>1e-3)
+    cwd.push([D.ids[j], +coldVec[j].toFixed(2), +warmVec[j].toFixed(2)]);
+  window.__hideSet=null; window.__ambOff=ambWas; window.__snapOff=snapWas;
+  try{ window.__m.autoUpdate=true; }catch(e){}
+  try{ if(tkWas) window.__app.ticker.start(); }catch(e){}
+  return JSON.stringify({meshes:cfg.meshes, idx:ti, miss, pinIx, nstep:cfg.nstep,
+    idEcho:pinIx.map(e=>[e[0], e[1], e[1]>=0?P.ids[e[1]]:null]),
+    partsKeyNames:Object.keys(PT), drawablePartKeys:partKeys, chain, protoPartMeth:protoMeth,
+    coreRewrittenFromDefaults:rewr, finalParamDiffBetweenPaths:pdiff, rows, reads,
+    attrs, drawableKeyNames:dkeys, drawables:D.count, params:P.count,
+    coldWarmDiffCount:cwd.length, coldWarmDiff:cwd.slice(0,60)});
+})"""
+
+
 # ---------------------------------------------------------------- ⑨ 变形者闸：这个参数除了显隐，还挪不挪几何？
 # 为什么要它：判据 C2「边界恒定 + 跨过美术翻转点」会把 `ParamForearmLAngle`（左前臂角）也捞进来 ——
 # 它确实绑定着某些 ArtMesh 的显隐，但它同时是**姿态形变**参数。snap 它 = 手臂角度硬跳，
@@ -792,6 +1112,13 @@ def main():
     ap.add_argument("--drvclip", default="", help="④ 第二基准：先播这条 clip、等 --drvwait 秒定格后再扫（setup 基线下乘性门会漏）")
     ap.add_argument("--drvwait", type=float, default=10.0, help="④ 播 clip 后等几秒定格（要等到角色在画面内）")
     ap.add_argument("--gatefind", default="", help="⑫ 合取门二分：逗号分隔的 mesh 名（实态下灭着的那些）")
+    ap.add_argument("--recon", default="", help="⑬ 台账矛盾判定：逗号分隔的 mesh 名（必须自带一条阳性对照片），在同一趟里对读 ⑤ 的扫法与 ⑫ 的钉法")
+    ap.add_argument("--reconshot", default="", help="⑭ 同参数两历史比像素：逗号分隔的 mesh 名（分「引擎真锁存」与「读错缓冲」）")
+    ap.add_argument("--reconcold", default="", help="⑮ 冷态逐拍：逗号分隔的 mesh 名；全新页面上一次跳到 --rpin 再逐拍读，判「显隐是第几拍才结算」")
+    ap.add_argument("--coldmap", default="", help="⑯ 冷态逐值全模型图：形如 Param25:0,0.1,0.2,0.4,0.6（每个值都从默认一次跳到，正序+倒序各一遍）")
+    ap.add_argument("--focus", default="", help="⑯ 只盯这几片（逗号分隔 mesh 名），否则打印每档新亮/新灭名单前 10")
+    ap.add_argument("--rpin", default="Param25:0.5", help="⑬ 钉住的参数，形如 Param25:0.5")
+    ap.add_argument("--settle", type=int, default=4, help="⑬ S7/S8 逐拍读几拍（判「显隐是不是滞后一拍才结算」）")
     ap.add_argument("--gclip", default="home", help="⑫ 定格自哪条 clip 的实态（空=用页面当前姿态）")
     ap.add_argument("--gwait", type=float, default=4.0, help="⑫ 播几秒后取实态")
     ap.add_argument("--gpin", default="", help="⑫ 两端都钉住的参数，形如 Param25:0.5（先打开第一道门）")
@@ -1147,6 +1474,217 @@ def main():
             if r["nonDefaultList"]:
                 print("     非默认部件前 12: %s" % ", ".join(
                     "%s(现%.2f/默%.2f)" % (n[0][:18], n[1], n[2]) for n in r["nonDefaultList"][:12]))
+
+    # —— ⑯ 冷态逐值全模型图（放在最前：这一臂要求"每个值都从默认一次跳到"，前面不能有爬档）
+    if a.coldmap:
+        pname16, _, vlist = a.coldmap.partition(":")
+        vs16 = [float(x) for x in vlist.split(",") if x.strip() != ""]
+        focus16 = [x.strip() for x in a.focus.split(",") if x.strip()]
+        raw16 = ev(JS_COLDMAP + "({param:%s, values:%s, focus:%s})"
+                   % (json.dumps(pname16), json.dumps(vs16), json.dumps(focus16)))
+        try:
+            r16 = json.loads(raw16) if isinstance(raw16, str) and raw16.strip().startswith("{") else {"err": str(raw16)[:300]}
+        except Exception:
+            r16 = {"err": str(raw16)[:300]}
+        f16 = os.path.join(ROOT, ".diag", "l2d_coldmap_%s_%s.json" % (a.model, pname16))
+        with open(f16, "w", encoding="utf-8") as fh:
+            json.dump({"cfg": {"param": pname16, "values": vs16, "focus": focus16}, "res": r16}, fh, ensure_ascii=False)
+        if "passes" not in r16:
+            print("\n== ⑯ 冷态逐值图未出结果: %s" % str(r16)[:300])
+        else:
+            print("\n== ⑯ 冷态逐值图：`%s`(下标 %s) 每个值都从 moc3 默认**一次跳到**，读全部 %d 片"
+                  % (pname16, r16.get("idx"), r16.get("drawables")))
+            print("   正序与倒序两遍是否一致: %s（不一致 ⇒ 台账那类逐档扫描带滞回，不能当函数表）"
+                  % ("**一致**" if r16.get("forwardBackwardAgree") else "**不一致 ⇒ 有滞回**"))
+            for pi, rows in enumerate(r16["passes"]):
+                print("   第 %d 遍（%s）" % (pi + 1, "正序" if pi == 0 else "倒序"))
+                for r in rows:
+                    print("     %-7s 亮着 %4d 片 | 相对默认 新亮 %d / 新灭 %d%s"
+                          % (r["v"], r["lit"], r["nOn"], r["nOff"],
+                             ("  关注片读数 %s" % dict(zip(focus16, r["focus"])) if focus16 else "")))
+                    if not focus16:
+                        print("        新亮 %s | 新灭 %s" % (r["on"][:10], r["off"][:10]))
+            print("   台账 → %s" % f16)
+
+    # —— ⑮ 冷态逐拍（放在所有会改状态的臂**之前**，否则"冷"字不成立）
+    if a.reconcold:
+        ms15 = [x.strip() for x in a.reconcold.split(",") if x.strip()]
+        pin15 = [[x.split(":")[0], float(x.split(":")[1])]
+                 for x in re.split(r"[,\s]+", a.rpin or "") if ":" in x]
+        raw15 = ev(JS_RECONCOLD + "({meshes:%s, pin:%s, n:%s})"
+                   % (json.dumps(ms15), json.dumps(pin15), json.dumps(max(2, a.settle))))
+        try:
+            r15 = json.loads(raw15) if isinstance(raw15, str) and raw15.strip().startswith("{") else {"err": str(raw15)[:300]}
+        except Exception:
+            r15 = {"err": str(raw15)[:300]}
+        f15 = os.path.join(ROOT, ".diag", "l2d_coldstep_%s.json" % a.model)
+        with open(f15, "w", encoding="utf-8") as fh:
+            json.dump({"cfg": {"meshes": ms15, "pin": pin15}, "res": r15}, fh, ensure_ascii=False)
+        if "seq" not in r15:
+            print("\n== ⑮ 冷态逐拍未出结果: %s" % str(r15)[:300])
+        else:
+            print("\n== ⑮ 冷态逐拍：一次跳到 %s 之后逐拍读（全新页面、中途绝不预热）" % (pin15,))
+            print("   %-6s %-4s %-8s %s" % ("方向", "拍", "参数实值", "  ".join("%-12s" % m for m in ms15)))
+            for row in r15["seq"]:
+                print("   %-6s %-4s %-8s %s" % (row[0], row[1], row[3],
+                                                "  ".join("%-12s" % v for v in row[2])))
+            up = [r for r in r15["seq"] if r[0] == "up"]
+            dn = [r for r in r15["seq"] if r[0] == "down"]
+            base = r15["seq"][0][2]
+            for j, m in enumerate(ms15):
+                ku = next((r[1] for r in up if abs((r[2][j] or 0) - (base[j] or 0)) > 1e-3), None)
+                kd = next((r[1] for r in dn if abs((r[2][j] or 0) - (up[-1][2][j] or 0)) > 1e-3), None)
+                print("   %-12s 基线 %-6s 跳变后第 %s 拍才变 | 跳回后第 %s 拍才变 ⇒ %s"
+                      % (m, base[j], ku if ku else "不变", kd if kd else "不变",
+                         ("滞后 %d 拍 ⇒ 台账阈值里混进了『第几拍』" % ku) if ku else "该片不受这次跳变影响"))
+            print("   台账 → %s" % f15)
+
+    # —— ⑭ 状态定格截图：同参数、两种历史，比像素（分"引擎真锁存"与"读错缓冲"）
+    if a.reconshot:
+        ms14 = [x.strip() for x in a.reconshot.split(",") if x.strip()]
+        pin14 = [[x.split(":")[0], float(x.split(":")[1])]
+                 for x in re.split(r"[,\s]+", a.rpin or "") if ":" in x]
+        shots = {}
+
+        def setstate(tag, state, via, repeat=1):
+            raw = ev(JS_SET_STATE + "({state:%s, pin:%s, meshes:%s, repeat:%s, via:%s})"
+                     % (json.dumps(state), json.dumps(pin14), json.dumps(ms14),
+                        json.dumps(repeat), json.dumps(via)))
+            try:
+                j14 = json.loads(raw) if isinstance(raw, str) and raw.strip().startswith("{") else {"err": str(raw)[:200]}
+            except Exception:
+                j14 = {"err": str(raw)[:200]}
+            png = cmd("Page.captureScreenshot", {"format": "png"})
+            fp = os.path.join(ROOT, ".diag", "l2d_state_%s_%s.png" % (a.model, tag))
+            with open(fp, "wb") as fh:
+                fh.write(base64.b64decode(png["data"]))
+            shots[tag] = fp
+            print("   %-12s state=%s 驱动=%-6s 写 %s 格 ×%s 拍 | 读数 %s | pin %s | 亮着的片 %s | part非1=%s"
+                  % (tag, j14.get("state"), j14.get("via"), j14.get("wrote"), j14.get("updates"),
+                     j14.get("targets"), json.dumps(j14.get("pin"), ensure_ascii=False),
+                     j14.get("litPixi"), j14.get("partNon1")))
+            return j14
+
+        print("\n== ⑭ 同参数两历史比像素（目标 %s，pin %s）" % (",".join(ms14), pin14))
+        try:
+            from PIL import Image, ImageChops
+
+            def npix(p, q):
+                i1 = Image.open(p).convert("RGB"); i2 = Image.open(q).convert("RGB")
+                if i1.size != i2.size:
+                    i2 = i2.resize(i1.size)
+                dm = ImageChops.difference(i1, i2).convert("L")
+                return sum(1 for x in dm.getdata() if x > 12), dm.getbbox()
+
+            for via in ("model", "core"):   # model 先跑：core 那趟的 coldA 已被上一趟扫过，只当复现
+                p = "%s_" % via
+                c1 = setstate(p + "coldA", "A", via)
+                setstate(p + "coldA2", "A", via)
+                setstate(p + "B", "B", via)
+                w1 = setstate(p + "warmA", "A", via)
+                n1, bx1 = npix(shots[p + "coldA"], shots[p + "warmA"])
+                n2, _ = npix(shots[p + "B"], shots[p + "warmA"])
+                same_read = (c1.get("targets") or []) == (w1.get("targets") or [])
+                print("   [%s] coldA vs warmA（参数逐位相同）差 %d 像素 包围盒 %s | B vs warmA 差 %d 像素 | 两档读数%s"
+                      % (via, n1, bx1, n2, "相同" if same_read else "**不同**"))
+                print("   [%s] ⇒ %s" % (via, (
+                    "读数变、像素也变 ⇒ 引擎确实按历史决定可见性（台账不是函数表）" if n1 >= 50 and not same_read
+                    else "读数变、像素不变 ⇒ 这块缓冲没进渲染（该档差异与画面无关），台账的「该亮」不成立于像素"
+                    if not same_read else "读数不变 ⇒ 这种驱动下没有锁存")))
+            print("   注意：coldA 是「本会话第一次把参数写成全默认」，warmA 是「被扫过之后回到全默认」——"
+                  "两者参数数组逐位相同，只有历史不同。")
+        except Exception as e:
+            print("   像素对照失败: %r" % (e,))
+
+    # —— ⑬ 台账矛盾判定（§6.37 第一件事：同一趟里对读 ⑤ 的扫法与 ⑫ 的钉法）
+    if a.recon:
+        meshes13 = [x.strip() for x in a.recon.split(",") if x.strip()]
+        pin13 = [[x.split(":")[0], float(x.split(":")[1])]
+                 for x in re.split(r"[,\s]+", a.rpin or "") if ":" in x]
+        raw13 = ev(JS_RECON + "({meshes:%s, pin:%s, nstep:%s, settle:%s})"
+                   % (json.dumps(meshes13), json.dumps(pin13), json.dumps(max(4, a.nsweep)),
+                      json.dumps(max(2, a.settle))))
+        try:
+            r13 = json.loads(raw13) if isinstance(raw13, str) and raw13.strip().startswith("{") else {"err": str(raw13)[:300]}
+        except Exception:
+            r13 = {"err": str(raw13)[:300]}
+        f13 = os.path.join(ROOT, ".diag", "l2d_recon_%s.json" % a.model)
+        with open(f13, "w", encoding="utf-8") as fh:
+            json.dump({"cfg": {"meshes": meshes13, "pin": pin13}, "res": r13}, fh, ensure_ascii=False)
+        if "rows" not in r13:
+            print("\n== ⑬ 台账矛盾判定未出结果: %s" % str(r13)[:300])
+        else:
+            print("\n== ⑬ 台账矛盾判定（目标 %s，pin %s）" % (",".join(meshes13), pin13))
+            print("   下标 %s | 名字数组自证 %s | 扫完后两条写路径的参数数组差异 %d 个（必须为 0 才可比）"
+                  % (r13.get("idx"), r13.get("idEcho"), r13.get("finalParamDiffBetweenPaths")))
+            if r13.get("miss"):
+                print("   ⚠️ 这些名字不在模型里: %s" % r13["miss"])
+            print("   parts 视图字段: %s | drawables 里带 part 字样的字段: %s | core 原型上的 part 方法: %s"
+                  % (r13.get("partsKeyNames"), r13.get("drawablePartKeys"), r13.get("protoPartMeth")))
+            if r13.get("chain"):
+                for c in r13["chain"]:
+                    print("     归属 %s → %s" % (c["key"], c["vals"]))
+            hdr = "   %-26s %-8s %s" % ("状态", "写了几格", "  ".join("%-11s" % m for m in meshes13))
+            print(hdr)
+            for x in r13["rows"]:
+                pp = x.get("part") or {}
+                print("   %-26s %-8s %s  part:%s非1=%s 区间[%s,%s] pin实值=%s"
+                      % (x["tag"], x["wrote"],
+                         "  ".join("%-11s" % ("-" if v is None else ("%.3f" % v)) for v in x["op"]),
+                         ("可读" if pp.get("readable") else "**读不到(%s)**" % pp.get("type")),
+                         pp.get("non1"), pp.get("mn"), pp.get("mx"),
+                         json.dumps(x.get("pin"), ensure_ascii=False)))
+            for s13 in r13.get("reads") or []:
+                print("   %s:" % s13["tag"])
+                if "api" in s13:            # S10 的形状：[标签, [旧视图, 新视图, 框架 getter]]
+                    print("      框架 getter: %s | **三种读法不一致的次数 = %d**（>0 ⇒ 台账建在失效视图上）"
+                          % (s13["api"], s13["mismatch"]))
+                    for row in s13["s"]:
+                        r = row[1]
+                        print("      %-4s 旧视图 %-28s 重取视图 %-28s getter %s"
+                              % (row[0], r[0], r[1], r[2] if len(r) > 2 else "-"))
+                    continue
+                if s13.get("apiSetter"):    # S12 的形状：[k, A 读数, B 读数, A 写了几格, B 写了几格]
+                    print("      参数数组漂移自证: A %d 格 / B %d 格（应为 0）" % (s13["driftA"], s13["driftB"]))
+                    for row in s13["s"]:
+                        print("      第%-3s A %-28s | B %-28s   写格数 A=%s B=%s"
+                              % (row[0], row[1], row[2], row[3], row[4]))
+                    continue
+                if "arrDriftA" in s13:      # S9 的 A/B 交替形状：[k, A 读数, B 读数]
+                    print("      参数数组漂移自证: 第 %d 次起 A %d 格 / B %d 格（应为 0，否则两列不可比）"
+                          % (len(s13["s"]), s13["arrDriftA"], s13["arrDriftB"]))
+                    for row in s13["s"]:
+                        print("      第%-3s A %-28s | B %s" % (row[0], row[1], row[2]))
+                    continue
+                for row in s13["s"]:
+                    line = "      %-8s %s" % (row[0], "  ".join(
+                        "%s=%s" % (m, ov) for m, ov in zip(meshes13, row[1])))
+                    if len(row) > 2:
+                        line += "   part非1=%s" % row[2]
+                    if len(row) > 3:
+                        line += "   update 改写了 %s" % (", ".join(
+                            "%s(%s→%s)" % (nm, a, b) for nm, a, b in row[3][:8]) or "无")
+                    print(line)
+            rw = r13.get("coreRewrittenFromDefaults") or []
+            print("   全默认写完后 core 在 update 里自己改写的参数：%d 个 %s"
+                  % (len(rw), ", ".join("%s(%s→%s)" % (nm, a, b) for nm, a, b in rw[:12]) or "（无 ⇒ 没有派生参数链）"))
+            for x in (r13.get("attrs") or []):
+                print("   属性 %-12s idx=%-4s 类型=%s 混合=%s 掩膜数=%s 被掩膜引用=%s 归属part=%s 顶点=%s 索引=%s"
+                      % (x["name"], x["idx"], x.get("type"), x.get("blend"), x.get("maskCounts"),
+                         x.get("maskRef"), x.get("part"), x.get("verts"), x.get("indices")))
+            cwd13 = r13.get("coldWarmDiff") or []
+            print("   冷/暖全模型对照（两次都是「全默认」，差别只在中间被扫过）：读数不同的片 **%d / %d**"
+                  % (r13.get("coldWarmDiffCount", -1), r13.get("drawables", -1)))
+            print("      %s" % ", ".join("%s(%s→%s)" % (nm, a, b) for nm, a, b in cwd13[:26]))
+            s3 = next((x for x in r13["rows"] if x["tag"].startswith("S3")), None)
+            if s3 and s3.get("partProbe"):
+                pb = s3["partProbe"]
+                print("   part 是输入还是输出：写 1 之后非 1 的个数 %s → update 之后 %s ⇒ %s"
+                      % (pb["afterWrite"]["non1"] if pb["afterWrite"].get("readable") else "?",
+                         pb["afterUpdate"]["non1"] if pb["afterUpdate"].get("readable") else "?",
+                         "core 会覆盖我们写的值（part 是输出）" if pb["overwritten"]
+                         else "core 不动它（part 是不随参数重算的第二套输入）"))
+            print("   台账 → %s" % f13)
 
     # —— ⑫ 合取门二分：实态下灭着的片，是哪几个参数一起关着的（逐个扫量程在合取门下必然空手而归）
     if a.gatefind:

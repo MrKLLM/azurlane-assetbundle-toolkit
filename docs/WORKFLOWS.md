@@ -3337,6 +3337,19 @@ WF-15（承重白名单：标注正本属于"丢了不可复原"那一类）、W
    ② ⚠️ **"不切动作的对照组 = 0 次"没有否证力**：带门开合是周期性的，窗口相位决定 0 次还是 1 次
    （实测同一条 `__none__` 跑出过 0 与 1）；要判"绑事件"，对照组必须覆盖 ≥1 个完整周期。
 
+7. **判「参数 → 哪片 ArtMesh 显隐」之前，先证这张表是函数表**（新臂 ⑯ `--coldmap` / ⑮ `--reconcold` / ⑬ `--recon`）：
+   **逐档爬的因果扫描（0→0.1→0.2…）带不可逆滞回**——本项目实测：爬完之后再回全默认，被点亮的那 29 片**仍是 1**，
+   于是"阈值"其实是**扫描网格的中点**（`snapswitch.json` 里 `flips=[0.05,0.15,…]` 就是这么来的），
+   连"哪几片算一组"都是同一假象。正确形状：**每个测量点都从基线一次跳到**，且**正序 + 倒序各跑一遍**，
+   两遍一致才允许发布成表；不一致就只许说"有滞回"，不许说阈值。
+   配套三把仪器自证（缺一把就可能把仪器故障读成"这条路无效"）：
+   ① 同一状态用**三种读法**对照——手里的旧视图 / 每拍重取的 `core._model.drawables.*` / 框架 getter
+   （不一致 ⇒ wasm 内存增长后 typed-array 视图失效）；
+   ② 写值分**两条路径**各跑一遍——直写 wasm 缓冲 vs `core.setParameterValueByIndex`（不同 ⇒ 绕过了真实播放路径）；
+   ③ 把参数写成基线后 update，再**逐位 diff 参数数组**（非 0 ⇒ moc3 里有派生参数链，扫出的"阈值"是派生值的运动）。
+   ⚠️ 任何"像素有没有变"的对照都必须调 **`model.update()`**：pixi 每片的 alpha 是在 `model.update()` 里
+   从 core 缓冲同步的，只做 `core.update()+app.render()` 的截图对"缓冲变了而像素没变"**不构成证据**（本轮真实踩过）。
+
 **涉及文件**：`gallery_src/index.html`（运行时补丁 ⑤ + 环境层 + `motionSegs`/`poseDriven`/`markPhase`）、
 `scripts/diag/l2d_curve_shape.py`、`scripts/diag/l2d_param_meta_probe.py`、`scripts/diag/l2d_motion_param_probe.py`（`--dump` + 平台/下降判据 + `AMB=1`）、
 `scripts/diag/l2d_part_flicker_probe.py`（逐帧 part/drawable 不透明度 + `--trace` + `window.__noRest` 两臂）、
