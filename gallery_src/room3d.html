@@ -91,7 +91,8 @@ canvas{display:block}
     <button class="sw" data-k="leafw" title="树叶贴图 B 通道恒 241-255 且这三张材质没有 _BaseColor，蓝色不是颜色；把 B 当数据压掉">绿叶<i>推断</i></button>
   </div>
   <div class="grp"><span>角色 · 包内</span>
-    <button class="sw" data-k="char" title="她不在房间场景包里，在 dorm3d/character/ 另一套包；坐标取自 _base_scene 的 Player / PlayerPoint">天狼星</button>
+    <button class="sw on" data-k="char" title="她不在房间场景包里，在 dorm3d/character/ 另一套包；坐标取自 _base_scene 的 Player / PlayerPoint。默认开着">天狼星</button>
+    <button class="sw" data-k="approach" title="把相机挪到她面前 2.2 米、看着她胸口高度——默认机位离得远，她只有一小条">走近看她</button>
     <span id="spots"></span>
   </div>
   <div class="grp"><span>渲染</span>
@@ -127,7 +128,7 @@ const URLS = {glb: P+'room.glb', truth: P+'room.glb.truth.json', side: P+'room.l
 /* 探针落点：只认这里的内容，不认 MIME / 不认 HTTP 200 */
 const S = {done:false, err:'', meshObjects:0, posTotal:0, lights:0, lmSlots:0, lmMats:0, lmPages:0,
            lmChannel:null, chanOk:0, chanBad:0, cloudwMats:0, leafwMats:0, backdropTris:0,
-           on:{lm:true, sky:false, cloudw:false, leafw:false, char:false}, declared:null, ambient:null,
+           on:{lm:true, sky:false, cloudw:false, leafw:false, char:true}, declared:null, ambient:null,
            sceneTris:0, home:null, views:[], view:null, viewFov:null, char:null,
            mode:'orbit', camPos:null, yaw:null, pitch:null, walkSpeed:null, keysSeen:[], frames:0};
 window.__ROOM3D = S;
@@ -427,6 +428,14 @@ async function boot(){
   bindWalkLook(renderer.domElement);
   S.mode='orbit'; S.walkSpeed=walk.speed;
   if(views.length) setView(0); else goPack();     // 机位表缺件时退回包内 Camera，不停在原地不动
+  /* 角色默认开：在天狼星的宿舍里看不到天狼星，等于房间少了一半。
+     载入失败**不许静默**——记下原因、把开关拨回 off、HUD 上打出来，
+     不能让她"看起来开着"其实是空的。 */
+  if(S.on.char){
+    try{ await loadChar(); }
+    catch(e){ S.charError=String(e&&e.message||e).slice(0,180); S.on.char=false;
+      const b=document.querySelector('.sw[data-k="char"]'); if(b) b.classList.remove('on'); }
+  }
   await setLightmap(true);
   draw();
   S.sceneTris=sceneTrisSeen;
@@ -454,6 +463,7 @@ function hudUpdate(){
       ' · 站位 <b>'+(S.char.spot||'—')+'</b> @ '+JSON.stringify(S.char.pos&&S.char.pos.map(v=>+v.toFixed(2)))+
       ' · 朝向 '+S.char.yaw+' rad'+(S.char.yawFix?'（含目视校正 '+S.char.yawFix+' rad，非包内数据）':'')+
       '<br><span class="warn">'+S.char.anim+'</span>':'')+
+    (S.charError?'<br><span class="warn">角色载入失败：'+S.charError+'（开关已拨回关，别把空场景当成"她在"）</span>':'')+
     (S.err?'<br><span class="warn">'+S.err+'</span>':'');
 }
 
@@ -589,11 +599,36 @@ function bindWalkLook(cv){
   },{passive:false});
 }
 
+/* 走近看她：默认机位离她十几米，人只有一小条，第一次点开关很容易以为"没出来"。
+   站位与朝向都是包里的，但"站在她面前 2.2 米、看她胸口 1.05 米高"是**观看用的摆位**，
+   不是包内数据 —— 所以它是一颗按钮，不改她的任何姿态。 */
+async function approachChar(){
+  if(!charObj){
+    try{ await loadChar(); }
+    catch(e){ S.err=String(e&&e.message||e).slice(0,180); hudUpdate(); return; }
+    charObj.visible=true; S.on.char=true;
+    document.querySelector('.sw[data-k="char"]').classList.add('on');
+  }
+  charObj.visible = true;
+  const p = charObj.position, yaw = charObj.rotation.y;
+  const f = [Math.sin(yaw), 0, Math.cos(yaw)];        // rotation.y 作用在局部 +Z 上
+  const d = 2.2;
+  const cp = [p.x + f[0]*d, 1.35, p.z + f[2]*d];
+  camera.fov = 55; camera.updateProjectionMatrix();
+  camera.position.set(cp[0], cp[1], cp[2]);
+  controls.target.set(p.x, 1.05, p.z);
+  if(walk.on) lookFrom(cp, [p.x, 1.05, p.z]); else controls.update();
+  S.approach={to:cp.map(v=>+v.toFixed(3)), distToChar:+Math.hypot(cp[0]-p.x, cp[2]-p.z).toFixed(3)};
+  S.camPos=camera.position.toArray();
+  draw(); hudUpdate();
+}
+
 async function toggle(k){
   if(k==='reset'){ if(S.home){ camera.position.fromArray(S.home.pos);
       controls.target.fromArray(S.home.target);
       if(walk.on) lookFrom(S.home.pos, S.home.target); else controls.update();
     } draw(); return; }
+  if(k==='approach'){ await approachChar(); return; }      // 动作，不是开关：不参与 on/class 翻转
   const v=!S.on[k]; S.on[k]=v;
   document.querySelector('.sw[data-k="'+k+'"]').classList.toggle('on', v);
   if(k==='char'){

@@ -543,22 +543,17 @@ def main():
             '若四个点 yaw 全相同，说明只抄了位置没抄旋转，坐椅子就会面朝错方向')
         cg = char_glb_counts()
         print('   角色 GLB 独立计数:', json.dumps(cg, ensure_ascii=False))
-        settle(ev)
-        pre, _, _ = stable(ev)
-        r = ev("""(()=>{const b=document.querySelector('.sw[data-k="char"]'); if(!b) return {nf:1};
-          const v0=window.__ROOM3D.on.char; b.click();
-          return {v0:v0};})()""")
-        # 角色模型 9.6 MB，要等它真的解出来（判据落在 S.char.loaded，不是等固定秒数）
-        ok_load = ev("""(async()=>{const t=m=>new Promise(r=>setTimeout(r,m));
-          for(let i=0;i<200 && !(window.__ROOM3D.char&&window.__ROOM3D.char.loaded);i++) await t(150);
-          const c=window.__ROOM3D.char||{};
-          return {loaded:!!c.loaded, err:window.__ROOM3D.err, meshes:c.meshes,
-                  posTotal:c.posTotal, posUnique:c.posUnique, skinned:c.skinned,
+        # 角色现在**默认就是开的** ⇒ 判据不再是"点一下她出来"，而是"打开页面她就在"
+        ok_load = ev("""(()=>{const c=window.__ROOM3D.char||{};
+          const b=document.querySelector('.sw[data-k="char"]');
+          return {loaded:!!c.loaded, err:window.__ROOM3D.err, charErr:window.__ROOM3D.charError||null,
+                  meshes:c.meshes, posTotal:c.posTotal, posUnique:c.posUnique, skinned:c.skinned,
                   pos:c.pos, spot:c.spot, on:window.__ROOM3D.on.char,
-                  spots:[...document.querySelectorAll('#spots .sw')].map(b=>b.dataset.s)};})()""")
-        say(isinstance(ok_load, dict) and ok_load.get('on') is True and ok_load.get('loaded') is True
-            and not ok_load.get('err'),
-            f'开角色：点击落地且模型真解出来（{json.dumps(ok_load, ensure_ascii=False)[:150]}）')
+                  cls:b?b.classList.contains('on'):null,
+                  spots:[...document.querySelectorAll('#spots .sw')].map(x=>x.dataset.s)};})()""")
+        say(isinstance(ok_load, dict) and ok_load.get('on') is True and ok_load.get('cls') is True
+            and ok_load.get('loaded') is True and not ok_load.get('err') and not ok_load.get('charErr'),
+            f'默认就开着（不点也在）：{json.dumps(ok_load, ensure_ascii=False)[:170]}')
         if isinstance(ok_load, dict) and ok_load.get('loaded'):
             say(ok_load.get('meshes') == cg['primitives'],
                 f"网格 {ok_load['meshes']} == GLB primitive {cg['primitives']}")
@@ -597,16 +592,49 @@ def main():
                 else:
                     print(f"     · {p['label']}：她在当前机位画面外（ndc {isinstance(got,dict) and got.get('ndc')}）"
                           "⇒ 不要求画面改变")
-            say(json.dumps(ev(HASH_JS), sort_keys=True) != pre, '开角色 ⇒ 画面里真的多了一个人')
-            ev("""(()=>{const b=document.querySelector('.sw[data-k="char"]'); b.click();})()""")
             settle(ev)
-            say(stable(ev)[0] == pre, '关掉角色 ⇒ 逐字节回到开之前（可逆，不是留了个残影）')
-            ev("""(()=>{const b=document.querySelector('.sw[data-k="char"]'); b.click();})()""")
-            settle(ev, 700)     # 模型已在缓存里，这次只是把 visible 翻回来
+            base, _, _ = stable(ev)
+            r = click(ev, '.sw[data-k="char"]')
+            settle(ev)
+            off, _, _ = stable(ev)
+            say(isinstance(r, dict) and r.get('v1') is False and off is not None and off != base,
+                f'反向对照：默认开着 ⇒ 关掉她就少一个人（{json.dumps(r, ensure_ascii=False)[:70]}）')
+            click(ev, '.sw[data-k="char"]')
+            settle(ev)
+            say(stable(ev)[0] == base, '再开回来 ⇒ 逐字节回到关之前（可逆，不是留了个残影）')
+            # 「走近看她」：默认机位离她十几米，人只有一小条，这条要真的把人放到看得清的距离
+            ev("""(()=>{const b=document.querySelector('#spots .sw[data-s="Bed"]'); if(b) b.click();})()""")
+            settle(ev)
+            far, _, _ = stable(ev)
+            ap = ev("""(()=>{const b=document.querySelector('.sw[data-k="approach"]');
+              if(!b) return {nf:1};
+              const before=window.__ROOM3D.camPos; b.click();
+              const c=window.__ROOM3D.char;
+              return {before:before, after:window.__ROOM3D.camPos, approach:window.__ROOM3D.approach,
+                      onScreen:c.onScreen, ndc:c.ndc, spot:c.spot};})()""")
+            settle(ev)
+            near, _, _ = stable(ev)
+            dd = (isinstance(ap, dict) and isinstance(ap.get('approach'), dict)
+                  and ap['approach'].get('distToChar'))
+            say(isinstance(ap, dict) and ap.get('before') and ap.get('after')
+                and dist(ap['before'], ap['after']) > 1.0
+                and dd is not None and abs(dd - 2.2) < 0.05
+                and ap.get('onScreen') is True and near != far and near is not None,
+                f'「走近看她」：相机真的挪到她面前（离她 {dd} m，她在画面内 '
+                f'ndc {isinstance(ap,dict) and ap.get("ndc")}，画面改变）'
+                + ('' if dd and abs(dd - 2.2) < 0.05 else ' ⇒ ' + json.dumps(ap, ensure_ascii=False)[:220]))
         else:
             say(False, '角色没载入成功 ⇒ 后面 6 条角色判据不作结论')
 
         print('== 6. 三个"推断"开关各自必须改变画面（先证明点击落地，再谈画面）==')
+        # 这三条的"画面必须改变"依赖**窗外内容在取景里**（天海/云/树都在窗外）。
+        # 上一段结尾停在「走近看她」的特写，那个镜头里窗外全被墙挡住 ⇒ 判据的前置条件不成立，
+        # 报出来的红是取景问题不是产品问题（正是 §131 那条规则反噬到我自己写的老判据上）。
+        # ⇒ 先把取景复位到卧室机位，再把当前 view 打进失败信息里。
+        ev("""(()=>{const b=document.querySelector('#views .sw[data-v="0"]'); if(b) b.click();})()""")
+        settle(ev, 700)
+        say(ev('window.__ROOM3D.view') == 'bedroom',
+            '复位到卧室机位（窗外天海/云/树都在这个镜头里）后再量推断开关')
         h, tries, raw0 = stable(ev)
         if h is None:
             say(False, f'取不到稳定帧 ⇒ 尺子本身无效，后面全部不作结论：{json.dumps(raw0)[:200]}')
@@ -626,11 +654,12 @@ def main():
                 continue
             after, _, _ = stable(ev)
             m = r.get(rk) if rk else None
+            view = ev('window.__ROOM3D.view')      # 红的时候先说清"当时在哪个镜头里量的"
             if rk:
                 say(after is not None and before is not None and after != before and (m or 0) > 0,
-                    f'开关 {k}：画面改变（重画 {m} 张材质，默认本来是关的）')
+                    f'开关 {k}：画面改变（重画 {m} 张材质，默认本来是关的；取景 {view}）')
             else:
-                say(after != before and after is not None, f'开关 {k}：开之后画面改变')
+                say(after != before and after is not None, f'开关 {k}：开之后画面改变（取景 {view}）')
             # 关掉必须还原，否则"开关"是单向滤镜，自证就假了
             click(ev, '.sw[data-k="%s"]' % k)
             settle(ev)
@@ -667,7 +696,9 @@ def main():
              e.dispatchEvent(new Event('input',{bubbles:true}));
              document.querySelector('.sw[data-k="sky"]').click();
              document.querySelector('.sw[data-k="cloudw"]').click();
-             document.querySelector('.sw[data-k="leafw"]').click();})()""")
+             document.querySelector('.sw[data-k="leafw"]').click();
+             const b=document.querySelector('#spots .sw[data-s="Bed"]'); if(b) b.click();
+             const a=document.querySelector('.sw[data-k="approach"]'); if(a) a.click();})()""")
         settle(ev, 1200)
         cmd('Page.enable')
         b64 = cmd('Page.captureScreenshot', {'format': 'png'})['data']
