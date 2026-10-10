@@ -8005,3 +8005,31 @@ URL 加 cache-buster）、`gallery_src/index.html`（补丁 ⑦ snap + `window._
 **涉及文件（追加-XII）**：`scripts/diag/l2d_part_flicker_probe.py`（新臂 ⑪ `--partcheck`、新臂 ⑫ `--gatefind`
 二分找合取门 + 两套名字数组逐位自证；臂 ④ 加 `--drvpin` 与钉值回显）、
 `.diag/l2d_partcheck_gezi_2.json`、`.diag/l2d_gatefind_gezi_2.json`、`.diag/gf*.log`。
+
+**§123 追加-XIII（同日续：用户改口"一闪一闪"→ 试了第二层"整族全灭就退回上一好值"，实测撤销）**
+
+用户复测细化：症状是**一闪一闪**（不是整段没有）⇒ 指向 `home` **片内**自己穿死区那 3 次
+（0.083 / 0.219 / 0.083 秒，合计 0.385 秒）——第一层只管跨 clip 切换，管不到片内。
+
+试的修法：给表里每个参数带上"它管的那族 mesh"名单（`--emit` 现在写 `params[].meshes`），
+运行时在 `afterMotionUpdate` 看**上一帧** `drawables.opacities`：这一族一盏都不亮 ⇒ 把该参数退回
+"上一次族里有片亮着"的值，连退上限 25 帧（≈0.4s）后放弃。
+
+- ❌ **实测撤销，判据本身不成立**：臂 ⑩ 加了"每帧有几个家族整族全灭"的计数后，
+  **修法关与修法开都是每一帧 100% 有 18 个家族全灭**（33 个家族里）。
+  ⇒ 那些家族**本来就不属于这条动作**（换装变体、另一套手、场景件），
+  "整族全灭"在**家族粒度**上根本不区分「该灭」与「闪了一下」；兜住它们一帧都没救回来，
+  反而在家族正常关闭时把参数白钉 0.4 秒（让本该消失的美术多留 0.4 秒）——**净负收益**。
+- ✅ 撤销后复测第一层没坏：修法关 ⇒ `Param25` 家族最低 **0/34** 亮；修法开 ⇒ 最低 **5/34**，
+  切换首帧即 `Param25=0.5`。`window.__snapDbg()` 回到 `{params:33, groups:57}`（无 fam/holding 字段）。
+- ✅ **剩下的正确形状**：闪烁是**家族内的子组**灭、同族其它成员还亮着
+  （实测 `home` 片内穿越时 `Param25` 家族仍有 11 片亮着，但手不在里面）。
+  ⇒ 判据必须落在**子组**上，而"哪几片算一只手"正是追加-XII 那条没判清的台账矛盾要回答的事。
+  下一轮先做那一件事（把"扫 `Param25`"与"钉 `Param25`"合进同一次运行、同一套索引），
+  再谈子组闪烁；**不要**再往"家族级聚合判据"上投入。
+- ⚠️ 顺带：表仍漏 5 条 clip（`touch_body`/`touch_idle1`/`touch_idle2`/`touch_idle15`/`touch_drag1`，
+  它们开头 0.6s 内 `Param25` 不是常量 ⇒ 进不了 `clips[]` 表）。这条与子组无关，是独立的小缺口。
+
+**涉及文件（追加-XIII）**：`gallery_src/index.html`（第二层加了又撤，注释里留了撤销理由）、
+`scripts/diag/l2d_part_flicker_probe.py`（臂 ⑩ 加 `fams`/"每帧几个家族全灭"计数）、
+`scripts/diag/l2d_snap_criterion_scan.py`（`--emit` 增 `params[].meshes`）。

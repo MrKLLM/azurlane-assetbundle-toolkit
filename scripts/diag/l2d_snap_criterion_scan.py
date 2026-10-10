@@ -300,9 +300,11 @@ def main():
                    "generatedBy": os.path.basename(__file__),
                    "note": "cross-clip fade of these params changes WHICH ArtMeshes are drawn "
                            "(and the pose jump stays under maxjump) - gallery pins the incoming "
-                           "clip's boundary value instead of blending them",
+                           "clip's boundary value instead of blending them; meshes[] feeds the "
+                           "second layer (never render a frame where the whole family is dark)",
                    "params": {p: {"flips": opmap[p]["flips"], "mn": opmap[p]["mn"],
-                                  "mx": opmap[p]["mx"], "stepShift": deform.get(p, [])}
+                                  "mx": opmap[p]["mx"], "stepShift": deform.get(p, []),
+                                  "meshes": sorted(opmap[p]["grid"].keys())}
                               for p in flagged},
                    "clips": heads}
         os.makedirs(os.path.dirname(out), exist_ok=True)

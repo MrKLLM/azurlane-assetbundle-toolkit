@@ -630,6 +630,8 @@ JS_SNAPAB = r"""(async (cfg) => {
   const ib=cfg.setB.map(n=>D.ids.indexOf(n)).filter(i=>i>=0);
   const ip=cfg.pnames.map(n=>P.ids.indexOf(n));
   const i25=cfg.set25.map(n=>D.ids.indexOf(n)).filter(i=>i>=0);
+  // 全部开关家族（来自 <model>.snapswitch.json 的 params[].meshes）：每帧量"有几个家族整族全灭"
+  const fams=(cfg.fams||[]).map(a=>a.map(n=>D.ids.indexOf(n)).filter(i=>i>=0)).filter(a=>a.length);
   const frameN=()=>{ try{ PIXI.Ticker.shared.tick(performance.now()); }catch(e){}
                      try{ window.__app.render(); }catch(e){} };
   const run=async(off)=>{
@@ -649,7 +651,8 @@ JS_SNAPAB = r"""(async (cfg) => {
       const mx=(ix)=>ix.length? Math.max.apply(null,ix.map(i=>O[i])) : -1;
       const row=[+(cap.ts[r]).toFixed(3), cap.groups[r]||null, nLit,
                  +mx(ia).toFixed(3), +mx(ib).toFixed(3),
-                 i25.reduce((a,i)=>a+(O[i]>=0.5?1:0),0), +mx(i25).toFixed(3)];
+                 i25.reduce((a,i)=>a+(O[i]>=0.5?1:0),0), +mx(i25).toFixed(3),
+                 fams.reduce((a,mi)=>a+(mi.some(j=>O[j]>=0.5)?0:1),0)];
       for(let j=0;j<ip.length;j++) row.push(ip[j]<0? null: +cap.rows[r][ip[j]].toFixed(3));
       rows.push(row);
     }
@@ -1061,10 +1064,15 @@ def main():
                 if e[1] == tgt:
                     set25 = [ld["names"][x[0]] for x in e[7]]
                     break
+        fams = []
+        sf = os.path.join(ROOT, "Output", "Live2D", a.model, "%s.snapswitch.json" % a.model)
+        if os.path.exists(sf):
+            sj = json.load(open(sf, encoding="utf-8"))
+            fams = [v.get("meshes") or [] for v in (sj.get("params") or {}).values()]
         cfg = {"from": frm, "to": to,
                "setA": [x.strip() for x in a.snapA.split(",") if x.strip()],
                "setB": [x.strip() for x in a.snapB.split(",") if x.strip()],
-               "set25": set25,
+               "set25": set25, "fams": fams,
                "pnames": [x.strip() for x in a.snapP.split(",") if x.strip()],
                "frames": max(12, int(a.hold * 1000 / max(1, a.step))), "stepMs": max(16, a.step)}
         raw10 = ev(JS_SNAPAB + "(" + json.dumps(cfg) + ")")
@@ -1085,15 +1093,20 @@ def main():
                 win = rows[k0:]
                 darki = [i for i in range(len(win)) if win[i][3] < 0.05 and win[i][4] < 0.05]
                 secs = round(sum(max(0.0, win[i + 1][0] - win[i][0]) for i in darki if i + 1 < len(win)), 3)
+                darkFam = [i for i in range(len(win)) if len(win[i]) > 7 and win[i][7] > 0]
                 print("   %-4s 采样 %d 帧（切换在第 %d 帧）；A∧B 同时灭 %d 帧 / 约 %.2fs；切换后 nLit 最低 %s；A 峰 %.2f B 峰 %.2f；台账集(该参数能影响的全部 mesh) 最低 %d/%d 亮、峰值 %.2f"
                       % ("修法关" if mode == "off" else "修法开", len(rows), k0, len(darki), secs,
                          min([r[2] for r in win]) if win else "-",
                          max([r[3] for r in win]) if win else -1, max([r[4] for r in win]) if win else -1,
                          min([r[5] for r in win]) if win else -1, len(cfg["set25"]),
                          max([r[6] for r in win]) if win else -1))
+                print("        「整族全灭」的帧 %d/%d；单帧最多同时灭 %d 个家族；切换后仍全灭的家族 %s"
+                      % (len(darkFam), len(win),
+                         max([r[7] for r in win]) if win and len(win[0]) > 7 else -1,
+                         sorted({(win[i][1]) for i in darkFam})))
                 tl = os.path.join(ROOT, ".diag", "l2d_snapab_%s_%s.txt" % (a.model, mode))
                 with open(tl, "w", encoding="utf-8") as fh:
-                    fh.write("ts group nLit maxA maxB nLedger25 maxLedger25 %s\n" % " ".join(cfg["pnames"]))
+                    fh.write("ts group nLit maxA maxB nLedger25 maxLedger25 famDark %s\n" % " ".join(cfg["pnames"]))
                     for r in rows:
                         fh.write("%.3f %s %d %.3f %.3f %s\n" % (r[0], r[1], r[2], r[3], r[4],
                                                                 " ".join("-" if x is None else str(x) for x in r[5:])))
