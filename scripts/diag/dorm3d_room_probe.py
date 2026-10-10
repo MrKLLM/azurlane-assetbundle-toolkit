@@ -1155,6 +1155,20 @@ def main():
                      "bloom": "0.6", "sky": "1", "cloudw": "1", "leafw": "1", "shot": "leaf"},
                     {"tag": "白云+不碰叶对照", "tone": "aces", "exp": "1", "ambm": "flat",
                      "bloom": "0.6", "sky": "1", "cloudw": "1"},
+                    # 第 3 步：Saturation 被"白色泛光 + 白色环境光"冲淡 ⇒ 分别降这两项，
+                    # 看 sat 能不能在不牺牲 mean 的前提下回来（Bakery Skylight 读不到，
+                    # 所以这是**参数权衡**，不是还原光路——结论要这么写）。
+                    {"tag": "低泛光0.35+天海白云绿叶", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.35", "sky": "1", "cloudw": "1", "leafw": "1", "shot": "b35f"},
+                    {"tag": "低泛光0.2+天海白云绿叶", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "bloom": "0.2", "sky": "1", "cloudw": "1", "leafw": "1"},
+                    {"tag": "无泛光+天海白云绿叶", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "sky": "1", "cloudw": "1", "leafw": "1"},
+                    {"tag": "泛光0.35+环境光降到0.6", "tone": "aces", "exp": "1", "ambm": "flat",
+                     "ambk": "0.6", "bloom": "0.35", "sky": "1", "cloudw": "1", "leafw": "1"},
+                    {"tag": "泛光0.35+环境光0.6+曝光1.3", "tone": "aces", "exp": "1.3",
+                     "ambm": "flat", "ambk": "0.6", "bloom": "0.35", "sky": "1",
+                     "cloudw": "1", "leafw": "1", "shot": "mix"},
                     {"tag": "对照:天海但灯×π去衰减", "tone": "aces", "exp": "1", "ambm": "flat",
                      "bloom": "0.6", "sky": "1", "li": PI, "ld": PI, "dc": "0"},
                 ]
