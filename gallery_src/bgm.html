@@ -71,14 +71,18 @@ input.q{flex:1;min-width:230px;font:inherit;font-size:14px;color:var(--txt);
 input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel) 92%,transparent);
   box-shadow:0 0 0 4px var(--on-bg),inset 0 1px 2px color-mix(in srgb,var(--dim) 12%,transparent)}
 .grp{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:2px 0 10px}
-/* 分组标签（用途 / 出处 / 专辑 / 收藏）：它是"这一排在筛什么"的唯一线索，所以**必须和
-   chip 一样有自己的底**。原来它是裸字（--dim，11.5px）：
-     · 纯色页面上 #93a3bd 压 #eef4fb ≈ 2.5:1，11.5px 中文笔画密 ⇒ 用户报"看不清字"；
-     · 站用背景是一张高对比照片时更没救——字底下没有底，任何单一颜色都只在一半场景可读。
+/* 分组标签（用途 / 出处 / 专辑 / 收藏）：它是"这一排在筛什么"的名字，**不是又一个可点项**。
+   原来它是裸字（--dim，11.5px）：纯色页面上 #93a3bd 压 #eef4fb ≈ 2.5:1，11.5px 中文笔画密 ⇒ 用户报
+   "看不清字"；站用背景是一张高对比照片时更没救 —— 字底下没有底，任何单一颜色都只在一半场景可读。
+   ⇒ 给它底，但**要和 chip 明确区分开**（第一版只加底，用户回"大标签和子标签长得一样了"）：
+     · 形状：chip 是 999px 胶囊，它是 7px 方角；
+     · 填充：chip 是半透面板底 + 一圈描边，它是**不透明**的品牌色淡底、无描边（不透明 ⇒ 站用背景前不用另开规则）；
+     · 字重 / 字号：700 / 11px，chip 是 400 / 12.5px。
    ⚠️ `:not(.chip)` 不能省：`.grp>span` 的特异度 (0,1,1) **高于** `.chip` (0,1,0)，
-      不限定就会把 padding/背景糊到「★ 只看收藏」那颗 chip 上。 */
-.grp>span:not(.chip){font-size:11.5px;color:var(--txt2);white-space:nowrap;padding:3px 9px;
-  border-radius:var(--r-chip);background:color-mix(in srgb,var(--panel) 72%,transparent)}
+      不限定就会把这套样式糊到「★ 只看收藏」那颗 chip 上。 */
+.grp>span:not(.chip){font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--txt2);
+  white-space:nowrap;padding:3px 8px;border-radius:7px;
+  background:color-mix(in srgb,var(--brand) 10%,var(--panel))}
 .chip{font-size:12.5px;color:var(--txt2);background:color-mix(in srgb,var(--panel) 62%,transparent);
   border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:5px 12px;cursor:pointer;
   white-space:nowrap;user-select:none;

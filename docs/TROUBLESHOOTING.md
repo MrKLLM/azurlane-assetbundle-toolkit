@@ -9439,3 +9439,42 @@ Qoder 内置浏览器标签是 `visibilityState=hidden` 的隐藏表面：**`Int
 
 **涉及文件**：`gallery_src/bgm.html`、`gallery_src/backgrounds.html`、`gallery_src/favorites.js`、
 `scripts/diag/glass_pages_probe.py`；图证 `.diag/favshots/bgm_{bg,skin}*.png`、`.diag/glasspages/plain_light.png`。
+
+
+
+## §138 补：三页全撤 + 分组标签"有底但别像 chip"（2026-10-11 同日第二轮，用户实机追报）
+
+上一节只撤了音乐库，理由写的是"背景库栏体只有 16% 白，带子在那儿才是唯一的厚"。
+**这条区分被用户实机推翻**：「首页和背景图也是有那条杠」。⇒ 结论要收成一条硬的：
+**页头挂一条"更厚的玻璃带子"这个形态整个不成立**，与栏体透明度无关。三页一起撤，`rim()` 与
+`header::before` 两种写法、`--nav-rim` / `--nav-rim-h` 两个 token 一起删（要捞代码：
+`git show b1655a5:gallery_src/liquid_glass.js`）。
+
+**第二件事是我自己造出来的**：上一节给分组标签加底之后，用户回「大标签做点区分，不然看着和子标签长一样了」。
+根因很简单——我加的那层底**照抄了 chip 的形态**（`--r-chip` 胶囊 + 半透明白），于是"这一排的名字"
+长得和"这一排的一个选项"一模一样，反而更糟。
+⇒ 区分不能只靠"有没有底"，要**三条轴一起拉开**（只动一条在照片背景前会被吃掉）：
+
+| 轴 | 大标签（排名字） | 子标签（可选项 chip） |
+|---|---|---|
+| 形状 | `border-radius:7px` 方角 | `999px` 胶囊 |
+| 填充 | `color-mix(in srgb,var(--brand) 10%,var(--panel))` **不透明**品牌淡底 | 半透明白 + 一圈描边 |
+| 字重 / 字号 | 700 / 11px + `letter-spacing` | 400 / 12.5px |
+
+⚠️ 用**不透明**底是有意的：它自带可读性，`favorites.js` 里那组 `html.has-sitebg` 特判就可以整条删掉
+（上一节给标签加的 86% 白底规则已删）—— 少一类"只在设了背景时才生效"的规则，就少一类漏判。
+实测（托管浏览器逐条读 computed style）：夜面 标签 `#1c2743` 底 + `#b9c3da` 字 = **8.4:1**，
+chip `panel 62%` + 描边 + 999px —— 四条轴都不同。首页那八个 `.ctl label`（类别/阵营/稀有度…）同步。
+
+**闸门跟着架构一起翻向，别留恒真判据**：
+- `glass_pages_probe.py`：`spec['forbid']`（`header::before` 必须 `backdrop-filter:none` 且 `content:none`）
+  + 新增 `noglass` 档 —— 背景库现在**连模块都不该加载**，加载了就红；`.navrim` 节点存在就红。
+- `glass_perf_probe.py`：原来那条"切 `html.lg` 画面必须变"的 `render_proof()` 在首页**没有对象了**。
+  这里有个陷阱值得记：把它反过来断言"两版必须相同"是**假判据** —— 水面每帧都在动，两版必然不同，
+  那种"不同"是帧差不是滤镜盒（实测整屏/沿边 md5 就是不一样，反过来断言会天天报假警）。
+  ⇒ 正确做法：像素对照整段**退役**（`render_proof` 一并删），sound 的那条换成**结构闸门**
+  （`filters==0` 且 `header::before` 计算值 `none`）。首页帧时仍然可读，因为它量的是水面本身。
+
+**本轮翻掉的两条自己的结论**（都写进来，别当没发生）：
+① "背景库那条带子读得成厚边" —— 用户实机否掉；
+② "给标签加个底就可读了" —— 加完变成第二个 chip，等于没解决区分问题。

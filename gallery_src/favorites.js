@@ -150,11 +150,9 @@ function css(){
       标题与统计行 ⇒ 一律给到九成。图本身仍不加模糊、不加压暗（用户 2026-10-11 拍板"原图清楚铺满"），
       这条只把"放字的那一条 UI"垫实。 */
    'html.has-sitebg header{background:color-mix(in srgb,var(--panel) 90%,transparent)!important}'+
-   /* 首页的筛选标签是 `.ctl label`、另两页是 `.grp>span`：都是**裸字**（没有底），
-      照片亮部暗部各吃掉一半可读性 ⇒ 和 chip 一样给底，颜色也一并从 --dim 提到 --txt。 */
-   'html.has-sitebg :is(.grp>span:not(.chip),.ctl label){'+
-   'background:color-mix(in srgb,var(--panel) 86%,transparent)!important}'+
-   'html.has-sitebg :is(.grp>span,.ctl label,.sub,.en,.mt,.dim){color:var(--txt)!important;opacity:.9}'+
+   /* 分组标签（.grp>span / .ctl label）**不再需要 has-sitebg 特判**：三页都改成了
+      "不透明品牌淡底 + 方角 + 700 字重"，照片背景本来就压不动它，而半透明白底会和 chip 撞脸。 */
+   'html.has-sitebg :is(.sub,.en,.mt,.dim){color:var(--txt)!important;opacity:.9}'+
    /* ⚠️ 上面这一串**必须以 '+ 结尾**：这里曾经写成 ';'，于是 textContent 就地结束，
       后面四条（压光晕、藏首页水面 canvas、星标 .corner/.tr 定位）全被静默丢掉 ——
       JS 不报错、CSS 不生效，是那种"功能看着在、屏幕上没有"的失效。 */

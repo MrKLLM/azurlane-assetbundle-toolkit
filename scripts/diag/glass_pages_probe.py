@@ -11,7 +11,10 @@
   2 生效   计算后的 backdrop-filter 里确实含 url() —— 只看类名会骗人：
            自定义属性解析失败是**整条声明作废**，类在、滤镜却没挂上（§133 那条老坑）
   3 桶数   同时存在的滤镜个数 ≤ 2（成本主因是"几个不同滤镜"，不是复杂度，§134）
+  3b 零盒  spec['noglass']=True 的页反过来判：**不许**加载折射模块、不许长出滤镜盒
+           （背景库 2026-10-11 起整页零折射盒，理由同 1b，见 §138）
   4 像素   冻住画面、只切 html.lg 一个类，页头那条边墙的取景必须变 —— 不变就是白改
+           （noglass 页跳过：没有可开关的东西，比出来恒"相同"，那种相同不是证据）
   5 反向   列表里的行/卡一张都不许挂 backdrop-filter（§136：被旋转的盒子里挂遮罩就整块糊）
   6 管道   音乐库进度条是胶囊管（圆角 = 半高、svg 被 clip-path 裁进管里、波仍在画）
   7 缩放   背景库查看器：滚轮真的放大（读 computed matrix 的 a）、角标跟着变、按 0 复位、
@@ -52,8 +55,13 @@ PAGES = {
     'bgm.html': {'mount': [('#bar', 'bglg', '')],
                  'forbid': [('header', '::before', '栏体已经是 62% 白 + blur26，带子在这只读作一条杠')],
                  'rows': '.row', 'tube': '#tide'},
-    'backgrounds.html': {'mount': [('.navrim', 'hglg', '')], 'rows': '.card',
-                         'zoom': ('#ovimg', '#ovbox', '#ovz')},
+    # 背景库 2026-10-11 起**整个不加载折射模块**：页头那条边墙先以 header::before 存在（不落像素），
+    # 再改成栏的兄弟节点 .navrim（落像素了，但落的就是用户报的那条杠）⇒ 两种写法一起退役（§138）。
+    # noglass=True 让下面那套"模块必须 on / 必须挂上"的判据反过来用：加载了模块、或又长出滤镜盒，都算红。
+    'backgrounds.html': {'mount': [], 'noglass': True,
+                         'forbid': [('header', '::before', '页头边墙整条退役，见 §138'),
+                                    ('.navrim', '', '同上 —— 这棵树里不该再有这个节点')],
+                         'rows': '.card', 'zoom': ('#ovimg', '#ovbox', '#ovz')},
 }
 
 
@@ -113,8 +121,8 @@ class Page:
 
 
 STATE = """(()=>{const out={lg:document.documentElement.classList.contains('lg'),
-  on:!!(window.LiquidGlass&&LiquidGlass.on), buckets:LiquidGlass?LiquidGlass.buckets:-1,
-  filters:LiquidGlass?LiquidGlass.filters:-1, mounted:[], forbidden:[]};
+  on:!!(window.LiquidGlass&&LiquidGlass.on), buckets:typeof LiquidGlass==='undefined'?-1:LiquidGlass.buckets,
+  filters:typeof LiquidGlass==='undefined'?-1:LiquidGlass.filters, mounted:[], forbidden:[]};
   %s
   %s
   return JSON.stringify(out);})()"""
@@ -132,7 +140,7 @@ MOUNT_JS = """const M=%s;   // [[sel,cls,pseudo],...]
 # （2026-10-11 用户实机报"头顶横幅下边有条杠"，照片背景前实测把带子抬亮 47/255 级）。
 FORBID_JS = """const F=%s;   // [[sel,pseudo,why],...]
   for(const [s,ps,why] of F){const el=document.querySelector(s);
-    if(!el){out.forbidden.push({s,ok:true,note:'元素不存在'});continue;}
+    if(!el){out.forbidden.push({s,ok:true,bf:'(无此元素)',why});continue;}
     const cs=getComputedStyle(el,ps||null);
     const bf=String(cs.backdropFilter||cs.webkitBackdropFilter||'none');
     out.forbidden.push({s,ok:(bf==='none'||!bf)&&cs.content==='none',why,bf:bf.slice(0,40)});}"""
@@ -276,11 +284,12 @@ def check(page, spec, fails):
     print(f'\n──── {page} ────')
     pg = Page(9349, prof, url, (W, H))
     try:
-        for _ in range(40):
-            n = pg.ev("!!window.LiquidGlass")
-            if n is True:
-                break
-            time.sleep(0.5)
+        if not spec.get('noglass'):
+            for _ in range(40):
+                n = pg.ev("!!window.LiquidGlass")
+                if n is True:
+                    break
+                time.sleep(0.5)
         time.sleep(1.6)
         js = STATE % (MOUNT_JS, FORBID_JS) % (json.dumps(spec['mount']),
                                               json.dumps(spec.get('forbid', [])))
@@ -302,7 +311,13 @@ def check(page, spec, fails):
                 fails.append(f"{page}: {f['s']} 又挂上了滤镜盒（{f['bf']}）—— {f['why']}")
         if st['buckets'] > 2 or st['filters'] > 2:
             fails.append(f"{page}: 滤镜桶 {st['buckets']}/滤镜 {st['filters']} > 2（成本主因，§134）")
-        if not st['on']:
+        if spec.get('noglass'):
+            # 反向：这页现在**不该**有折射模块。挂回来 = §138 那条杠回归。
+            print(f"  零折射盒 {'✅ 模块没加载' if not st['on'] else '❌ 模块还挂着（桶 ' + str(st['buckets']) + '）'}")
+            if st['on']:
+                fails.append(f'{page}: 又加载/挂载了折射模块 —— 本页已判零盒（§138），'
+                             f'要恢复先回答"身后有照片时它读不读得成一条杠"')
+        elif not st['on']:
             fails.append(f'{page}: LiquidGlass.on=false —— 这台浏览器不支持 backdrop-filter+url()，下面全作废')
 
         rw = json.loads(pg.ev(ROWS_JS % (spec['rows'], spec['rows'])))
@@ -427,7 +442,10 @@ def check(page, spec, fails):
           for(let s=200;s<9000;s+=50){const y0=s+h-18,y1=s+h;
             if(rs.some(a=>a[0]<y1&&a[1]>y0)) return s;}
           return -1;})()""")
-        if not isinstance(pos, int) or pos < 0:
+        if spec.get('noglass'):
+            print('  像素对照: ⏭ 跳过 —— 本页零折射盒（§138）：没有可开/可关的东西，'
+                  '比了也只能得到"相同"，那种"相同"不是证据')
+        elif not isinstance(pos, int) or pos < 0:
             print('  像素对照: ⏭ 找不到"内容压在栏底边墙上"的滚动位置 —— 这条作废（不许拿"相同"当结论）')
         else:
             pg.ev("scrollTo(0,%d);" % pos + "'ok'")
@@ -449,7 +467,7 @@ def check(page, spec, fails):
                 #    也不能当"没生效"的结论 —— 报红会把人引向错误的方向，所以降级为参考信息。
                 print(f'  像素对照(A/A 稳定，滚到 {pos} 让内容压到栏底): 关={off} 开={on} '
                       f'{"✅ 只切一个类就换了画面" if off != on else "❓ 两版相同 —— 这条在这两页不成立，未证实也未证伪（首页同判据是过的）"}')
-        if A.rim:
+        if A.rim and not spec.get('noglass'):
             rim_diag(pg, spec, FREEZE_CSS)
         pg.ev("(()=>{const s=document.getElementById('aafreeze');if(s)s.remove();})()")
         shot(pg, f'{page[:-5]}_full')

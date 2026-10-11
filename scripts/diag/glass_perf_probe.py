@@ -208,38 +208,6 @@ def clip_shot(pg, what='nav'):
     return hashlib.md5(base64.b64decode(d['data'])).hexdigest()[:12]
 
 
-def render_proof(pg, label='折射'):
-    """单变量对照：水面冻住、取景不动，只切 html.lg 这一个类。
-    两帧必须不同才算「这个材质真的落到合成结果上」。上一版的对照同时改了两件事
-    （加折射 + 关面板模糊），像素当然不同，那条判据是恒真的假绿灯。
-    ⚠️ 2026-10-11 补一道 **A/A 空白对照**：同一状态连拍两张。FREEZE 只把 bgStep 换成空函数，
-       `bgDraw`（上传/绘制/finish）还在每帧跑 ⇒ 取景里可能还有别的东西在动，那种"两版不同"
-       量的是水面不是折射。两页子探针就被这个骗过一次（`glass_pages_probe` 的 A/A）。
-       A/A 不稳 ⇒ 这条判据**作废**：既不许报绿，也不许把报红读成"折射没生效"。"""
-    pg.ev(FREEZE)
-    time.sleep(0.5)
-    pg.ev("document.documentElement.classList.add('lg');'ok'")
-    time.sleep(0.7)
-    aa1 = clip_shot(pg)
-    time.sleep(0.9)
-    aa2 = clip_shot(pg)
-    if aa1 != aa2:
-        print(f'  渲染对照({label}): ⏭ 作废 —— 冻住之后同状态连拍两张仍不同（{aa1} vs {aa2}）'
-              f' ⇒ 取景里还有别的东西在动，这条既不算绿也不算红')
-        pg.ev(UNFREEZE)
-        return None
-    pg.ev("document.documentElement.classList.remove('lg');'ok'")
-    time.sleep(0.7)
-    off = clip_shot(pg)
-    pg.ev("document.documentElement.classList.add('lg');'ok'")
-    time.sleep(0.7)
-    on = clip_shot(pg)
-    pg.ev(UNFREEZE)
-    ok = off != on
-    print(f'  渲染对照({label}，A/A 稳定): 关={off} 开={on}  {"✅ 只切一个类就换了画面" if ok else "❌ 完全相同 —— 这个材质根本没落到像素上"}')
-    return ok
-
-
 def run(pg, name, csskey, wave, pre=None):
     pre_info = None
     if pre:
@@ -580,13 +548,15 @@ def shots(pg):
           "s.id='shotsty';document.head.appendChild(s);}return 'ok';})()")
     st = json.loads(pg.ev(STATUS))
     print('落地状态:', json.dumps(st, ensure_ascii=False))
-    if (not st['filters'] or not st['hglg'] or not st['feimg']
-            or not st['tok_ok'] or 'url(' not in st['bf']):
-        # 走 print 而不是 SystemExit：stderr 没设 utf-8，Windows 控制台上中文会变乱码（本轮撞到）
-        print('! 折射链路断在结构层：filters/hglg/feImage 有空、--lg-* token 没读到、'
-              '或导航栏 ::before 计算后 backdrop-filter 不含 url() —— 取图无意义，先修实现')
+    # ⚠️ 2026-10-11 §138 之后，这条闸门**方向反过来了**：首页"零折射盒"才是新的架构不变式。
+    #   导航栏下沿那条 18px 边墙（header::before 挂 blur17+saturate2.2+brightness1.14）已被用户
+    #   实机判死 —— 身后是站用背景照片时它在暗部被抬亮 47/255 级、上沿一条硬接缝，读作"横幅下面
+    #   多了一条杠"。所以：挂回来（类在、伪元素带 backdrop-filter、或还有滤镜桶）才 exit 1。
+    if st['hglg'] or st['bf'] not in ('none', '') or st['filters']:
+        print(f'! 首页又长出折射盒了：hglg={st["hglg"]} header::before={st["bf"]!r} 滤镜={st["filters"]} '
+              f'—— 页头边墙已于 §138 判死，要恢复先回答"身后有照片时它读不读得成一条杠"')
         sys.exit(1)
-    if A.depth:
+    if A.depth and st['filters']:
         print(f'极端检验：--lg-depth 从默认 26 拉到 {A.depth}。这个量级下若仍看不到位移，'
               f'说明滤镜根本没生效（而不是"效果太弱"）')
         pg.ev(f"document.documentElement.style.setProperty('--lg-depth','{A.depth}');"
@@ -595,42 +565,18 @@ def shots(pg):
     sweep(pg, 1600)
     pg.ev(FREEZE)
     time.sleep(0.7)
-    # 沿边特写的取景：钉在**导航栏下沿那条 14px 边墙**上，6 倍放大 —— 折射只发生在这一圈里，
-    # 整屏缩着看必然看不见，必须把它单独放大到能数清棋盘格。
-    r = json.loads(pg.ev("""(()=>{const b=document.querySelector('header').getBoundingClientRect();
-        return JSON.stringify({x:b.left,y:b.bottom,w:b.width,h:b.height});})()"""))
-    edge = {'x': max(0, r['x'] + r['w'] * 0.18), 'y': max(0, r['y'] - 26),
-            'width': 96, 'height': 40, 'scale': 6}
-    caps = {}
-    for name, lg in (('1改前', False), ('2改后', True)):
-        # 单变量对照：只切 html.lg 这一个类。上一版用 OLD_MAT 覆盖写法，等于同时改了两件事
-        # （加折射 + 把原来那条模糊盖掉），那种对照恒真、骗过我一次。
-        pg.ev("document.documentElement.classList.toggle('lg',%s);'ok'" % ('true' if lg else 'false'))
-        time.sleep(0.9)
-        for tag, clip in (('整屏', None),
-                          ('特写', {'x': 30, 'y': H * 0.22, 'width': 560, 'height': 700, 'scale': 2}),
-                          ('沿边', edge)):
-            args = {'format': 'png'}
-            if clip:
-                args['clip'] = clip
-            raw = base64.b64decode(pg.cmd('Page.captureScreenshot', args)['data'])
-            p = os.path.join(d, f'{"bend" if A.bend else "sea"}_{name}_{tag}.png')
-            open(p, 'wb').write(raw)
-            caps[(name, tag)] = hashlib.md5(raw).hexdigest()[:12]
-            print(f'  {name} {tag}  md5={caps[(name, tag)]}  {p}')
+    # 2026-10-11 §138：首页零折射盒 ⇒「只切 html.lg 一个类，画面必须变」这条对照**没有对象了**，
+    # 成对取图（1改前/2改后 × 整屏/特写/沿边）整段撤掉。
+    # ⚠️ 为什么不反过来断言"两版必须相同"：水面每帧都在动，两版必然不同（实测整屏与沿边的 md5
+    #    就是不一样），那个"不同"是帧差不是滤镜盒 —— 拿它当判据只会天天报假警。
+    #    sound 的那一条是上面的结构闸门（filters==0 且 header::before 计算值 == none），已经判过。
     pg.ev("document.documentElement.classList.add('lg');'ok'")
+    raw = base64.b64decode(pg.cmd('Page.captureScreenshot', {'format': 'png'})['data'])
+    p = os.path.join(d, f'{"bend" if A.bend else "sea"}_整屏.png')
+    open(p, 'wb').write(raw)
+    print(f'  取图: {p}  md5={hashlib.md5(raw).hexdigest()[:12]}'
+          f'  —— 只给人眼核材质；像素对照已随边墙一起退役（§138）')
     pg.ev(UNFREEZE)
-    for tag in ('整屏', '特写', '沿边'):
-        a, b = caps[('1改前', tag)], caps[('2改后', tag)]
-        diff = a != b
-        if tag == '特写':
-            # 「卡片区两版必须逐字节相同」这条**已撤下**（本轮误报过一次）：它想防"折射偷偷回到卡片
-            # 边墙"，但卡片面板本身是半透明的，两张截图之间水面只要差一帧，卡片区就一定不同
-            # ⇒ 断言不 sound。它该管的事由结构闸门 card_boxes==0 负责（卡片盒内不许挂任何滤镜）。
-            print(f'  参考({tag}/卡片): {a} vs {b} —— 只反映水面帧差，**不作判据**'
-                  f'（卡片不做玻璃由 card_boxes={st["card_boxes"]} 那条结构闸门守，见 §136）')
-        else:
-            print(f'  对照({tag}/导航栏): {"✅ 两版像素不同" if diff else "❌ 完全相同 —— 折射没落到画面上，白改"}')
 
 
 CAPS = """(()=>{
@@ -743,15 +689,21 @@ def main():
                   f'  ⇒ 一转就糊（§136 八态对照）。要厚边只能走不依赖 mask 的实现，'
                   f'或者把这层放到**不会被旋转**的容器上。')
             sys.exit(1)
-        print(f'  边墙架构: 卡片零滤镜盒 ✅（§136）；导航栏 bf={str(st0["bf"])[:40]}')
+        # ⚠️ §138 起首页的架构不变式是"导航栏也零滤镜盒"：那条 18px 边墙在照片背景前读作一条杠，
+        #   整条退役。挂回来 = 红（和上面卡片那条 §136 闸门同一类，防的是"又觉得页头缺点什么"）。
+        if st0['hglg'] or str(st0['bf']) != 'none' or st0['filters']:
+            print(f'! 导航栏又长出滤镜盒：hglg={st0["hglg"]} bf={str(st0["bf"])[:40]!r} '
+                  f'滤镜={st0["filters"]} —— §138 已判死，先回答"身后有照片时它读不读得成一条杠"')
+            sys.exit(1)
+        print('  边墙架构: 卡片零滤镜盒 ✅（§136）；导航栏零滤镜盒 ✅（§138）')
         if A.hover:
             hover_diag(pg)
             return
         # 帧时数字只有在「这个材质确实会改变画面」被证完之后才有意义，所以它是硬闸门不是打印。
-        rp = render_proof(pg, '落地版边墙')
-        if rp is False:
-            print('! 渲染对照不过 —— 先修实现，这一轮所有帧时数字都不要读')
-            sys.exit(1)
+        # 但首页现在没有任何可开/可关的材质了 ⇒ 这条对照**跳过**，而不是放宽成"相同也算过"
+        # （那种"相同"是仪器没有对象，不是产品通过）。帧时本身量的还是水面，读得。
+        rp = None
+        print('  渲染对照: ⏭ 跳过 —— 首页零折射盒（§138），没有对象可比；下面这些帧时量的是水面本身')
         # rp is None = A/A 就不稳，这条判据作废：不拦提交（那是仪器局限，不是产品缺陷），
         # 但也不许把"✅"打在任何依赖它的结论上。
         if A.phases:
