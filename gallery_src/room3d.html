@@ -8,6 +8,9 @@
 <!-- 配色/圆角只有正本 theme.css。⚠️ 组件规则里不许出现字面颜色；
      WebGL 的清屏色也从 token 取（themeColor），昼/夜才会一起动。 -->
 <link rel="stylesheet" href="theme.css">
+<!-- 收藏 / 网站背景：本站的"站用背景"是一条 html 背景图，四个页面都得认，
+     否则从首页设完跳到 3D 宿舍就"背景丢了"。这页是 ES module，用普通 script 先挂 window。 -->
+<script src="favorites.js"></script>
 <script type="importmap">
 {"imports":{
   "three":"./vendor/three/three.module.min.js",

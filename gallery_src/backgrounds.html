@@ -187,7 +187,7 @@ header .sp{flex:1}
 </header>
 
 <div class="wrap">
-  <div class="tools"><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"></div>
+  <div class="tools"><span class="chip" id="cFav" title="只看已收藏的背景图" style="align-self:center">★ 只看收藏<b id="favN">0</b></span><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"></div>
   <div class="grp" id="gTier"><span>命名档</span></div>
   <div class="grp" id="gChar" hidden><span>画面</span></div>
   <div class="grp" id="gGroup"><span>类目</span></div>
@@ -202,6 +202,7 @@ header .sp{flex:1}
   <div class="cap"><b id="fsname"></b><span id="fsen"></span><span class="zbadge" id="fsz">适配</span>
     <span class="sp"></span>
     <button id="fsprev">← 上一张</button><button id="fsnext">下一张 →</button>
+    <button id="ovbg2" class="fsbg">设为网站背景</button>
     <button id="fsdl">下载原图</button><button id="fsclose">退出全屏（Esc）</button></div>
 </div>
 
@@ -219,6 +220,7 @@ header .sp{flex:1}
         <button id="ovnext">下一张 →</button>
         <button id="ovfs">全屏看壁纸</button>
         <a class="dl" id="ovdl" download>下载原图</a>
+        <button id="ovbg">设为网站背景</button>
         <button id="ovclose">关闭（Esc）</button>
         <span class="zbadge" id="ovz">适配</span>
         <span class="zhint">滚轮缩放 · 拖拽平移 · 双击 1:1</span>
@@ -228,6 +230,7 @@ header .sp{flex:1}
 </div>
 
 <script src="liquid_glass.js"></script>
+<script src="favorites.js"></script>
 <script>
 /* 命名四档的语义（与 scripts/build_bg_meta.py 一致，页面不许自己升档）：
    exact    这张图自己被配置表的背景字段整值引用，且那行有中文名 → 中文关卡名
@@ -243,7 +246,7 @@ const mb=b=>b>=2**20?(b/2**20).toFixed(1)+' MB':(b/2**10).toFixed(0)+' KB';
 const clean=s=>(s||'').split('||')[0].trim();
 const TIER={exact:'确定',baked:'图内文字',inferred:'推断',none:'类目说明'};
 
-let ALL=[],view=[],fTier='',fGroup='',fSub='',fChar='shown',q='',cur=-1,META=null;
+let ALL=[],view=[],fTier='',fGroup='',fSub='',fChar='shown',q='',cur=-1,META=null,fFav=false;
 /* 「画面」这一维是**人工逐格标注**（inputs/gamecfg/bg_char_flags.json，经 build_bg_meta 透传）。
    默认 `shown` = 只藏起明确判过「无角色」的，**没判过的照常显示**（用户 2026-10-07 定的口径）：
    标注只覆盖 1,305 张场景背景，登录/其他类目共 604 张从没判过，把"没字段"当 0 就是静默藏图。
@@ -297,7 +300,8 @@ function subVal(it){
 function apply(){
   const kw=q.trim().toLowerCase();
   view=ALL.filter(it=>(!fTier||it.tier===fTier)&&(!fGroup||it.group===fGroup)
-                       &&(!fSub||subVal(it)===fSub)&&(!kw||hay(it).includes(kw))&&charOk(it));
+                       &&(!fSub||subVal(it)===fSub)&&(!kw||hay(it).includes(kw))&&charOk(it)
+                       &&(!fFav||(window.Fav&&Fav.has('bg',it.key))));
   const g=$('grid'); g.innerHTML='';
   const frag=document.createDocumentFragment();
   for(const it of view){
@@ -307,6 +311,7 @@ function apply(){
     c.innerHTML='<span class="badge '+it.tier+'">'+TIER[it.tier]+'</span>'+
       (vt?'<span class="badge var">'+vt+'</span>':'')+
       '<div class="ph" style="aspect-ratio:'+ar+'"><img src="'+it.thumb+'" alt="" loading="lazy"></div>'+
+      (window.Fav?Fav.btn('bg',it.key,title(it),'corner tr'):'')+
       '<div class="nm"><div class="t1">'+esc(title(it))+'</div>'+
       '<div class="t2">'+esc(it.name)+' · '+mb(it.bytes)+'</div></div>';
     c.addEventListener('click',()=>open(it.key));
@@ -423,6 +428,7 @@ function paint(){
   $('ovimg').src=it.img; $('oven').textContent=it.key+' · '+it.name;
   $('ovdl').href=it.img; $('ovdl').download=it.name+'.png';
   if($('fs').classList.contains('on')) fsPaint();
+  if(window.SiteBg) syncBg();
   $('ovname').textContent=title(it);
   const grp=(META.groups[it.group]||{}).cn||it.group;
   const rows=[['命名档',TIER[it.tier]+(it.tier==='inferred'?'（继承自同词根「'+it.inferred_from+'」）':'')],
@@ -548,6 +554,24 @@ async function boot(){
   const th=$('gTheme');
   th.querySelector('[data-t="'+(document.documentElement.dataset.theme||'light')+'"]')
     &&th.querySelector('[data-t="'+(document.documentElement.dataset.theme||'light')+'"]').classList.add('on');
+  if(window.Fav){ Fav.bind(); favCount();
+    $('cFav').onclick=()=>{ fFav=!fFav; $('cFav').classList.toggle('on',fFav); apply(); };
+    /* 点星之后：正开着「只看收藏」要立刻重筛；否则只原地改填充，别把整屏重建一遍
+       （重建会打断懒加载、也会把滚动位置弹回顶部） */
+    document.addEventListener('favchange',()=>{ favCount(); if(fFav) apply(); });
+  }
+  ['ovbg','ovbg2'].forEach(id=>{ const b=$(id); if(!b) return;
+    b.onclick=()=>{ const it=view[cur]; if(!it) return;
+      SiteBg.toggle({url:it.img,kind:'bg',key:it.key,label:title(it)}); syncBg(); }; });
+  syncBg();
+}
+function favCount(){ const e=$('favN'); if(e) e.textContent=Fav.count('bg'); }
+/* 按钮文案跟着"当前这张是不是已设为背景"走 —— 两处按钮共用同一个真相，不各存各的 */
+function syncBg(){
+  ['ovbg','ovbg2'].forEach(id=>{ const b=$(id); if(!b) return;
+    const it=cur>=0?view[cur]:null, on=!!(it&&window.SiteBg&&SiteBg.is(it.img));
+    b.textContent=on?'已设为背景（点一下取消）':'设为网站背景';
+    b.classList.toggle('on',on); });
 }
 $('q').addEventListener('input',e=>{q=e.target.value;apply()});
 $('gTheme').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;

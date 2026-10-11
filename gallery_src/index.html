@@ -216,6 +216,19 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
 @keyframes zoomout{to{opacity:0;transform:scale(.96) translateY(8px)}}
 .side{width:264px;flex:none;background:var(--panel2);border-right:1px solid var(--line);display:flex;flex-direction:column}
 .side .hd{padding:15px 14px 10px}
+/* 弹窗头部的两个动作：收藏星标 + 「设为网站背景」。放在标题右侧，
+   不跟 .skinlist（皮肤列表）挤在一起——那个列表会换行，动作按钮要一直够得着。 */
+.side .hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+.side .hd .t{flex:1 1 auto;min-width:0}
+.macts{display:flex;gap:6px;align-items:center;flex:none;margin-left:auto}
+.bgbtn{font:inherit;font-size:11.5px;color:var(--txt2);cursor:pointer;white-space:nowrap;
+  background:color-mix(in srgb,var(--panel) 72%,transparent);border:1px solid var(--chip-line);
+  border-radius:var(--r-chip);padding:4px 10px;
+  transition:transform var(--t-col) var(--ease-ios),background var(--t-col) var(--ease-ios),
+    color var(--t-col) var(--ease-ios),border-color var(--t-col) var(--ease-ios)}
+.bgbtn:hover{transform:translateY(-1px);border-color:var(--brand);color:var(--brand-d)}
+.bgbtn:active{transform:scale(.97)}
+.bgbtn.on{background:var(--grad-brand);color:var(--on-txt);border-color:transparent}
 .side .hd .t{font-size:22px;font-weight:800;color:var(--txt);line-height:1.15}
 .side .hd .p{font-size:11px;color:var(--dim);margin-top:2px;font-weight:600}
 .meta{padding:8px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);
@@ -488,7 +501,7 @@ main{position:relative;z-index:1}
     <option value="cn">按名称</option><option value="faction">按阵营</option><option value="type">按舰种</option><option value="rarity">按稀有度</option>
   </select></div>
   <div class="ctl"><label>内容</label><select id="fHas">
-    <option value="">全部</option><option value="spine">含Spine</option><option value="live2d">含Live2D</option><option value="voice">含语音</option><option value="cn">有中文名</option>
+    <option value="">全部</option><option value="spine">含Spine</option><option value="live2d">含Live2D</option><option value="voice">含语音</option><option value="cn">有中文名</option><option value="fav">已收藏</option>
   </select></div>
   <div class="grow"></div>
   <div class="ctl"><label>全局</label><div class="opt" id="gOpt">
@@ -509,7 +522,7 @@ main{position:relative;z-index:1}
   <div class="modal">
     <button class="close" id="close">×</button>
     <div class="side">
-      <div class="hd"><div class="t" id="mName"></div><div class="p" id="mPy"></div></div>
+      <div class="hd"><div class="t" id="mName"></div><div class="p" id="mPy"></div><div class="macts" id="mActs"></div></div>
       <div class="meta" id="mMeta"></div>
       <div class="skinlist" id="mSkins"></div>
     </div>
@@ -520,6 +533,7 @@ main{position:relative;z-index:1}
   </div>
 </div>
 
+<script src="./favorites.js"></script>
 <script src="./index.js"></script>
 <script src="./vendor/spine/spine-all.js"></script>
 <script>
@@ -643,7 +657,7 @@ function makeCard(s){
   const ds=defSkin(s); const th=thumbOf(ds);
   const badges=[]; if(hasSpine(s))badges.push('<span class="b-spine">SPINE</span>'); if(hasL2d(s))badges.push('<span class="b-l2d">L2D</span>'); if(s.voiceCount)badges.push('<span class="b-voice">🔊'+s.voiceCount+'</span>');
   const tags=[]; if(s.rarity)tags.push(`<span class="tag ${rarClass(s.rarity)}">${s.rarity}</span>`); if(s.faction)tags.push(`<span class="tag f">${s.faction}</span>`); if(s.type)tags.push(`<span class="tag s">${s.type}</span>`);
-  card.innerHTML=`<div class="thumb">${th?`<img loading="lazy" src="${th}">`:'<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:12px">无立绘</div>'}<div class="badge">${badges.join('')}</div></div>
+  card.innerHTML=`<div class="thumb">${th?`<img loading="lazy" src="${th}">`:'<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:12px">无立绘</div>'}<div class="badge">${badges.join('')}</div>${window.Fav?Fav.btn('skin',s.id,s.name,'corner'):''}</div>
     <div class="body"><div class="nm">${s.name}</div><div class="py">${s.id} · ${pseudoKind(s)||s.skins.length+'皮肤'}</div><div class="tags">${tags.join('')}</div></div>`;
   /* 卡片可 Tab 聚焦：以前整张网格只有鼠标一条路，键盘走不到任何一张卡（§6.18 ④）。
      Enter/Space 的激活走 mainEl 上的**一个**委托监听器，不给千张卡各挂一个。 */
@@ -866,6 +880,10 @@ function apply(){
     if(hs==='live2d' && !hasL2d(s))return false;
     if(hs==='voice' && !s.voiceCount)return false;
     if(hs==='cn' && !s.hasCn)return false;
+    /* 「已收藏」：单位是一张卡 = 一个角色（键用 s.id），不是它下面的某个皮肤。
+       模块没加载（离线/被拦）时这一档筛出空表，而不是把全部放过来——
+       放过来会变成"收藏坏了但看着像好的"。 */
+    if(hs==='fav' && !(window.Fav&&Fav.has('skin',s.id)))return false;
     if(q && s.name.toLowerCase().indexOf(q)<0 && s.id.toLowerCase().indexOf(q)<0)return false;
     return true;
   });
@@ -995,7 +1013,29 @@ function buildSkinList(s){
     el.appendChild(d);
   });
 }
+/* 弹窗头部动作：收藏（单位 = 这个角色）+ 把当前皮肤的立绘设成网站背景。
+   ⚠️ 每次换皮肤都要重画一遍——「设为背景」的 URL 跟着当前皮肤走，
+      留着上一张的就会做出"看着点的是 A、实际设的是 B"这种事。 */
+function renderActs(){
+  const el=document.getElementById('mActs'); if(!el||!window.Fav||!curShip) return;
+  const sk=curSkin, url=sk? (P+(sk.cg||sk.image||'')) : '';
+  el.innerHTML = Fav.btn('skin',curShip.id,curShip.name) +
+    (url? '<button class="bgbtn'+(SiteBg.is(url)?' on':'')+'" id="mSetBg" title="'+url+'">'
+        + (SiteBg.is(url)?'已设为背景':'设为网站背景')+'</button>' : '');
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest && e.target.closest('#mSetBg'); if(!b) return;
+  const url=b.title, sk=curSkin, nm=(curShip?curShip.name:'')+(sk&&sk.label?(' · '+sk.label):'');
+  SiteBg.toggle({url:url,kind:'skin',key:sk?sk.key:'',label:nm});
+  renderActs();
+});
+/* 收藏变了：正开着「已收藏」这一档时立刻重筛，否则点了星却看着没反应 */
+document.addEventListener('favchange',()=>{
+  if(document.getElementById('fHas').value==='fav') apply();
+  else Fav.paint();
+});
 function setSkin(sk){ curSkin=sk; paintSrc='cg'; const s=curShip;
+  renderActs();
   const nameEl=document.getElementById('mName'), pyEl=document.getElementById('mPy'), metaEl=document.getElementById('mMeta');
   if(s.sil){
     /* 剪影不是皮肤：标题位给"这是什么"，来源做成可点入口跳回本体船 —— 用户要的就是
@@ -2630,7 +2670,7 @@ function bgDraw(ts){
 function bgStart(){ if(!BG.raf && BG.mode==='gl') { BG.raf=requestAnimationFrame(bgDraw); } }
 /* 指针 → 水高场。走 window 的 pointermove：卡片自己也要收 hover，不能抢事件。 */
 function bgWake(x, y, down){
-  if(RM.matches || BG.mode!=='gl' || mask.classList.contains('on')) return;
+  if(RM.matches || siteBgOn() || BG.mode!=='gl' || mask.classList.contains('on')) return;
   const sx=x/innerWidth*BG.sw, sy=(1-y/innerHeight)*BG.sh;      // 纹理 y 轴翻转对齐 gl_FragCoord
   let lx=sx, ly=sy, dx=0, dy=0;
   if(BG.last){ lx=BG.last[0]; ly=BG.last[1]; dx=sx-lx; dy=sy-ly; }
@@ -2662,15 +2702,19 @@ let bgPend=null;
 window.addEventListener('pointermove',e=>{
   /* 节流到每帧一次：触摸板 pointermove 能到 120Hz，每次都写场就是白烧 CPU。
      但**不能丢坐标**——丢中间点会让快速拖动在场上留下断口，所以取最新值。 */
-  if(RM.matches || BG.mode!=='gl') return;
+  if(RM.matches || siteBgOn() || BG.mode!=='gl') return;
   if(bgPend) return;
   bgPend=requestAnimationFrame(()=>{ bgPend=null; bgWake(e.clientX,e.clientY,false); });
 },{passive:true});
 window.addEventListener('pointerdown',e=>{ bgWake(e.clientX,e.clientY,true); },{passive:true});
 window.addEventListener('blur',()=>{ BG.last=null; });
+const siteBgOn=()=>!!(window.SiteBg&&SiteBg.get());
 function bgSync(){
   const host=document.getElementById('bgfx'); if(!host) return;
-  if(RM.matches){ if(BG.raf){ cancelAnimationFrame(BG.raf); BG.raf=0; } bgClear(); return; }
+  /* 「减少动效」与「设了站用背景」是同一种状态：水面不是当前的背景 ⇒ 停循环 + 清屏。
+     水面 canvas 是不透明的（WebGL alpha:false），CSS 里已经把它 display:none 掉，
+     但循环不停就是每帧白烧 3.3ms 画一张看不见的海。 */
+  if(RM.matches || siteBgOn()){ if(BG.raf){ cancelAnimationFrame(BG.raf); BG.raf=0; } bgClear(); return; }
   if(!BG.cv){
     BG.cv=document.createElement('canvas'); host.appendChild(BG.cv);
     bgColors(); bgInit(); bgResize();
@@ -2681,11 +2725,17 @@ function bgSync(){
 }
 RM.addEventListener('change',bgSync);
 bgSync();
+/* 设 / 取消站用背景时立刻切水面层的运行状态。不监听的话正在跑的循环会一直画到下一次
+   bgSync（只有 resize、减少动效变化才触发），用户"取消背景"之后海面就不回来了。 */
+document.addEventListener('sitebgchange',()=>bgSync());
 
 /* 启动必须走 apply() 而不是 renderGrid()：view 的初值是 ships.slice()（索引原序），
    而排序只发生在 apply() 里，apply() 又只绑在筛选控件的 change/input 事件上。
    以前这里直接 renderGrid() → 第一屏是未排序的原序（VTuber 联动与 -META 变体排最前），
    用户报的"随便点一个筛选再回来才正常"就是这个（2026-09-26；由 126e16e 引入）。 */
+/* 收藏的委托监听必须在 apply() 之前挂上：apply() 一次性建出满屏卡片，而星标是拼进 innerHTML 的，
+   没有委托就没人接它们的点击（也不会报错，只是点了没反应——最难查的那种）。 */
+if(window.Fav) Fav.bind();
 apply();
 </script>
 </body>
