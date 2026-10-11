@@ -869,15 +869,22 @@ function glRR(x,y,w,h,r){
 function glBuild(){
   const main=mainEl; if(!main) return;
   const vp=main.clientHeight; if(vp<40) return;
-  const H=Math.round(vp*3), W=Math.round(main.clientWidth), top=Math.round(main.scrollTop);
+  /* 锚点往**上**多留一个视口：层覆盖 [scrollTop-vp, scrollTop+2vp)。
+     原来锚在 scrollTop，向上滚时上方那一屏根本不在层里，要等越过 0.6 视口才重建 ⇒ 头顶先空一条没环的带子。 */
+  const H=Math.round(vp*3), W=Math.round(main.clientWidth), top=Math.round(main.scrollTop-vp);
   const cs=getComputedStyle(document.documentElement);
   const ring=parseFloat(cs.getPropertyValue('--lg-ring'))||12;
   const rad=parseFloat(cs.getPropertyValue('--r-card'))||16;
   const mr=main.getBoundingClientRect(), hov=main.querySelector('.card:hover');
+  /* 环的纵坐标 = 「卡片相对滚动视口的位置」+「层相对视口的偏移」。
+     写成 off 而不是直接把 y 当 r.top-mr.top：锚点一变（上面那个往上留一视口）y 就整体错一个视口，
+     而且错得"看起来只是环偏了"，很容易当成观感问题去调参。 */
+  const off=main.scrollTop-top;
   let d='', n=0;
   main.querySelectorAll('.card.g').forEach(c=>{
     if(c===hov) return;                                   // 悬停那张走自己的 ::before
-    const y=Math.round(c.getBoundingClientRect().top-mr.top), x=Math.round(c.getBoundingClientRect().left-mr.left);
+    const r=c.getBoundingClientRect();
+    const y=Math.round(r.top-mr.top+off), x=Math.round(r.left-mr.left);
     if(y<-40||y>H+40) return;                             // 只画锚点窗口内的（上下各留 40px 余量）
     const w=Math.round(c.offsetWidth), h=Math.round(c.offsetHeight);
     d+=glRR(x,y,w,h,rad)+glRR(x+ring,y+ring,Math.max(0,w-2*ring),Math.max(0,h-2*ring),Math.max(0,rad-ring));
