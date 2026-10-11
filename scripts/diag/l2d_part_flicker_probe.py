@@ -920,6 +920,250 @@ JS_LATCHRESET = r"""(async (cfg) => {
 })"""
 
 
+# ---------------------------------------------------------------- ㉑ 预路过（补丁 ⑧）的 A/B：切换首帧"该亮的那几组手"亮了几片
+# 为什么要它：⑲ 量出锁存律之后，修法 (a) 是"载入后把开关参数的键全路过一遍"。
+#   它到底改变了什么，只能按**组**量：冷态律给出六组（0.1→331-335、0.2→325-330、0.3→355/379、
+#   0.4→356-360、0.5→364/380/381/593/594、0.6→365-370）+ 可逆的 A 组手（36/42/43/44/51）。
+#   判据（两条都要过）：① **预路过开** 时，idle 稳定态下这六组**至少各亮一片**（关 ⇒ 只有被跳不到的那些不亮）；
+#   ② 切到 `home` 之后**不再出现"整组从亮变灭"**（闪烁的指纹）。
+# ⚠️ 补丁在**表 fetch 完成时**就跑，所以 A/B 必须在页面加载**之前**关掉开关 —— 用
+#   CDP `Page.addScriptToEvaluateOnNewDocument` 注入 `window.__preRoll=false`，不能加载完再设。
+JS_PREROLL = r"""(async (cfg) => {
+  const im=window.__m.internalModel, core=im.coreModel, M=core._model, D=M.drawables;
+  const ids=Array.from(D.ids);
+  const grp=(names)=>names.map(n=>{ const j=ids.indexOf(n); return j<0? null : +D.opacities[j].toFixed(2); });
+  const G={A:['ArtMesh36','ArtMesh42','ArtMesh43','ArtMesh44','ArtMesh51'],
+           g01:['ArtMesh331','ArtMesh332','ArtMesh333','ArtMesh334','ArtMesh335'],
+           g02:['ArtMesh325','ArtMesh326','ArtMesh327','ArtMesh328','ArtMesh329','ArtMesh330'],
+           g03:['ArtMesh355','ArtMesh379'],
+           g04:['ArtMesh356','ArtMesh357','ArtMesh358','ArtMesh359','ArtMesh360'],
+           g05:['ArtMesh364','ArtMesh380','ArtMesh381','ArtMesh593','ArtMesh594'],
+           g06:['ArtMesh365','ArtMesh366','ArtMesh367','ArtMesh368','ArtMesh369','ArtMesh370']};
+  const shot=()=>{ let lit=0; for(let j=0;j<D.count;j++) if(D.opacities[j]>0.5) lit++;
+    const o={lit}; for(const k in G){ const v=grp(G[k]); o[k]=v.filter(x=>x!==null);
+      o[k+'_on']=v.filter(x=>x!==null&&x>0.5).length; } return o; };
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  const dbg=(()=>{ try{ return {pre:window.__preRollDbg?window.__preRollDbg():null,
+                                last:window.__preRollLast||null, err:window.__preRollErr||null,
+                                snap:window.__snapDbg?window.__snapDbg():null}; }catch(e){ return {err:String(e)}; } })();
+  const seq=[];
+  /* ⚠️ 这一档是专门用来分「锁存是真的」还是「⑲ 那套冻结协议造出来的假象」：
+     预路过跑完**当拍**就读（中间一帧动作都没有），再等 1 秒动作后读一次。
+     当拍亮、1 秒后灭 ⇒ 真实播放管线每帧重算显隐、根本不存在"点亮就不灭"，
+     ⑲/追加-XV 那条"锁存律"要按**仪器假象**更正；当拍就不亮 ⇒ 预路过这条路本身没走通（写的不是同一条通道）。*/
+  if(cfg.prerun && window.__preRoll!==false && typeof window.__preRollRun==='function'){
+    let h=null; try{ h=window.__preRollRun(); }catch(e){}
+    seq.push(Object.assign({tag:"预路过跑完·当拍（未经任何动作帧）", clip:(()=>{ try{ return im.motionManager.state.currentGroup; }catch(e){ return null; } })()}, shot()));
+    for(let k=0;k<60;k++){ await t(16); }
+    seq.push(Object.assign({tag:"再跑 1 秒动作之后", clip:(()=>{ try{ return im.motionManager.state.currentGroup; }catch(e){ return null; } })()}, shot()));
+  }
+  for(const st of cfg.steps){
+    if(st.clip){ try{ im.motionManager.startMotion(st.clip,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){} }
+    const nfr=Math.max(1,Math.round(st.wait*1000/16));
+    for(let k=0;k<nfr;k++){ await t(16); }
+    seq.push(Object.assign({tag:st.tag, clip:(()=>{ try{ return im.motionManager.state.currentGroup; }catch(e){ return null; } })()},
+                            shot()));
+  }
+  return JSON.stringify({preroll:(window.__preRoll!==false), dbg, seq,
+                         groups:Object.keys(G).map(k=>[k,G[k].length])});
+})"""
+
+
+# ---------------------------------------------------------------- ㉒ 手部并集**逐拍**（只记变化与全灭，不受截图速度限制）
+#   为什么再来一趟：⑩/⑳ 的采样被 swiftshader 的渲染拖到 ~5 拍/秒（200ms 一拍），
+#   「手闪了一下」这种 1~3 拍（几十毫秒）的窗口**在 200ms 网格上根本量不到** —— 上一趟
+#   `--trace` 跑满 20s 只拿到 200 拍，且并集从头到尾没为 0 过，这个"没为 0"**不能当判死证据**。
+#   本臂改成：① 只记「手部名单里发生翻转的片」与「并集为 0 的拍」⇒ 高频也不会爆内存；
+#   ② 时钟原点是 `startMotion` 那一刻（不是页面加载、也不是帧号）；
+#   ③ 先量**实测拍率**（upd/秒）并随结果一起发布 —— 拍率不到 30/s 就明确说"仍测不到"，不许拿它判死。
+JS_HANDDARK = r"""(async (cfg) => {
+  const m=window.__m, im=m.internalModel, core=im.coreModel, CP=Object.getPrototypeOf(core);
+  const M=core._model, D=M.drawables, P=M.parameters;
+  const ids=Array.from(D.ids);
+  const hand=cfg.names.map(n=>ids.indexOf(n)).filter(j=>j>=0);
+  const handNames=hand.map(j=>ids[j]);
+  const watch=cfg.params.map(n=>(window.__pid||[]).indexOf(n)).filter(j=>j>=0);
+  const watchNames=watch.map(j=>(window.__pid||[])[j]);
+  /* 「面积=0」有两种，含义完全不同，必须分开：
+       ① vertexCount 本身就是 0 ⇒ moc3 里这块美术**没有几何**，opacity 再怎么改都不会有一个像素；
+       ② 有顶点但全等 ⇒ 被绑定缩放压成了一个点（状态相关，跟着姿态变）。
+     上一轮 ⑲ 的"锁存律/键位分组"是**只读 opacity** 分出来的组，若组里混着①，那些结论
+     是在给看不见的美术记账 —— 这正好是"改了十几轮、用户还是说手没了"能同时成立的那扇门。 */
+  const VC=M.drawables.vertexCounts||[];
+  const vshot=()=>hand.map((j,q)=>{ const p=D.vertexPositions[j];
+    return [handNames[q], (VC.length? +VC[j] : null), p.length,
+            p.length? +p[0].toFixed(3):null, p.length? +p[1].toFixed(3):null]; });
+  const v0count=(()=>{ let z=0; for(let i=0;i<D.count;i++) if(VC.length && +VC[i]===0) z++;
+                       return z; })();
+  if(!window.__hdHook){
+    const base=CP.update;
+    CP.update=function(){ const r=base.apply(this,arguments); const H=window.__hd;
+      if(!H) return r;
+      const MM=this._model, O=MM.drawables.opacities, n=MM.drawables.count;
+      const VP=MM.drawables.vertexPositions;
+      const t=(performance.now()-H.t0)/1000;
+      /* 「亮」= opacity>0.5，「看得见」= 亮 **且** 顶点没塌成一个点。
+         为什么要加第二栏（本轮的新发现）：台账里 g01~g06 那 29 片手的包围盒**全是 0**，
+         也就是说它们亮着却在画面上不存在 —— 十几轮只读 opacity 的判据把这类"亮着的空壳"
+         当成"手还在"，所以每一轮的"并集没为 0"都是虚的。Live2D 藏一套美术有两条通道
+         （透明度 / 绑定缩放归零 ⇒ 顶点坍缩），只读前者必然漏后者。 */
+      let lit=0, vis=H.visCache;
+      H.n=(H.n||0)+1;
+      if(H.n % (cfg.every||4) === 1){        // 全模型逐顶点扫描太贵（会把拍率从 14/s 拖到 9/s），按 --hdevery 抽稀
+        vis=0;
+        for(let i=0;i<n;i++){ if(O[i]<=0.5) continue; lit++;
+          const p=VP[i]; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+          for(let k=0;k+1<p.length;k+=2){ const a=p[k],b=p[k+1];
+            if(a<x0)x0=a; else if(a>x1)x1=a; if(b<y0)y0=b; else if(b>y1)y1=b; }
+          if((x1-x0)*(y1-y0) > H.eps) vis++; }
+        H.visCache=vis; H.litCache=lit;
+      } else { lit=H.litCache||0; }
+      let hl=0, hv=0, ha=0;
+      const st=new Array(hand.length);
+      for(let q=0;q<hand.length;q++){ st[q]=O[hand[q]]>0.5?1:0;
+        if(st[q]){ hl++; const p=VP[hand[q]]; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+          for(let k=0;k+1<p.length;k+=2){ const a=p[k],b=p[k+1];
+            if(a<x0)x0=a; else if(a>x1)x1=a; if(b<y0)y0=b; else if(b>y1)y1=b; }
+          const ar=(x1-x0)*(y1-y0);
+          if(ar > H.eps){ hv++; ha+=ar; H.handArea[q]=+ar.toFixed(4); }
+          else H.handArea[q]=0; }
+        else H.handArea[q]=0; }
+      H.rows.push([+t.toFixed(3),lit,vis,hl,hv,+ha.toFixed(4),H.handArea.slice(),
+                   (()=>{ try{ return im.motionManager.state.currentGroup||''; }catch(e){ return ''; } })()]);
+      if(vis<H.minVis) H.minVis=vis; if(vis>H.maxVis) H.maxVis=vis;
+      if(hv<H.minHv) H.minHv=hv; if(hv>H.maxHv2) H.maxHv2=hv;
+      H.upd++;
+      if(hl<H.minHl) H.minHl=hl; if(hl>H.maxHl) H.maxHl=hl;
+      if(H.lastSt){ const add=[],del=[],dim=[];
+        for(let q=0;q<hand.length;q++){ if(st[q]!==H.lastSt[q]){ if(st[q]) add.push(handNames[q]); else del.push(handNames[q]); }
+          else if(st[q] && +(O[hand[q]].toFixed(2))!==H.lastOp[q]) dim.push([handNames[q],H.lastOp[q],+O[hand[q]].toFixed(2)]); }
+        if(add.length||del.length)
+          H.changes.push([+t.toFixed(3),lit,hl,add,del, watch.length? watch.map(j=>+P.values[j].toFixed(3)):null]);
+        if(dim.length&&H.dimming.length<200) H.dimming.push([+t.toFixed(3),hl,dim]); }
+      H.lastSt=st; H.lastOp=hand.map(j=>+O[j].toFixed(2));
+      if(hl===0){ if(H.winStart===null) H.winStart=+t.toFixed(3);
+                  if(H.zero.length<400) H.zero.push([+t.toFixed(3),lit]); }
+      else if(H.winStart!==null){ if(H.windows.length<200) H.windows.push([H.winStart,+t.toFixed(3)]); H.winStart=null; }
+      /* 第二套窗口判据：亮片数没问题、但**有面积的手**为 0 —— 这才是"画面上手没了"。 */
+      if(hv===0){ if(H.vwinStart===null) H.vwinStart=+t.toFixed(3); }
+      else if(H.vwinStart!==null){ if(H.vwindows.length<200) H.vwindows.push([H.vwinStart,+t.toFixed(3)]); H.vwinStart=null; }
+      return r; };
+    CP.__hdHook=1; window.__hdHook=1;
+  }
+  window.__hd={t0:performance.now(), upd:0, changes:[], zero:[], windows:[], dimming:[], rows:[],
+               winStart:null, vwinStart:null, vwindows:[], lastSt:null, lastOp:[],
+               minHl:999, maxHl:0, minVis:1e9, maxVis:0, minHv:999, maxHv2:0,
+               eps:(cfg.eps!==undefined? cfg.eps:1e-4), visCache:0, litCache:0, n:0,
+               handArea:new Array(hand.length)};
+  if(cfg.small){ try{ window.__app.renderer.resize(cfg.w||360, cfg.h||260); }catch(e){} }
+  /* ⚠️ 默认走**页面自己的入口**（下拉选 + 点「重播」），不是直接调 motionManager。
+     理由（AGENTS「验证脚本不得绕过被测入口」+ 本轮的关键发现）：`play()` 除了 startMotion 还会
+     `played.add(g)` —— 那是「残留复位层 restTick」唯一的装填条件。十几轮探针全部直接调
+     startMotion ⇒ `played` 永远为空 ⇒ 复位层从来没被 armed 过，之前"关/开复位层都一样"的 A/B
+     等于两台都关着做。用户报的"手消失"若落在回落 idle 那 700ms 渐变里，旧仪器**结构上看不见**。 */
+  window.__uiFail=null;
+  if(cfg.ui){ const s=document.getElementById('l2Motion'), b=document.getElementById('l2Replay');
+    if(s&&b){ s.value=cfg.clip; s.dispatchEvent(new Event('change')); b.click(); }
+    else window.__uiFail='页面上找不到 #l2Motion / #l2Replay'; }
+  else { try{ im.motionManager.startMotion(cfg.clip,0,PIXI.live2d.MotionPriority.FORCE); }catch(e){} }
+  window.__hd.t0=performance.now();                 // 时钟原点 = 切换那一刻（不是页面加载）
+  /* 定点抓拍走 `renderer.extract`（不是 CDP 截图）：CDP 那张一次要 0.8~1.2s，模型跟着停摆，
+     抓回来的"第几秒"根本不是模型的第几秒（§123 追加-XIX 那个 7~34 倍时钟错就是这么来的）。
+     extract 在页面里同步跑，几十毫秒级，拍完立刻把**当时的逐拍读数**一起存下来 ⇒
+     每张图都自带它的状态签名，事后不必信时钟。 */
+  window.__shots=[]; const shots=(cfg.shots||[]).slice().sort((a,b)=>a-b); let si=0;
+  /* 场景快照：判"角色跑哪去了"到底是**容器变换**（画廊的 fit/缩放/平移）还是**参数**（模型自己的
+     顶点动了）。两者的修法完全不同，所以每拍都同时记 pixi 的 transform 与模型空间可见包围盒。
+     顺带把补丁 ⑤ 的回绕名单 `__phaseSet` 与"离默认值最远"的参数一起打出来 —— §123 里
+     "一律回绕会让右前臂从 -59° 瞬跳到 +1°，用户症状是选 home 时手会消失"这条线索从没被关过。 */
+  const snapAt=(cfg.snapAt||[]).slice().sort((a,b)=>a-b); let ki=0; const snaps=[];
+  const takeSnap=(tt)=>{ const o={t:+tt.toFixed(3)};
+    try{ o.g=im.motionManager.state.currentGroup||''; }catch(e){ o.g='?'; }
+    try{ const s=m.scale,p=m.position; o.tr=[+s.x.toFixed(4),+s.y.toFixed(4),+p.x.toFixed(1),+p.y.toFixed(1),+((m.rotation||0)).toFixed(4)]; }catch(e){ o.tr=null; }
+    try{ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+      for(let i=0;i<D.count;i++){ if(D.opacities[i]<=0.5) continue; const q=D.vertexPositions[i];
+        for(let k=0;k+1<q.length;k+=2){ const a=q[k],b=q[k+1]; if(a<x0)x0=a; if(a>x1)x1=a; if(b<y0)y0=b; if(b>y1)y1=b; } }
+      o.bb=[+x0.toFixed(2),+y0.toFixed(2),+x1.toFixed(2),+y1.toFixed(2)]; }catch(e){ o.bb=null; }
+    try{ o.phase=[...(core.__phaseSet||[])].map(j=>window.__pid[j]).filter(Boolean); }catch(e){ o.phase='n/a'; }
+    try{ const far=[];
+      for(let j=0;j<P.count;j++){ const sp=P.maximumValues[j]-P.minimumValues[j]; if(!(sp>0)) continue;
+        const dev=Math.abs(P.values[j]-P.defaultValues[j])/sp;
+        if(dev>0.3) far.push([window.__pid[j],+dev.toFixed(2),+P.values[j].toFixed(2),
+                              +P.defaultValues[j].toFixed(2),+P.minimumValues[j].toFixed(1),+P.maximumValues[j].toFixed(1)]); }
+      far.sort((a,b)=>b[1]-a[1]); o.far=far.slice(0,14); }catch(e){ o.far='n/a'; }
+    o.row=(window.__hd? window.__hd.rows.slice(-1)[0]||[] : []).slice(0,6);
+    return o; };
+  let unphased=null;
+  const until=performance.now()+cfg.secs*1000;
+  while(performance.now()<until){
+    const tt=(performance.now()-window.__hd.t0)/1000;
+    if(si<shots.length && tt>=shots[si]){
+      const want=shots[si]; si++;
+      try{ const b64=await window.__app.renderer.extract.base64(window.__app.stage,"image/png");
+        const rec={t:+tt.toFixed(3), want, row:(window.__hd.rows.slice(-1)[0]||[]).slice(0,6), b64};
+        /* 「手到底在不在画面里」只能这样量：把**除手部片以外**的所有 drawable 透明度打 0
+           （复用钩子已有的 __hideSet，它打在 core.update 之后 ⇒ 渲染读的就是这份缓冲），
+           再抓一张带 alpha 的 PNG。画布本身 backgroundAlpha=0，所以剩下的不透明像素
+           **就是手在屏幕上的实际落点** —— 越界与否从此不必靠肉眼猜。 */
+        if((cfg.onlyAt||[]).some(x=>Math.abs(x-want)<0.6)){
+          const keep=new Set(hand), other=[];
+          for(let i=0;i<D.count;i++) if(!keep.has(i)) other.push(i);
+          window.__hideSet=new Set(other);
+          await new Promise(r=>setTimeout(r,140));
+          try{ rec.handsB64=await window.__app.renderer.extract.base64(window.__app.stage,"image/png"); }catch(e){ rec.handsErr=String(e).slice(0,100); }
+          window.__hideSet=null;
+          await new Promise(r=>setTimeout(r,140));
+        }
+        /* ⚠️ 名单本身必须先验，否则上面量到的"手不在画面里"可能只是"我叫错了名字"。
+           做法：同一时刻**逐组只 hide 这一组**，抓 7 张图 —— 画面上哪一块没了，
+           这组才真的是那块美术。这是本臂的阳性对照。 */
+        if(cfg.grpAt!==undefined && Math.abs(cfg.grpAt-want)<0.6 && cfg.groups){
+          /* 必须**冻住 ticker** 再逐组 hide：两张图之间只要动画走过 0.3s，差异就被位移吃掉，
+             实测七组的差异包围盒一模一样（= 全画面位移），对照等于没做。 */
+          try{ window.__app.ticker.stop(); }catch(e){}
+          await new Promise(r=>setTimeout(r,80));
+          rec.grp=[];
+          try{ rec.grpBase=await window.__app.renderer.extract.base64(window.__app.stage,"image/png"); }catch(e){}
+          for(let gi=0; gi<cfg.groups.length; gi++){
+            const idx=(cfg.groups[gi]||[]).map(n=>ids.indexOf(n)).filter(j=>j>=0);
+            window.__hideSet=new Set(idx);
+            await new Promise(r=>setTimeout(r,60));
+            try{ rec.grp.push({name:cfg.grpNames[gi], n:idx.length,
+                               b64:await window.__app.renderer.extract.base64(window.__app.stage,"image/png")}); }
+            catch(e){ rec.grp.push({name:cfg.grpNames[gi], n:idx.length, err:String(e).slice(0,90)}); }
+            window.__hideSet=null;
+            await new Promise(r=>setTimeout(r,60));
+          }
+          try{ window.__app.ticker.start(); }catch(e){}
+        }
+        window.__shots.push(rec);
+      }catch(e){ window.__shots.push({t:+tt.toFixed(3), want, err:String(e).slice(0,120)}); }
+    }
+    if(ki<snapAt.length && tt>=snapAt[ki]){ const w=snapAt[ki]; ki++; snaps.push(takeSnap(tt)); }
+    if(cfg.unphaseAt && unphased===null && tt>=cfg.unphaseAt){
+      try{ const S=core.__phaseSet; unphased={had:S?S.size:-1};
+        if(S) S.clear(); unphased.at=+tt.toFixed(3); }catch(e){ unphased={err:String(e).slice(0,100)}; }
+    }
+    await new Promise(r=>setTimeout(r,100));
+  }
+  const H=window.__hd; window.__hd=null;
+  if(H.winStart!==null) H.windows.push([H.winStart,+cfg.secs.toFixed(3)]);
+  if(H.vwinStart!==null) H.vwindows.push([H.vwinStart,+cfg.secs.toFixed(3)]);
+  return JSON.stringify({clip:cfg.clip, secs:cfg.secs, small:!!cfg.small, eps:H.eps,
+    ui:!!cfg.ui, uiFail:window.__uiFail||null, snaps:snaps, unphased:unphased,
+    played:(()=>{ try{ return (im.motionManager.state&&im.motionManager.state.currentGroup)||null; }catch(e){ return null; } })(),
+    upd:H.upd, updPerSec:+(H.upd/cfg.secs).toFixed(1),
+    minHl:H.minHl===999?null:H.minHl, maxHl:H.maxHl, windows:H.windows,
+    minVis:H.minVis===1e9?null:H.minVis, maxVis:H.maxVis,
+    minHv:H.minHv===999?null:H.minHv, maxHv2:H.maxHv2, vwindows:H.vwindows,
+    handCount:hand.length, missing:cfg.names.filter(n=>ids.indexOf(n)<0),
+    handNames:handNames, zeroVertexDrawables:v0count, totalDrawables:D.count,
+    vcStart:vshot(), vcEnd:vshot(),
+    watch:watchNames, changesTotal:H.changes.length, rows:H.rows,
+    changes:H.changes.slice(0,400), zero:H.zero.slice(0,60), dimming:H.dimming.slice(0,40)});
+})"""
+
+
 # ---------------------------------------------------------------- ⑬ 台账矛盾判定：同一趟里把「扫 Param25」与「钉 Param25」合进同一次运行、同一套索引
 # 为什么要它（§6.37 交接的第一件事）：臂 ⑤ 的显隐台账说「全默认 + Param25=0.5 ⇒ ArtMesh325=1.0」，
 # 臂 ⑫ 用**逐位相同**的参数数组直读同一个下标(378) 得 **0**，且三个目标全灭（不是单片偶发）。
@@ -1506,6 +1750,25 @@ def main():
     ap.add_argument("--lrprotocol", default="two", choices=["one", "two"], help="⑱ seq 模式：two=先复位打一拍再打目标值一拍（⑰ 现做法）；one=写成目标状态只打一拍")
     ap.add_argument("--lrseq", default="0,0.05,0.1,0.2,0.5,1.0", help="⑱ seq 模式扫的值（按参数量程钳）")
     ap.add_argument("--lrpump", type=int, default=60, help="⑱ seq 模式：复位后再连打几拍（分「锁存」与「慢收敛」）")
+    ap.add_argument("--preroll", action="store_true", help="㉑ 预路过（补丁 ⑧）A/B：开/关各跑一遍全新页面，逐组量六组手亮几片")
+    ap.add_argument("--handdark", action="store_true", help="㉒ 手部并集**逐拍**只记翻转与全灭窗口（不受截图速度限制）；"
+                                                            "配 --hdclip/--hdsecs/--hdsmall/--hdparams")
+    ap.add_argument("--hdclip", default="home", help="㉒ 从 idle 强切到哪条 clip（时钟原点=切换那一刻）")
+    ap.add_argument("--hdsecs", type=float, default=20.0, help="㉒ 切换后连续测多少秒")
+    ap.add_argument("--hdsmall", type=int, default=1, help="㉒ 1=先把渲染器缩到 360x260 换拍率（0=不缩）；拍率会随结果发布")
+    ap.add_argument("--hdparams", default="Param25,Param27,Param28,Param145,Param144",
+                    help="㉒ 每次翻转随行的参数读数（逗号分隔参数名）")
+    ap.add_argument("--hdevery", type=int, default=4, help="㉒ 全模型逐顶点扫描每几拍做一次（1=每拍，拍率会掉一半）")
+    ap.add_argument("--hdshots", default="", help="㉒ 在这些秒数各抓一张页面内截图（逗号分隔，走 renderer.extract 不冻结时钟）")
+    ap.add_argument("--hdonlyat", default="", help="㉒ 在这些秒数额外抓一张「只留手部片」的图，并直接量手的**屏幕**包围盒（判手有没有被裁到画面外）")
+    ap.add_argument("--hdgrpat", type=float, default=0, help="㉒ 在这一秒做**阳性对照**：逐组只 hide 一组各抓一张，认出名单里每组到底是画面上哪一块（0=不做）")
+    ap.add_argument("--hdw", type=int, default=360, help="㉒ 缩渲染器的宽（要和手看得清，抓图时建议 720 以上）")
+    ap.add_argument("--hdh", type=int, default=260, help="㉒ 缩渲染器的高")
+    ap.add_argument("--hdui", action="store_true", help="㉒ 走页面入口（下拉选动作 + 点「重播」）而不是直接 startMotion —— "
+                                                        "只有这条路会装填「残留复位层」，见 JS_HANDDARK 注释")
+    ap.add_argument("--hdsnapat", default="", help="㉒ 在这些秒数各打一次场景快照（容器变换 / 模型空间可见包围盒 / 回绕名单 / 离默认最远的参数）")
+    ap.add_argument("--hdunphase", type=float, default=0, help="㉒ >0 则在该秒把补丁 ⑤ 的回绕集合**清空**（同一次运行内的 A/B，判"
+                                                                "「角色跑掉是不是回绕造成的」）")
     ap.add_argument("--latchlaw", default="", help="⑲ 锁存律：参数名（可写成 Param25:0,0.05,0.1 指定值表），**每个值换一次新页面**")
     ap.add_argument("--lawseq", default="0,0.02,0.05,0.08,0.1,0.15,0.2,0.3,0.4,0.5,0.6,1.0",
                     help="⑲ 默认值表（覆盖不到具体形状时自己加值，一页一值 ⇒ 值表就是成本）")
@@ -1977,6 +2240,253 @@ def main():
                 print("   core/model 上真实存在的 reset 类 API：%s" % json.dumps(r18.get("api"), ensure_ascii=False)[:300])
                 print("   结论要看：没有任何复位成功 ⇒ ⑰ 只能「一页一探测」，全库批量判死；"
                       "有且签名可复现 ⇒ ⑰ 按原方案跑，复位步骤写进 probe。")
+
+    # —— ㉑ 预路过（补丁 ⑧）的 A/B：必须各跑一遍全新页面（补丁在表到手那一刻就生效，事后开关无效）
+    if a.preroll:
+        steps21 = [{"tag": "idle 稳态", "clip": "idle", "wait": 4.0},
+                   {"tag": "切到 home 首帧", "clip": "home", "wait": 0.25},
+                   {"tag": "home +3s", "clip": "", "wait": 3.0},
+                   {"tag": "home +9s（已过第一段过渡）", "clip": "", "wait": 6.0},
+                   {"tag": "home +15s", "clip": "", "wait": 6.0}]
+        res21 = {}
+        for mode in ("off", "on"):
+            if mode == "off":
+                cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "window.__preRoll=false;"})
+            j21 = reload_boot()
+            if not j21.get("ok"):
+                print("   [FAIL] ㉑ %s 那遍重载失败：%s" % (mode, str(j21)[:160]))
+                break
+            raw21 = ev(JS_PREROLL + "({steps:%s})" % json.dumps(steps21))
+            try:
+                res21[mode] = json.loads(raw21) if isinstance(raw21, str) and raw21.strip().startswith("{") else {"err": str(raw21)[:240]}
+            except Exception:
+                res21[mode] = {"err": str(raw21)[:240]}
+            if mode == "off":
+                try:
+                    cmd("Page.removeScriptToEvaluateOnNewDocument", {"identifier": "1"})
+                except Exception:
+                    pass
+        f21 = os.path.join(ROOT, ".diag", "l2d_preroll_ab_%s.json" % a.model)
+        with open(f21, "w", encoding="utf-8") as fh:
+            json.dump(res21, fh, ensure_ascii=False)
+        print("\n== ㉑ 预路过 A/B（六组手 = ⑲ 冷态律给的键位分组；on = 载入后把所有键路过一遍）")
+        for mode in ("off", "on"):
+            r = res21.get(mode) or {}
+            if "seq" not in r:
+                print("   %s 那遍未出结果：%s" % (mode, str(r)[:200]))
+                continue
+            last = (r["dbg"].get("last") or {})
+            print("   %s：preRoll=%s 预路过 hits=%s 耗时=%sms 表=%s"
+                  % (mode, r.get("preroll"), last.get("hits"), last.get("ms"),
+                     (r["dbg"].get("snap") or {}).get("state")))
+            for st in r["seq"]:
+                print("     %-30s 亮 %-5s  %s" % (st["tag"], st["lit"],
+                      "  ".join("%s %d/%d" % (g, st.get(g + "_on", 0), n) for g, n in r["groups"])))
+        if all("seq" in (res21.get(m) or {}) for m in ("off", "on")):
+            print("\n   判据①（idle 稳态下六组各至少亮一片）：")
+            for mode in ("off", "on"):
+                st = next((x for x in res21[mode]["seq"] if x["tag"] == "idle 稳态"), None)
+                if not st:
+                    continue
+                bad = [g for g, n in res21[mode]["groups"] if g != "A" and st.get(g + "_on", 0) == 0]
+                print("     %s：%s" % (mode, "六组全有亮的" if not bad else "仍整组全灭 %s" % bad))
+            print("   判据②（切到 home 之后不得出现「整组从亮变灭」）：")
+            for mode in ("off", "on"):
+                seq = res21[mode]["seq"]
+                hits = []
+                for x, y in zip(seq, seq[1:]):
+                    for g, n in res21[mode]["groups"]:
+                        if x.get(g + "_on", 0) > 0 and y.get(g + "_on", 0) == 0:
+                            hits.append("%s→%s %s" % (x["tag"], y["tag"], g))
+                print("     %s：%s" % (mode, hits or "无整组熄灭"))
+        print("   逐组读数 → %s" % f21)
+
+    # —— ㉒ 手部并集逐拍：上一趟 `--trace` 20s 只拿到 200 拍（swiftshader 渲染 200ms/拍），
+    #    "并集从没为 0"这个结论的**时间分辨率不够**，不能拿来判死。本臂把采样提到拍率自证 ≥25/s，
+    #    并且只记翻转与全灭窗口，所以高频也不会把结果撑爆。
+    if a.handdark:
+        HD34 = ["ArtMesh36", "ArtMesh42", "ArtMesh43", "ArtMesh44", "ArtMesh51",
+                "ArtMesh331", "ArtMesh332", "ArtMesh333", "ArtMesh334", "ArtMesh335",
+                "ArtMesh325", "ArtMesh326", "ArtMesh327", "ArtMesh328", "ArtMesh329", "ArtMesh330",
+                "ArtMesh355", "ArtMesh379",
+                "ArtMesh356", "ArtMesh357", "ArtMesh358", "ArtMesh359", "ArtMesh360",
+                "ArtMesh364", "ArtMesh380", "ArtMesh381", "ArtMesh593", "ArtMesh594",
+                "ArtMesh365", "ArtMesh366", "ArtMesh367", "ArtMesh368", "ArtMesh369", "ArtMesh370"]
+        j22 = reload_boot()
+        if not j22.get("ok"):
+            print("   [FAIL] ㉒ 重载失败：%s" % str(j22)[:160])
+        else:
+            cfg22 = {"clip": a.hdclip, "secs": a.hdsecs, "small": bool(a.hdsmall), "names": HD34,
+                     "every": max(1, a.hdevery), "w": a.hdw, "h": a.hdh, "ui": bool(a.hdui),
+                     "groups": [HD34[0:5], HD34[5:10], HD34[10:16], HD34[16:18],
+                                HD34[18:23], HD34[23:28], HD34[28:34]],
+                     "grpNames": ["A", "g01", "g02", "g03", "g04", "g05", "g06"],
+                     "grpAt": (a.hdgrpat if a.hdgrpat > 0 else None),
+                     "snapAt": [float(x) for x in a.hdsnapat.split(",") if x.strip()],
+                     "onlyAt": [float(x) for x in a.hdonlyat.split(",") if x.strip()],
+                     "unphaseAt": (a.hdunphase if a.hdunphase > 0 else 0),
+                     "shots": [float(x) for x in a.hdshots.split(",") if x.strip()],
+                     "params": [x.strip() for x in a.hdparams.split(",") if x.strip()]}
+            raw22 = ev(JS_HANDDARK + "(%s)" % json.dumps(cfg22))
+            try:
+                r22 = json.loads(raw22) if isinstance(raw22, str) and raw22.strip().startswith("{") else {"err": str(raw22)[:300]}
+            except Exception:
+                r22 = {"err": str(raw22)[:300]}
+            f22 = os.path.join(ROOT, ".diag", "l2d_handdark_%s_%s.json" % (a.model, a.hdclip))
+            with open(f22, "w", encoding="utf-8") as fh:
+                json.dump(r22, fh, ensure_ascii=False)
+            print("\n== ㉒ 手部并集逐拍（%d 片，切换→`%s`，测 %.1fs）" % (len(HD34), a.hdclip, a.hdsecs))
+            if "upd" not in r22:
+                print("   [FAIL] %s" % str(r22)[:300])
+            else:
+                print("   自证：upd=%d 拍率=%.1f/s（缩渲染器=%s） 名单命中=%d/%d 缺=%s"
+                      % (r22["upd"], r22["updPerSec"], r22["small"], r22["handCount"],
+                         len(HD34), r22["missing"] or "无"))
+                print("   全模型：亮(opacity>0.5) 最少%s/最多%s ｜ 看得见(亮且面积>%.0e) 最少%s/最多%s"
+                      % ("-", r22["maxVis"], r22["eps"], r22["minVis"], r22["maxVis"]))
+                print("   手部名单：亮片数 %s~%s ｜ **看得见**的片数 %s~%s"
+                      % (r22["minHl"], r22["maxHl"], r22["minHv"], r22["maxHv2"]))
+                print("   亮片全灭窗口 %d 个 ｜ **看得见=0** 的窗口 %d 个：%s"
+                      % (len(r22["windows"]), len(r22["vwindows"]),
+                         ("  ".join("[%.2f→%.2f] %.2fs" % (w[0], w[1], w[1] - w[0])
+                                    for w in r22["vwindows"][:12])) or "无"))
+                print("   翻转事件 %d 次（前 40）：t 并集亮数 [新亮]/[新灭] 随行参数%s"
+                      % (r22["changesTotal"], r22["watch"]))
+                for ch in r22["changes"][:40]:
+                    print("     %7.3fs 亮%-3d  +%-28s -%-28s %s"
+                          % (ch[0], ch[2], ",".join(x.replace("ArtMesh", "") for x in ch[3])[:28],
+                             ",".join(x.replace("ArtMesh", "") for x in ch[4])[:28], ch[5]))
+                rows22 = r22.get("rows") or []
+                if rows22:
+                    print("   逐拍时间轴（t 全模型亮/看得见 手亮/手看得见 手面积合计）每 %d 拍取一拍："
+                          % max(1, len(rows22) // 24))
+                    for x in rows22[::max(1, len(rows22) // 24)]:
+                        print("     %7.3fs %-6s %4d/%4d   手 %2d/%2d  面积 %8.3f"
+                              % (x[0], (x[7] if len(x) > 7 else ""), x[1], x[2], x[3], x[4], x[5]))
+                    gseq, glast = [], None
+                    for x in rows22:
+                        g = x[7] if len(x) > 7 else ""
+                        if g != glast:
+                            gseq.append((x[0], g)); glast = g
+                    print("   currentGroup 变化：%s" % ("  ".join("%.2fs→%s" % (a_, b_ or "空") for a_, b_ in gseq[:14])))
+                    for sn in (r22.get("snaps") or []):
+                        print("   [snap] t=%-7.2f group=%-6s 容器变换(sx,sy,px,py,rot)=%s 可见包围盒=%s"
+                              % (sn.get("t", -1), sn.get("g"), sn.get("tr"), sn.get("bb")))
+                        ph = sn.get("phase")
+                        if isinstance(ph, list):
+                            print("          回绕名单 %d 个：%s" % (len(ph), ",".join(ph[:16])))
+                        for fr in (sn.get("far") or [])[:8]:
+                            print("          偏离默认 %-12s dev=%-5s 值=%-7s 默认=%-7s 量程[%s,%s]" % tuple(fr))
+                    if r22.get("unphased"):
+                        print("   中途清空回绕集合（同页 A/B）：%s" % r22["unphased"])
+                    hn22 = r22.get("handNames") or HD34
+                    if rows22 and len(rows22[0]) > 6:
+                        cols = list(zip(*[x[6] for x in rows22]))
+                        print("   逐片面积（最大/最小/最小出现的时刻；最小不到最大的 20% 记 COLLAPSE）：")
+                        for j, nm in enumerate(hn22[:len(cols)]):
+                            c = list(cols[j])
+                            if not c:
+                                continue
+                            mx = max(c); mi = min(c); mni = c.index(mi)
+                            coll = "COLLAPSE" if mx > 1e-3 and mi < 0.2 * mx else ""
+                            print("     %-12s 最大%8.3f 最小%8.3f @%6.2fs 首%8.3f 末%8.3f %s"
+                                  % (nm, mx, mi, rows22[mni][0], c[0], c[-1], coll))
+                    vcs = r22.get("vcEnd") or []
+                    if vcs:
+                        print("   顶点体检（收尾那一拍）：片名 / vertexCount / 顶点数组长度 / 首顶点坐标")
+                        for row in vcs:
+                            print("     %-12s vc=%-5s 长度=%-5s 首顶点=(%s, %s)"
+                                  % (row[0], row[1], row[2], row[3], row[4]))
+                        print("   全模型 vertexCount==0 的 drawable：%s / %s"
+                              % (r22.get("zeroVertexDrawables"), r22.get("totalDrawables")))
+                if r22.get("dimming"):
+                    print("   半途变淡（同一拍没灭但透明度变了，前 8）：%s"
+                          % json.dumps(r22["dimming"][:8], ensure_ascii=False)[:400])
+                if r22["updPerSec"] < 25:
+                    print("   ⚠️ 拍率 %.1f/s 不够（<25/s）：这趟**测不到**几十毫秒级的闪没，"
+                          "只够证明 %.0fms 以上的窗口不存在" % (r22["updPerSec"], 1000.0 / r22["updPerSec"]))
+                print("   逐拍明细 → %s" % f22)
+                idx22 = ev("JSON.stringify((window.__shots||[]).map(s=>({t:s.t,want:s.want,err:s.err||null,row:s.row,hands:!!s.handsB64,handsErr:s.handsErr||null,grp:(s.grp||[]).length,gbase:!!s.grpBase})))") or "[]"
+                try:
+                    lst22 = json.loads(idx22)
+                except Exception:
+                    lst22 = []
+                for q, s in enumerate(lst22):
+                    if s.get("err"):
+                        print("   [shot] t=%s 抓失败：%s" % (s.get("want"), s["err"]))
+                        continue
+                    b64 = ev("window.__shots[%d].b64||''" % q) or ""
+                    if isinstance(b64, dict):
+                        b64 = b64.get("value", "")
+                    b64 = (b64 or "").split(",", 1)[-1]
+                    if not b64:
+                        print("   [shot] t=%s 没取到 base64" % s.get("want"))
+                        continue
+                    fp22 = os.path.join(ROOT, ".diag", "l2d_handdark_%s_%s_t%s.png"
+                                        % (a.model, a.hdclip, ("%5.2f" % s.get("t", 0)).replace(" ", "0")))
+                    with open(fp22, "wb") as fh:
+                        fh.write(base64.b64decode(b64))
+                    print("   [shot] t=%.2fs 逐拍签名(手 亮/看得见/面积)=%s → %s"
+                          % (s.get("t", 0), (s.get("row") or [])[3:], os.path.basename(fp22)))
+                    if s.get("hands"):
+                        hb = ev("window.__shots[%d].handsB64||''" % q) or ""
+                        hb = (hb or "").split(",", 1)[-1]
+                        if not hb:
+                            print("          只留手：没取到 base64（%s）" % (s.get("handsErr") or "?"))
+                            continue
+                        fp23 = fp22[:-4] + "_handsonly.png"
+                        with open(fp23, "wb") as fh:
+                            fh.write(base64.b64decode(hb))
+                        try:
+                            from PIL import Image as _Im
+                            im23 = _Im.open(fp23).convert("RGBA")
+                            bb = im23.split()[3].getbbox()
+                            W23, H23 = im23.size
+                            if not bb:
+                                print("          只留手：画布上**一个不透明像素都没有** ⇒ 手整体在画面外 (%dx%d)" % (W23, H23))
+                            else:
+                                x0, y0, x1, y1 = bb
+                                edge = "".join(n for n, c in (("左", x0 <= 1), ("上", y0 <= 1),
+                                                               ("右", x1 >= W23 - 2), ("下", y1 >= H23 - 2)) if c)
+                                print("          只留手：屏幕包围盒(%d,%d)-(%d,%d) 画布%dx%d 贴边=%s 占屏%.1f%%"
+                                      % (x0, y0, x1, y1, W23, H23, edge or "无",
+                                         100.0 * (x1 - x0) * (y1 - y0) / (W23 * H23)))
+                        except Exception as e23:
+                            print("          只留手：算包围盒失败 %s" % str(e23)[:120])
+                    gp_base = fp22
+                    if s.get("gbase"):
+                        gbz = (ev("window.__shots[%d].grpBase||''" % q) or "").split(",", 1)[-1]
+                        if gbz:
+                            gp_base = fp22[:-4] + "_frozen.png"
+                            with open(gp_base, "wb") as fh:
+                                fh.write(base64.b64decode(gbz))
+                    for gz in range(int(s.get("grp") or 0)):
+                        meta = ev("JSON.stringify({name:window.__shots[%d].grp[%d].name,n:window.__shots[%d].grp[%d].n,"
+                                  "err:window.__shots[%d].grp[%d].err||null})" % (q, gz, q, gz, q, gz))
+                        try:
+                            mm23 = json.loads(meta)
+                        except Exception:
+                            mm23 = {"name": "?", "n": 0, "err": str(meta)[:80]}
+                        gb = ev("window.__shots[%d].grp[%d].b64||''" % (q, gz)) or ""
+                        gb = (gb or "").split(",", 1)[-1]
+                        if not gb:
+                            print("          [阳性对照] hide %s 抓图失败：%s" % (mm23.get("name"), mm23.get("err")))
+                            continue
+                        fp24 = fp22[:-4] + "_hide-%s.png" % mm23.get("name")
+                        with open(fp24, "wb") as fh:
+                            fh.write(base64.b64decode(gb))
+                        try:
+                            from PIL import Image as _Im, ImageChops as _C
+                            a1 = _Im.open(gp_base).convert("RGB")
+                            a2 = _Im.open(fp24).convert("RGB")
+                            dif = _C.difference(a1, a2).convert("L")
+                            bb = dif.getbbox()
+                            nd = sum(1 for v in list(dif.getdata()) if v > 24)
+                            print("          [阳性对照] 只 hide %-4s(%2d 片) → 画面差异 %7d 像素 区域 %s → %s"
+                                  % (mm23.get("name"), mm23.get("n") or 0, nd, bb, os.path.basename(fp24)))
+                        except Exception as e24:
+                            print("          [阳性对照] hide %s 存图成功，比差异失败 %s"
+                                  % (mm23.get("name"), str(e24)[:100]))
 
     # —— ⑲ 锁存律：**一页只探一个值**（⑱ 证了显隐是路径函数之后，这是唯一还能拿到「边沿→写入」对应关系的形状）
     #    每页做三件事：冷基线 → 一次跳到 v（这份签名 = 该值的**干净响应** R(v)）→ 回默认打一拍 + 连打 pump 拍
