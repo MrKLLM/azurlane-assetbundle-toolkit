@@ -126,26 +126,15 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
   transform:perspective(620px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--sc));
   transition:transform .14s ease-out,box-shadow .24s var(--spring-slow),border-color .18s ease-out;
   animation:pop .34s var(--spring) backwards;animation-delay:calc(min(var(--i,0),24)*16ms)}
-/* 边墙：**一层覆盖网格的遮罩层，一次画出所有卡的环**（2026-10-11 结构改造，接 §134）。
-   原来是每张卡一个 ::before 挂 backdrop-filter ⇒ 同屏 70 个滤镜盒。而 backdrop-filter 的成本
-   单位就是"盒子个数"（半径/遮罩/面积/链长全都不要钱，§134 一）⇒ 并成一个盒子之后实测
-   划水 16.7ms → 6.7ms，正好贴到"完全不挂玻璃"的地板上（那 10ms 全是盒子个数带来的）。
-   ⚠️ 这一层必须在滚动容器 main **内部**、随内容滚动：环相对卡片不动 ⇒ 滚动时不需要重算遮罩，
-      只在越过锚点阈值时换一次。做成 fixed 层就得每帧重建，白亏。
-   ⚠️ 它盖在所有卡之上（每张卡有 transform ⇒ 各自成层叠上下文，卡内 z-index 拦不住这层），
-      所以卡片的 ::after 斜反光会被这一圈模糊扫到一点。实测可接受；观感不对就把反光也搬进这层。
-   ⚠️ 环宽 12px 与圆角 16px 由 GL 建遮罩时写死同源，别只改这里的 CSS。 */
-#glassone{position:absolute;left:0;pointer-events:none;z-index:6;
-  -webkit-backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08);
-  backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08);
-  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;
-  -webkit-mask-position:0 0;mask-position:0 0;
-  -webkit-mask-size:100% 100%;mask-size:100% 100%}
-/* ⚠️ 悬停那一张是**例外**：卡片有 transform（跟随鼠标倾斜 ±11°、上浮 5px），而层里的环是按
-   静止位置画的，一倾斜环就脱开卡边 ⇒ 让这一张挂回自己的 ::before（环跟着卡走），
-   同时 GL 建遮罩时把它从层里扣掉（否则会双重模糊）。
-   代价：悬停期间多 1 个滤镜盒（≈0.15ms），换来环不脱位。进出各重建一次，不是每帧。 */
-.card:hover.g::before{content:'';position:absolute;inset:0;z-index:4;pointer-events:none;
+/* 边墙：一圈 12px 的"更厚的玻璃"，玻璃拟态最出特征的一笔。
+   做法是 backdrop-filter 挂在 ::before 上，再用两层 mask 做 exclude，只留外圈那一环。
+   ⚠️ 厚度从 9px 加到 12px、模糊从 13px 加到 17px：上一版这一圈太薄，看不出"边"和"面"的差别。
+   ⚠️ 面板那层 blur(2.5px) **已删**（2026-10-11 性能轮）：实测成本是「每个挂 backdrop-filter 的
+      盒子一份固定开销」，与模糊半径、遮罩、面积、链上函数个数都无关（N/P/Q/R 四条对照全部与
+      不改动同价）⇒ 唯一的减法是**少一个盒子**。卡片原来是两个（面板 + 边墙），砍掉面板那个，
+      而 2.5px 底下压着的是不透明缩略图，本来就几乎看不出。`.g` 现在只表示"这张卡挂边墙"。
+   ⚠️ 这一圈**只是模糊**，推不动背景像素——真折射见下面"卡面故意不做折射"那条，它只留给导航栏。 */
+.card.g::before{content:'';position:absolute;inset:0;z-index:4;pointer-events:none;
   border-radius:inherit;padding:var(--lg-ring,12px);
   -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
   mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
@@ -853,79 +842,13 @@ function lgRefresh(){
   lgApply(document.querySelector('header'),'nav');
 }
 
-/* ---------- 边墙：一层遮罩画完所有环（配套 CSS 的 #glassone） ----------
-   为什么这样做：backdrop-filter 的成本单位是"挂它的盒子个数"，与半径/遮罩/面积/链长无关
-   （§134 一实测），所以 70 个卡各挂一个 = 10ms，并成一层 = 实测贴回零玻璃地板。
-   遮罩是一张 SVG：每条环 = 外圆角矩形 + 内圆角矩形两条子路径配 fill-rule:evenodd。
-   ⚠️ 坐标一律用「相对 main 的布局位置」，不是 getBoundingClientRect —— 后者带 transform，
-      悬停倾斜的卡会把环画歪。悬停那一张另有自己的 ::before（见 CSS 里的例外），这里跳过它。 */
-const GL = { el:null, top:0, pend:0 };
-function glRR(x,y,w,h,r){
-  r=Math.max(0,Math.min(r,Math.min(w,h)/2));
-  return 'M'+(x+r)+' '+y+'h'+(w-2*r)+'a'+r+' '+r+' 0 0 1 '+r+' '+r+'v'+(h-2*r)+
-         'a'+r+' '+r+' 0 0 1 '+(-r)+' '+r+'h'+(2*r-w)+'a'+r+' '+r+' 0 0 1 '+(-r)+' '+(-r)+
-         'v'+(2*r-h)+'a'+r+' '+r+' 0 0 1 '+r+' '+(-r)+'z';
-}
-function glBuild(){
-  const main=mainEl; if(!main) return;
-  const vp=main.clientHeight; if(vp<40) return;
-  /* 锚点往**上**多留一个视口：层覆盖 [scrollTop-vp, scrollTop+2vp)。
-     原来锚在 scrollTop，向上滚时上方那一屏根本不在层里，要等越过 0.6 视口才重建 ⇒ 头顶先空一条没环的带子。 */
-  const H=Math.round(vp*3), W=Math.round(main.clientWidth), top=Math.round(main.scrollTop-vp);
-  const cs=getComputedStyle(document.documentElement);
-  const ring=parseFloat(cs.getPropertyValue('--lg-ring'))||12;
-  const rad=parseFloat(cs.getPropertyValue('--r-card'))||16;
-  const hov=main.querySelector('.card:hover');
-  /* ⚠️ 位置一律取「布局位置」(offsetLeft/offsetTop 累加到 main)，**绝不能用
-     getBoundingClientRect()**：后者含 transform，而卡片 hover 会 perspective + 倾斜 ±11° +
-     上浮 + scale(1.015)，投影出来的矩形比布局盒大并且会**压到邻卡的矩形上**。
-     遮罩是 fill-rule:evenodd（按奇偶抵消），两个矩形一重叠，重叠区就从"环"翻成"实心"
-     ⇒ 现象是"某张卡整块糊住、连名字都看不见"（2026-10-11 用户实机撞到）。
-     尺寸同理用 offsetWidth/offsetHeight。悬停那张另有自己的 ::before（环跟着卡走），这里跳过它。
-     层与卡片同在 main 的 padding-box 坐标系里 ⇒ 层内坐标 = 布局位置 - 层的 top，不需要再绕视口。 */
-  let d='', n=0;
-  main.querySelectorAll('.card.g').forEach(c=>{
-    if(c===hov) return;
-    let x=0, y=0, e=c;
-    while(e && e!==main){ x+=e.offsetLeft; y+=e.offsetTop; e=e.offsetParent; }
-    const w=c.offsetWidth, h=c.offsetHeight, yy=Math.round(y-top);
-    x=Math.round(x);
-    if(yy<-40||yy>H+40) return;                           // 只画锚点窗口内的（上下各留 40px 余量）
-    d+=glRR(x,yy,w,h,rad)+glRR(x+ring,yy+ring,Math.max(0,w-2*ring),Math.max(0,h-2*ring),Math.max(0,rad-ring));
-    n++;
-  });
-  const el=GL.el||(GL.el=document.createElement('div'));
-  el.id='glassone';
-  el.style.width=W+'px'; el.style.height=H+'px'; el.style.top=top+'px';
-  if(n){
-    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'">'+
-              '<path d="'+d+'" fill="#fff" fill-rule="evenodd"/></svg>';
-    const u='url("data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)+'")';
-    el.style.webkitMaskImage=u; el.style.maskImage=u;
-    el.style.display='';
-  } else el.style.display='none';        // 一张都不在窗口内时别留一层全页模糊在那儿糊着
-  if(!el.parentNode) main.appendChild(el);
-  GL.top=top;
-}
-function glSchedule(){ if(GL.pend) return;
-  GL.pend=requestAnimationFrame(()=>{ GL.pend=0; glBuild(); }); }
-function glOnScroll(){
-  if(!GL.el) return glBuild();
-  if(Math.abs(mainEl.scrollTop-GL.top) > mainEl.clientHeight*0.6) glBuild();  // 越过锚点才重建
-}
-
 /* 毛玻璃（backdrop-filter）只给**进过视口**的卡片挂：1008 张各挂一层背景模糊是必掉的帧，
    而 IntersectionObserver 把同时生效的数量压到同屏那几十张。
    ⚠️ 每次重画网格必须先 disconnect()：观察器会持有它 observe 过的元素，
    卡片是每次筛选都整批新建的，不摘就会一路攒下去（泄漏）。 */
 const GLASS_IO = ('IntersectionObserver' in window) ? new IntersectionObserver(es=>{
   es.forEach(en=>en.target.classList.toggle('g', en.isIntersecting));
-  glSchedule();          // 进/出视口都会改变要画哪些环，rAF 合并成一次重建
 },{rootMargin:'140px'}) : null;
-/* 悬停进出要重算环（进出各一次，不是每帧）：hover 那张从层里挪到自己的 ::before。 */
-mainEl.addEventListener('mouseover',e=>{ if(e.target.closest && e.target.closest('.card')) glSchedule(); });
-mainEl.addEventListener('mouseleave',glSchedule);
-addEventListener('resize',glSchedule);
 if(LG.on){
   lgApply(document.querySelector('header'),'nav');
   let lgPend=0;

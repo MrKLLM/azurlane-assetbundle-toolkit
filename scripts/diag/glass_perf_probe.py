@@ -474,8 +474,15 @@ STATUS = """(()=>{const h=document.documentElement, nav=h.querySelector('header'
     tok_ok:['--lg-blur','--lg-ring','--lg-depth'].every(n=>String(cs.getPropertyValue(n)).trim()!==''),
     feimg:(LG.svg&&LG.svg.querySelector('feImage'))?LG.svg.querySelector('feImage')
       .getAttribute('href').length:0,
-    // 结构闸门：边墙必须是**一层** #glassone。逐卡 ::before 挂滤镜的写法一旦回来（悬停那张除外），
-    // 70 个滤镜盒就悄悄回来了、划水掉回 ~16.7ms —— 而这不会有任何报错，只会变成"又卡了"。
+    // 边墙**架构**报告：两种都合法，但必须只有一种在跑。
+    //   one-layer = #glassone 一层遮罩画所有环（省 13ms，但 2026-10-11 出现"整卡糊成实心"且
+    //               无头复现不了 ⇒ 已撤，见 §135）；per-card = 逐卡 ::before 挂滤镜（~16.7ms）。
+    // 闸门只判两种死路：一个都没有（玻璃没了）、或两种都挂（同一圈被模糊两次）。
+    rim_mode:(()=>{const one=!!document.getElementById('glassone');
+      let per=0; document.querySelectorAll('.card.g').forEach(c=>{
+        if(c.matches(':hover')) return;
+        if(getComputedStyle(c,'::before').backdropFilter!=='none') per++;});
+      return one?(per?'BOTH':'one-layer'):(per?'per-card':'NONE');})(),
     ov:(()=>{const g=document.getElementById('glassone');
       if(!g) return 'NO #glassone';
       const cs=getComputedStyle(g), mk=(cs.maskImage||cs.webkitMaskImage||'');
@@ -686,11 +693,14 @@ def main():
         # 这两条互相矛盾，说明条件跑起来时折射可能压根没生效——没有这行断言就会拿一组假数字下结论。
         print('材质:', json.dumps(json.loads(pg.ev(STATUS)), ensure_ascii=False))
         st0 = json.loads(pg.ev(STATUS))
-        if ('NO #glassone' in st0['ov']) or ('bf=false' in st0['ov']) or st0['ov_boxes']:
-            print(f'! 边墙结构闸门不过：{st0["ov"]}，非悬停卡上还挂着 {st0["ov_boxes"]} 个滤镜盒 —— '
-                  f'逐卡 ::before 的写法回来了，70 个盒会把划水打回 ~16.7ms（见 §134）')
+        # 只判两种死路：玻璃整个没了 / 两种架构同时挂着（同一圈被模糊两次）
+        if st0['rim_mode'] in ('NONE', 'BOTH'):
+            print(f'! 边墙架构闸门不过：rim_mode={st0["rim_mode"]}（'
+                  f'{"一层遮罩与逐卡 ::before 同时挂着 ⇒ 同一圈模糊两次" if st0["rim_mode"]=="BOTH" else "边墙没有任何滤镜 ⇒ 玻璃整圈消失"}）'
+                  f'；ov={st0["ov"]} ov_boxes={st0["ov_boxes"]}')
             sys.exit(1)
-        print(f'  边墙结构: {st0["ov"]}；非悬停卡上的滤镜盒 {st0["ov_boxes"]} 个 ✅')
+        print(f'  边墙架构: {st0["rim_mode"]}（per-card ≈16.7ms / one-layer ≈3.3ms，见 §134、§135）'
+              f'；ov_boxes={st0["ov_boxes"]} ov={st0["ov"]}')
         # 帧时数字只有在「这个材质确实会改变画面」被证完之后才有意义，所以它是硬闸门不是打印。
         if not render_proof(pg, '落地版边墙'):
             print('! 渲染对照不过 —— 先修实现，这一轮所有帧时数字都不要读')
@@ -716,8 +726,8 @@ def main():
         out['A_idle_as_is'] = run(pg, 'A 静止·现毛玻璃', 'asis', False)
         out['B_wave_as_is'] = run(pg, 'B 划水·现毛玻璃', 'asis', True)
         out['C_wave_noglass'] = run(pg, 'C 划水·摘玻璃', 'noglass', True)
-        out['D_wave_turb'] = run(pg, 'D 划水·现算噪声', 'turb', True)
-        out['E_wave_img'] = run(pg, 'E 划水·静态法线图', 'img', True)
+        # D/E 已撤下：它们给 `#glassone` 挂折射，而并层已回退（§135）⇒ 打在空选择器上=纯噪声。
+        # 想复现那两条的结论，先把 --shots 的架构切回 one-layer。
         out['F_wave_imgbody'] = run(pg, 'F 划水·整面折射', 'imgbody', True)
         print('  ── 以下是归因条件，不是候选方案 ──')
         # ⚠️ 2026-10-11 边墙并成 #glassone 之后，L/M/N/P/Q/R/X 七条**已撤下**：它们注入的选择器是
@@ -769,9 +779,9 @@ def main():
         # 相同就说明 url() 只是被 CSS 解析接受、并没有真的落到合成结果上 —— 那 E/F 的耗时数字毫无意义。
         # 阳性对照看的是**卡片**取景：D/E/F 只改卡片材质、不动导航栏，用 nav 取景会全同（假警报）
         sig = {k: (out.get(k) or {}).get('shot_card') for k in
-               ('C_wave_noglass', 'D_wave_turb', 'E_wave_img', 'F_wave_imgbody')}
-        if len(set(v for v in sig.values() if v)) < 4:
-            bad.append(f'截图指纹未全部互异 {sig}：材质差异没进像素，E/F 的成本结论不成立')
+               ('C_wave_noglass', 'F_wave_imgbody')}
+        if len(set(v for v in sig.values() if v)) < 2:
+            bad.append(f'截图指纹未全部互异 {sig}：材质差异没进像素，F 的成本结论不成立')
         if bad:
             print('\n⚠ 判据未过 —— ' + '；'.join(bad))
         else:
