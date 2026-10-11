@@ -9328,5 +9328,9 @@ Qoder 内置浏览器标签是 `visibilityState=hidden` 的隐藏表面：**`Int
   这与"用户 30~60fps 下看得见"并不矛盾。⇒ 要么把采样提到 30 拍/秒以上
   （需要绕开 swiftshader 的渲染成本：只跑 `coreModel.update()` 不渲染，靠参数向量事后回帧），
   要么给用户一个"暂停"按钮让**他**把坏帧冻住（顺带补上状态文档里那条"面板缺暂停开关"的旧待办）。
+- ⚠️ **入库留痕**：本条与臂 ㉙ 是在共享索引下被另一会话的提交 `b1655a5` 一起带进版本库的
+  （我先 `git add` 了这两个文件、他们随后 `git commit`）。内容无损（`git log -S JS_AREAHUNT` /
+  `-S 追加-XXIV` 都落在 b1655a5），但**提交说明不是我的那条**，所以这里补一句，免得以后按
+  commit message 找这条找不到。共享工作树下"我 add、他 commit"会互相扫，这条已经第三次发生。
 - **涉及文件（追加-XXIV）**：`scripts/diag/l2d_part_flicker_probe.py`（新臂 ㉙ `--areahunt/--hanames/--hasecs/--hathr/--haevery`）、
   `.diag/l2d_areahunt_gezi_2.json`、`.diag/l2d_areashot_gezi_2/`、`.diag/ah_shots.png`。
