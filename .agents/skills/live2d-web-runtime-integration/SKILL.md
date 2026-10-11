@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
 description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳、选某个动作时手会消失、部件在任何动作里都不动、切动作时某个部件闪一下、部件消失一下但 part 组读数恒定、同参数两次读出不同的显隐、扫出来的阈值表复现不了、把 34 片并成一个开关家族可疑、部件门那类否证报「0 个异常」但其实是键名读不到。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.7.22
+version: 1.7.23
 ---
 
 # Live2D 网页运行时集成
@@ -819,6 +819,21 @@ vs "参数持久保留"）的分叉，症状会被误读成"闪一下"。口径�
 本案数字与判死清单见 `docs/TROUBLESHOOTING.md` §123 追加-XX；可抄的测法＝
 `scripts/diag/l2d_part_flicker_probe.py` 的臂 ㉒（`--handdark` + `--hdonlyat`（只留目标片量屏幕包围盒）
 + `--hdgrpat`（逐组 hide 看图）+ `--hdui`（走页面入口）+ `--hdshots`（页面内定时截图））。
+**"要量哪一块"必须由**同一趟页面**回答：先冻住、照这一帧量靶、再就地二分**（2026-10-11 两次假阳性换来的）：
+
+- **不要试图跨进程复现动画相位**。插件的 `motionManager.state` 里没有时间的字段（只有
+  `currentGroup/currentIndex/*Priority`），`_currentMotion`/`state.items` 也不存在；
+  改用"参数向量当姿态指纹去扫最近帧"同样失败（实测残差 RMS 4.28，复位后角色整个倒立）。
+  ⇒ 任何"照着上一次运行量的靶框"都是错的。
+- **能用的形状 = 一个页面会话里的两步会话**：驱动轮询一个命令文件 ⇒
+  ① `{advance:秒}`：页面放开跑一会儿再**就地冻住**（`autoUpdate=false` + `ticker.stop()` + 手动一次
+  `coreModel.update()`），回传当前帧与 `stage.getBounds()`；② `{mode:bisect, box}`：
+  我照**这张**帧量靶，同一页面、同一冻帧上逐批藏、比颜色。靶框与画面天然同帧，`advance` 可反复发。
+- **反查结果必须"把靶框画回那张图"看一眼再采信**。本案第一次收敛出"某片变色 96%"看着极漂亮，
+  画回图上看：框压在月亮上 ⇒ 那一片是背景月亮。数字漂亮 ≠ 认对了对象。
+- **闸门要会拒绝**：残差超阈值就 `poseMiss` 中止、不许继续二分——
+  宁可没有名单，也不要一份会把人带回死路的假名单（本项目已因此白烧过十一轮）。
+
 **用像素当靶做"这块是谁画的"反查时，还有三条会让整批结论翻车的仪器事实**（2026-10-11 实测，第一次反查因此给出假阳性名单）：
 
 - **`extract(stage)` 裁的是模型自身包围盒，不是画布** ⇒ 同一张图上的 (x,y) 到下一帧就落到别的身体部位上。

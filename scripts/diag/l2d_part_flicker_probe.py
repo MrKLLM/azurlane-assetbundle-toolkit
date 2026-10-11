@@ -1165,6 +1165,71 @@ JS_HANDDARK = r"""(async (cfg) => {
 })"""
 
 
+# ---------------------------------------------------------------- ㉖ 就地冻住，把当前帧交出来量靶
+#   跨进程/跨段「复现相位」连续两次失败（指纹最小距离残差 4.28，根本没落回那一帧），
+#   而反查其实不需要复现——只要把页面**就地冻住**，靶框照着这一帧量就行。
+JS_FREEZE = r"""(async (cfg) => {
+  const m=window.__m, im=m.internalModel, app=window.__app, R=app.renderer;
+  const M=im.coreModel._model, D=M.drawables;
+  /* advance>0 ⇒ 先放开跑一会儿再冻：这样"这一帧没有手"时可以再要一帧，不必重开整趟。 */
+  if(cfg.advance>0){ try{ m.autoUpdate=true; im.autoUpdate=true; app.ticker.start(); }catch(e){}
+                     await new Promise(r=>setTimeout(r, cfg.advance*1000)); }
+  try{ m.autoUpdate=false; }catch(e){}
+  try{ im.autoUpdate=false; }catch(e){}
+  try{ app.ticker.stop(); }catch(e){}
+  await new Promise(r=>setTimeout(r,150));
+  try{ im.coreModel.update(); }catch(e){}
+  const url=await R.extract.base64(app.stage,"image/png");
+  let bb=null; try{ const g=app.stage.getBounds(); bb=[+g.x.toFixed(1),+g.y.toFixed(1),+g.width.toFixed(1),+g.height.toFixed(1)]; }catch(e){}
+  let lit=0; for(let i=0;i<D.count;i++) if(D.opacities[i]>0.5) lit++;
+  let g2=null; try{ g2=im.motionManager.state.currentGroup; }catch(e){}
+  return JSON.stringify({frozen:true, group:g2, lit:lit, bounds:bb,
+    canvas:[app.renderer.width, app.renderer.height], b64:url});
+})"""
+
+
+
+# ---------------------------------------------------------------- ㉕ 探一条「能读到 clip 自身时间」的路径
+#   三趟实测证明「点击后第 N 秒」不是相位（同一个 --hfat 11，一趟举手居中、一趟只露底边一对角），
+#   而反查靶框必须锁在同一姿态上才有意义 ⇒ 锚点要换成 clip 自己的时间。
+#   但插件的 motionManager.state 里只有 group/index/priority，没有时间 ⇒ 先把内部对象探一遍。
+JS_TIMEPROBE = r"""(async (cfg) => {
+  const m=window.__m, im=m.internalModel, mm=im.motionManager;
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  const keys=(o)=>{ const k=[]; let cur=o, d=0;
+    while(cur && d<4){ for(const x of Object.getOwnPropertyNames(cur))
+        if(k.indexOf(x)<0 && k.length<70) k.push(x);
+      cur=Object.getPrototypeOf(cur); d++; } return k; };
+  const nums=(o)=>{ const out={}; if(!o) return out;
+    for(const k of Object.keys(o)){ const v=o[k];
+      if(typeof v==='number'&&isFinite(v)) out[k]=+v.toFixed(3); } return out; };
+  const probe=()=>{ const st=mm.state||{}; const it=(st.items&&st.items[0])||null;
+    const cm=mm._currentMotion||mm.currentMotion||null; const T=[];
+    const add=(nm,v)=>T.push([nm,(typeof v==='number'&&isFinite(v))?+v.toFixed(3):String(v).slice(0,16)]);
+    add('mm._currentMotion._currentTime', cm&&cm._currentTime);
+    add('cm.currentTime', cm&&cm.currentTime);
+    add('cm.getTime()', (cm&&cm.getTime)?cm.getTime():'nofn');
+    add('items[0]._currentTime', it&&it._currentTime);
+    add('items[0].getTime()', (it&&it.getTime)?it.getTime():'nofn');
+    add('items[0].startTime', it&&it.startTime);
+    add('im._motionTime', im._motionTime);
+    add('m._lastUpdate', m._lastUpdate);
+    add('ticker.lastTime', window.__app.ticker.lastTime);
+    return {group:st.currentGroup, nItems:st.items?st.items.length:null,
+      itemKeys:it?keys(it).slice(0,36):null, itemNums:nums(it),
+      cm:!!cm, cmKeys:cm?keys(cm).slice(0,36):null, cmNums:cm?nums(cm):null,
+      mmNums:nums(mm), times:T}; };
+  const sel=document.getElementById('l2Motion'), rb=document.getElementById('l2Replay');
+  const rows=[{tag:'点击前', p:probe()}];
+  sel.value=cfg.clip; sel.dispatchEvent(new Event('change')); rb.click();
+  await t(300); rows.push({tag:'约0.3s', p:probe()});
+  await t(2700); rows.push({tag:'约3s', p:probe()});
+  await t(3000); rows.push({tag:'约6s', p:probe()});
+  await t(5000); rows.push({tag:'约11s', p:probe()});
+  return JSON.stringify(rows);
+})"""
+
+
 # ---------------------------------------------------------------- ㉔ 反查「画面上那两只手到底是哪批 mesh」
 #   为什么必须有这一臂（§123 追加-XX 的账）：过去十一轮所有"手在不在"的判据都挂在一份
 #   **从没验过**的名单上（臂 ⑤/⑲ 按显隐变化分出来的家族），本轮用两条阳性对照证伪了它 ——
@@ -1209,9 +1274,48 @@ JS_HANDFIND = r"""(async (cfg) => {
       const want=cfg.sweep.t0+k*cfg.sweep.step, now=(performance.now()-t0ref)/1000;
       if(want>now) await t((want-now)*1000);
       const u=await R.extract.base64(app.stage,"image/png");
-      sw.push({t:+want.toFixed(2), b64:u});
+      /* 每张图同时记下**整条参数向量**＝这一帧的"姿态指纹"。下一趟不再靠秒数对齐，
+         而是把播放姿态**复位到指纹最近的那一帧**再冻住 ⇒ 两趟落在同一姿态上，靶框才可比。 */
+      sw.push({t:+want.toFixed(2), v:Array.from(M.parameters.values), b64:u});
       if(sw.length>=40) break; }
-    return JSON.stringify({sweep:sw, clip:cfg.clip, box:cfg.box}); }
+    window.__sw=sw.map(f=>({t:f.t, v:f.v}));        // 指纹留在页面里，等同一趟的第二段用
+    return JSON.stringify({sweep:sw, clip:cfg.clip, box:cfg.box, kept:window.__sw.length}); }
+  let chk=null;
+  /* 第二趟：按指纹复位。扫一遍找到与 ref 最像的那一帧，记下它的向量；
+     然后关 autoUpdate + 停 ticker 把那一帧**写回**参数并只重算一次 ⇒ 姿态确定、与秒数无关。 */
+  let REF=null;
+  if(cfg.noscan){ /* é¡µé¢å·²è¢« JS_FREEZE å»ä½ï¼ä»¥å½åå¸§ä¸ºåï¼ä¸åçç¸ä½ */ }
+  else if(cfg.refT!==undefined && window.__sw){
+    const cand=window.__sw.slice().sort((x,y)=>Math.abs(x.t-cfg.refT)-Math.abs(y.t-cfg.refT))[0];
+    if(cand) REF={t:cand.t, v:cand.v}; }
+  else if(cfg.ref) REF=cfg.ref;
+  if(REF && !cfg.noscan){ const ref=REF.v, P=M.parameters;
+    const dist=(a)=>{ let d=0; for(let i=0;i<a.length;i++){ const x=a[i]-ref[i]; d+=x*x; } return d; };
+    /* ⚠️ 等命令的那段时间里 clip 早播完回落 idle 了 —— 上一版没重播就去扫，扫到的全是 idle，
+       于是"复位"落到别的姿态上，靶框压在月亮里，反查出 ArtMesh157 被当成手（其实是月亮）。
+       ⇒ 第二段必须**先重播**再扫指纹，且残差过大就中止，不许带着错姿态继续二分。 */
+    if(cfg.replay!==false){ try{ sel.value=cfg.clip; sel.dispatchEvent(new Event('change')); rb.click(); }catch(e){} }
+    let best=1e18, bestV=null, tEnd=performance.now()+ (cfg.refScanMs||20000);
+    while(performance.now()<tEnd){
+      const v=M.parameters.values, d=dist(v);
+      if(d<best){ best=d; bestV=Array.from(v); }
+      await t(40); }
+    try{ m.autoUpdate=false; }catch(e){}
+    try{ im.autoUpdate=false; }catch(e){}
+    try{ app.ticker.stop(); }catch(e){}
+    await t(80);
+    if(bestV){ for(let i=0;i<bestV.length;i++) P.values[i]=bestV[i];
+      try{ im.coreModel.update(); }catch(e){} }
+    chk=await shot();
+    const dv=dist(Array.from(P.values));
+    log.push(['按指纹复位（取 t=%s 那帧）：最小距离 %s → 复位后 %s（532 参数均方根）'
+              % [REF.t, +Math.sqrt(best/532).toFixed(5), +Math.sqrt(dv/532).toFixed(5)],
+              0,0, Math.sqrt(dv/532) <= 0.02 ? 'OK 落回同一姿态' : '❌ 残差过大 ⇒ 根本没落回那一帧，中止反查']);
+    if(Math.sqrt(dv/532) > 0.02 && !cfg.hfforce){
+      try{ app.ticker.start(); m.autoUpdate=true; }catch(e){}
+      return JSON.stringify({poseMiss:true, refT:REF.t, resid:+Math.sqrt(dv/532).toFixed(4),
+        box:cfg.box, area:(chk?chk.w*chk.h:0), log:log, singles:[], refB64:chk?chk.url:null}); }
+  }
   await t(cfg.at*1000);
   /* ⚠️ 必须**真的冻住**才能量"这块是谁画的"：`autoUpdate` 开着时每次渲染都会把模型往前推一帧，
      实测两连测自差 21,163/40,300 = 53% ⇒ 噪声比信号还大，任何掉率都读不出东西。
@@ -1283,7 +1387,8 @@ JS_HANDFIND = r"""(async (cfg) => {
     fin.push([nm, +(q.r*100).toFixed(1), +D.opacities[j].toFixed(2), +(D.renderOrders[j]||0).toFixed(0)]); }
   try{ app.ticker.start(); m.autoUpdate=true; }catch(e){}
   return JSON.stringify({at:cfg.at, box:cfg.box, area, self0, nz, allDiff, boxDiffAll, sameImg,
-    litCount:lit.length, total:D.count, log:log, singles:fin});
+    litCount:lit.length, total:D.count, log:log, singles:fin,
+    refB64:(typeof chk!=="undefined"&&chk)?chk.url:null});
 })"""
 
 
@@ -1876,6 +1981,7 @@ def main():
     ap.add_argument("--preroll", action="store_true", help="㉑ 预路过（补丁 ⑧）A/B：开/关各跑一遍全新页面，逐组量六组手亮几片")
     ap.add_argument("--handdark", action="store_true", help="㉒ 手部并集**逐拍**只记翻转与全灭窗口（不受截图速度限制）；"
                                                             "配 --hdclip/--hdsecs/--hdsmall/--hdparams")
+    ap.add_argument("--timeprobe", action="store_true", help="㉕ 探一条能读到 clip 自身时间的路径（内部对象键名 + 各候选值随时间变化），改锚点之前先跑这个")
     ap.add_argument("--handfind", action="store_true", help="㉔ 反查「画面上那两只手是哪批 mesh」：走 UI 入口播到第 --hfat 秒，"
                                                             "逐批藏 drawable，看 --hfbox 那块屏幕区域的像素掉多少")
     ap.add_argument("--hfat", type=float, default=7.0, help="㉔ 在第几秒开始量（要挑一个「手此刻在画面上」的相位）")
@@ -1883,6 +1989,8 @@ def main():
     ap.add_argument("--hfthr", type=float, default=0.25, help="㉔ 一批藏起来后区域掉多少比例算正（默认 0.25）")
     ap.add_argument("--hfbatch", type=int, default=48, help="㉔ 第一层每批多少片（亮着的片里切）")
     ap.add_argument("--hfbudget", type=int, default=90, help="㉔ 最多做多少次截图（预算用完就停，防跑飞）")
+    ap.add_argument("--hfwait", type=float, default=0, help="㉔ 扫完相后在同一趟页面里等命令文件 .diag/_hf_go.json（{t,box}），收到就按本趟自己的指纹复位再反查 —— 跨进程复现相位不可行")
+    ap.add_argument("--hfpick", default="", help="㉔ 第二趟用：按 --hfsweep 存的姿态指纹（这一秒）把播放姿态复位后再冻住，靶框才与扫相图可比")
     ap.add_argument("--hfsweep", default="", help="㉔ 只扫不判：按 起:止:步长 每帧存一张图（相位两次运行对不上，靶框必须由本趟自己的图来量）")
     ap.add_argument("--hdclip", default="home", help="㉒/㉔ 从 idle 强切到哪条 clip（时钟原点=切换那一刻）")
     ap.add_argument("--hdsecs", type=float, default=20.0, help="㉒ 切换后连续测多少秒")
@@ -2625,6 +2733,38 @@ def main():
                                   % (mm23.get("name"), str(e24)[:100]))
 
     # —— ㉔ 反查「画面上那两只手到底是哪批 mesh」（旧名单已被 §123 追加-XX 判死，先有名单再谈修法）
+    # —— ㉕ 探「clip 自身时间」的可读路径（锚点改造的前置；找到哪条随时间单调走就用哪条）
+    if a.timeprobe:
+        j25 = reload_boot()
+        if not j25.get("ok"):
+            print("   [FAIL] ㉕ 重载失败：%s" % str(j25)[:160])
+        else:
+            raw25 = ev(JS_TIMEPROBE + "({clip:%s})" % json.dumps(a.hdclip))
+            try:
+                r25 = json.loads(raw25)
+            except Exception:
+                r25 = None
+            print("== ㉕ clip 自身时间可读性探测（%s）" % a.hdclip)
+            if not isinstance(r25, list):
+                print("   [FAIL] %s" % str(raw25)[:260])
+            else:
+                f25 = os.path.join(ROOT, ".diag", "l2d_timeprobe_%s.json" % a.model)
+                with open(f25, "w", encoding="utf-8") as fh:
+                    json.dump(r25, fh, ensure_ascii=False)
+                for row in r25:
+                    q = row["p"]
+                    print("   %s  group=%s 队列长=%s" % (row["tag"], q.get("group"), q.get("nItems")))
+                    for nm, v in (q.get("times") or []):
+                        print("        %-32s %s" % (nm, v))
+                q0 = r25[-1]["p"]
+                print("   items[0] 键名：%s" % (q0.get("itemKeys")))
+                print("   items[0] 数值：%s" % json.dumps(q0.get("itemNums"), ensure_ascii=False)[:400])
+                print("   _currentMotion 存在=%s 键名：%s" % (q0.get("cm"), (q0.get("cmKeys") or [])))
+                print("   _currentMotion 数值：%s" % json.dumps(q0.get("cmNums"), ensure_ascii=False)[:400])
+                print("   motionManager 数值：%s" % json.dumps(q0.get("mmNums"), ensure_ascii=False)[:300])
+                print("   明细 → %s" % f25)
+
+
     if a.handfind:
         box24 = [int(x) for x in a.hfbox.split(",") if x.strip()]
         if len(box24) != 4:
@@ -2639,12 +2779,31 @@ def main():
                          "batch": max(4, a.hfbatch), "budget": max(8, a.hfbudget),
                          "sweep": ({"t0": sw24[0], "step": sw24[2],
                                      "n": max(1, int((sw24[1]-sw24[0])/sw24[2])+1)}
-                                    if sw24 and len(sw24) >= 3 else None)}
+                                    if sw24 and len(sw24) >= 3 else None),
+                         "ref": None}
+                if a.hfpick.strip():
+                    fpv = os.path.join(ROOT, ".diag", "l2d_hfsweep_%s.json" % a.model)
+                    if not os.path.isfile(fpv):
+                        print("   [FAIL] ㉔ 要先跑 --hfsweep 生成姿态指纹（%s 不存在）" % fpv)
+                    else:
+                        want24 = float(a.hfpick)
+                        fr24 = min(json.load(open(fpv, encoding="utf-8"))["frames"],
+                                   key=lambda f: abs(f["t"] - want24))
+                        cfg24["ref"] = {"t": fr24["t"], "v": fr24["v"]}
+                        print("   ㉔ 按指纹复位：目标 t=%.2fs → 取 %s 那帧的 %d 个参数" %
+                              (want24, fr24["t"], len(fr24["v"])))
                 raw24 = ev(JS_HANDFIND + "(%s)" % json.dumps(cfg24))
                 try:
                     r24 = json.loads(raw24) if isinstance(raw24, str) and raw24.strip().startswith("{") else {"err": str(raw24)[:300]}
                 except Exception:
                     r24 = {"err": str(raw24)[:300]}
+                rb24 = r24.pop("refB64", None) if isinstance(r24, dict) else None
+                if rb24:
+                    fp24r = os.path.join(ROOT, ".diag", "l2d_handfind_%s_ref.png" % a.model)
+                    with open(fp24r, "wb") as fh:
+                        fh.write(base64.b64decode(rb24.split(",", 1)[-1]))
+                    print("   复位后的确认帧 → %s（要和扫相图同一姿态，靶框才可比）"
+                          % os.path.basename(fp24r))
                 bb24 = r24.pop("baseB64", None) if isinstance(r24, dict) else None
                 if bb24:
                     fp24b = os.path.join(ROOT, ".diag", "l2d_handfind_%s_at%s_base.png" % (a.model, a.hfat))
@@ -2661,16 +2820,69 @@ def main():
                         os.makedirs(d24)
                     for old in glob.glob(os.path.join(d24, "*.png")):
                         os.remove(old)
+                    fv24 = os.path.join(ROOT, ".diag", "l2d_hfsweep_%s.json" % a.model)
+                    with open(fv24, "w", encoding="utf-8") as fh:
+                        json.dump({"clip": a.hdclip,
+                                   "frames": [{"t": fr["t"], "v": fr.get("v")} for fr in r24["sweep"]]},
+                                  fh)
                     for fr in r24["sweep"]:
                         with open(os.path.join(d24, "s%05.2fs.png" % fr["t"]), "wb") as fh:
                             fh.write(base64.b64decode((fr["b64"] or "").split(",", 1)[-1]))
+                    print("   姿态指纹 → %s" % fv24)
                     print("   扫了 %d 帧（整幅不透明像素数随姿态变，可当粗相位标记）→ %s"
                           % (len(r24["sweep"]), d24))
                     for fr in r24["sweep"]:
-                        print("     t=%5.2fs 整幅 %6d" % (fr["t"], fr["all"]))
+                        print("     t=%5.2fs 整幅 %6s" % (fr["t"], fr.get("all", 0)))
                     r24 = None
+                    if a.hfwait > 0:
+                        go = os.path.join(ROOT, ".diag", "_hf_go.json")
+                        def wait_go(sec):
+                            if os.path.isfile(go):
+                                os.remove(go)
+                            t0w = time.time()
+                            while not os.path.isfile(go) and time.time() - t0w < sec:
+                                time.sleep(2)
+                            if not os.path.isfile(go):
+                                return None
+                            try:
+                                return json.load(open(go, encoding="utf-8"))
+                            except Exception:
+                                return None
+                        print("   第 1 步：等 {\"advance\":秒数} —— 放开跑那么久再就地冻住，交回当前帧"
+                              "（反复发就能换帧，直到画面里有手）")
+                        g1 = wait_go(a.hfwait)
+                        if not g1:
+                            print("   [FAIL] 没等到 freeze 命令")
+                        else:
+                            fz = json.loads(ev(JS_FREEZE + "(%s)" % json.dumps(
+                                {"advance": float(g1.get("advance", 0) or 0)})) or "{}")
+                            if fz.get("b64"):
+                                fpz = os.path.join(ROOT, ".diag", "hf_frozen.png")
+                                with open(fpz, "wb") as fh:
+                                    fh.write(base64.b64decode(fz["b64"].split(",", 1)[-1]))
+                                print("   已冻住 group=%s 亮片=%s 画布=%s 模型包围盒=%s → %s"
+                                      % (fz.get("group"), fz.get("lit"), fz.get("canvas"),
+                                         fz.get("bounds"), os.path.basename(fpz)))
+                            print("   第 2 步：等 {mode:bisect, box:[x0,y0,x1,y1]} —— 就在这张冻帧上反查")
+                            g2 = wait_go(a.hfwait)
+                            if not g2 or not g2.get("box"):
+                                print("   [FAIL] 没等到 bisect 命令或没给 box")
+                            else:
+                                raw24b = ev(JS_HANDFIND + "(%s)" % json.dumps(
+                                    {"clip": a.hdclip, "at": 0, "noscan": True,
+                                     "box": [int(x) for x in g2["box"]],
+                                     "thr": float(g2.get("thr", a.hfthr)),
+                                     "batch": max(4, a.hfbatch), "budget": max(8, a.hfbudget)}))
+                                try:
+                                    r24 = json.loads(raw24b)
+                                except Exception:
+                                    r24 = {"err": str(raw24b)[:300]}
                 if r24 is None:
                     pass
+                elif r24.get("poseMiss"):
+                    print("   ❌ 姿态没落回去（目标 t=%s，残差 %s）⇒ 不反查。"
+                          "先确认第二段有重播、或加 --hfforce 强行试" % (r24.get("refT"), r24.get("resid")))
+                    r24 = None
                 elif "area" not in r24:
                     print("   [FAIL] %s" % str(r24)[:300])
                 else:
