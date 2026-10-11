@@ -444,11 +444,11 @@ motion 大面积失效源于我们自己的解析器（帧 0 护栏 + 曲线名�
 - **液态玻璃已铺到音乐库/背景库**：折射抽成 `gallery_src/liquid_glass.js`（首页内联副本暂时并存）。
   两页各挂 1~2 盒：页头边墙 +（音乐库）播放器面板 —— "整盒挂滤镜"**不需要遮罩**（法线图中间是平的，
   天然只折射边墙，绕开 §136）。进度条改成**胶囊玻璃管**（潮水装进管里，`clip-path` 只裁 `<svg>`），
-  并撤掉 536 行曲目行的 `backdrop-filter`。⚠️ 页头边墙**未证实看得见**：栏体自己成了 backdrop root
-  （六档对照见 WF-40 补四），修法已验证但未动手（任务 #10）。验收 `glass_pages_probe.py` 七条。
+  ⚠️ 页头边墙：背景库**已改并验证落像素**（边墙改成栏的兄弟节点 `.navrim`，病根是栏体自己成了
+  backdrop root）；音乐库 A/A 读不稳 ⇒ 未改未结论，首页保持原样（§136 补二）。`--rim` 验。
 - **收藏与网站背景 ✅**：新 `gallery_src/favorites.js` 四页共用 —— `gallery.fav` 存三类稳定键
   （bgm=slug / 首页卡=舰船 id / 背景=bg_meta key，**不用下标**），星标在卡片·曲目行·背景卡·弹窗，
-  各页有「★ 只看收藏」；`gallery.sitebg` 画在 **body 的 background-image**（四页 body 自带不透明渐变，画在 html 上等于没画），首页水面 canvas 也不透明 ⇒ 设了背景就藏掉它并**停掉每帧绘制**。立绘 contain 贴底、壁纸 cover 铺满，只压文字条不动图。验收 `favorites_probe.py`。
+  各页有「★ 只看收藏」；`gallery.sitebg` 画在 **body 的 background-image**（四页 body 自带不透明渐变，画在 html 上等于没画），首页水面 canvas 也不透明 ⇒ 设了背景就藏掉它并**停掉每帧绘制**。立绘 contain 贴底、壁纸 cover 铺满；可读性只给控件加底（文字条 + chip/搜索框/分组标签），**不动图本身**。验收 `favorites_probe.py`。
 - **源码治理**：画廊前端源码在**仓库内 `gallery_src/`**（唯一权威版本），`Output/gallery_v2/` 是运行目录（gitignore）。**2026-09-26 起两边改成硬链接**（同一份磁盘数据两个路径名），**2026-10-07 起两边清单以 `scripts/deploy_gallery.py` 的 `FILES` 为准（个数与名单都别在文档里抄，这里曾长期写"4/4 已全部换链"、又写过"现 7 项"，加页面之后早就对不上了）**：改正本即刻生效、不需再部署。`deploy_gallery.py` 三态——默认 copy 修复（断链后的回退手段）/ `--check` **要求 `FILES` 全部同 inode，断链或漂移都 `exit 1`** / `--relink` 换链（要求两边逐字节相同，且正本有未提交改动者自动跳过，防打断并行会话）。⚠️ 断链的唯一现实成因是整文件写回式「写临时文件+改名」的原子保存：**16:52 真断过一次，而当时只比内容的 `--check` 给了 `exit 0`（判据漏洞，已改为结构性并写进 AGENTS.md 收尾清单第 1 条——改 `gallery_src/` 正本一律原地编辑）**。当前 `index.html`（被另一会话的未提交改动占着）与本轮新拆出的 `liquid_glass.js` 等处于"已断链、内容仍一致"态，各自提交后 `--relink` 补。见 §43 与 WF-16。CG 导出页 `cg_export.html` 同样入 `gallery_src/`；服务器 `_gallery_server.py` 提供 `POST /save_cg` 落盘接口，`--export` 参数直开导出页。⚠️ 服务器按自身所在目录算根，**只能双击 `Output\gallery_v2\` 里那份 bat**。
 - **运行**：`启动资产浏览器.bat`（→ `_gallery_server.py`：8777 端口 + `allow_reuse_address` + 端口占用即复用 + 结尾 `pause`，杜绝闪退）。file:// 下立绘/语音可看，Spine `fetch` 被 CORS 拦需走 .bat。
 - **运行时库台账**（2026-09-26）：`vendor/` 4 个第三方 JS 只在 gitignore 目录里，版本/来源/sha256 记进 **`gallery_src/vendor/MANIFEST.json`**（3 个的 URL 当日重新下载按哈希逐字节对拍命中），换机器跑 `py -3 scripts/fetch_gallery_vendor.py` 补齐（**哈希+字节数双对上才落盘**，`--check` 只校验）。⚠️ **唯一残留缺口**：`vendor/spine/spine-all.js`（实测 3.8.75，非旧文档写的 3.8.99）没有可按哈希校验的下载源——本机这份与上游官方 3.8 构建不同（499623B ≠ 501448B），只能从 `tools/spine-viewer/spine-runtime/` 取，而 `tools/` 也在 gitignore。要彻底封掉需二选一：把 501KB 提交进仓库（先确认 Spine Runtimes License 允许），或改用可哈希校验的上游构建并回归 Spine 播放。**未拍板**。

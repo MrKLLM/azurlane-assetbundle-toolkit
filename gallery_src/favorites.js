@@ -139,7 +139,14 @@ function css(){
    'color-mix(in srgb,var(--panel) 74%,transparent),'+
    'color-mix(in srgb,var(--panel) 95%,transparent) 46%)}'+
    'html.has-sitebg .row{background:color-mix(in srgb,var(--panel) 88%,transparent)}'+
-   'html.has-sitebg .card .nm{background:color-mix(in srgb,var(--panel) 90%,transparent)}';
+   'html.has-sitebg .card .nm{background:color-mix(in srgb,var(--panel) 90%,transparent)}'+
+   /* 光晕之外还有一整类东西会被立绘洗掉：**筛选控件**（chip / 搜索框 / 下拉 / 分组标签 / 提示条）。
+      它们平时是"半透明白 + 次级灰字"，压在浅色立绘的亮部上就彻底读不出（2026-10-11 用户截图：
+      音乐库昼间模式，用途/出处/专辑那一排 chip 全糊）。同样只给控件自己加底，不动背景图。
+      ⚠️ 用 !important：room3d 的 <style> 排在本模块之后，同特异度会把它自己的规则赢回去。 */
+   'html.has-sitebg :is(.chip:not(.on),.q,.sel,.opt,.hint,.tools,.tabs,.ctl select){'+
+   'background:color-mix(in srgb,var(--panel) 92%,transparent)!important}'+
+   'html.has-sitebg :is(.grp>span,.sub,.en,.mt,.dim){color:var(--txt)!important;opacity:.9}';
    /* 光晕在背景图之上会把图洗白 ⇒ 有站用背景时压到两成（图本身不加模糊、不加压暗） */
    'html.has-sitebg #bgfx .glow,html.has-sitebg .amb i{opacity:.2}'+
    /* ⚠️ 首页那层水面 canvas 是**不透明**的（WebGL 默认 alpha:false），整层铺满视口 ⇒

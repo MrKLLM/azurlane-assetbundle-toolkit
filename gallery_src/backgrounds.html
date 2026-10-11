@@ -29,19 +29,10 @@ body{font-family:'Segoe UI',"Microsoft YaHei",system-ui,sans-serif;color:var(--t
 header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
   padding:14px 22px;background:var(--nav-bg);border-bottom:1px solid var(--nav-line);
   backdrop-filter:blur(var(--nav-blur)) saturate(1.5);-webkit-backdrop-filter:blur(var(--nav-blur)) saturate(1.5)}
-/* 下沿那条"厚边墙"：14px 实心带，折射强度明显高于栏体 —— 与首页导航栏同一手法（§133/§136）。
-   z-index:-1 才落在"栏体背景之上、栏内文字之下"：header 自己有 z-index ⇒ 它是层叠上下文，
-   负值子元素会压回背景上面，不会钻到背景底下去（那样这条带子就整个看不见）。
-   ⚠️ 这条带子从不被 3D 旋转，所以它可以挂遮罩/折射；卡片行不行见 §136。 */
-header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:var(--nav-rim-h,14px);
-  pointer-events:none;z-index:-1;
-  -webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);
-  backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}
-/* var() 一律带兜底：自定义属性解析失败是**整条声明作废**，兜底写成上一版那条纯模糊，
-   最坏情况退回旧观感，而不是那一圈整个消失。 */
-html.lg header.hglg::before{
-  -webkit-backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14));
-  backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14))}
+/* 页头那条"厚边墙"**不再是 header::before，而是栏的兄弟节点 `.navrim`**（样式与挂载都在
+   liquid_glass.js 里）。原因：栏体自己挂着 backdrop-filter ⇒ 它是 backdrop root，
+   子元素的后备景被限定在栏体内部，滚过去的卡片进不到采样里 ⇒ 折射算了但屏幕上什么都没有。
+   四档对照（每档先过 A/A）与排除掉的 sticky 假设见 §136 补 / WF-40 补四。 */
 header h1{font-size:19px;font-weight:650;color:var(--title);letter-spacing:.4px}
 header .back{font-size:13px;color:var(--txt2);text-decoration:none;padding:6px 12px;border-radius:var(--r-chip);
   border:1px solid var(--chip-line);background:var(--chip);transition:color var(--t-col) var(--ease-ios),
@@ -606,8 +597,8 @@ boot();
 /* 液态玻璃：本页只挂页头那条 14px 边墙（它身后是滚动的缩略图网格 = 低频背景，折射读得干净）。
    卡片**不挂**：数量大、hover 有位移，而 backdrop-filter 的成本单位就是盒子个数（§134），
    且 §136 那条失效模式正是"被旋转的盒子里挂遮罩"。 */
-if(window.LiquidGlass&&LiquidGlass.on)
-  LiquidGlass.auto(document.querySelector('header'),{cls:'hglg',band:true,kind:'nav'});
+/* 边墙挂在栏的兄弟节点上（不是栏的子元素）—— 理由见上面 .navrim 那段注释与 §136 补 */
+if(window.LiquidGlass&&LiquidGlass.on) LiquidGlass.rim(document.querySelector('header'));
 </script>
 </body>
 </html>

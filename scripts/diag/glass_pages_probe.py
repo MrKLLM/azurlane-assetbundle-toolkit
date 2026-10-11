@@ -32,14 +32,24 @@ CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
 AP = argparse.ArgumentParser()
 AP.add_argument('--port', default='8777')
 AP.add_argument('--win', default='1440,900')
+AP.add_argument('--rim', action='store_true',
+                help='额外跑"页头边墙为什么不落像素"的四档对照（V0/V1/V6 sticky/兄弟节点）')
 A = AP.parse_args()
 W, H = (int(x) for x in A.win.split(','))
 SHOTD = os.path.join(ROOT, '.diag', 'glasspages')
+# 像素对照的前置：这三处都在自己动（光晕 drift / 波形 rAF / 播放中的均衡器），
+# 不冻住的话 A/A 就不稳，「两版不同」量的到底是动画还是材质，说不清。
+# ⚠️ 音乐库还有一处在动：`.row` 的进场浮现（IntersectionObserver 给每行 setTimeout 错峰加 .in），
+#    不冻住的话 A/A 永远不稳，四档对照就全都不能读（本轮第一次跑就是这样）。
+FREEZE_CSS = ('.amb i{animation:none!important;transition:none!important}'
+              ',.tide svg{display:none!important}.eq u{animation:none!important}'
+              ',.row{opacity:1!important;transform:none!important;transition:none!important}'
+              ',.card{animation:none!important}')
 
 PAGES = {
     'bgm.html': {'mount': [('header', 'hglg', '::before'), ('#bar', 'bglg', '')],
                  'rows': '.row', 'tube': '#tide'},
-    'backgrounds.html': {'mount': [('header', 'hglg', '::before')], 'rows': '.card',
+    'backgrounds.html': {'mount': [('.navrim', 'hglg', '')], 'rows': '.card',
                          'zoom': ('#ovimg', '#ovbox', '#ovz')},
 }
 
@@ -148,6 +158,100 @@ def scale_of(pg, sel):
               "return JSON.stringify({raw:String(t).slice(0,46),s:a.length?+(+a[0]).toFixed(3):1});})()"
               % json.dumps(sel))
     return json.loads(v)
+
+
+RIM_VARIANTS = {
+    'V0 现状（栏体 ::before）': '',
+    'V1 栏体不挂滤镜': 'header{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
+    # 首页与这两页结构相同（栏体挂滤镜 + 子元素挂边墙），只有首页落像素 —— 唯一没排除的差别是
+    # position:sticky（合成层不同）。这一档就是验它。
+    'V6 栏体改 relative': 'header{position:relative!important}',
+    # 兄弟节点：不是 backdrop root 的后代 ⇒ 采得到页面内容。挂载必须带真 url（上一版对照漏了
+    # 这一步，量到的"变了"其实只是 saturate/brightness 的颜色差，不是折射）。
+    'V5 边墙挪成栏的兄弟': '@SIBLING@',   # 它的「关」= 只糊不折射，见 rim_diag
+    # 决定性阳性对照：给边墙涂不透明红。**A/A 已稳的前提下这一档还不变，就说明这条带子
+    # 压根没出现在画面里**（被栏体背景盖住 / 取景里没有它），那"折射不落像素"就不是折射的问题，
+    # 后面所有关于 backdrop root 的推论都作废。上一版一次性脚本没冻动画就跑过这档，白信了一次。
+    'V7 涂红（决定性对照）': 'header::before{background:#ff0044!important}',
+}
+
+
+def rim_diag(pg, spec, freeze_css):
+    """页头边墙落不落像素的四档对照。协议（每档同一套）：
+       冻动画 → 滚到"内容压在栏底" → A/A（同状态连拍必须相同，否则这档不能读）
+       → 开 html.lg 拍一张、关 html.lg 拍一张，**比的是开与关**。
+       ⚠️ 判定式原来写成"开 vs 再开一次"，两帧当然是同一状态 —— 那一轮所有 ❌ 都是假的，
+          哈希打出来才看见 V1 的开与关其实不同。这种"判据自己比自己"的错，只能靠
+          把原始哈希打出来才发现，所以这里一直打印三个哈希。
+       ⚠️ V5（兄弟节点）不受 html.lg 影响，它的"关"必须显式换成"只糊不折射"，
+          否则两帧是同一个东西，测不出任何差别。"""
+    print('\n  ── 边墙对照（每档：冻动画 + 滚到内容压栏底 + A/A + 开/关）──')
+    pg.ev("(()=>{let s=document.getElementById('frz');if(!s){s=document.createElement('style');"
+          "s.id='frz';document.head.appendChild(s);}s.textContent=%s;})()" % json.dumps(freeze_css))
+    pos = pg.ev(FIND_RIM_SPOT)
+    if not isinstance(pos, int) or pos < 0:
+        print('    ! 找不到内容压在栏底的位置，对照跳过')
+        return
+    for name, css in RIM_VARIANTS.items():
+        sib = css == '@SIBLING@'
+        def apply(css_text):
+            if sib:
+                # 兄弟节点档必须把栏体自己那条 ::before 藏掉，否则两态都还在折射，
+                # 差值就说不清是谁贡献的
+                pg.ev("(()=>{let s=document.getElementById('rv');if(!s){s=document.createElement('style');"
+                      "s.id='rv';document.head.appendChild(s);}s.textContent="
+                      "'header::before{display:none!important}';})()")
+                v = json.dumps(css_text)
+                pg.ev(RIM_SIBLING % (v, v))
+            else:
+                pg.ev("(()=>{let s=document.getElementById('rv');if(!s){s=document.createElement('style');"
+                      "s.id='rv';document.head.appendChild(s);}s.textContent=%s;})()"
+                      % json.dumps(css_text))
+        apply(css if not sib else '')
+        pg.ev('scrollTo(0,%d);1' % pos); time.sleep(1.4)
+        pg.ev("document.documentElement.classList.add('lg');'ok'"); time.sleep(0.8)
+        a1 = shot(pg, 'rim_a1'); time.sleep(1.0); a2 = shot(pg, 'rim_a2')
+        # 「关」：普通档就是去掉 html.lg（边墙退回 blur(17px) 那版）；兄弟节点档要显式换成只糊不折射
+        pg.ev("document.documentElement.classList.remove('lg');'ok'")
+        apply(RIM_BLUR_ONLY if sib else css if not sib else '')
+        time.sleep(0.9)
+        off = shot(pg, 'rim_off')
+        pg.ev("document.documentElement.classList.add('lg');'ok'")
+        apply('' if sib else css)
+        time.sleep(0.9)
+        on = shot(pg, 'rim_on')
+        if sib:
+            pg.ev(RIM_KILL)
+        else:
+            pg.ev("(()=>{const s=document.getElementById('rv');if(s)s.textContent='';})()")
+        bf = pg.ev("String(getComputedStyle(document.querySelector('header'),'::before')"
+                   ".backdropFilter).slice(0,40)")
+        print(f'    {name:<22} A/A {"稳" if a1 == a2 else "不稳→不能读"}  '
+              f'开/关 {"✅ 落像素" if a1 != off else "❌ 相同"}  开={a1} 关={off} 再开={on} bf={bf!r}')
+    pg.ev("(()=>{const s=document.getElementById('frz');if(s)s.remove();})()")
+
+
+FIND_RIM_SPOT = """(()=>{const h=Math.round(document.querySelector('header').getBoundingClientRect().height);
+  const rs=[...document.querySelectorAll('.card .ph img,.row,.thumb')].slice(0,600).map(e=>{
+    const r=e.getBoundingClientRect(); return [r.top+scrollY,r.bottom+scrollY];});
+  for(let s=200;s<9000;s+=50){const y0=s+h-18,y1=s+h;
+    if(rs.some(a=>a[0]<y1&&a[1]>y0)) return s;}
+  return -1;})()"""
+
+# 兄弟节点档专用：把带子的滤镜写成"只糊不折射"就是它的「关」态
+RIM_BLUR_ONLY = 'blur(17px) saturate(2.2) brightness(1.14)'
+RIM_SIBLING = """(()=>{const hd=document.querySelector('header').getBoundingClientRect();
+  const z=getComputedStyle(document.querySelector('header')).zIndex;
+  const f=getComputedStyle(document.querySelector('header'),'::before').backdropFilter||'';
+  const u=(f.match(/url\\([^)]*\\)/)||[''])[0];
+  if(!u&&!%s) return 'NO-URL';      /* 没有真 url 的对照只能测颜色，测不到折射 */
+  let d=document.getElementById('rimtest');
+  if(!d){d=document.createElement('div');d.id='rimtest';document.body.appendChild(d);}
+  const v=%s||('blur(1px) saturate(1.9) brightness(1.1) '+u);
+  d.style.cssText='position:fixed;left:0;right:0;height:18px;pointer-events:none;z-index:'+z+
+                  ';top:'+(hd.bottom-18)+'px';
+  d.style.webkitBackdropFilter=v; d.style.backdropFilter=v; return 'ok '+u.slice(0,14);})()"""
+RIM_KILL = "(()=>{const d=document.getElementById('rimtest');if(d)d.remove();return 1;})()"
 
 
 def check(page, spec, fails):
@@ -291,10 +395,8 @@ def check(page, spec, fails):
         #    是同一个颜色，于是"效果看不见"是仪器假象。边墙折射的是**从它身后经过的内容**，
         #    只有滚动起来、内容压到栏底下时才弯得出来。
         pg.ev("(()=>{const b=document.getElementById('pp');if(b)b.click();return 1;})()")   # 暂停：时间文本每帧都变
-        pg.ev("(()=>{const s=document.createElement('style');s.id='aafreeze';s.textContent="
-              "'.amb i{animation:none!important;transition:none!important}"
-              ",.tide svg{display:none!important}.eq u{animation:none!important}'"
-              ";document.head.appendChild(s);})()")
+        pg.ev("(()=>{const s=document.createElement('style');s.id='aafreeze';"
+              "s.textContent=FZ;return 1;})()".replace('FZ', json.dumps(FREEZE_CSS)))
         # 这条判据是**位置敏感**的：滚到两行之间的空隙上就没得弯。所以不随手滚一个数，
         # 让页面自己找一个"卡片正好压在栏底那条边墙上"的位置，找不到就作废而不是报红。
         # ⚠️ 不能用 elementFromPoint 找：那个点被 sticky 栏自己盖着，永远返回 header，
@@ -327,6 +429,8 @@ def check(page, spec, fails):
                 #    也不能当"没生效"的结论 —— 报红会把人引向错误的方向，所以降级为参考信息。
                 print(f'  像素对照(A/A 稳定，滚到 {pos} 让内容压到栏底): 关={off} 开={on} '
                       f'{"✅ 只切一个类就换了画面" if off != on else "❓ 两版相同 —— 这条在这两页不成立，未证实也未证伪（首页同判据是过的）"}')
+        if A.rim:
+            rim_diag(pg, spec, FREEZE_CSS)
         pg.ev("(()=>{const s=document.getElementById('aafreeze');if(s)s.remove();})()")
         shot(pg, f'{page[:-5]}_full')
     finally:

@@ -227,6 +227,16 @@ if A.shots:
                                                if raw0 != raw else '❌ 两版逐字节相同 ⇒ 图没画出来（又被哪层盖住了）'))
             if raw0 == raw:
                 fails.append(f'index.html: 站用背景 {kind} 设了但画面没变')
+            # 音乐库昼间也拍一张：用户就是在这页报"字看不清"的（筛选 chip 压在亮色立绘上）。
+            # 只拍首页等于把用户报的那一页漏在验收外面。
+            b.go('bgm.html', 2.2)
+            b.ev('SiteBg.set(%s);1' % json.dumps({'url': url, 'kind': kind, 'key': label, 'label': label}))
+            time.sleep(1.4)
+            open(os.path.join(shotd, f'bgm_{kind}.png'), 'wb').write(
+                base64.b64decode(b.cmd('Page.captureScreenshot', {'format': 'png'})['data']))
+            b.ev("document.documentElement.dataset.theme='light';1"); time.sleep(0.8)
+            open(os.path.join(shotd, f'bgm_{kind}_light.png'), 'wb').write(
+                base64.b64decode(b.cmd('Page.captureScreenshot', {'format': 'png'})['data']))
         b.ev('SiteBg.clear();1')
 
 b.close()

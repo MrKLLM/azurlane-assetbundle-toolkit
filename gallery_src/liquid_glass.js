@@ -124,19 +124,79 @@ function mount(el,o){
   return true;
 }
 /* 尺寸变了（换窗口、播放器浮出/收起）就把挂过的元素重算一遍 */
+var RIMS=[];   /* 声明必须在 refresh() 之前：resize 触发 refresh 时它得已经是数组 */
 function refresh(){
   LG.buckets.length=0;
   if(LG.svg) while(LG.svg.firstChild) LG.svg.removeChild(LG.svg.firstChild);
+  for(var i=0;i<RIMS.length;i++){ rimPlace(RIMS[i].el,RIMS[i].header); rimMount(RIMS[i].el); }
   var t=LG.targets.slice(); LG.targets.length=0;
-  for(var i=0;i<t.length;i++){ if(t[i].isConnected) mount(t[i], t[i].__lg||null); }
+  for(var j=0;j<t.length;j++){ if(t[j].isConnected) mount(t[j], t[j].__lg||null); }
 }
 function auto(el,o){ if(el){ el.__lg=o; mount(el,o); } return el; }
+
+/* ── 页头边墙：为什么可以是栏的子元素、又为什么这两页必须是栏的兄弟 ──
+   挂在 `header::before`（栏的子元素）时实测**不落像素**：栏体自己挂着 backdrop-filter，
+   它就成了一个 backdrop root，子元素的"后备景"被限定在栏体内部那块半透明底上，
+   滚过去的卡片根本进不到采样里。四档对照（每档都先过 A/A）：
+     V0 现状            开/关逐字节相同
+     V1 摘掉栏体自己的滤镜  立刻落像素   ⇒ 病根就是 backdrop root
+     V6 sticky→relative   相同         ⇒ 与定位方式无关（这条排除了）
+     V5 改成栏的兄弟节点    落像素       ⇒ 本函数就是这个修法的落地
+     V7 给带子涂不透明红    与 V0 不同   ⇒ 那块区域本来就在取景里（阳性对照）
+   ⚠️ 首页那条仍是子元素写法、且实测落像素 —— 两页与首页的差别我没查出来。
+      别顺手把首页也改成兄弟节点：那是把一件已验证有效的事押在未解释的差异上。 */
+function rimCss(){
+  if(document.getElementById('navrimcss')) return;
+  var s=document.createElement('style'); s.id='navrimcss';
+  s.textContent='.navrim{position:fixed;left:0;right:0;pointer-events:none;'+
+    '-webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);'+
+    'backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}'+
+    'html.lg .navrim.hglg{-webkit-backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9)'+
+    ' brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14));'+
+    'backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10)'+
+    ' var(--lgf,blur(17px) saturate(2.2) brightness(1.14))}';
+  document.head.appendChild(s);
+}
+function rimH(){
+  return Math.round(parseFloat(getComputedStyle(document.documentElement)
+          .getPropertyValue('--nav-rim-h'))||18);
+}
+function rimPlace(el,header){
+  var h=rimH();
+  var top=Math.round(header.getBoundingClientRect().bottom-h)+'px';
+  /* 尺寸没变就别重挂：挂载会挑一个滤镜桶，反复重挂可能换到另一张法线图上，
+     于是"同一个状态连拍两张"都能不同（探针的 A/A 就是这么被搞坏的）。 */
+  var moved=el.style.top!==top || el.style.height!==h+'px';
+  el.style.top=top; el.style.height=h+'px';
+  el.style.zIndex=getComputedStyle(header).zIndex;   /* 与栏同层：压在滚动内容之上 */
+  return moved;
+}
+function rimMount(el){
+  el.__lg={cls:'hglg',kind:'nav',radius:0,ring:rimH()};   /* 整条带子都是"墙"，无圆角 */
+  mount(el,el.__lg);
+}
+function rim(header){
+  if(!LG.on||!header) return null;
+  rimCss();
+  var el=header.nextElementSibling;
+  if(!el||!el.className.indexOf || el.className.indexOf('navrim')<0){
+    el=document.createElement('div'); el.className='navrim';
+    el.setAttribute('aria-hidden','true');
+    header.insertAdjacentElement('afterend',el);
+    RIMS.push({el:el,header:header});
+  }
+  rimPlace(el,header); rimMount(el);
+  /* 栏高会变（换行、换主题、窗口缩放）⇒ 盯栏自己，比只监听 resize 可靠 */
+  if(window.ResizeObserver)
+    new ResizeObserver(function(){ if(rimPlace(el,header)) rimMount(el); }).observe(header);
+  return el;
+}
 
 var pend=0;
 addEventListener('resize',function(){ if(pend) return;
   pend=requestAnimationFrame(function(){ pend=0; refresh(); }); });
 
-window.LiquidGlass={ on:LG.on, mount:mount, auto:auto, refresh:refresh,
+window.LiquidGlass={ on:LG.on, mount:mount, auto:auto, rim:rim, refresh:refresh,
                      get buckets(){return LG.buckets.length;}, get filters(){
                        return LG.svg?LG.svg.querySelectorAll('filter').length:0; } };
 })();

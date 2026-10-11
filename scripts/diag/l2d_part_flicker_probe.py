@@ -1248,6 +1248,60 @@ JS_TIMEPROBE = r"""(async (cfg) => {
 #   反查要在"**确实没有手**的那一帧"上做，而抓到这一帧不能靠猜秒数。
 #   手法：先连拍 N 张（每张同时记下当时的全部参数向量），我看图挑一帧，
 #   再把那一帧的向量写回去 → **同一个页面里精确回到那一帧**（姿态由参数决定，不需要复现时间）。
+# ---------------------------------------------------------------- ❙ 逐拍盯手的可见面积，一掉就存下那一拍的姿态向量
+#   上一轮 38 张按秒撒网都没抓到断手瞬间 ⇒ 改成在 `coreModel.update()` 里**每拍**算一次
+#   手的可见面积（亮着的手片包围盒面积之和），低于峰值的 thr 就开一个事件，
+#   并把**事件内最低那一拍**的全部参数向量存下来 → 事后用 ❘ restore 精确回到那一帧抓图。
+JS_AREAHUNT = r"""(async (cfg) => {
+  const m=window.__m, im=m.internalModel, CP=Object.getPrototypeOf(im.coreModel);
+  const M=im.coreModel._model, D=M.drawables, P=M.parameters;
+  const app=window.__app;
+  const ids=Array.from(D.ids);
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  const tgt=cfg.names.map(n=>ids.indexOf(n)).filter(j=>j>=0);
+  if(!window.__ahHook){ const base=CP.update;
+    CP.update=function(){ const r=base.apply(this,arguments); const H=window.__ah;
+      if(!H) return r;
+      const MM=this._model, O=MM.drawables.opacities, VP=MM.drawables.vertexPositions;
+      let tot=0; const per=[];
+      for(let q=0;q<H.tgt.length;q++){ const j=H.tgt[q]; let a=0;
+        if(O[j]>0.5){ const p=VP[j]; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+          for(let k=0;k+1<p.length;k+=2){ const x=p[k],y=p[k+1];
+            if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+          a=(x1-x0)*(y1-y0); if(!(a>0)) a=0; }
+        per.push(+a.toFixed(2)); tot+=a; }
+      const now=(performance.now()-H.t0)/1000;
+      H.upd++; if(tot>H.max) H.max=tot;
+      if(H.series.length<(cfg.cap||4000) && (H.upd % (cfg.every||1)===0))
+        H.series.push([+now.toFixed(3), +tot.toFixed(1)]);
+      if(H.max>0 && tot < cfg.thr*H.max){
+        if(!H.ev) H.ev={t0:+now.toFixed(3), min:+tot.toFixed(1), minAt:+now.toFixed(3), n:0,
+                        vec:Array.from(P.values), per:per.slice()};
+        else { H.ev.n++;
+          if(tot<H.ev.min){ H.ev.min=+tot.toFixed(1); H.ev.minAt=+now.toFixed(3);
+                            H.ev.vec=Array.from(P.values); H.ev.per=per.slice(); } }
+      } else if(H.ev){ H.ev.t1=+now.toFixed(3); H.ev.dur=+(H.ev.t1-H.ev.t0).toFixed(3);
+        if(H.events.length<40) H.events.push(H.ev); H.ev=null; }
+      H.last=+tot.toFixed(1); H.lastPer=per;
+      return r; };
+    CP.__ahHook=1; window.__ahHook=1; }
+  const sel=document.getElementById('l2Motion'), rb=document.getElementById('l2Replay');
+  if(!(sel&&rb)) return JSON.stringify({fail:'页面上找不到 #l2Motion / #l2Replay'});
+  window.__ah={t0:performance.now(), tgt:tgt, upd:0, max:0, series:[], events:[], ev:null,
+               last:0, lastPer:[]};
+  sel.value=cfg.clip; sel.dispatchEvent(new Event('change')); rb.click();
+  window.__ah.t0=performance.now();
+  await t(cfg.secs*1000);
+  const H=window.__ah; window.__ah=null;
+  if(H.ev){ H.ev.t1=+cfg.secs.toFixed(3); H.ev.dur=+(H.ev.t1-H.ev.t0).toFixed(3); H.events.push(H.ev); }
+  return JSON.stringify({clip:cfg.clip, secs:cfg.secs, upd:H.upd, updPerSec:+(H.upd/cfg.secs).toFixed(1),
+    maxArea:H.max, lastArea:H.last, names:cfg.names, nTarget:tgt.length,
+    events:H.events.map(e=>({t0:e.t0,t1:e.t1,dur:e.dur,min:e.min,minAt:e.minAt,n:e.n,per:e.per,vec:e.vec})),
+    series:H.series});
+})"""
+
+
+
 JS_SHEET = r"""(async (cfg) => {
   const m=window.__m, im=m.internalModel, app=window.__app, R=app.renderer;
   const M=im.coreModel._model, D=M.drawables, P=M.parameters;
@@ -2092,6 +2146,12 @@ def main():
     ap.add_argument("--handdark", action="store_true", help="㉒ 手部并集**逐拍**只记翻转与全灭窗口（不受截图速度限制）；"
                                                             "配 --hdclip/--hdsecs/--hdsmall/--hdparams")
     ap.add_argument("--timeprobe", action="store_true", help="㉕ 探一条能读到 clip 自身时间的路径（内部对象键名 + 各候选值随时间变化），改锚点之前先跑这个")
+    ap.add_argument("--areahunt", action="store_true", help="㉙ 逐拍盯手的可见面积，一掉就存那一拍的姿态向量（事后按向量精确回帧抓拍）")
+    ap.add_argument("--hanames", default="ArtMesh482,ArtMesh243,ArtMesh49,ArtMesh50,ArtMesh36,ArtMesh42,ArtMesh43,ArtMesh44,ArtMesh51", help="㉙ 要盯的片名（逗号分隔）")
+    ap.add_argument("--hasecs", type=float, default=20.0, help="㉙ 连续测多少秒")
+    ap.add_argument("--hathr", type=float, default=0.45, help="㉙ 面积低于峰值的这个比例算一次骤降")
+    ap.add_argument("--haevery", type=int, default=1, help="㉙ 曲线序列每几拍存一点（1=每拍）")
+
     ap.add_argument("--handfind", action="store_true", help="㉔ 反查「画面上那两只手是哪批 mesh」：走 UI 入口播到第 --hfat 秒，"
                                                             "逐批藏 drawable，看 --hfbox 那块屏幕区域的像素掉多少")
     ap.add_argument("--hfat", type=float, default=7.0, help="㉔ 在第几秒开始量（要挑一个「手此刻在画面上」的相位）")
@@ -2875,6 +2935,48 @@ def main():
                 print("   明细 → %s" % f25)
 
 
+    # —— ㉙ 逐拍盯手的可见面积：一掉就存那一拍的姿态向量，事后按向量精确回帧抓拍
+    if a.areahunt:
+        j29 = reload_boot()
+        if not j29.get("ok"):
+            print("   [FAIL] ㉙ 重载失败：%s" % str(j29)[:160])
+        else:
+            names29 = [x.strip() for x in a.hanames.split(",") if x.strip()]
+            raw29 = ev(JS_AREAHUNT + "(%s)" % json.dumps(
+                {"clip": a.hdclip, "secs": a.hasecs, "names": names29,
+                 "thr": a.hathr, "every": max(1, a.haevery), "cap": 4000}))
+            try:
+                r29 = json.loads(raw29)
+            except Exception:
+                r29 = {"err": str(raw29)[:300]}
+            f29 = os.path.join(ROOT, ".diag", "l2d_areahunt_%s.json" % a.model)
+            with open(f29, "w", encoding="utf-8") as fh:
+                json.dump(r29, fh)
+            print("\n== ㉙ 面积骤降猎帧（%s，%.0fs，%d 片：%s）" % (a.hdclip, a.hasecs, len(names29), ",".join(names29)))
+            if "upd" not in r29:
+                print("   [FAIL] %s" % str(r29)[:300])
+            else:
+                print("   自证：upd=%d 拍率=%.1f/s 面积峰值=%s 收尾=%s 事件 %d 个"
+                      % (r29["upd"], r29["updPerSec"], r29["maxArea"], r29["lastArea"], len(r29["events"])))
+                for e in r29["events"]:
+                    print("     [%.2f→%.2f] 持续 %.3fs 最低 %.1f（峰值的 %.0f%%）逐片=%s"
+                          % (e["t0"], e["t1"], e["dur"], e["min"],
+                             100.0 * e["min"] / max(1e-6, r29["maxArea"]), e["per"]))
+                d29 = os.path.join(ROOT, ".diag", "l2d_areashot_%s" % a.model)
+                if not os.path.isdir(d29):
+                    os.makedirs(d29)
+                for old in glob.glob(os.path.join(d29, "*.png")):
+                    os.remove(old)
+                for k, e in enumerate(r29["events"][:8]):
+                    rr = json.loads(ev(JS_SHEET + "(%s)" % json.dumps({"restoreVec": e["vec"]})) or "{}")
+                    if not rr.get("b64"):
+                        print("     [抓拍失败] 事件 %d：%s" % (k, str(rr)[:120]))
+                        continue
+                    fp = os.path.join(d29, "ev%d_min%05.2fs.png" % (k, e["minAt"]))
+                    with open(fp, "wb") as fh:
+                        fh.write(base64.b64decode(rr["b64"].split(",", 1)[-1]))
+                    print("     事件 %d 最低拍 t=%.2fs → %s（亮 %s 片）" % (k, e["minAt"], os.path.basename(fp), rr.get("lit")))
+                print("   明细 → %s；抓拍 → %s" % (f29, d29))
     if a.handfind:
         box24 = [int(x) for x in a.hfbox.split(",") if x.strip()]
         if len(box24) != 4:
