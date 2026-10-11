@@ -31,7 +31,7 @@ header{background:var(--nav-bg);
              0 8px 26px color-mix(in srgb,var(--brand) 12%,transparent);
   position:relative;z-index:10}
 /* ② 下沿的"边墙"：一条 14px 厚、折射更重的玻璃截面（和卡片 ::before 同一个手法） */
-header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:14px;
+header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:var(--nav-rim-h,14px);
   pointer-events:none;z-index:-1;
   -webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);
   backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}

@@ -41,7 +41,7 @@ header::after{content:'';position:absolute;inset:0;pointer-events:none;opacity:.
     color-mix(in srgb,var(--brand) 10%,transparent) 100%)}
 /* 下沿那条"厚边墙"：14px 实心带，折射强度明显高于栏体 —— 与首页导航栏同一手法（§133/§136）。
    ⚠️ 这条带子从不被旋转，所以它可以安全挂 mask/折射；卡片和曲目行不行（§136）。 */
-header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:14px;
+header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:var(--nav-rim-h,14px);
   pointer-events:none;z-index:0;
   -webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);
   backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}

@@ -33,7 +33,7 @@ header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:14px
    z-index:-1 才落在"栏体背景之上、栏内文字之下"：header 自己有 z-index ⇒ 它是层叠上下文，
    负值子元素会压回背景上面，不会钻到背景底下去（那样这条带子就整个看不见）。
    ⚠️ 这条带子从不被 3D 旋转，所以它可以挂遮罩/折射；卡片行不行见 §136。 */
-header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:14px;
+header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:var(--nav-rim-h,14px);
   pointer-events:none;z-index:-1;
   -webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);
   backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}
@@ -138,8 +138,19 @@ header .sp{flex:1}
 .sheet{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-panel);
   box-shadow:var(--sh3);max-width:1180px;width:100%;max-height:92vh;overflow:auto;
   display:grid;grid-template-columns:1fr 320px;gap:0}
-.sheet .imgbox{background:var(--stage);display:flex;align-items:center;justify-content:center;min-height:320px}
+/* ⚠️ overflow:hidden 必须有：放大是靠 transform 做的，**不改变布局尺寸**，
+   不加这一条放大的图会直接盖到右边的信息栏上（而且不会出现滚动条，看不出越界）。 */
+.sheet .imgbox{background:var(--stage);display:flex;align-items:center;justify-content:center;
+  min-height:320px;position:relative;overflow:hidden}
 .sheet .imgbox img{max-width:100%;max-height:88vh;display:block}
+/* 缩放/平移：光标下那个点要跟着光标走，所以 transform-origin 固定 0 0，位移自己算 */
+.sheet .imgbox img,.fs img{transform-origin:0 0;transition:none;will-change:transform}
+.sheet .imgbox img{cursor:zoom-in}
+.sheet .imgbox.zoomed img,.fs.zoomed img{cursor:grab}
+.sheet .imgbox.grabbing img,.fs.grabbing img{cursor:grabbing}
+.zbadge{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;
+  min-width:46px;text-align:center;align-self:center}
+.zhint{font-size:11px;color:var(--dim);margin-left:auto;align-self:center}
 .sheet .side{padding:20px;border-left:1px solid var(--line)}
 .sheet h2{font-size:17px;color:var(--title);margin-bottom:4px;line-height:1.35}
 .sheet .en{font-size:12px;color:var(--dim);font-family:ui-monospace,Consolas,monospace;word-break:break-all}
@@ -188,14 +199,15 @@ header .sp{flex:1}
 
 <div class="fs" id="fs">
   <img id="fsimg" alt="">
-  <div class="cap"><b id="fsname"></b><span id="fsen"></span><span class="sp"></span>
+  <div class="cap"><b id="fsname"></b><span id="fsen"></span><span class="zbadge" id="fsz">适配</span>
+    <span class="sp"></span>
     <button id="fsprev">← 上一张</button><button id="fsnext">下一张 →</button>
     <button id="fsdl">下载原图</button><button id="fsclose">退出全屏（Esc）</button></div>
 </div>
 
 <div class="ov" id="ov">
   <div class="sheet">
-    <div class="imgbox"><img id="ovimg" alt=""></div>
+    <div class="imgbox" id="ovbox"><img id="ovimg" alt=""></div>
     <div class="side">
       <h2 id="ovname"></h2>
       <div class="en" id="oven"></div>
@@ -208,6 +220,8 @@ header .sp{flex:1}
         <button id="ovfs">全屏看壁纸</button>
         <a class="dl" id="ovdl" download>下载原图</a>
         <button id="ovclose">关闭（Esc）</button>
+        <span class="zbadge" id="ovz">适配</span>
+        <span class="zhint">滚轮缩放 · 拖拽平移 · 双击 1:1</span>
       </div>
     </div>
   </div>
@@ -405,6 +419,7 @@ function open(key){
 }
 function paint(){
   const it=view[cur]; if(!it) return;
+  ovZ.reset();   // 换图必须回到"适配"：上一张的倍率与位移对这一张没有意义
   $('ovimg').src=it.img; $('oven').textContent=it.key+' · '+it.name;
   $('ovdl').href=it.img; $('ovdl').download=it.name+'.png';
   if($('fs').classList.contains('on')) fsPaint();
@@ -453,6 +468,7 @@ function close(){ $('ov').classList.remove('open'); cur=-1; $('ovimg').removeAtt
    不能把"能不能全屏"当成这层的前提。 */
 function fsPaint(){
   const it=view[cur]; if(!it) return;
+  fsZ.reset();
   $('fsimg').src=it.img; $('fsname').textContent=title(it);
   $('fsen').textContent=it.key+' · '+it.w+'×'+it.h+' · '+mb(it.bytes);
 }
@@ -472,6 +488,55 @@ function fsDownload(){
   const a=document.createElement('a'); a.href=it.img;
   a.download=it.name+'.png'; document.body.appendChild(a); a.click(); a.remove();
 }
+
+/* ── 图片缩放 / 平移（详情弹窗与全屏壁纸共用一个工厂）──
+   三个坑写死在这里，改之前先读完：
+   ① 放大用 transform 而不是改 width：改宽度每滚一下都触发重排，会卡。
+      但 transform **不改布局尺寸** ⇒ .imgbox 必须 overflow:hidden（见上面那条 CSS），
+      否则放大的图直接盖到右边信息栏上，还不出滚动条、越界看不出来。
+   ② "光标底下那个点不许跑"只能自己算：origin 固定 0 0 时屏幕点 s = t + z·p，
+      换倍率要保持 p 不动 ⇒ t' = c − (z'/z)(c − t)。少这一步就是"往左上角缩"。
+   ③ 1:1 的基准不是 naturalWidth/clientWidth：object-fit:contain 下元素铺满视口、
+      图只是里面那一块，必须先按宽高比算出**实际显示宽**再去除，否则竖图会把 1:1
+      算成放大好几倍（这就是"双击之后直接糊到脸上"的成因）。 */
+function zoomable(img, box, out){
+  let z=1, tx=0, ty=0, drag=null;
+  const dispW=()=>{ const ar=(img.naturalWidth||16)/(img.naturalHeight||9);
+    return Math.max(1, Math.min(img.clientWidth||1, (img.clientHeight||1)*ar)); };
+  const one=()=>{ const n=img.naturalWidth; return n? Math.max(1,Math.min(6,n/dispW())) : 2; };
+  function apply(){
+    img.style.transform='translate('+tx.toFixed(2)+'px,'+ty.toFixed(2)+'px) scale('+z.toFixed(4)+')';
+    box.classList.toggle('zoomed', z>1.001);
+    if(out) out.textContent = z>1.001 ? Math.round(z*100)+'%' : '适配';
+  }
+  function reset(){ z=1; tx=0; ty=0; drag=null; box.classList.remove('grabbing'); apply(); }
+  function zoomAt(c,z1){
+    z1=Math.max(1,Math.min(6,z1));
+    if(z1<=1.001){ reset(); return; }
+    tx=c.x-(z1/z)*(c.x-tx); ty=c.y-(z1/z)*(c.y-ty); z=z1; apply();
+  }
+  const local=e=>{ const r=box.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top}; };
+  const chrome=e=>e.target.closest && e.target.closest('.cap,.nav,button,a');
+  box.addEventListener('wheel',e=>{
+    if(chrome(e)) return;                 // 底部按钮条上滚轮不该缩放
+    e.preventDefault();
+    zoomAt(local(e), z*(e.deltaY<0?1.16:1/1.16));
+  },{passive:false});
+  box.addEventListener('pointerdown',e=>{
+    if(z<=1.001||chrome(e)) return;
+    drag={x:e.clientX-tx,y:e.clientY-ty}; box.setPointerCapture(e.pointerId);
+    box.classList.add('grabbing');
+  });
+  box.addEventListener('pointermove',e=>{ if(!drag) return;
+    tx=e.clientX-drag.x; ty=e.clientY-drag.y; apply(); });
+  const up=()=>{ if(!drag) return; drag=null; box.classList.remove('grabbing'); apply(); };
+  box.addEventListener('pointerup',up); box.addEventListener('pointercancel',up);
+  box.addEventListener('dblclick',e=>{ if(chrome(e)) return;
+    if(z>1.001) reset(); else zoomAt(local(e), one()); });
+  return {reset, get z(){return z;}, step:d=>zoomAt({x:box.clientWidth/2,y:box.clientHeight/2}, z*d)};
+}
+const ovZ=zoomable($('ovimg'),$('ovbox'),$('ovz'));
+const fsZ=zoomable($('fsimg'),$('fs'),$('fsz'));
 
 async function boot(){
   try{
@@ -502,6 +567,12 @@ addEventListener('keydown',e=>{
   if(e.key==='Escape'&&$('fs').classList.contains('on')){fsClose();return}
   if(e.key==='Escape'&&cur>=0){close();return}
   if(e.key==='/'&&cur<0){e.preventDefault();$('q').focus();return}
+  /* 缩放键盘档：当前打开的是哪一层就作用在哪一层（全屏壁纸优先于详情弹窗） */
+  if(cur>=0 && (e.key==='+'||e.key==='='||e.key==='-'||e.key==='0'||e.key==='_')){
+    const z=$('fs').classList.contains('on')?fsZ:ovZ;
+    if(e.key==='0') z.reset(); else z.step(e.key==='+'||e.key==='='?1.25:0.8);
+    e.preventDefault(); return;
+  }
   if(cur>=0&&e.key==='ArrowLeft'){cur--;paint()}
   if(cur>=0&&e.key==='ArrowRight'&&cur<view.length-1){cur++;paint()}
 });
