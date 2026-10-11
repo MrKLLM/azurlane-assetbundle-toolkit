@@ -390,21 +390,21 @@ def main():
     if spreads:
         fails.append(f'1 玻璃：悬停仍在发光 —— 出现了带扩散半径的彩色环 {spreads[0]!r}'
                      f'（用户："划过卡片不用发光"）')
-    # ② 边墙：它必须比面板"更像一个厚玻璃截面"。
-    #    ⚠️ 2026-10-10 **这条判据重新表述过**（不是放宽阈值）：原来拿"边墙 blur 半径 > 面板 blur 半径"
-    #    当厚度线索，那是毛玻璃时代的代理指标。首页边墙换成 feDisplacementMap 真折射后，厚度由
-    #    **像素位移**承担、blur 只留 1px 收边 ⇒ 再要求 blur 更大就是错的。改成"折射 url() 与
-    #    更强的 blur 至少占一条"，两条路都堵死时仍然报红，不许恒真。
-    #    ⚠️ 2026-10-11 又改一次，仍是**重新表述不是放宽**：面板那层 blur(2.5px) 已删
-    #    （backdrop-filter 的成本单位是"盒子个数"，见 §134），于是"面板半径"这个比较对象根本不存在了。
-    #    现在的结构：边墙必须挂滤镜（折射 url() 或 blur）；**若**面板也挂着，才要求边墙更强。
-    #    ⇒ "面板没滤镜"是合法形态，但"边墙空着"照样报红。
-    if 'blur' not in hov['rim'] and 'url(' not in hov['rim']:
-        fails.append(f'1 玻璃：::before 上没有 backdrop-filter，缺"厚边墙"这一特征（{hov["rim"][:44]}）')
-    pb = re.search(r'blur\(([0-9.]+)px\)', hov['bf']); rb = re.search(r'blur\(([0-9.]+)px\)', hov['rim'])
-    if pb and 'url(' not in hov['rim'] and not (rb and float(rb.group(1)) > float(pb.group(1))):
-        fails.append(f'1 玻璃：面板挂着 blur({pb.group(1)}px)，边墙既没挂折射 url() 也不比它强'
-                     f'（边墙 {rb.group(1) if rb else "—"}px）—— 看不出厚度差')
+    # ② 边墙：**卡片盒内一个 backdrop-filter 都不许挂**（元素自身与 ::before/::after 都算）。
+    #    ⚠️ 这条判据 2026-10-11 第三次改，方向是**反过来**，而且仍然是"重新表述"不是"放宽"：
+    #      ① 原来判"边墙 blur 半径 > 面板半径"——毛玻璃时代的厚度代理指标，折射上线后失效；
+    #      ② 改成"折射 url() 与更强的 blur 至少占一条"——面板层删掉后比较对象没了；
+    #      ③ 现在卡片根本不挂滤镜：因为卡片必然被跟手倾斜 rotateX/rotateY，而**转角一非 0，
+    #         Chrome 就把 ::before 上那层"只留环"的 mask 整个丢掉 ⇒ blur 铺满整张卡**
+    #         （静态 8° 即触发；六态对照与两条被证伪的旧根因见 §136）。用户据此拍掉那圈磨砂边。
+    #    ⇒ 报红条件：任何一张卡的 ::before/::after/自身挂着 backdrop-filter（= 那圈又长回来了，
+    #      一转就糊）。"厚度"这一特征已移交导航栏那条边墙（判据在 11 节 nav_rim）。
+    if 'blur' in hov['rim'] or 'url(' in hov['rim'] or 'saturate' in hov['rim']:
+        fails.append(f'1 玻璃：卡片 ::before 又挂上 backdrop-filter 了（{hov["rim"][:44]}）'
+                     f'—— 卡片一转就糊整张面，见 §136')
+    pb = re.search(r'blur\(([0-9.]+)px\)', hov['bf'])
+    if pb:
+        fails.append(f'1 玻璃：卡片元素本身挂着 backdrop-filter({hov["bf"][:40]}) —— 同上，§136')
     # （原来这里判"高光坐标必须跟着指针换"，随那个发光效果一起删掉了）
     if 'matrix' not in hov['imMat']:
         fails.append(f'1 悬停：缩略图没跟随放大（{hov["imMat"]}）')
@@ -430,22 +430,27 @@ def main():
         fails.append('1 悬停：卡面上又长出了 .nmbar（用户已点名不要那条）')
     if not hov['nm']:
         fails.append('1 悬停：卡面下方的舰名不见了（舰名必须常驻）')
-    # 毛玻璃：进视口的卡必须有 backdrop-filter，**没进视口的卡必须没有** —— 这条是成本护栏
+    # 成本护栏（原「毛玻璃只给进视口的卡挂」那条，随边墙一起改写）：以前这条判的是
+    #   "视口内必须有 ≥5 张卡挂着模糊、视口外必须一张都不挂"——那是 IntersectionObserver 的验收。
+    #   现在卡片零滤镜（§136），那个观察器已删，所以判据换成**更强**的一条：视口内外都一张都不许挂。
+    #   ⚠️ 别把它读成"原来那半条被放宽了"：它把"视口内要有"这半边直接取消，是因为那半边已经不存在；
+    #      留下来的是硬约束，任何一张卡挂上滤镜就报红（含悬停态——那正是 §136 的触发态）。
     far = t.j("""
       const cs=[...document.querySelectorAll('.card')];
-      const vh=innerHeight;
-      const outOf=cs.filter(c=>{const r=c.getBoundingClientRect();
-        return r.top>vh+200;}).slice(0,40);
-      return JSON.stringify({n:outOf.length, g:outOf.filter(c=>c.classList.contains('g')).length,
-        inView:cs.filter(c=>c.classList.contains('g')).length,
-        total:cs.length});""")
-    print(f'1 玻璃  视口内挂了模糊的卡 {far["inView"]} / 共 {far["total"]} 张；'
-          f'视口外取样 {far["n"]} 张里挂了 {far["g"]} 张（必须 0）')
+      const bad=c=>['','::before','::after'].some(p=>{const v=getComputedStyle(c,p).backdropFilter;
+        return v && v!=='none';});
+      const hit=cs.filter(bad);
+      return JSON.stringify({n:cs.length, bad:hit.length,
+        sample:hit.slice(0,3).map(c=>(c.querySelector('.nm')||{}).textContent||'?'),
+        g:cs.filter(c=>c.classList.contains('g')).length});""")
+    print(f'1 玻璃  {far["n"]} 张卡里挂着 backdrop-filter 的 {far["bad"]} 张（必须 0）'
+          f'；`.g` 残留 {far["g"]} 张')
+    if far['bad'] > 0:
+        fails.append(f'1 玻璃：{far["bad"]}/{far["n"]} 张卡挂着 backdrop-filter（样本 {far["sample"]}）'
+                     f'—— 卡片一转就糊整张面，见 §136')
     if far['g'] > 0:
-        fails.append(f'1 玻璃：{far["g"]}/{far["n"]} 张**视口外**的卡还挂着 backdrop-filter —— '
-                     f'IntersectionObserver 没摘，1008 张一起模糊必掉帧')
-    if far['inView'] < 5:
-        fails.append(f'1 玻璃：视口内只有 {far["inView"]} 张卡挂上了模糊，毛玻璃等于没做')
+        fails.append(f'1 玻璃：还有 {far["g"]} 张卡带 .g —— 那个类名的消费者（边墙）已删，'
+                     f'留着说明挂载逻辑没撤干净')
 
     # 1b. 倾斜的成本：每次事件都要「读矩形 + 写两个变量」。1008 张卡的网格上这玩意会掉帧，
     #     所以把成本量出来当判据；同时证明它真的在驱动倾斜（否则测的只是空转）。
