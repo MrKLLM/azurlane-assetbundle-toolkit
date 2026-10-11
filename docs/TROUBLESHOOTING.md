@@ -9334,3 +9334,53 @@ Qoder 内置浏览器标签是 `visibilityState=hidden` 的隐藏表面：**`Int
   commit message 找这条找不到。共享工作树下"我 add、他 commit"会互相扫，这条已经第三次发生。
 - **涉及文件（追加-XXIV）**：`scripts/diag/l2d_part_flicker_probe.py`（新臂 ㉙ `--areahunt/--hanames/--hasecs/--hathr/--haevery`）、
   `.diag/l2d_areahunt_gezi_2.json`、`.diag/l2d_areashot_gezi_2/`、`.diag/ah_shots.png`。
+
+
+## §138. 页头那条「边墙」在照片背景前读作一条杠；分组标签是裸字 ⇒ 任何单一颜色都只有一半场景可读（2026-10-11 前端）
+
+**症状**：用户第二次报「还是看不清字」，并新报「头顶横幅下边怎么有条杠」。场景 = 音乐库昼间 +
+站用背景是一张夜景照片。两件事：① 页头下面多出一条横杠；②「用途 / 出处 / 专辑 / 收藏」读不出。
+
+**取证**（第二次说"还是X"起不许再猜根因，先拿复现样本）：
+- 用户截图逐行量：栏体那块底 (179,190,208) → 其下 18px 带子 (226,229,237) → 再下面才是图 (59,78,114)
+  ⇒ 带子比**它自己所在的栏体还亮 47/255 级**，上沿一条硬接缝 ⇒ 这就是那条"杠"。
+- 同一处改动拿到**纯色**页面上做 A/B（摘掉带子）：差 ≤17/765，等于看不见 ⇒ 我第一轮在托管浏览器里
+  据此判过"带子无罪"，那是假的：那张 2.5 MB 的站用背景**当时还没解码上屏**，量的是没有暗部的页面。
+  **要量"暗部才放大得出来"的效果，必须确认身后那张图真的落屏了**（阳性对照：同一区域亮部/暗部各取一点）。
+
+**根因**：
+1. `header::before` 那条 18px 带子挂 `blur(17px) saturate(2.2) brightness(1.14)`。首页导航栏的栏体只有
+   16% 白 ⇒ 带子是那一片唯一的"厚"，读作玻璃厚边；音乐库的栏体自己已经是 62% 白 + `blur(26px)`
+   （它本身就是 backdrop root）⇒ 同一手法落在"已经糊过一遍的底"上，只多画出一条更亮的矩形带。
+   ⇒ **同一个装饰只在"底够透"的元素上成立**；两页共用一条 CSS 形状 ≠ 共用一个结论。
+2. 分组标签是**裸字**（`.grp>span{color:var(--dim)}`，11.5px）：纯色页面上 #93a3bd 压 #eef4fb 实测对比度
+   **2.5:1**（AA 线是 4.5）；换成照片背景后它一会儿压亮部一会儿压暗部 ⇒ **任何单一颜色都只在一半场景可读**。
+   上一轮那个"把颜色改成 `--txt`"的补丁还只在 `html.has-sitebg` 下生效，所以不设背景时它压根没跑。
+
+**修法**：
+- 音乐库撤掉 `header::before` + `html.lg header.hglg::before` + `LiquidGlass.auto(header,{band:true})`
+  三处 ⇒ 本页滤镜盒 2 → 1。背景库的 `.navrim` **留着**（它栏体只有 16%，与首页同一类）。
+- 标签改成"和 chip 一样有自己的底"：`.grp>span:not(.chip)` → `--txt2` + 72% 白板 + 胶囊圆角，
+  纯色页面实测 **5.0:1**；`header .sub`（统计行）同步从 `--dim` 提到 `--txt2`。
+  ⚠️ `:not(.chip)` 不能省：`.grp>span` 特异度 (0,1,1) **高于** `.chip` (0,1,0)，不限定就会把 padding 和
+  背景糊到「★ 只看收藏」那颗 chip 上。
+- `favorites.js`：`html.has-sitebg header{…90% 白}`，并把首页那类裸标签 `.ctl label` 一起加底。
+
+**顺带抓到一条静默失效**（同一次改动里）：`favorites.js` 注入的 CSS 是一长串 `+` 拼出来的字符串，
+中间某行**误写成 `;` 结尾** ⇒ 赋值就地结束，后面四条规则（压 `.amb` 光晕、藏首页那张不透明水面 canvas、
+星标 `.favbtn.corner` / `.tr` 定位）**全都没进 `<style>`，而且不报任何错**。
+⇒ 判据：量 `#favcss` 的 `textContent` 长度**并且逐条断言每条规则都在**（本轮 1593 → 2013 字节），
+不能只看"页面上好像挺正常"。这类"JS 合法、CSS 少一截"的坑，`node --check` 永远查不出来。
+
+**已排除的假设**（本轮量出来的，别重跑）：
+- ~~那条杠是 `header` 的 `box-shadow: var(--sh1)`~~：摘掉投影只改栏体下沿 15px 的软渐变（≤27/765 级、
+  无硬边），带子那 47 级它给不出来。
+- ~~sticky 定位的锅~~：§136 补的 V6 档已排除。
+- ~~给标签换个颜色就能读~~：见根因 2 —— 照片背景这条轴上"颜色"已经死了，只能给底。
+
+**验收**：`glass_pages_probe.py` 新增**禁挂判据**（`spec['forbid']`：`header::before` 的计算
+`backdrop-filter` 必须是 `none` 且 `content` 必须是 `none`，否则 `exit 1`）—— 与 §136 那条
+"卡片挂任一滤镜盒即红"同类的架构闸门，防的是下次有人觉得页头缺点什么、又把带子挂回来。
+
+**涉及文件**：`gallery_src/bgm.html`、`gallery_src/backgrounds.html`、`gallery_src/favorites.js`、
+`scripts/diag/glass_pages_probe.py`；图证 `.diag/favshots/bgm_{bg,skin}*.png`、`.diag/glasspages/plain_light.png`。

@@ -146,8 +146,18 @@ function css(){
       ⚠️ 用 !important：room3d 的 <style> 排在本模块之后，同特异度会把它自己的规则赢回去。 */
    'html.has-sitebg :is(.chip:not(.on),.q,.sel,.opt,.hint,.tools,.tabs,.ctl select){'+
    'background:color-mix(in srgb,var(--panel) 92%,transparent)!important}'+
-   'html.has-sitebg :is(.grp>span,.sub,.en,.mt,.dim){color:var(--txt)!important;opacity:.9}';
-   /* 光晕在背景图之上会把图洗白 ⇒ 有站用背景时压到两成（图本身不加模糊、不加压暗） */
+   /* 页头：栏体平时只有 62%（音乐库）甚至 16%（首页 / 背景库）白，身后换成一张照片就压不住
+      标题与统计行 ⇒ 一律给到九成。图本身仍不加模糊、不加压暗（用户 2026-10-11 拍板"原图清楚铺满"），
+      这条只把"放字的那一条 UI"垫实。 */
+   'html.has-sitebg header{background:color-mix(in srgb,var(--panel) 90%,transparent)!important}'+
+   /* 首页的筛选标签是 `.ctl label`、另两页是 `.grp>span`：都是**裸字**（没有底），
+      照片亮部暗部各吃掉一半可读性 ⇒ 和 chip 一样给底，颜色也一并从 --dim 提到 --txt。 */
+   'html.has-sitebg :is(.grp>span:not(.chip),.ctl label){'+
+   'background:color-mix(in srgb,var(--panel) 86%,transparent)!important}'+
+   'html.has-sitebg :is(.grp>span,.ctl label,.sub,.en,.mt,.dim){color:var(--txt)!important;opacity:.9}'+
+   /* ⚠️ 上面这一串**必须以 '+ 结尾**：这里曾经写成 ';'，于是 textContent 就地结束，
+      后面四条（压光晕、藏首页水面 canvas、星标 .corner/.tr 定位）全被静默丢掉 ——
+      JS 不报错、CSS 不生效，是那种"功能看着在、屏幕上没有"的失效。 */
    'html.has-sitebg #bgfx .glow,html.has-sitebg .amb i{opacity:.2}'+
    /* ⚠️ 首页那层水面 canvas 是**不透明**的（WebGL 默认 alpha:false），整层铺满视口 ⇒
       设了站用背景必须把它藏掉，否则背景图 100% 被盖住（实测两张截图一模一样）。

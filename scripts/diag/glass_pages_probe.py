@@ -5,7 +5,9 @@
 折射**挂上了没有**、挂在了**该挂的元素**上、以及它有没有真的落到像素上。
 
 判据（每条都会打印，任一不过就 exit 1）：
-  1 挂载   header（两页）与 .bar（音乐库）各自带上类，且 --lgf=url(#lgN) 已写
+  1 挂载   spec['mount'] 里每个元素各自带上类，且 --lgf=url(#lgN) 已写
+  1b 禁挂  spec['forbid'] 里每个元素（含伪元素）**不许**有 backdrop-filter ——
+           音乐库页头那条边墙已被用户判死为"一条杠"，挂回来就是回归（红）
   2 生效   计算后的 backdrop-filter 里确实含 url() —— 只看类名会骗人：
            自定义属性解析失败是**整条声明作废**，类在、滤镜却没挂上（§133 那条老坑）
   3 桶数   同时存在的滤镜个数 ≤ 2（成本主因是"几个不同滤镜"，不是复杂度，§134）
@@ -47,7 +49,8 @@ FREEZE_CSS = ('.amb i{animation:none!important;transition:none!important}'
               ',.card{animation:none!important}')
 
 PAGES = {
-    'bgm.html': {'mount': [('header', 'hglg', '::before'), ('#bar', 'bglg', '')],
+    'bgm.html': {'mount': [('#bar', 'bglg', '')],
+                 'forbid': [('header', '::before', '栏体已经是 62% 白 + blur26，带子在这只读作一条杠')],
                  'rows': '.row', 'tube': '#tide'},
     'backgrounds.html': {'mount': [('.navrim', 'hglg', '')], 'rows': '.card',
                          'zoom': ('#ovimg', '#ovbox', '#ovz')},
@@ -111,7 +114,8 @@ class Page:
 
 STATE = """(()=>{const out={lg:document.documentElement.classList.contains('lg'),
   on:!!(window.LiquidGlass&&LiquidGlass.on), buckets:LiquidGlass?LiquidGlass.buckets:-1,
-  filters:LiquidGlass?LiquidGlass.filters:-1, mounted:[]};
+  filters:LiquidGlass?LiquidGlass.filters:-1, mounted:[], forbidden:[]};
+  %s
   %s
   return JSON.stringify(out);})()"""
 
@@ -122,6 +126,16 @@ MOUNT_JS = """const M=%s;   // [[sel,cls,pseudo],...]
     const bf=String(cs.backdropFilter||cs.webkitBackdropFilter||'none');
     out.mounted.push({s,ok:el.classList.contains(cls)&&/url\\(/.test(bf),cls:el.classList.contains(cls),
       lgf:String(el.style.getPropertyValue('--lgf')||'').slice(0,14), bf:bf.slice(0,52)});}"""
+
+# 反向挂载判据：某些元素**不许**挂边墙。音乐库页头就是第一条 ——
+# 栏体自己已经是 62% 白 + blur(26px)，那条 18px 带子在它下面只会画出一条更亮的杠
+# （2026-10-11 用户实机报"头顶横幅下边有条杠"，照片背景前实测把带子抬亮 47/255 级）。
+FORBID_JS = """const F=%s;   // [[sel,pseudo,why],...]
+  for(const [s,ps,why] of F){const el=document.querySelector(s);
+    if(!el){out.forbidden.push({s,ok:true,note:'元素不存在'});continue;}
+    const cs=getComputedStyle(el,ps||null);
+    const bf=String(cs.backdropFilter||cs.webkitBackdropFilter||'none');
+    out.forbidden.push({s,ok:(bf==='none'||!bf)&&cs.content==='none',why,bf:bf.slice(0,40)});}"""
 
 ROWS_JS = """(()=>{let n=0;document.querySelectorAll('%s').forEach(e=>{
     ['','::before','::after'].forEach(p=>{const v=getComputedStyle(e,p).backdropFilter;
@@ -268,7 +282,8 @@ def check(page, spec, fails):
                 break
             time.sleep(0.5)
         time.sleep(1.6)
-        js = STATE % MOUNT_JS % json.dumps(spec['mount'])
+        js = STATE % (MOUNT_JS, FORBID_JS) % (json.dumps(spec['mount']),
+                                              json.dumps(spec.get('forbid', [])))
         st = pg.ev(js)
         if not isinstance(st, str):
             fails.append(f'{page}: 状态读取失败 {st}')
@@ -280,6 +295,11 @@ def check(page, spec, fails):
                   f"{'✅' if m['ok'] else '❌'}")
             if not m['ok']:
                 fails.append(f"{page}: {m['s']} 没挂上折射（{m.get('why') or '类在但 backdrop-filter 里没有 url()'}）")
+        for f in st['forbidden']:
+            print(f"  禁挂 {f['s']:<8} 空={f['ok']} bf={f['bf']!r} —— {f['why']} "
+                  f"{'✅' if f['ok'] else '❌'}")
+            if not f['ok']:
+                fails.append(f"{page}: {f['s']} 又挂上了滤镜盒（{f['bf']}）—— {f['why']}")
         if st['buckets'] > 2 or st['filters'] > 2:
             fails.append(f"{page}: 滤镜桶 {st['buckets']}/滤镜 {st['filters']} > 2（成本主因，§134）")
         if not st['on']:

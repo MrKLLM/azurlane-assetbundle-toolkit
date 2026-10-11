@@ -39,20 +39,16 @@ header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:14px
 header::after{content:'';position:absolute;inset:0;pointer-events:none;opacity:.5;
   background:linear-gradient(112deg,color-mix(in srgb,#fff 22%,transparent) 0%,transparent 34%,transparent 66%,
     color-mix(in srgb,var(--brand) 10%,transparent) 100%)}
-/* 下沿那条"厚边墙"：14px 实心带，折射强度明显高于栏体 —— 与首页导航栏同一手法（§133/§136）。
-   ⚠️ 这条带子从不被旋转，所以它可以安全挂 mask/折射；卡片和曲目行不行（§136）。 */
-header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:var(--nav-rim-h,14px);
-  pointer-events:none;z-index:0;
-  -webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);
-  backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}
-/* 折射版：var() 全部带兜底 —— 自定义属性解析失败会让**整条声明**作废（不是只作废那一项），
-   兜底写成上一版那条纯模糊，最坏情况是退回旧观感，而不是那一圈整个消失。 */
-html.lg header.hglg::before{
-  -webkit-backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14));
-  backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14))}
+/* ⚠️ 这里**不再有**下沿那条 18px「边墙」带子（原来是 header::before 挂 blur17+saturate2.2+brightness1.14）。
+   用户 2026-10-11 实机报"头顶横幅下边有条杠"，量过之后判死：
+     · 栏体自己已经是 62% 白 + blur(26px) ⇒ 它就是一个 backdrop root，带子只能糊"栏内那块底"，
+       在纯色页面上只差 5/255 级（等于白挂）；
+     · 一旦身后是站用背景（高对比照片），同一块带子在暗部被抬亮 **47 级**（179,190,208 → 226,229,237），
+       上沿还带一条硬接缝 ⇒ 读作"横幅下面多了一条杠"，不读作玻璃厚边。
+   首页那条带子不动：它的栏体几乎全透（--nav-bg 16%），带子是那一片唯一的"厚"，用户从未报过。 */
 header>*{position:relative;z-index:1}
 header h1{font-size:17px;font-weight:800;letter-spacing:.02em;color:var(--title);white-space:nowrap}
-header .sub{font-size:12px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+header .sub{font-size:12px;color:var(--txt2);white-space:nowrap;font-variant-numeric:tabular-nums}
 header .sp{flex:1}
 a.back{font-size:13px;color:var(--txt2);text-decoration:none;padding:7px 14px;
   border-radius:var(--r-chip);background:color-mix(in srgb,var(--panel) 70%,transparent);
@@ -75,7 +71,14 @@ input.q{flex:1;min-width:230px;font:inherit;font-size:14px;color:var(--txt);
 input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel) 92%,transparent);
   box-shadow:0 0 0 4px var(--on-bg),inset 0 1px 2px color-mix(in srgb,var(--dim) 12%,transparent)}
 .grp{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:2px 0 10px}
-.grp>span{font-size:11.5px;color:var(--dim);margin-right:1px;white-space:nowrap}
+/* 分组标签（用途 / 出处 / 专辑 / 收藏）：它是"这一排在筛什么"的唯一线索，所以**必须和
+   chip 一样有自己的底**。原来它是裸字（--dim，11.5px）：
+     · 纯色页面上 #93a3bd 压 #eef4fb ≈ 2.5:1，11.5px 中文笔画密 ⇒ 用户报"看不清字"；
+     · 站用背景是一张高对比照片时更没救——字底下没有底，任何单一颜色都只在一半场景可读。
+   ⚠️ `:not(.chip)` 不能省：`.grp>span` 的特异度 (0,1,1) **高于** `.chip` (0,1,0)，
+      不限定就会把 padding/背景糊到「★ 只看收藏」那颗 chip 上。 */
+.grp>span:not(.chip){font-size:11.5px;color:var(--txt2);white-space:nowrap;padding:3px 9px;
+  border-radius:var(--r-chip);background:color-mix(in srgb,var(--panel) 72%,transparent)}
 .chip{font-size:12.5px;color:var(--txt2);background:color-mix(in srgb,var(--panel) 62%,transparent);
   border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:5px 12px;cursor:pointer;
   white-space:nowrap;user-select:none;
@@ -489,15 +492,15 @@ document.onkeydown=e=>{
 boot();
 
 /* ───────── 液态玻璃挂载（模块见 liquid_glass.js）─────────
-   只挂两处：页头那条 14px 边墙 + 播放器整块面板。都是**从不被 3D 旋转**的元素 ——
-   §136 那条失效模式（转角非 0 ⇒ Chrome 丢掉子元素遮罩、模糊铺满整盒）就是这么避开的。
+   本页只挂一处：播放器整块面板。它是**从不被 3D 旋转**的元素 —— §136 那条失效模式
+   （转角非 0 ⇒ Chrome 丢掉子元素遮罩、模糊铺满整盒）就是这么避开的。
+   页头那条边墙已撤（理由见上面 header 那段注释：在照片背景前它读作"一条杠"）。
    曲目行与卡片故意不挂：数量大（本页可以筛出几百行），而 backdrop-filter 的成本单位
    就是"挂着的盒子个数"（§134），为装饰付这笔钱不划算。
    ⚠️ 播放器面板挂折射**不需要遮罩**：法线图中间是平的，只有贴边一圈有坡度，
       所以整盒挂滤镜天然就等于"只折射边墙"。别顺手加 mask 把它退回 §136 那个坑。 */
 if(window.LiquidGlass&&LiquidGlass.on){
   const bar=$('bar'), cs=getComputedStyle(bar);
-  LiquidGlass.auto(document.querySelector('header'),{cls:'hglg',band:true,kind:'nav'});
   LiquidGlass.auto(bar,{cls:'bglg',kind:'panel',ring:16,
     radius:parseFloat(cs.borderTopLeftRadius)||16});
 }
