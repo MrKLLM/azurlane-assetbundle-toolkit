@@ -84,13 +84,16 @@ CSS = {
     'noglass': ('.card,.card::before,header,header::before'
                 '{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}'),
     # D：折射用 feTurbulence（每帧现算噪声）——故意做成上界
+    # ⚠️ 2026-10-11 这三条从 `.card.g::before` 改指到 `#glassone`：边墙并成一层之后，
+    #    卡片的 ::before 只剩 :hover 才有，往它身上注入等于打在空选择器上（D/E 会与 C 逐字节相同，
+    #    看起来像"折射不改变像素"，其实是条件失效）。
     'turb': ('.card.g{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}'
-             '.card.g::before{-webkit-backdrop-filter:blur(1px) url(#pTurb)!important;'
-             'backdrop-filter:blur(1px) url(#pTurb)!important}'),
+             '#glassone{backdrop-filter:blur(1px) url(#pTurb)!important;'
+             '-webkit-backdrop-filter:blur(1px) url(#pTurb)!important}'),
     # E：折射用静态法线图查表——真方案
     'img': ('.card.g{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}'
-            '.card.g::before{-webkit-backdrop-filter:blur(1px) url(#pImg)!important;'
-            'backdrop-filter:blur(1px) url(#pImg)!important}'),
+            '#glassone{backdrop-filter:blur(1px) url(#pImg)!important;'
+            '-webkit-backdrop-filter:blur(1px) url(#pImg)!important}'),
     # F：整张卡面板也折射（最坏情况）
     'imgbody': ('.card.g{-webkit-backdrop-filter:blur(2px) url(#pImg)!important;'
                 'backdrop-filter:blur(2px) url(#pImg)!important}'
@@ -129,6 +132,9 @@ CSS = {
     #    若不同，就不许声称免费，得交用户肉眼判。
     'panel_back': ('.card.g{-webkit-backdrop-filter:blur(2.5px) saturate(1.5)!important;'
                    'backdrop-filter:blur(2.5px) saturate(1.5)!important}'),
+    # O：摘掉逐卡边墙滤镜 —— 与 overlay 配对，用来量「70 个盒 → 1 个盒」到底省多少
+    'rim_off': ('.card.g::before{-webkit-backdrop-filter:none!important;'
+                'backdrop-filter:none!important}'),
 }
 
 # 数量敏感性：把在屏挂滤镜的卡数硬压到 N 张，直接量"几张卡才付得起"。
@@ -303,8 +309,9 @@ def render_proof(pg, label='折射'):
 
 
 def run(pg, name, csskey, wave, pre=None):
+    pre_info = None
     if pre:
-        pg.ev(JS_PRE[pre])
+        pre_info = pg.ev(JS_PRE[pre])       # overlay 那条会回报「画了几个环 / 遮罩多大」
     pg.ev(START % (A.ms, str(wave).lower(), CSS[csskey]))
     # 不再从 Python 侧 sweep()：见 START 上方注释——那是在量发事件的速度，不是渲染成本
     time.sleep(A.ms / 1000.0 + 0.6)
@@ -324,6 +331,11 @@ def run(pg, name, csskey, wave, pre=None):
     d['html_lg'] = s['html_lg']
     d['shot'] = clip_shot(pg)
     d['shot_card'] = clip_shot(pg, 'card')
+    if pre == 'overlay':
+        # 截图必须在拆层**之前**取：否则拍到的只是"边墙被摘掉"的空态，证不了遮罩层真的画出来了
+        print(f'{"":18}遮罩层: {pre_info}')
+        d['shot_ov'] = clip_shot(pg, 'card')
+        pg.ev(OVERLAY_OFF)
     print(f'  {name:16} med {d["med"]:>6}ms  p95 {d["p95"]:>6}ms  max {d["max"]:>6}ms  '
           f'~{d["fps"]:>5}fps  导航栏折射={int(d["hglg"])} lg={int(d["html_lg"])}  strokes={d["strokes"]}  '
           f'bg帧={d["bgframes"]}  图={d["shot"]}/{d["shot_card"]}\n{"":18}材质={d["bf"][:44]}')
@@ -365,6 +377,42 @@ def ph_report(pg, label):
           f'绘制 {d["render"]/n:5.2f}  GPU等待 {d["fin"]/n:6.2f}  合计 {tot:6.2f} ms/帧')
     return {'frames': n, 'step': round(d['step']/n, 2), 'upload': round(d['upload']/n, 2),
             'render': round(d['render']/n, 2), 'finish': round(d['fin']/n, 2), 'total': round(tot, 2)}
+
+
+# ── 结构改造假设的现场验证：把「每张卡一个滤镜盒」换成「一层遮罩画完所有环」──
+# 成本模型说单位是盒子个数（§134），那 70 个盒并成 1 个应该省 ~13ms。
+# 这条**先在探针里注入验证**，不改正本：不便宜就不做，省得把首页架构换一遍再发现白干。
+OVERLAY_JS = """(()=>{
+  const main=document.getElementById('main');
+  if(document.getElementById('glassone')) document.getElementById('glassone').remove();
+  const vp=main.clientHeight, top=main.scrollTop, H=vp*3, W=main.clientWidth;
+  const rr=(x,y,w,h,r)=>`M${x+r} ${y}h${w-2*r}a${r} ${r} 0 0 1 ${r} ${r}v${h-2*r}`+
+                        `a${r} ${r} 0 0 1 ${-r} ${r}h${-(w-2*r)}a${r} ${r} 0 0 1 ${-r} ${-r}`+
+                        `v${-(h-2*r)}a${r} ${r} 0 0 1 ${r} ${-r}z`;
+  const lay=document.createElement('div'); lay.id='glassone';
+  // 层放在滚动容器内 ⇒ 环相对卡片不动，滚动时遮罩**不需要重建**（这是这条方案成立的关键）
+  lay.style.cssText='position:absolute;left:0;pointer-events:none;z-index:6;width:'+W+'px;height:'+H+'px;top:'+top+'px';
+  let d='';
+  document.querySelectorAll('.card.g').forEach(c=>{
+    const r=c.getBoundingClientRect(), x=r.left, y=r.top-top;
+    if(y<-40||y>H+40) return;
+    d+=rr(x,y,r.width,r.height,16)+rr(x+12,y+12,Math.max(0,r.width-24),Math.max(0,r.height-24),12);
+  });
+  const n=(d.match(/M/g)||[]).length/2;
+  const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'">'+
+            '<path d="'+d+'" fill="#fff" fill-rule="evenodd"/></svg>';
+  const u='url("data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)+'")';
+  lay.style.webkitMaskImage=u; lay.style.maskImage=u;
+  const st=document.createElement('style'); st.id='ovsty';
+  st.textContent='#glassone{backdrop-filter:blur(17px) saturate(2) brightness(1.08);'+
+    '-webkit-backdrop-filter:blur(17px) saturate(2) brightness(1.08)}';
+  document.head.appendChild(st);
+  main.appendChild(lay);
+  return JSON.stringify({rings:n, W:W, H:H, svg_kb:Math.round(svg.length/1024)});})()"""
+
+OVERLAY_OFF = "(()=>{const l=document.getElementById('glassone'); if(l)l.remove();" \
+              "const s=document.getElementById('ovsty'); if(s)s.remove(); return 'ok';})()"
+JS_PRE['overlay'] = OVERLAY_JS   # JS_PRE 定义在前，这条只能补在这里
 
 
 def phases(pg):
@@ -425,6 +473,18 @@ STATUS = """(()=>{const h=document.documentElement, nav=h.querySelector('header'
     tok_ok:['--lg-blur','--lg-ring','--lg-depth'].every(n=>String(cs.getPropertyValue(n)).trim()!==''),
     feimg:(LG.svg&&LG.svg.querySelector('feImage'))?LG.svg.querySelector('feImage')
       .getAttribute('href').length:0,
+    // 结构闸门：边墙必须是**一层** #glassone。逐卡 ::before 挂滤镜的写法一旦回来（悬停那张除外），
+    // 70 个滤镜盒就悄悄回来了、划水掉回 ~16.7ms —— 而这不会有任何报错，只会变成"又卡了"。
+    ov:(()=>{const g=document.getElementById('glassone');
+      if(!g) return 'NO #glassone';
+      const cs=getComputedStyle(g), mk=(cs.maskImage||cs.webkitMaskImage||'');
+      return 'bf='+(cs.backdropFilter!=='none')+' mask='+(mk.indexOf('url(')===0)+
+             ' size='+g.style.width+'x'+g.style.height;})(),
+    ov_boxes:(()=>{let n=0;
+      document.querySelectorAll('.card').forEach(c=>{
+        if(!c.classList.contains('g')||c.matches(':hover')) return;
+        if(getComputedStyle(c,'::before').backdropFilter!=='none') n++;});
+      return n;})(),
     nav_h:(()=>{const r=nav.getBoundingClientRect();
       return Math.round(r.width)+'x'+Math.round(r.height);})()});})()"""
 
@@ -592,6 +652,12 @@ def main():
         # 材质状态必须在跑条件之前先打印一次：本轮就是「B 比 K 慢 2.8 倍」和「B 与 K 截图逐字节相同」
         # 这两条互相矛盾，说明条件跑起来时折射可能压根没生效——没有这行断言就会拿一组假数字下结论。
         print('材质:', json.dumps(json.loads(pg.ev(STATUS)), ensure_ascii=False))
+        st0 = json.loads(pg.ev(STATUS))
+        if ('NO #glassone' in st0['ov']) or ('bf=false' in st0['ov']) or st0['ov_boxes']:
+            print(f'! 边墙结构闸门不过：{st0["ov"]}，非悬停卡上还挂着 {st0["ov_boxes"]} 个滤镜盒 —— '
+                  f'逐卡 ::before 的写法回来了，70 个盒会把划水打回 ~16.7ms（见 §134）')
+            sys.exit(1)
+        print(f'  边墙结构: {st0["ov"]}；非悬停卡上的滤镜盒 {st0["ov_boxes"]} 个 ✅')
         # 帧时数字只有在「这个材质确实会改变画面」被证完之后才有意义，所以它是硬闸门不是打印。
         if not render_proof(pg, '落地版边墙'):
             print('! 渲染对照不过 —— 先修实现，这一轮所有帧时数字都不要读')
@@ -617,21 +683,26 @@ def main():
         out['D_wave_turb'] = run(pg, 'D 划水·现算噪声', 'turb', True)
         out['E_wave_img'] = run(pg, 'E 划水·静态法线图', 'img', True)
         out['F_wave_imgbody'] = run(pg, 'F 划水·整面折射', 'imgbody', True)
-        print('  ── 以下四条是追那 20ms 的去向 + 落地后的真实对照，不是候选方案 ──')
+        print('  ── 以下是归因条件，不是候选方案 ──')
+        # ⚠️ 2026-10-11 边墙并成 #glassone 之后，L/M/N/P/Q/R/X 七条**已撤下**：它们注入的选择器是
+        #    `.card.g::before`，而那个伪元素现在只有 :hover 才存在 ⇒ 注入完全空转。
+        #    空转的条件不是"少了个信息"，是**噪声伪装成信息**（同一份代码两轮能差 3ms，
+        #    本轮就出现过 N/Q/R 与 B 差 3ms 而它们其实什么都没改）。宁可删也不留着。
+        #    它们当年量出的结论已经钉在 §134 那张表里；CSS 键保留是给 --caps 手工隔离实验用的。
         out['K_wave_lg_off'] = run(pg, 'K 划水·只摘折射', 'asis', True, 'lgoff')
-        out['L_wave_rimonly'] = run(pg, 'L 划水·只留边墙', 'rimonly', True)
-        out['M_wave_panelonly'] = run(pg, 'M 划水·摘卡片边墙', 'panelonly', True)
-        print('  ── N/P/Q/2/4：把边墙那 ~20ms 拆成「半径 / 遮罩 / 面积 / 数量」四项 ──')
-        out['N_wave_rim5'] = run(pg, 'N 划水·边墙blur 17→5', 'rim5', True)
-        out['P_wave_nomask'] = run(pg, 'P 划水·边墙去遮罩', 'nomask', True)
-        out['Q_wave_strip'] = run(pg, 'Q 划水·只留顶条12px', 'strip', True)
-        out['R_wave_rim_plain'] = run(pg, 'R 划水·边墙只剩blur', 'rim_plain', True)
         out['S_wave_panel_back'] = run(pg, 'S 划水·把面板层注回', 'panel_back', True)
+        out['O_wave_overlay'] = run(pg, 'O 划水·注入第二层遮罩', 'asis', True, 'overlay')
+        o_, c0 = out.get('O_wave_overlay'), out.get('C_wave_noglass')
+        if o_ and c0:
+            # O 现在是"再注入一层实验性遮罩"，地板用 C（完全不挂玻璃），不再用已撤下的 X
+            print(f'  遮罩层对照: 一层(落地)={out["B_wave_as_is"]["med"]}ms  '
+                  f'实验层={o_["med"]}ms  零玻璃地板={c0["med"]}ms  '
+                  f'像素{"与零玻璃不同 ⇒ 遮罩真的画出来了 ✅" if o_.get("shot_ov") != c0["shot_card"] else "与零玻璃逐字节相同 ⇒ 遮罩层根本没渲染 ❌"}')
         s_, b_ = out.get('S_wave_panel_back'), out.get('B_wave_as_is')
         if s_ and b_:
-            print(f'  「砍掉面板层是免费的」这条结论的证据：把 blur(2.5px) 注回后卡片取景 '
-                  f'{"逐字节相同 ✅ 那层本来就看不出" if s_["shot_card"] == b_["shot_card"] else "有差异 ❌ 不许声称免费，交肉眼判"}'
-                  f'（{b_["shot_card"]} vs {s_["shot_card"]}）')
+            print(f'  「多挂一层每卡滤镜要多少钱」：注回 blur(2.5px) 后 {b_["med"]}ms → {s_["med"]}ms'
+                  f'（+{s_["med"]-b_["med"]:.1f}ms，70 个盒）；取景 {b_["shot_card"]} vs {s_["shot_card"]}'
+                  f'{" 逐字节相同" if s_["shot_card"] == b_["shot_card"] else " 有差异 ⇒ 不是免费的，交肉眼判"}')
         out['G_wave_noglow'] = run(pg, 'G 划水·摘玻璃+藏光晕', 'noglass_noglow', True)
         out['H_wave_render_stub'] = run(pg, 'H 划水·停掉GL绘制', 'noglass', True, 'renderstub')
         out['J_wave_asis_noglow'] = run(pg, 'J 划水·毛玻璃+藏光晕', 'noglow', True)
@@ -643,6 +714,15 @@ def main():
             for k in ('G_wave_noglow', 'H_wave_render_stub'):
                 if out.get(k) and out[k]['shot'] == c['shot']:
                     print(f'  ⚠ {k} 与 C 像素完全相同 —— 该条件没改变画面，它的耗时数字无意义')
+        # 通用"条件空转"探测：任何一条条件的取景若与 B 逐字节相同，说明它注入的声明根本没生效
+        # （2026-10-11 边墙并成一层之后，N/P/Q/R/rim_off/panelonly 这些打在 `.card.g::before` 上的
+        #  条件全部变成空转——那个伪元素现在只有 :hover 才存在。留着它们是为了复现 §134 那张表，
+        #  但**空转的条件不许当数据读**，所以这里逐条点名，而不是只在 C/D/E/F 那四条上设岗。）
+        base_shot = (out.get('B_wave_as_is') or {}).get('shot_card')
+        inert = [k for k, v in out.items()
+                 if v and k != 'B_wave_as_is' and v.get('shot_card') == base_shot]
+        if inert:
+            print(f'  ⚠ 以下条件与 B 逐字节相同 = **空转，它们的帧时不要读**：{", ".join(inert)}')
         b = out.get('B_wave_as_is')
         bad = []
         if not b or b['strokes'] == 0:
