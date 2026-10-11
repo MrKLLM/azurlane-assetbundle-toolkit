@@ -1238,6 +1238,116 @@ JS_TIMEPROBE = r"""(async (cfg) => {
 #   （复用钩子的 __hideSet，它打在 core.update 之后 ⇒ 渲染读的就是这份缓冲），
 #   每藏一批就在"手的那块屏幕区域"里数还剩多少不透明像素。掉得多 ⇒ 这批里有手的片；再二分到位。
 #   ⚠️ 不用"只亮目标片"那条路：目标片此刻本来就亮着，而"藏"不会遇到"顶点被缩放压成一个点"的假阴性。
+# ---------------------------------------------------------------- ㉗ 反问题：把「灭着」的片分批**强制点亮**
+#   ㉔ 问的是"这块是谁画的"（在**有**手的冻帧上逐批藏）；症状那一帧里手不在，藏不出答案。
+#   本臂反过来问：**在确实没有手的那一帧**，把当前灭着的片一批批强制点亮（其余全隐），
+#   哪一批点亮后手出现在原位 ⇒ 那批就是"该亮而没亮"的美术。
+#   ⚠️ 已知局限（追加-XXI 记过）：被绑定缩放归零的顶点即使点亮也画不出东西
+#      ⇒ "仍什么都没有"只能判"不是这批"，**不能**判死。
+# ---------------------------------------------------------------- ❘ 连拍带姿态向量 + 按向量精确回到那一帧
+#   反查要在"**确实没有手**的那一帧"上做，而抓到这一帧不能靠猜秒数。
+#   手法：先连拍 N 张（每张同时记下当时的全部参数向量），我看图挑一帧，
+#   再把那一帧的向量写回去 → **同一个页面里精确回到那一帧**（姿态由参数决定，不需要复现时间）。
+JS_SHEET = r"""(async (cfg) => {
+  const m=window.__m, im=m.internalModel, app=window.__app, R=app.renderer;
+  const M=im.coreModel._model, D=M.drawables, P=M.parameters;
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  const stop=()=>{ try{ m.autoUpdate=false; }catch(e){} try{ im.autoUpdate=false; }catch(e){}
+                   try{ app.ticker.stop(); }catch(e){} };
+  const go=()=>{ try{ m.autoUpdate=true; }catch(e){} try{ im.autoUpdate=true; }catch(e){}
+                 try{ app.ticker.start(); }catch(e){} };
+  const pump=()=>{ try{ im.coreModel.update(); }catch(e){} };
+  const fr=async()=>await R.extract.base64(app.stage,"image/png");
+  if(cfg.restoreVec){ stop(); await t(120);
+    const v=cfg.restoreVec; for(let i=0;i<v.length&&i<P.count;i++) P.values[i]=v[i];
+    pump(); const url=await fr();
+    let lit=0; for(let i=0;i<D.count;i++) if(D.opacities[i]>0.5) lit++;
+    return JSON.stringify({restored:true, lit:lit, group:(()=>{try{return im.motionManager.state.currentGroup;}catch(e){return null}})(), b64:url}); }
+  go();
+  const out=[];
+  for(let k=0;k<(cfg.n||10);k++){
+    await t(cfg.gapMs||260);
+    out.push({i:k, t:+((k+1)*(cfg.gapMs||260)/1000).toFixed(2),
+              v:Array.from(P.values), b64:await fr()});
+    if(out.length>=24) break; }
+  stop();
+  return JSON.stringify({sheet:out.map(o=>({i:o.i, t:o.t, v:o.v})),
+                         b64s:out.map(o=>o.b64), n:out.length});
+})"""
+
+
+
+JS_FORCELIGHT = r"""(async (cfg) => {
+  const m=window.__m, im=m.internalModel, app=window.__app, R=app.renderer;
+  const CP=Object.getPrototypeOf(im.coreModel);
+  const M=im.coreModel._model, D=M.drawables;
+  const ids=Array.from(D.ids);
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  if(!window.__olHook){ const base=CP.update;
+    CP.update=function(){ const r=base.apply(this,arguments); const S=window.__onlySet;
+      if(S){ const O=this._model.drawables.opacities, n=this._model.drawables.count;
+        for(let i=0;i<n;i++) O[i]=0;
+        for(const j of S) O[j]=1; }
+      return r; };
+    CP.__olHook=1; window.__olHook=1; }
+  const pump=()=>{ try{ im.coreModel.update(); }catch(e){} };
+  const cv=document.createElement('canvas'); const cx=cv.getContext('2d',{willReadFrequently:true});
+  const box=cfg.box;
+  const shot=async()=>{ const url=await R.extract.base64(app.stage,"image/png");
+    const img=new Image(); await new Promise((ok,no)=>{ img.onload=ok; img.onerror=()=>no('e'); img.src=url; });
+    if(cv.width!==img.width||cv.height!==img.height){ cv.width=img.width; cv.height=img.height; }
+    cx.clearRect(0,0,img.width,img.height); cx.drawImage(img,0,0);
+    const x0=Math.max(0,box[0]), y0=Math.max(0,box[1]);
+    const w=Math.max(1,Math.min(img.width-x0, box[2]-box[0])), h=Math.max(1,Math.min(img.height-y0, box[3]-box[1]));
+    return {url, w, h, px:cx.getImageData(x0,y0,w,h).data}; };
+  const opaque=(o)=>{ let n=0; for(let i=3;i<o.px.length;i+=4) if(o.px[i]>10) n++; return n; };
+  const area=box[2]-box[0], hh=box[3]-box[1];
+  const log=[]; const dark=[], litNow0=[];
+  /* ⚠️ 顺序坑（本轮实测踩到）：下面第一条对照会把缓冲**全部写 0**，
+     所以"当前亮着哪些片"必须**在擦之前**取，否则对照项恒等于 0、整批读数全被污染。 */
+  for(let i=0;i<D.count;i++) (D.opacities[i]>0.5 ? litNow0 : dark).push(i);
+  /* 先钉两条对照：① 什么都不点亮 ⇒ 靶区应当基本是空的（不空说明这帧本来就有东西在那儿）；
+     ② 把**当前亮着**的片全点亮回去（__onlySet=亮片集）⇒ 画面应当和原帧同形，证明钩子没写坏。 */
+  window.__onlySet=new Set(); pump(); await t(60); const E0=await shot();
+  window.__onlySet=new Set(litNow0); pump(); await t(60); const E1=await shot();
+  window.__onlySet=new Set(); pump(); await t(60); const E0b=await shot();
+  const litNow=litNow0;
+  log.push(['对照：只点亮"当前亮着"的 %d 片 → 靶区不透明像素 %s（面积 %s）'
+            % (litNow.length, opaque(E1), area*hh), 0,0, '']);
+  window.__onlySet=null; pump(); await t(60);
+  const bs=cfg.batch||40, pos=[];
+  for(let i=0;i<dark.length;i+=bs){
+    const part=dark.slice(i,i+bs);
+    window.__onlySet=new Set(part); pump(); await t(60);
+    const o=await shot(); const n=opaque(o); window.__onlySet=null; pump(); await t(40);
+    log.push(['批 %d/%d (%d 片灭着的)' % (Math.floor(i/bs)+1, Math.ceil(dark.length/bs), part.length),
+              n, area*hh, '靶区亮了 '+Math.round(100*n/(area*hh))+'%']);
+    if(n >= cfg.thr*area*hh) pos.push(part);
+    if(log.length>cfg.budget) break; }
+  const found=[];
+  for(const grp of pos){ let cur=grp;
+    while(cur.length>1 && log.length<cfg.budget){
+      const mid=Math.ceil(cur.length/2), A=cur.slice(0,mid), B=cur.slice(mid);
+      window.__onlySet=new Set(A); pump(); await t(60); const na=opaque(await shot());
+      window.__onlySet=new Set(B); pump(); await t(60); const nb=opaque(await shot());
+      window.__onlySet=null; pump();
+      if(na>=cfg.thr*area*hh && na>=nb) cur=A; else if(nb>=cfg.thr*area*hh) cur=B;
+      else { log.push(['二分两边都不亮，停在 '+cur.length+' 片',0,0,cur.map(j=>ids[j]).join(',').slice(0,200)]); break; } }
+    if(cur.length===1) found.push(ids[cur[0]]);
+    else found.push('未收敛:'+cur.map(j=>ids[j]).join(',')); }
+  const fin=[];
+  for(const nm of found.slice(0,14)){ const j=ids.indexOf(nm); if(j<0){ fin.push([nm,'?']); continue; }
+    window.__onlySet=new Set([j]); pump(); await t(60); const o=await shot();
+    fin.push([nm, opaque(o), +D.opacities[j].toFixed(2)]); window.__onlySet=null; pump(); }
+  window.__onlySet=null; pump(); await t(60);
+  const after=await shot();
+  return JSON.stringify({box, areaPx:area*hh, darkCount:dark.length, litCount:litNow.length,
+    emptyBox:opaque(E0), emptyBox2:opaque(E0b), restoredBox:opaque(E1), log:log, singles:fin,
+    backToNormal:opaque(after), b64:after.url.slice(0,64)});
+})"""
+
+
+
 JS_HANDFIND = r"""(async (cfg) => {
   const m=window.__m, im=m.internalModel, M=im.coreModel._model, D=M.drawables;
   const app=window.__app, R=app.renderer;
@@ -2848,35 +2958,94 @@ def main():
                                 return json.load(open(go, encoding="utf-8"))
                             except Exception:
                                 return None
-                        print("   第 1 步：等 {\"advance\":秒数} —— 放开跑那么久再就地冻住，交回当前帧"
-                              "（反复发就能换帧，直到画面里有手）")
-                        g1 = wait_go(a.hfwait)
-                        if not g1:
-                            print("   [FAIL] 没等到 freeze 命令")
-                        else:
-                            fz = json.loads(ev(JS_FREEZE + "(%s)" % json.dumps(
-                                {"advance": float(g1.get("advance", 0) or 0)})) or "{}")
-                            if fz.get("b64"):
-                                fpz = os.path.join(ROOT, ".diag", "hf_frozen.png")
+                        print("   进入同一趟页面的会话：反复等命令文件 %s" % os.path.basename(go))
+                        print("   命令：{advance:秒}=冻住交帧 ｜ {mode:sheet,n,gapMs}=连拍并记姿态向量")
+                        print("         {mode:restore,i}=精确回到第 i 张 ｜ {mode:bisect,box}=这块是谁画的")
+                        print("         {mode:forcelight,box}=灭着的片里谁在该处 ｜ {mode:quit}")
+                        sheet24 = os.path.join(ROOT, ".diag", "l2d_sheet_%s.json" % a.model)
+                        while True:
+                            g = wait_go(a.hfwait)
+                            if not g:
+                                print("   [FAIL] 等命令超时，会话结束")
+                                break
+                            md = g.get("mode", "freeze")
+                            if md == "quit":
+                                break
+                            if md == "sheet":
+                                rsh = json.loads(ev(JS_SHEET + "(%s)" % json.dumps(
+                                    {"n": int(g.get("n", 10)), "gapMs": int(g.get("gapMs", 260))})) or "{}")
+                                if not rsh.get("sheet"):
+                                    print("   [FAIL] sheet 没回数据：%s" % str(rsh)[:200])
+                                    continue
+                                with open(sheet24, "w", encoding="utf-8") as fh:
+                                    json.dump({"frames": rsh["sheet"]}, fh)
+                                dsh = os.path.join(ROOT, ".diag", "l2d_sheet_%s" % a.model)
+                                if not os.path.isdir(dsh):
+                                    os.makedirs(dsh)
+                                for old in glob.glob(os.path.join(dsh, "*.png")):
+                                    os.remove(old)
+                                for o, b64 in zip(rsh["sheet"], rsh.get("b64s") or []):
+                                    with open(os.path.join(dsh, "k%02d.png" % o["i"]), "wb") as fh:
+                                        fh.write(base64.b64decode((b64 or "").split(",", 1)[-1]))
+                                print("   连拍 %d 张（向量 → %s）图 → %s"
+                                      % (len(rsh["sheet"]), os.path.basename(sheet24), dsh))
+                                continue
+                            if md == "restore":
+                                frs = json.load(open(sheet24, encoding="utf-8"))["frames"]
+                                pick24 = [f for f in frs if f["i"] == int(g.get("i", -1))]
+                                if not pick24:
+                                    print("   [FAIL] 第 %s 张不在会话里" % g.get("i"))
+                                    continue
+                                rr = json.loads(ev(JS_SHEET + "(%s)" % json.dumps(
+                                    {"restoreVec": pick24[0]["v"]})) or "{}")
+                                fpz = os.path.join(ROOT, ".diag", "hf_restored.png")
                                 with open(fpz, "wb") as fh:
-                                    fh.write(base64.b64decode(fz["b64"].split(",", 1)[-1]))
-                                print("   已冻住 group=%s 亮片=%s 画布=%s 模型包围盒=%s → %s"
-                                      % (fz.get("group"), fz.get("lit"), fz.get("canvas"),
-                                         fz.get("bounds"), os.path.basename(fpz)))
-                            print("   第 2 步：等 {mode:bisect, box:[x0,y0,x1,y1]} —— 就在这张冻帧上反查")
-                            g2 = wait_go(a.hfwait)
-                            if not g2 or not g2.get("box"):
-                                print("   [FAIL] 没等到 bisect 命令或没给 box")
-                            else:
-                                raw24b = ev(JS_HANDFIND + "(%s)" % json.dumps(
-                                    {"clip": a.hdclip, "at": 0, "noscan": True,
-                                     "box": [int(x) for x in g2["box"]],
-                                     "thr": float(g2.get("thr", a.hfthr)),
-                                     "batch": max(4, a.hfbatch), "budget": max(8, a.hfbudget)}))
-                                try:
-                                    r24 = json.loads(raw24b)
-                                except Exception:
-                                    r24 = {"err": str(raw24b)[:300]}
+                                    fh.write(base64.b64decode((rr.get("b64") or "").split(",", 1)[-1]))
+                                print("   已回到第 %s 张（亮 %s 片 group=%s）→ %s"
+                                      % (g.get("i"), rr.get("lit"), rr.get("group"), os.path.basename(fpz)))
+                                continue
+                            if md == "freeze":
+                                fz = json.loads(ev(JS_FREEZE + "(%s)" % json.dumps(
+                                    {"advance": float(g.get("advance", 0) or 0)})) or "{}")
+                                if fz.get("b64"):
+                                    fpz = os.path.join(ROOT, ".diag", "hf_frozen.png")
+                                    with open(fpz, "wb") as fh:
+                                        fh.write(base64.b64decode(fz["b64"].split(",", 1)[-1]))
+                                    print("   冻住 group=%s 亮片=%s 包围盒=%s → %s"
+                                          % (fz.get("group"), fz.get("lit"), fz.get("bounds"),
+                                             os.path.basename(fpz)))
+                                continue
+                            if not g.get("box"):
+                                print("   [FAIL] %s 需要 box" % md)
+                                continue
+                            bx = [int(x) for x in g["box"]]
+                            if md == "forcelight":
+                                rq = json.loads(ev(JS_FORCELIGHT + "(%s)" % json.dumps(
+                                    {"box": bx, "thr": float(g.get("thr", 0.05)),
+                                     "batch": max(8, int(g.get("batch", 40))),
+                                     "budget": max(12, a.hfbudget)})) or "{}")
+                                if "log" not in rq:
+                                    print("   [FAIL] %s" % str(rq)[:200])
+                                    continue
+                                print("   反问题：灭着 %s 片；对照 什么都不点=%s、点亮当前亮片=%s（靶区面积 %s）"
+                                      % (rq["darkCount"], rq["emptyBox"], rq["restoredBox"], rq["areaPx"]))
+                                for e in rq["log"]:
+                                    print("     %-30s %s %s" % (str(e[0])[:30], e[1], e[3]))
+                                print("   收敛：%s" % (rq.get("singles") or "无"))
+                                continue
+                            rq = json.loads(ev(JS_HANDFIND + "(%s)" % json.dumps(
+                                {"clip": a.hdclip, "at": 0, "noscan": True, "box": bx,
+                                 "thr": float(g.get("thr", a.hfthr)), "batch": max(4, a.hfbatch),
+                                 "budget": max(8, a.hfbudget)})) or "{}")
+                            if "area" not in rq:
+                                print("   [FAIL] %s" % str(rq)[:200])
+                                continue
+                            print("   这块是谁画的：靶区 %s 像素、基线自差 %s；亮 %s/%s 片"
+                                  % (rq["area"], rq.get("self0"), rq["litCount"], rq.get("total")))
+                            for e in rq["log"]:
+                                print("     %-30s %s %s" % (str(e[0])[:30], e[1], e[3]))
+                            print("   收敛到单片：%s" % (rq.get("singles") or "无"))
+                        r24 = None
                 if r24 is None:
                     pass
                 elif r24.get("poseMiss"):

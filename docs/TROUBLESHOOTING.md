@@ -9243,3 +9243,37 @@ Qoder 内置浏览器标签是 `visibilityState=hidden` 的隐藏表面：**`Int
   ㉖ `JS_FREEZE`，臂 ㉔ 加 `--hfpick/--hfwait` 两步会话与 `poseMiss` 中止闸门、`noscan`，
   扫相同时回传参数指纹）、`.diag/hf_frozen.png`（那张冻帧，靶框来源）、
   `.diag/l2d_handfind_gezi_2_at7.0.json`（冻帧二分明细）、`.diag/hf24live.log`、`.diag/hf25track.log`。
+
+**§123 追加-XXIII（2026-10-11 第二十二~二十三轮：手的形变参数导出逐键完全一致 ⇒ "导出丢了手的动作"判死；会话工具成型）**
+
+- **新工具 `scripts/diag/l2d_hand_param_diff.py`**：同一个 clip，源侧 `m_StreamedClip` 逐键 `(t, c4)`
+  与导出侧 `motion3.json` 逐键一比一，报 ① 键数 ② 值域(动程) ③ 在**源侧每个键时刻**上导出值偏多少。
+  复用 `l2d_streamed_key_forensics` 的 `raw_keys/seg_walk/deref`（同一把尺子，不另写解析器）。
+  三条读法坑写进头注释：帧 0 的参考姿态必须按 `REF_POSE_EPS` 滤掉；`seg_walk` 只取段端点所以量不到段中点；
+  两侧时间基不一致要先看时间基（本次实测都是 0.000~18.250s ⇒ 一致）。
+- **结果：`gezi_2 / home` 的 14 条 Hand/Arm/Shoulder 形变参数最大偏差 0.0000**
+  （`ParamHandLAngle` 30 键动程 36.645、`ParamHandLChange` 14 键 30.0、`ParamHandRStretch` 23 键 33.806、
+  `ParamShoulderStretch` 9 键 27.107 …键数与动程逐条相同）。
+  ⇒ **"我们导出时把手的动作弄丢了/弄错了"这条判死**。
+- **另一条结构性否定**：`gezi_2.moc3` 里**没有任何手指参数**（只有 `ParamHand*Angle/Change/Stretch/Animation/Display28`）
+  ⇒ 手指是画在美术片上的。"手指参数没动所以手没了"这类假设在这个模型上**不成立**，别再找手指参数。
+- **反问题臂 ㉗ `JS_FORCELIGHT`（把灭着的片分批强制点亮、其余全隐）第一次跑被自己的顺序 bug 污染**：
+  对照项"点亮当前亮片"是在**擦缓冲之后**才取"当前亮着哪些片" ⇒ 取到空集 ⇒ 读数恒 0，
+  整批"靶区亮了 x%"全部不可信（当时只有 `ArtMesh190` 160 像素那点信号）。已修：亮/灭名单必须在写 0 之前取，
+  并补第二条对照（擦完之后再测一次空靶区应为 0）。
+  ⚠️ 修前那条"灭着的 415 片里没有第二套手"**只算弱证据**——已知被绑定缩放归零的顶点即使点亮也画不出东西。
+- **会话工具成型（同一趟页面，不再要求复现相位）**：㉘ `JS_SHEET` 两个模式
+  ① `{mode:sheet,n,gapMs}` 连拍 N 张并**逐张记下当时的完整参数向量**；
+  ② `{mode:restore,i}` 把第 i 张的向量写回参数 + 冻帧 ⇒ **精确回到那一帧**（实测：回到第 7 张，亮 360 片，
+  此时 currentGroup 已经是 idle 也不影响——姿态由参数决定，不由时钟决定）。
+  之后接 `{mode:bisect,box}`（这块是谁画的）或 `{mode:forcelight,box}`（灭着的里谁在该处）。
+- **本轮没抓到"没有手"的那一帧**：38 张采样（700ms×14 + 200ms×24）里两只手都在
+  （`.diag/sheet_montage.png`、`.diag/sheet2_montage.png`、`.diag/r7_zoom.png`）。
+  ⇒ 两种解释都没被排除：症状窗口**短于 200ms**，或它发生在我这几趟没采到的相位段
+  （这几趟的采样窗口整段落在"倒立旋转"那一段）。
+  **下一轮的硬约束**：找坏帧不能靠"每秒若干张"，要**每拍**判——用 ㉒ 逐拍记 `手美术片的可见面积`，
+  面积骤降的那几拍再触发抓拍（面积比"亮没亮"灵敏，本案实测手片面积在 5,982 ↔ 1,130 之间起伏）。
+- **涉及文件（追加-XXIII）**：`scripts/diag/l2d_hand_param_diff.py`（**新建**）、
+  `scripts/diag/l2d_part_flicker_probe.py`（新臂 ㉗ `JS_FORCELIGHT`、㉘ `JS_SHEET`，
+  会话改成多命令循环 `{advance|sheet|restore|bisect|forcelight|quit}`，并修掉擦缓冲顺序 bug）、
+  `.diag/l2d_sheet_gezi_2/`、`.diag/sheet_montage.png`、`.diag/sheet2_montage.png`、`.diag/r7_zoom.png`。
