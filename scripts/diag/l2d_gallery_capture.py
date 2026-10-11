@@ -7,6 +7,13 @@ scripts/diag/l2d_motion_energy.py 与**游戏录像**做同一把尺子的比较
 
 ⚠️ 无头 Chrome 的 rAF 被节流，所以每帧必须手动 `PIXI.Ticker.shared.tick(now)` + `app.render()`
    再截图 —— 不驱动的话抓到的一串全是同一帧，运动能量恒为 0，会得到"画廊完全静止"的假结论。
+⚠️ **但抓出来的帧序列，时间轴不是帧号**：动作时间跟着**真实时间**走，而无头里每帧截图要 0.7~1.2 秒真实
+   时间 ⇒ 帧号与模型时间脱钩 **7~34 倍**（实测 18.25s 的 clip 在 `--fps 30` 的**第 16 帧**就播完，后面
+   500 多帧全是"动作结束后"的状态；据此得出的"某个姿势只持续 1.5 秒"全是仪器假象，§123 追加-XIX）。
+   试过"自己造 `window.__tnow` 传给 `Ticker.tick()`" —— **不管用**，动作时间不由我们喂的 now 决定。
+   正解已内置：逐帧记 `time.monotonic()` → `timeline.json` 第 3 列 = 相对首帧的**真实秒数**，
+   收尾拿该 clip 的 `Param25` 曲线算"第一次到 0 的期望时刻"与这条轴比做**时间轴自证**；
+   不 PASS 的帧不许用于时序判据（单帧目视仍可用）。`--fps` 只决定抓多少帧，不决定时间刻度。
 
 用法: py -3 scripts/diag/l2d_gallery_capture.py gezi_2 --fps 6 --secs 10
 输出: .diag/gallery_vid/<model>/f###.png
@@ -145,19 +152,59 @@ def main():
             except Exception:
                 pass
         return 2
-    step = 1.0 / a.fps
     n = int(a.secs * a.fps)
+    # ⚠️ 无头抓帧的时间轴**不能用帧号**。实测（§123 追加-XIX）：动作时间跟着**真实时间**走，
+    #    而每帧截图要 0.7~1.2 秒真实时间 ⇒ 帧号与模型时间脱钩 7~34 倍，18.25s 的 clip 在 `--fps 30`
+    #    的第 16 帧就播完，后面全是"动作结束后"的状态。
+    #    试过"自己造 window.__tnow 传给 Ticker.tick()" —— **不管用**：动作时间不由我们喂的 now 决定
+    #    （自证直接报 FAIL，别再把这条路当修法）。正解：既然模型按真实时间推进，
+    #    **每帧的墙钟间隔就是它的时间步长** ⇒ 逐帧记 time.monotonic()，时间轴 = 相对首帧的秒数；
+    #    收尾拿该 clip 的 Param25 曲线算"第一次到 0 的期望时刻"与这条轴比 —— 自证不 PASS 的帧
+    #    不许用于任何时序判据（单帧目视仍可用）。`--fps` 从此只决定"抓多少帧"，不决定时间刻度。
+    t0 = time.monotonic()
+    ev("window.__capTl=[]; 1")
+    wall = [t0]
     for i in range(1, n + 1):
-        ev("(async()=>{ const t=ms=>new Promise(r=>setTimeout(r,ms));"
+        ev("(async()=>{"
            "try{ PIXI.Ticker.shared.tick(performance.now()); }catch(e){}"
-           "try{ window.__app.render(); }catch(e){} return 1;})()")
+           "try{ window.__app.render(); }catch(e){}"
+           "let v=null; try{ const M=window.__m.internalModel.coreModel._model;"
+           " const k=M.parameters.ids.indexOf('Param25'); if(k>=0) v=M.parameters.values[k]; }catch(e){}"
+           "window.__capTl.push([%d,v]); return 1;})()" % i)
         r = cmd("Page.captureScreenshot", {"format": "png", "clip": {
             "x": info["box"][0], "y": info["box"][1],
             "width": info["box"][2], "height": info["box"][3], "scale": 1.0}})
         open(os.path.join(out, "f%03d.png" % i), "wb").write(base64.b64decode(r["data"]))
-        time.sleep(step)
+        wall.append(time.monotonic())
         if i % 12 == 0:
             print("  %d/%d" % (i, n), flush=True)
+    tl = json.loads(ev("JSON.stringify(window.__capTl||[])") or "[]")
+    rows = [[i, (tl[i][1] if i < len(tl) else None), round(wall[i] - t0, 4)] for i in range(n)]
+    with open(os.path.join(out, "timeline.json"), "w", encoding="utf-8") as fh:
+        json.dump({"model": a.model, "clip": a.clip, "fps_nominal": a.fps,
+                   "axis": "第 3 列 = 相对首帧的真实秒数（= 模型时间轴；帧号不是时间）", "rows": rows}, fh)
+    med = (wall[-1] - wall[0]) / max(1, n - 1)
+    exp = obs = None
+    try:
+        mp = os.path.join(ROOT, "Output", "Live2D", a.model, "motion", "%s.motion3.json" % a.clip)
+        seg = next((c["Segments"] for c in json.load(open(mp, encoding="utf-8"))["Curves"]
+                    if c.get("Target") == "Parameter" and c.get("Id") == "Param25"), None)
+        if seg:
+            for j in range(0, len(seg) - 1, 3):
+                if abs(seg[j + 1]) < 1e-6 and (j == 0 or abs(seg[j - 2]) > 1e-6):
+                    exp = seg[j]; break
+    except Exception as e:
+        print("时间轴自证：算期望值失败 %s" % str(e)[:120])
+    obs = next((w for _i, v, w in rows if v is not None and abs(v) < 1e-3), None)
+    if exp is not None and obs is not None:
+        ok = abs(obs - exp) <= max(0.5, 0.05 * float(exp))
+        print("时间轴自证：每帧真实步长 %.3fs（按帧号当 1/%.0f 秒用会错 %.0f 倍）；"
+              "Param25 第一次到 0 —— 期望 %.2fs  真实轴 %.2fs  ⇒ %s"
+              % (med, a.fps, med * a.fps, exp, obs,
+                 "PASS（时序判据请用 timeline.json 第 3 列，别用帧号）"
+                 if ok else "**FAIL：真实轴也对不上，这批帧不许用于时序判据（只可用于单帧目视）**"))
+    else:
+        print("时间轴自证：缺期望值(%s) 或实测值(%s) ⇒ 未判定，按不可用于时序处理" % (exp, obs))
     try:
         ws.close()
     except Exception:
