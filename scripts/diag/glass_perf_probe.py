@@ -211,9 +211,23 @@ def clip_shot(pg, what='nav'):
 def render_proof(pg, label='折射'):
     """单变量对照：水面冻住、取景不动，只切 html.lg 这一个类。
     两帧必须不同才算「这个材质真的落到合成结果上」。上一版的对照同时改了两件事
-    （加折射 + 关面板模糊），像素当然不同，那条判据是恒真的假绿灯。"""
+    （加折射 + 关面板模糊），像素当然不同，那条判据是恒真的假绿灯。
+    ⚠️ 2026-10-11 补一道 **A/A 空白对照**：同一状态连拍两张。FREEZE 只把 bgStep 换成空函数，
+       `bgDraw`（上传/绘制/finish）还在每帧跑 ⇒ 取景里可能还有别的东西在动，那种"两版不同"
+       量的是水面不是折射。两页子探针就被这个骗过一次（`glass_pages_probe` 的 A/A）。
+       A/A 不稳 ⇒ 这条判据**作废**：既不许报绿，也不许把报红读成"折射没生效"。"""
     pg.ev(FREEZE)
     time.sleep(0.5)
+    pg.ev("document.documentElement.classList.add('lg');'ok'")
+    time.sleep(0.7)
+    aa1 = clip_shot(pg)
+    time.sleep(0.9)
+    aa2 = clip_shot(pg)
+    if aa1 != aa2:
+        print(f'  渲染对照({label}): ⏭ 作废 —— 冻住之后同状态连拍两张仍不同（{aa1} vs {aa2}）'
+              f' ⇒ 取景里还有别的东西在动，这条既不算绿也不算红')
+        pg.ev(UNFREEZE)
+        return None
     pg.ev("document.documentElement.classList.remove('lg');'ok'")
     time.sleep(0.7)
     off = clip_shot(pg)
@@ -222,7 +236,7 @@ def render_proof(pg, label='折射'):
     on = clip_shot(pg)
     pg.ev(UNFREEZE)
     ok = off != on
-    print(f'  渲染对照({label}): 关={off} 开={on}  {"✅ 只切一个类就换了画面" if ok else "❌ 完全相同 —— 这个材质根本没落到像素上"}')
+    print(f'  渲染对照({label}，A/A 稳定): 关={off} 开={on}  {"✅ 只切一个类就换了画面" if ok else "❌ 完全相同 —— 这个材质根本没落到像素上"}')
     return ok
 
 
@@ -734,9 +748,12 @@ def main():
             hover_diag(pg)
             return
         # 帧时数字只有在「这个材质确实会改变画面」被证完之后才有意义，所以它是硬闸门不是打印。
-        if not render_proof(pg, '落地版边墙'):
+        rp = render_proof(pg, '落地版边墙')
+        if rp is False:
             print('! 渲染对照不过 —— 先修实现，这一轮所有帧时数字都不要读')
             sys.exit(1)
+        # rp is None = A/A 就不稳，这条判据作废：不拦提交（那是仪器局限，不是产品缺陷），
+        # 但也不许把"✅"打在任何依赖它的结论上。
         if A.phases:
             phases(pg)
             return
