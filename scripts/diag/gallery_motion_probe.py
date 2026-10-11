@@ -395,13 +395,16 @@ def main():
     #    当厚度线索，那是毛玻璃时代的代理指标。首页边墙换成 feDisplacementMap 真折射后，厚度由
     #    **像素位移**承担、blur 只留 1px 收边 ⇒ 再要求 blur 更大就是错的。改成"折射 url() 与
     #    更强的 blur 至少占一条"，两条路都堵死时仍然报红，不许恒真。
+    #    ⚠️ 2026-10-11 又改一次，仍是**重新表述不是放宽**：面板那层 blur(2.5px) 已删
+    #    （backdrop-filter 的成本单位是"盒子个数"，见 §134），于是"面板半径"这个比较对象根本不存在了。
+    #    现在的结构：边墙必须挂滤镜（折射 url() 或 blur）；**若**面板也挂着，才要求边墙更强。
+    #    ⇒ "面板没滤镜"是合法形态，但"边墙空着"照样报红。
     if 'blur' not in hov['rim'] and 'url(' not in hov['rim']:
         fails.append(f'1 玻璃：::before 上没有 backdrop-filter，缺"厚边墙"这一特征（{hov["rim"][:44]}）')
     pb = re.search(r'blur\(([0-9.]+)px\)', hov['bf']); rb = re.search(r'blur\(([0-9.]+)px\)', hov['rim'])
-    if 'url(' not in hov['rim'] and not (pb and rb and float(rb.group(1)) > float(pb.group(1))):
-        fails.append(f'1 玻璃：边墙既没挂折射 url()，blur 也不比面板强'
-                     f'（边墙 {rb.group(1) if rb else "—"}px vs 面板 {pb.group(1) if pb else "—"}px）'
-                     f'—— 看不出厚度差')
+    if pb and 'url(' not in hov['rim'] and not (rb and float(rb.group(1)) > float(pb.group(1))):
+        fails.append(f'1 玻璃：面板挂着 blur({pb.group(1)}px)，边墙既没挂折射 url() 也不比它强'
+                     f'（边墙 {rb.group(1) if rb else "—"}px）—— 看不出厚度差')
     # （原来这里判"高光坐标必须跟着指针换"，随那个发光效果一起删掉了）
     if 'matrix' not in hov['imMat']:
         fails.append(f'1 悬停：缩略图没跟随放大（{hov["imMat"]}）')

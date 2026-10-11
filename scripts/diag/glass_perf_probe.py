@@ -98,7 +98,8 @@ CSS = {
                 'backdrop-filter:blur(1px) url(#pImg)!important}'),
     # L：只留边墙折射，把面板那层 blur(2.5px) 摘掉 —— 验「一张卡两层滤镜 → 一层」能省多少
     'rimonly': '.card.g{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}',
-    # M：只留面板那层模糊，把边墙整个摘掉 —— 与 L 配对，看这两层各值多少钱
+    # M：把卡片边墙那圈滤镜整个摘掉（面板层 2026-10-11 已删，所以这条现在等价于 C 的"卡片无滤镜"）
+    #    ⇒ 它是 C 的**交叉校验**：M 与 C 若不同价，说明还有一层滤镜没被账目算进去。
     'panelonly': ('html.lg .card.lgr::before{-webkit-backdrop-filter:none!important;'
                   'backdrop-filter:none!important}'
                   '.card.g::before{-webkit-backdrop-filter:none!important;'
@@ -110,17 +111,44 @@ CSS = {
                        '#bgfx .glow{display:none!important}'),
     # J：保留现有毛玻璃 + 藏光晕（若光晕是主因，这条就是「只改背景能省多少」）
     'noglow': '#bgfx .glow{display:none!important}',
+    # ── 把「边墙那层 ≈20ms」继续拆开：面积贵？遮罩贵？还是数量贵？ ──
+    # N：边墙模糊半径 17px → 5px（面积与遮罩都不变，只有半径变）
+    'rim5': '.card.g::before{backdrop-filter:blur(5px) saturate(2) brightness(1.08)!important;'
+            '-webkit-backdrop-filter:blur(5px) saturate(2) brightness(1.08)!important}',
+    # P：摘掉那两层 mask，但滤镜与面积原样保留 ⇒ 与「落地态」之差 = **遮罩**的钱
+    'nomask': '.card.g::before{-webkit-mask:none!important;mask:none!important}',
+    # Q：只留顶边 12px 一条（无遮罩、面积只有 12px 高）⇒ 与 P 之差 = **面积**的钱
+    'strip': ('.card.g::before{-webkit-mask:none!important;mask:none!important;'
+              'inset:auto auto 0 0!important;height:12px}'),
+    # R：边墙滤镜链从 blur+saturate+brightness 缩成只剩 blur ⇒ 量「链上每个函数要不要钱」
+    #    （N/P/Q 已证明半径、遮罩、面积都不要钱，剩下的嫌疑就是函数个数）
+    'rim_plain': ('.card.g::before{backdrop-filter:blur(17px)!important;'
+                  '-webkit-backdrop-filter:blur(17px)!important}'),
+    # S：把 2026-10-11 砍掉的**面板那层 blur(2.5px)** 原样注回来 ⇒ 这不是性能条件，是"免费"这条
+    #    结论的证据：它的 shot_card 与 B 逐字节相同，才许说"那层本来就看不出"。
+    #    若不同，就不许声称免费，得交用户肉眼判。
+    'panel_back': ('.card.g{-webkit-backdrop-filter:blur(2.5px) saturate(1.5)!important;'
+                   'backdrop-filter:blur(2.5px) saturate(1.5)!important}'),
 }
 
-# H：把 GL 绘制整个停掉（canvas 不再产生新帧）—— 用来判「20ms 是 canvas 重绘带出来的，
-#    还是 DOM 自己的」。必须能红：若这条例同 20ms，说明跟 canvas 无关。
+# 数量敏感性：把在屏挂滤镜的卡数硬压到 N 张，直接量"几张卡才付得起"。
+# ⚠️ 测量期间不滚动，所以摘掉的类不会被观察器加回来；这条只用于定位成本曲线，不是候选实现。
 JS_PRE = {
     'renderstub': "(()=>{if(!window.__R0)window.__R0=bgRender; window.bgRender=function(){}; return 'ok';})()",
     # K：只把折射摘掉（html.lg 一去掉，②-b 那条规则就不匹配，边墙自动退回上一版那条模糊）
     # —— 这才是「新效果比旧效果贵多少」的正确对照，C 那条把模糊也一起摘了，量的是别的东西。
     'lgoff': "(()=>{document.documentElement.classList.remove('lg'); return 'ok';})()",
+    'few24': "(()=>{const a=[...document.querySelectorAll('.card.g')];"
+             "a.slice(24).forEach(c=>c.classList.remove('g','lgr'));return 'ok';})()",
+    'few40': "(()=>{const a=[...document.querySelectorAll('.card.g')];"
+             "a.slice(40).forEach(c=>c.classList.remove('g','lgr'));return 'ok';})()",
     '_restore': "(()=>{if(window.__R0){window.bgRender=window.__R0;}"
-                "document.documentElement.classList.add('lg'); return 'ok';})()",
+                "document.documentElement.classList.add('lg');"
+                # few24/few40 会摘掉一批 .g，而测量期间不滚动、观察器不会加回来 ⇒ 还原必须
+                # 自己按视口重算一遍，否则后面所有条件都在"卡更少"的状态上测，数字全线偏低。
+                "document.querySelectorAll('.card').forEach(c=>{const r=c.getBoundingClientRect();"
+                "c.classList.toggle('g', r.bottom>-140 && r.top<innerHeight+140);});"
+                "return 'ok';})()",
 }
 
 SVG = """<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink'
@@ -232,20 +260,27 @@ def sweep(pg, ms):
         time.sleep(0.012)
 
 
-CLIP = None
+CLIPS = {}
 
 
-def clip_shot(pg):
-    """取景必须**钉在会折射的那条边墙上**。2026-10-11 起那是导航栏下沿 14px，不是卡片边墙
-    （卡片折射被用户否掉，"看着脏脏的"）。上一版写死在 (2%, 42%) 那块，落点是不是真有边墙
-    没人核对过，于是「三格截图逐字节相同」既可能是折射没渲染、也可能只是取到了一片没有边的
-    背景——仪器本身不成立，任何结论都推不出来。"""
-    global CLIP
-    if CLIP is None:
-        CLIP = json.loads(pg.ev("""(()=>{const r=document.querySelector('header').getBoundingClientRect();
-            return JSON.stringify({x:Math.max(0,innerWidth*0.18), y:Math.max(0,r.bottom-30),
-              width:460, height:64, scale:3});})()"""))
-    d = pg.cmd('Page.captureScreenshot', {'format': 'png', 'clip': CLIP})
+def clip_shot(pg, what='nav'):
+    """取景必须**钉在被这次改动影响的那块画面上**，两处各有用途：
+      · nav  —— 导航栏下沿 14px。2026-10-11 起落地版折射只挂在这里（卡片折射被用户否掉，
+                "看着脏脏的"），渲染对照用它。
+      · card —— 第一张卡含边墙那一圈。D/E/F 那几条是强制给**卡片**挂折射，它们不动导航栏，
+                用 nav 取景会全拍成同一张图 —— 本轮那条「截图指纹未全部互异」的 ⚠ 假警报
+                就是这么来的，不是实现坏了，是仪器只看得到一半。
+    写死坐标是上一版的错：没人核对过那块区域里到底有没有边墙。"""
+    if what not in CLIPS:
+        js = ("""(()=>{const r=document.querySelector('header').getBoundingClientRect();
+              return JSON.stringify({x:Math.max(0,innerWidth*0.18), y:Math.max(0,r.bottom-30),
+                width:460, height:64, scale:3});})()""") if what == 'nav' else \
+             ("""(()=>{const c=document.querySelector('.card.g')||document.querySelector('.card');
+              const r=c.getBoundingClientRect();
+              return JSON.stringify({x:Math.max(0,r.x-20), y:Math.max(0,r.y-20),
+                width:Math.min(420,r.width+40), height:Math.min(420,r.height+40), scale:2});})()""")
+        CLIPS[what] = json.loads(pg.ev(js))
+    d = pg.cmd('Page.captureScreenshot', {'format': 'png', 'clip': CLIPS[what]})
     return hashlib.md5(base64.b64decode(d['data'])).hexdigest()[:12]
 
 
@@ -288,9 +323,10 @@ def run(pg, name, csskey, wave, pre=None):
     d['hglg'] = s['hglg']
     d['html_lg'] = s['html_lg']
     d['shot'] = clip_shot(pg)
+    d['shot_card'] = clip_shot(pg, 'card')
     print(f'  {name:16} med {d["med"]:>6}ms  p95 {d["p95"]:>6}ms  max {d["max"]:>6}ms  '
           f'~{d["fps"]:>5}fps  导航栏折射={int(d["hglg"])} lg={int(d["html_lg"])}  strokes={d["strokes"]}  '
-          f'bg帧={d["bgframes"]}  图={d["shot"]}\n{"":18}材质={d["bf"][:44]}')
+          f'bg帧={d["bgframes"]}  图={d["shot"]}/{d["shot_card"]}\n{"":18}材质={d["bf"][:44]}')
     return d
 
 
@@ -584,10 +620,24 @@ def main():
         print('  ── 以下四条是追那 20ms 的去向 + 落地后的真实对照，不是候选方案 ──')
         out['K_wave_lg_off'] = run(pg, 'K 划水·只摘折射', 'asis', True, 'lgoff')
         out['L_wave_rimonly'] = run(pg, 'L 划水·只留边墙', 'rimonly', True)
-        out['M_wave_panelonly'] = run(pg, 'M 划水·只留面板', 'panelonly', True)
+        out['M_wave_panelonly'] = run(pg, 'M 划水·摘卡片边墙', 'panelonly', True)
+        print('  ── N/P/Q/2/4：把边墙那 ~20ms 拆成「半径 / 遮罩 / 面积 / 数量」四项 ──')
+        out['N_wave_rim5'] = run(pg, 'N 划水·边墙blur 17→5', 'rim5', True)
+        out['P_wave_nomask'] = run(pg, 'P 划水·边墙去遮罩', 'nomask', True)
+        out['Q_wave_strip'] = run(pg, 'Q 划水·只留顶条12px', 'strip', True)
+        out['R_wave_rim_plain'] = run(pg, 'R 划水·边墙只剩blur', 'rim_plain', True)
+        out['S_wave_panel_back'] = run(pg, 'S 划水·把面板层注回', 'panel_back', True)
+        s_, b_ = out.get('S_wave_panel_back'), out.get('B_wave_as_is')
+        if s_ and b_:
+            print(f'  「砍掉面板层是免费的」这条结论的证据：把 blur(2.5px) 注回后卡片取景 '
+                  f'{"逐字节相同 ✅ 那层本来就看不出" if s_["shot_card"] == b_["shot_card"] else "有差异 ❌ 不许声称免费，交肉眼判"}'
+                  f'（{b_["shot_card"]} vs {s_["shot_card"]}）')
         out['G_wave_noglow'] = run(pg, 'G 划水·摘玻璃+藏光晕', 'noglass_noglow', True)
         out['H_wave_render_stub'] = run(pg, 'H 划水·停掉GL绘制', 'noglass', True, 'renderstub')
         out['J_wave_asis_noglow'] = run(pg, 'J 划水·毛玻璃+藏光晕', 'noglow', True)
+        # 数量条件放最后：它们会摘掉一批 .g（_restore 里按视口重算补回，但仍是破坏性条件）
+        out['24_wave_few24'] = run(pg, '2 划水·只留24张卡', 'asis', True, 'few24')
+        out['40_wave_few40'] = run(pg, '4 划水·只留40张卡', 'asis', True, 'few40')
         c = out.get('C_wave_noglass')
         if c:
             for k in ('G_wave_noglow', 'H_wave_render_stub'):
@@ -601,7 +651,8 @@ def main():
             bad.append("bg帧=0：水面循环根本没跑（BG.mode 虽为 gl 但没起波）")
         # 阳性对照：摘玻璃 / 现算噪声 / 静态法线图 三种材质必须拍出**不同**的像素，
         # 相同就说明 url() 只是被 CSS 解析接受、并没有真的落到合成结果上 —— 那 E/F 的耗时数字毫无意义。
-        sig = {k: (out.get(k) or {}).get('shot') for k in
+        # 阳性对照看的是**卡片**取景：D/E/F 只改卡片材质、不动导航栏，用 nav 取景会全同（假警报）
+        sig = {k: (out.get(k) or {}).get('shot_card') for k in
                ('C_wave_noglass', 'D_wave_turb', 'E_wave_img', 'F_wave_imgbody')}
         if len(set(v for v in sig.values() if v)) < 4:
             bad.append(f'截图指纹未全部互异 {sig}：材质差异没进像素，E/F 的成本结论不成立')

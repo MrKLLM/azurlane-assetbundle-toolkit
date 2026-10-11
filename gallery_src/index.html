@@ -126,13 +126,14 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
   transform:perspective(620px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--sc));
   transition:transform .14s ease-out,box-shadow .24s var(--spring-slow),border-color .18s ease-out;
   animation:pop .34s var(--spring) backwards;animation-delay:calc(min(var(--i,0),24)*16ms)}
-/* ① 面板本身：极轻的一层模糊（5px）——玻璃会折射，但不会把背后糊成一团白 */
-.card.g{-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(1.5);
-  backdrop-filter:blur(var(--glass-blur)) saturate(1.5)}
-/* ② 边墙：一圈 12px 的"更厚的玻璃"，折射强度明显高于面板 —— 玻璃拟态最出特征的一笔。
+/* 边墙：一圈 12px 的"更厚的玻璃"，玻璃拟态最出特征的一笔。
    做法是 backdrop-filter 挂在 ::before 上，再用两层 mask 做 exclude，只留外圈那一环。
    ⚠️ 厚度从 9px 加到 12px、模糊从 13px 加到 17px：上一版这一圈太薄，看不出"边"和"面"的差别。
-   ⚠️ 这一圈**只是模糊**，它推不动背景像素。真折射在下面的 ②-b，这条是它的回退形态。 */
+   ⚠️ 面板那层 blur(2.5px) **已删**（2026-10-11 性能轮）：实测成本是「每个挂 backdrop-filter 的
+      盒子一份固定开销」，与模糊半径、遮罩、面积、链上函数个数都无关（N/P/Q/R 四条对照全部与
+      不改动同价）⇒ 唯一的减法是**少一个盒子**。卡片原来是两个（面板 + 边墙），砍掉面板那个，
+      而 2.5px 底下压着的是不透明缩略图，本来就几乎看不出。`.g` 现在只表示"这张卡挂边墙"。
+   ⚠️ 这一圈**只是模糊**，推不动背景像素——真折射见下面"卡面故意不做折射"那条，它只留给导航栏。 */
 .card.g::before{content:'';position:absolute;inset:0;z-index:4;pointer-events:none;
   border-radius:inherit;padding:var(--lg-ring,12px);
   -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
