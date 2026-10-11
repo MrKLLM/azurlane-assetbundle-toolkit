@@ -837,7 +837,7 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 5. **动作数据必须有外部权威基准，别自证清白**：`motion3.json` 的贝塞尔控制点是**绝对 (时间,值)**，运行时直读不做归一化还原；写成归一化分数会让每条贝塞尔都先猛蹿到≈0 再跳目标值，而**曲线集合/时长/参数名全部校验都能通过**（§21）。唯一能抓出它的是同模型的权威导出：`scripts/diag/l2d_ref_diff.py` 拉 l2d.su 的 `motions/<group>.motion3.json` 逐曲线采样比对。
 6. **启动序列必须走 `apply()`，不能直接 `renderGrid()`**（2026-09-26，§44）：`view` 的初值是 `ships.slice()`（索引原序），排序只发生在 `apply()` 里，而 `apply()` 只绑在筛选控件的 change/input 事件上。启动直接 `renderGrid()` ⇒ 首屏未排序（VTuber 联动与 `-META` 变体排最前），用户"随便点一个筛选再回来才正常"就是这个。改法一行：结尾 `renderGrid();` → `apply();`。**通用形状**：凡"初始状态是某个函数算出的派生状态"，启动就必须调那个函数，不能既初始化一份原始数据、又指望事件来补。
 
-**回归六件套（按顺序跑；2026-09-27 起第 6 件是台词/开关验收）**:
+**回归六件套（按顺序跑；2026-09-27 起第 6 件是台词/开关验收；2026-10-11 加第 7 件暂停端到端 ⇒ 现为七件套）**:
 ```bash
 # 0) 部署
 py -3 scripts/deploy_gallery.py
@@ -854,6 +854,12 @@ py -3 scripts/diag/interact_verify.py
 py -3 scripts/diag/hit_verify.py
 # 6) 台词/字幕与两个全局开关（2026-09-27 加：改过语音条、字幕、语音页或 skin_words/skin_voice 之后必跑）
 py -3 scripts/diag/talk_verify.py --shots
+# 7) 暂停按钮端到端（2026-10-11 加：改过 #l2Pause / restTick / _gallery_server 的 POST 之后必跑）
+#    它自带一台按正本 _gallery_server 起的空闲端口服务器，所以不依赖 8777 是不是新代码
+py -3 scripts/diag/l2d_pause_e2e.py gezi_2     # 症状皮肤：⑨ 在这条上合法 SKIP（没有残留参数）
+py -3 scripts/diag/l2d_pause_e2e.py antu_2     # 判据 ⑨ 只有这类"非 idle 驱动而 idle 不动"的皮肤装得出来
+#    读用户按暂停交出来的那一帧：
+py -3 scripts/diag/l2d_freeze_read.py <坏帧存档> [对照帧]
 ```
 
 > **一条命令跑完六件**：`py -3 scripts/diag/wf16_regression.py`
@@ -898,8 +904,25 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
 ⚠️ 该探针**必须走页面自己的 `play()`**（`sel.value=grp; sel.onchange()`），直接 `mm.startMotion` 会绕过复位逻辑所在的
 前端交互层，把正确的修复读成无效（2026-09-23 真实误判过一次）；且要回读 `mm.state.currentGroup` 区分「静默失败」与「没复位」。
 
+**「用户现场按停」= 坏帧交接通道（2026-10-11 加，治"无头只有 5.1 拍/秒、短窗口结构性测不到"）**:
+1. 用户在画廊里看到画面不对 ⇒ 按**空格**或点「暂停」。前端只做一件事：`mdl.autoUpdate=false`
+   —— 库的 `_render` 里是 `this.deltaTime && internalModel.update(...)`，而 `deltaTime` 只由
+   `Ticker.shared` 上的 `onTickerUpdate` 累加，所以关掉它 = motion/物理/`coreModel.update()` **整条**停住，
+   `app.ticker` 照跑（还能缩放平移）。不要改用 `app.ticker.stop()`：那会连渲染一起停，画面不再刷新，
+   而且页面自己那层 `__hideSet` 一类"在 update 里生效"的写入全部失效。
+2. 同一时刻前端把这一帧存档 POST 到 `/l2d_freeze` ⇒ `.diag/l2d_freeze/<时间戳>-<皮肤>-<组>.json`，
+   **文件名直接显示在条上**，用户只需念它。存档内容：全量参数向量 + 每片上屏美术的包围盒 + 取景 + 取证开关状态。
+3. 我方读档 `l2d_freeze_read.py <坏帧> <对照帧>`：**必须两帧比差集**（正常 idle 就有 8 片零面积的停放件，
+   单帧里"有片塌着"不是症状）。拿到向量后用探针臂 ㉘ `{restoreVec}` 把同一帧在无头里原样摆回，再上 ㉔/㉗。
+4. ⚠️ 凡是按 `performance.now()` 取时间的外挂（残留复位 `rest` / 环境层 `ambT0` / 开关钉住 `snapHold`）
+   在恢复时都要把 `t0` **一起**平移暂停掉的毫秒数，并让挂在 `app.ticker` 上的那条（`restTick`）在暂停期间不写参数；
+   漏一层的症状是恢复那一下对应参数瞬移（漏 `ambT0` = 花瓣滚动/波纹瞬移）。
+
 **判据**:
 - `l2d_ref_diff` 必须 **PASS**：组/曲线集合零缺失、**关键帧零不一致**、偏差中位 ≤0.5、偏差>0.5 占比 ≤12%（WARN 线按安土实测 3.8%~9.6% 的贝塞尔天花板校准）。
+- `l2d_pause_e2e` 七条全 PASS，其中两条是仪器自身的底线，抄别处也用得上：
+  **先证"会动"再证"冻住"**（暂停前逐拍相对位移必须 >0，否则"不变"可能只是页面死了），
+  以及**恢复跳变按"一拍对一拍"比**（无头只有 5~14 拍/秒，按固定毫秒比会把一次正常眨眼算成姿态瞬移）。
 - 坐标系偏移即视为失败（张冠李戴比「不触发」更糟）。
 - `interact_verify` 的空白点击断言：`after=null` 视为通过（=idle 看守者重取数据的间隙，不是触发动作）。
 - `hit_verify` 全量期望 **806/807**；若掉到 800 以下，说明包含判定或坐标换算被改坏。

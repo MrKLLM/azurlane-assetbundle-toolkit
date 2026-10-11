@@ -6,16 +6,20 @@
      供 Spine 实时播放（file:// 下 fetch 会被 CORS 拦，必须走 http）。
   2. 自动用默认浏览器打开页面。传 --export 则打开 cg_export.html（Spine 全屏 CG 批量导出）。
   3. 提供 POST /save_cg 与 GET /cg_exists，供 cg_export.html 落盘 PNG 到 Output/CG_v2/。
-  4. 稳健处理端口占用 / TIME_WAIT，避免窗口“闪退”。
+  4. 提供 POST /l2d_freeze，供 Live2D 页的「暂停」把冻住那一帧的姿态向量落盘到 .diag/l2d_freeze/
+     （临时取证区，不入库）。暂停本身是纯前端行为，这个接口只是把坏帧交出来的通道。
+  5. 稳健处理端口占用 / TIME_WAIT，避免窗口“闪退”。
 """
 import functools
 import http.server
+import json
 import os
 import re
 import socket
 import socketserver
 import sys
 import threading
+import time
 import webbrowser
 from urllib.parse import urlparse, parse_qs
 
@@ -23,6 +27,10 @@ PORT = 8777
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                 # gallery_v2 的上一级 = Output/
 CG_DIR = os.path.join(ROOT, "CG_v2")         # Spine setup-pose CG 导出目录
+# Live2D 暂停帧的落盘目录：项目根下的 .diag/（临时产物区，已在 .gitignore 里）。
+# 不在模块级算，见 Handler._freeze_dir —— 探针从 gallery_src/ 正本 import 这个模块时，
+# 按模块路径算出来的"项目根"是错的，探针传进来的 root 才是事实。
+FREEZE_SUB = os.path.join(".diag", "l2d_freeze")
 _NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,80}$")
 EXPORT = "--export" in sys.argv
 URL = (f"http://127.0.0.1:{PORT}/gallery_v2/cg_export.html" if EXPORT
@@ -135,9 +143,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         from urllib.parse import urlparse, parse_qs
+        route = urlparse(self.path).path
+        if route == "/l2d_freeze":
+            return self._save_freeze()
         q = parse_qs(urlparse(self.path).query)
         name = (q.get("name") or [""])[0]
-        if not urlparse(self.path).path == "/save_cg" or not _NAME_RE.match(name):
+        if not route == "/save_cg" or not _NAME_RE.match(name):
             self.send_error(400, "bad request")
             return
         n = int(self.headers.get("Content-Length", 0))
@@ -155,14 +166,65 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 remaining -= len(chunk)
         self._reply(b"ok", "text/plain")
 
+    def _read_body(self, limit):
+        n = int(self.headers.get("Content-Length", 0))
+        if not (0 < n < limit):
+            return None
+        buf, remaining = bytearray(), n
+        while remaining:
+            chunk = self.rfile.read(min(1 << 20, remaining))
+            if not chunk:
+                break
+            buf += chunk
+            remaining -= len(chunk)
+        return bytes(buf)
+
+    def _freeze_dir(self):
+        """暂停存档落在「这台服务器正在服务的这棵树」的上一级 .diag/ 里（服务根 = Output/ ⇒ 项目根下）。
+
+        按 self.directory 而不是模块路径算：探针从 gallery_src/ 里的正本 import 本模块起临时服务器时，
+        模块路径算出的"项目根"是仓库根，而探针传进来的 root 才是事实。
+        """
+        root = getattr(self, "directory", None) or ROOT
+        return os.path.normpath(os.path.join(root, os.pardir, FREEZE_SUB))
+
+    def _save_freeze(self):
+        """Live2D「暂停」送来的姿态存档：JSON 原样落盘，文件名由服务端时间戳 + 白名单 tag 生成。
+
+        不接受请求里带的任何路径/文件名 —— 页面只交数据，命名权在这边。
+        响应体回文件名，页面上直接显示，用户念这一个字符串就能把坏帧交给我。
+        """
+        body = self._read_body(8 * 1024 * 1024)
+        if body is None:
+            self.send_error(400, "bad size")
+            return
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            self.send_error(400, "bad json")
+            return
+        if not isinstance(data, dict):
+            self.send_error(400, "not an object")
+            return
+        tag = re.sub(r"[^A-Za-z0-9_.\-]", "", str(data.get("tag", "")))[:40] or "freeze"
+        stem = time.strftime("%Y%m%d-%H%M%S") + "-" + tag
+        fdir = self._freeze_dir()
+        os.makedirs(fdir, exist_ok=True)
+        name, k = stem + ".json", 2
+        while os.path.exists(os.path.join(fdir, name)):
+            name, k = f"{stem}-{k}.json", k + 1   # 同一秒内连按两次暂停：不覆盖前一份
+        with open(os.path.join(fdir, name), "wb") as f:
+            f.write(body)          # 原样落盘：解析只用来验合法与取 tag，不改写上送的内容
+        self._reply(name.encode("utf-8"), "text/plain")
+
     def end_headers(self):
         # 本地工具页：每次强制回源校验，杜绝 index.html/index.js 改版后浏览器仍用旧缓存
         self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 
-    def log_message(self, fmt, *args):  # 只留导出相关日志，屏蔽静态文件刷屏
+    def log_message(self, fmt, *args):  # 只留导出与暂停存档的日志，屏蔽静态文件刷屏
         s = fmt % args
-        if "/save_cg" in s or "/cg_exists" in s:
+        if "/save_cg" in s or "/cg_exists" in s or "/l2d_freeze" in s:
             super().log_message(fmt, *args)
 
 

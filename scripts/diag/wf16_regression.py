@@ -30,6 +30,12 @@ STEPS = [
     ('4 交互五项',         ['interact_verify.py'], False),
     ('5 全量按部位点击',   ['hit_verify.py'], True),
     ('6 台词与全局开关',   ['talk_verify.py', '--shots'], False),
+    # 第 7 件自带一台按**正本 _gallery_server** 起的服务器（空闲端口，不碰 8777）：
+    # 「暂停」这条判据要 POST /l2d_freeze 真的落盘，而 8777 上那台可能是别的会话按旧代码起的。
+    ('7 暂停按钮端到端',   ['l2d_pause_e2e.py', 'gezi_2'], False),
+    # 同一个脚本换 antu_2 再跑一遍：判据 ⑨（渐变在飞时暂停）只有在"非 idle 驱动而 idle 不动"
+    # 的参数存在的皮肤上才装得出来（§21 的 touch_idle1 就是那种）；gezi_2 上它是合法 SKIP。
+    ('7b 暂停端到端·复位层', ['l2d_pause_e2e.py', 'antu_2'], True),
 ]
 
 

@@ -30,16 +30,12 @@ header{background:var(--nav-bg);
   box-shadow:inset 0 -1px 0 var(--rim-hi),
              0 8px 26px color-mix(in srgb,var(--brand) 12%,transparent);
   position:relative;z-index:10}
-/* ② 下沿的"边墙"：一条 14px 厚、折射更重的玻璃截面（和卡片 ::before 同一个手法） */
-header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:var(--nav-rim-h,14px);
-  pointer-events:none;z-index:-1;
-  -webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);
-  backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}
-/* ②-b 同上：导航栏这条也是"只糊不推"，折射图按 ::before 自己的盒子算（宽=栏宽、高=14px、无圆角）。
-   var() 一律带兜底，理由见卡片 ②-b 那段注释。 */
-html.lg header.hglg::before{
-  -webkit-backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14));
-  backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14))}
+/* ② 下沿那条 18px「厚边墙」**已撤**（2026-10-11 用户实机：首页与背景库也报"横幅下边有条杠"）。
+   判死过程与逐行像素量法见 docs/TROUBLESHOOTING.md §138：那条带子挂
+   `blur(17px) saturate(2.2) brightness(1.14)`，身后是站用背景照片时暗部被抬亮 47/255 级、
+   上沿一条硬接缝 ⇒ 读作"多出来的一条杠"，不读作玻璃截面。三页同一个装置一起退役，
+   折射只留音乐库播放器那一盒（`liquid_glass.js`）。栏体自己那层 blur(6px) 保留 —— 那是"湿玻璃"，
+   不是"杠"。⚠️ 别再把它挂回来：`glass_perf_probe.py` 有禁挂档，挂了直接红。 */
 /* ③ 斜穿整条栏的反光：静止就在，不跟鼠标（栏子长，跟着鼠标会太吵） */
 header::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:-1;
   background:var(--spec2)}
@@ -51,7 +47,11 @@ header>*{position:relative}
 header h1{font-size:16px;color:var(--title);white-space:nowrap;font-weight:800;letter-spacing:.02em}
 header .sub{font-size:11px;color:var(--dim)}
 .ctl{display:flex;align-items:center;gap:6px}
-.ctl label{font-size:11px;color:var(--dim);font-weight:700;letter-spacing:.04em}
+.ctl label{font-size:11px;color:var(--txt2);font-weight:700;letter-spacing:.06em;
+  padding:3px 8px;border-radius:7px;background:color-mix(in srgb,var(--brand) 10%,var(--panel))}
+/* 这八个"排名字"（类别/阵营/稀有度/…）与音乐库·背景库的 .grp>span 用同一套区分：
+   方角 + 不透明品牌淡底 + 700 字重，刻意不像它右边那颗胶囊控件（§138 之后它们先有了底，
+   又被用户判"和子标签长一样"，所以区分靠形状/填充/字重三条一起，不只靠底）。 */
 
 /* ── 自绘下拉 ──────────────────────────────────────────────────────────
    原生 <select> 展开的那层是**操作系统画的**，CSS 一行都碰不到 ⇒ 想要"落下来"
@@ -843,14 +843,15 @@ function lgRefresh(){
   if(!LG.on) return;
   LG.buckets.clear();
   if(LG.svg) while(LG.svg.firstChild) LG.svg.removeChild(LG.svg.firstChild);
-  lgApply(document.querySelector('header'),'nav');
+  lgApplyAll();
 }
-
-/* 卡片这一层以前由 IntersectionObserver 按"进过视口"挂 .g，再给 .g 挂 backdrop-filter；
-   现在那条边墙整个撤了（理由与判据见上面 ② 那段注释和 §136），所以这个观察器也一起删掉——
-   留着它就是一只没有消费者的类名开关，而 .g 正是那圈模糊的入口。 */
+/* 本页现在**没有任何折射挂载点**了：卡片那条撤于 §136（一转就整块糊），导航栏那条撤于 §138
+   （读作一条杠）。lgApplyAll() 因此是空的 —— 留着它是因为上面那套内联 LG 机制还没拆干净，
+   拆的时机是"首页空下来"（`liquid_glass.js` 头部注释里那条切换点），届时整段一起删。
+   ⚠️ 别顺手往这里加挂载：要先过 §138 那条判据（身后有照片时会不会又变成一条杠）。 */
+function lgApplyAll(){}
 if(LG.on){
-  lgApply(document.querySelector('header'),'nav');
+  lgApplyAll();
   let lgPend=0;
   addEventListener('resize',()=>{ if(lgPend) return;
     lgPend=requestAnimationFrame(()=>{ lgPend=0; lgRefresh(); }); });
@@ -1000,6 +1001,11 @@ document.addEventListener('keydown',e=>{
     if(b){ b.click(); e.preventDefault(); } return; }
   if(e.key==='r'||e.key==='R'){ const b=document.getElementById('zReset')||document.getElementById('spFit')||document.getElementById('l2Fit');
     if(b){ b.click(); e.preventDefault(); } return; }
+  /* 空格=暂停 Live2D（只有 live2d 标签页挂了这个按钮）。
+     焦点可能停在刚点过的按钮上，而空格是在 keyup 才激活按钮的 ⇒ 先 blur，
+     否则一次空格会「暂停 + 又点一次那个按钮」两件事。 */
+  if(e.key===' '){ const b=document.getElementById('l2Pause');
+    if(b){ if(t.tagName==='BUTTON') t.blur(); b.click(); e.preventDefault(); } return; }
 });
 
 function buildSkinList(s){
@@ -1568,6 +1574,7 @@ async function renderLive2D(s, sk){
        不 FORCE 就连点第二个部位都放不出来。回落 idle 交给运行时（见 ②），不再需要定时器。 */
     const played=new Set();
     const play=g=>{ if(!g) return false;
+      if(l2Paused) l2SetPaused(false);         // 用户重新挑动作=明确要放开冻结（运行时自己回落 idle 不走这里）
       try{ playVoice(g);
         mm.startMotion(g,0,MP.FORCE);
         if(g!==idleGroup) played.add(g); return true; }catch(e){ return false; } };
@@ -1579,10 +1586,16 @@ async function renderLive2D(s, sk){
        两条约束防止误伤：① 只碰播过的 clip 驱动过的参数，物理/眨眼/口型等 clip 无关参数一律不动；
        ② 只在回到 idle（或队列空）时才复位，且先等 REST_DELAY 让上一条 clip 的淡出跑完，再线性渐变过去。 */
     const REST_DELAY=400, REST_MS=700, cm=im.coreModel;
+    /* 暂停态：真正的按钮与存档在下面的「控制条」一节，但 restTick / play 这两个每帧或随时会跑的
+       回调要靠它自检，所以状态声明在这里（放在后面会让本文件早期就存在跨引用）。
+       l2Now() = 模型时钟（暂停期间不推进），用来报「这一帧是这条动作的第几秒」。 */
+    let l2Paused=false, l2PauseT0=0, l2HeldMs=0, l2GroupT0=0, l2GroupLast=null;
+    const l2Now=()=>performance.now()-l2HeldMs;
     let rest=null;
     /* window.__noRest=true 关掉这层复位（无头取证开关，与 __ambOff 同类）：
        用来做「部件闪一下」的 A/B —— 见 scripts/diag/l2d_part_flicker_probe.py。 */
     const restTick=()=>{ if(window.__noRest){ rest=null; return; }
+      if(l2Paused) return;                       // 暂停期间冻住复位渐变，否则恢复瞬间会跳（t0 平移见 l2SetPaused）
       const cg=mm.state&&mm.state.currentGroup;
       if(cg&&cg!==idleGroup){ rest=null; return; }
       if(!rest){ const idleS=paramSets[idleGroup]; if(!idleS||!played.size) return;
@@ -1599,6 +1612,9 @@ async function renderLive2D(s, sk){
       for(const it of rest.items) try{ cm.setParameterValueByIndex(it[0], it[1]+(it[2]-it[1])*k); }catch(e){}
       if(k>=1) rest=null; };
     app.ticker.add(restTick);
+    /* 探针专用：把产品自己的复位状态交出去（暂停门要判"渐变在飞时恢复会不会跳"，
+       而渐变是不是在飞只有这一层自己知道）。 */
+    window.__restDbg=()=>rest?{items:rest.items.length, el:Math.round(performance.now()-rest.t0)}:null;
     /* ---------- 环境层（effect）常驻叠加 ----------
        源包 AnimatorController 里 `effect` 不是「一条可选动作」，而是**独立一层的默认状态**
        （层权重 1.0、Override、Loop=true；判据与全库普查见 §117，本轮又逐状态核过 m_Speed 全为 1.0）。
@@ -1735,8 +1751,10 @@ async function renderLive2D(s, sk){
       for(const it of h.items) if(now<h.t0+it[2]){ alive=true;
         try{ cm.setParameterValueByIndex(it[0],it[1]); }catch(e){} }
       if(!alive) snapHold=null; });
+    /* Cubism 的 id 在有些版本里是 {string} 对象、有些是裸字符串；取名一律走这个（面板与暂停存档共用） */
+    const idName=id=>(id&&id.string)||(typeof id==='string'?id:(id&&id.toString())||'?');
     const bar=document.getElementById('l2bar');
-    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Pause" class="tg">暂停</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2PauseInfo" style="display:none"></span><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>空格</b>暂停并存档当前帧 / <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     const fillSel=()=>{ const cur=sel.value;
       sel.innerHTML=groups.map(g=>`<option value="${g}">${g}${voice[g]?'（语音）':''}</option>`).join('');
@@ -1756,6 +1774,61 @@ async function renderLive2D(s, sk){
     document.getElementById('l2Replay').onclick=()=>{ play(sel.value); };
     document.getElementById('l2Fit').onclick=resetFraming;
     document.getElementById('l2Full').onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else viewEl.requestFullscreen().catch(()=>{}); };
+    /* ---------- 暂停：把姿态冻在「当前这一帧」，顺手把这一帧交出来 ----------
+       机制取 mdl.autoUpdate：库把它挂在 PIXI.Ticker.shared 上（onTickerUpdate 累 deltaTime），
+       而 _render 的守卫是 `this.deltaTime && internalModel.update(...)` ⇒ 关掉后 motion、物理、
+       coreModel.update 整条都不跑，pose 真冻住；app.ticker 不受影响，缩放/平移/判定区照常画。
+       ⚠️ 三层外挂是按 performance.now() 取时间的（残留复位 rest、环境层 ambT0、开关钉住 snapHold）：
+         暂停期间后两层根本不触发，但 rest 挂在 app.ticker 上会继续爬，恢复瞬间参数会跳 ⇒
+         restTick 里按 l2Paused 直接不动作，恢复时把三层的 t0 一起平移「暂停掉的毫秒数」。
+       存档只是「把坏帧交给我」的通道：完整参数向量 + 每个上屏美术的包围盒（塌成一个点的正是手不见了的
+       形状）落到 .diag/l2d_freeze/，文件名回填到条上。暂停本身不依赖服务器 —— POST 失败照样冻得住。 */
+    let l2TinG=0;
+    const l2FreezeDump=()=>{ const M=cm._model||{}, P=M.parameters||{}, D=M.drawables||{}, PA=M.parts||{};
+      const pars=[], parts=[], art=[]; let lit=0, collapsed=0;
+      for(let i=0;i<(P.count|0);i++) pars.push([idName(P.ids[i]), +(P.values[i]).toFixed(4)]);
+      for(let i=0;i<(PA.count|0);i++) parts.push([idName(PA.ids[i]), +(PA.opacities[i]).toFixed(3)]);
+      const V=D.vertexPositions||[];
+      for(let i=0;i<(D.count|0);i++){ const op=D.opacities[i]; if(!(op>0.01)) continue; lit++;
+        const p=V[i]; const nm=idName(D.ids[i]);
+        if(!p||!p.length){ collapsed++; art.push([nm, +op.toFixed(3), 0, 0, 0, 0]); continue; }
+        let x0=1e9, y0=1e9, x1=-1e9, y1=-1e9;
+        for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k];
+          if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
+        const w=x1-x0, h=y1-y0; if(w<0.02||h<0.02) collapsed++;
+        art.push([nm, +op.toFixed(3), +w.toFixed(2), +h.toFixed(2), +x0.toFixed(2), +y0.toFixed(2)]); }
+      const st=mm.state||{}, g=st.currentGroup||sel.value||'na';
+      l2TinG=(l2Now()-l2GroupT0)/1000;
+      return { kind:'l2d-freeze', tag:sk.live2dBase+'-'+g, skin:sk.key, model:model, base:sk.live2dBase,
+        group:st.currentGroup||null, sel:sel.value, tInGroup:+l2TinG.toFixed(3), heldMs:Math.round(l2HeldMs),
+        state:{currentGroup:st.currentGroup, currentIndex:st.currentIndex, currentPriority:st.currentPriority,
+               reservePriority:st.reservePriority, tag:st.tag},
+        view:{w:wrap.clientWidth, h:wrap.clientHeight, z:+z.toFixed(4), baseK:+baseK.toFixed(4),
+              ox:+ox.toFixed(1), oy:+oy.toFixed(1), mx:+mdl.x.toFixed(1), my:+mdl.y.toFixed(1),
+              scale:+mdl.scale.x.toFixed(4)},
+        flags:{ noRest:!!window.__noRest, ambOff:!!window.__ambOff, ambMask:!!window.__ambMask,
+                snapOff:!!window.__snapOff, phase:(cm.__phaseSet?cm.__phaseSet.size:0) },
+        counts:{params:pars.length, parts:parts.length, drawables:(D.count|0), lit:lit, collapsed:collapsed},
+        parameters:pars, parts:parts, art:art }; };
+    const l2SetPaused=async(on)=>{ if(!!on===l2Paused) return;
+      const btn=document.getElementById('l2Pause'), info=document.getElementById('l2PauseInfo');
+      l2Paused=!!on; mdl.autoUpdate=!l2Paused;
+      btn.classList.toggle('on',l2Paused); btn.textContent=l2Paused?'继续':'暂停';
+      if(l2Paused){ l2PauseT0=performance.now();
+        info.style.display=''; info.textContent='已冻结 · 正在存档…';
+        let j=null; try{ j=l2FreezeDump(); }catch(e){ info.textContent='已冻结 · 姿态读取失败：'+(e.message||e); return; }
+        const head='已冻结 '+j.group+' 第 '+j.tInGroup+'s';
+        try{ const r=await fetch('/l2d_freeze',{method:'POST',
+            headers:{'Content-Type':'application/json'}, body:JSON.stringify(j)});
+          info.textContent = r.ok ? (head+' · 存档 '+(await r.text())) : (head+' · 存档失败 HTTP '+r.status);
+        }catch(e){ info.textContent=head+' · 服务器没接住（需 启动资产浏览器.bat 起的服务器）'; }
+        return; }
+      const held=performance.now()-l2PauseT0; l2PauseT0=0; l2HeldMs+=held;
+      if(amb) ambT0+=held; if(rest) rest.t0+=held; if(snapHold) snapHold.t0+=held;
+      info.style.display='none'; };
+    document.getElementById('l2Pause').onclick=()=>{ l2SetPaused(!l2Paused); };
+    app.ticker.add(()=>{ const g=mm.state&&mm.state.currentGroup;   // 「这条动作第几秒」的起点，随组切换重置
+      if(g!==l2GroupLast){ l2GroupLast=g; l2GroupT0=l2Now(); } });
     const ro=new ResizeObserver(()=>refit(true)); ro.observe(wrap);
     /* 部位命中：model3.json 的 HitAreas[].Name 就是动作组名（全库 768/768 精确匹配）。
        用「点击瞬间实时读取的部件包围盒」而不是加载时算好的三角面：框会随呼吸/物理位移动，缓存坐标会点空。
@@ -1873,7 +1946,6 @@ async function renderLive2D(s, sk){
       areaG.visible=areaViz; if(!areaViz) areaTs.forEach(t=>t.visible=false); else drawAreas(); };
     app.ticker.add(()=>{ if(areaViz) drawAreas(); });
     /* ---------- 参数/部件检查器（l2d.su 同款）：手调参数=变相表情，部件透明度=换装调试 ---------- */
-    const idName=id=>(id&&id.string)||(typeof id==='string'?id:(id&&id.toString())||'?');
     let panelBuilt=false;
     document.getElementById('l2PanelBtn').onclick=()=>{ const pn=document.getElementById('l2panel');
       const on=pn.classList.toggle('on'); document.getElementById('l2PanelBtn').classList.toggle('on',on);

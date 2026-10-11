@@ -9335,6 +9335,61 @@ Qoder 内置浏览器标签是 `visibilityState=hidden` 的隐藏表面：**`Int
 - **涉及文件（追加-XXIV）**：`scripts/diag/l2d_part_flicker_probe.py`（新臂 ㉙ `--areahunt/--hanames/--hasecs/--hathr/--haevery`）、
   `.diag/l2d_areahunt_gezi_2.json`、`.diag/l2d_areashot_gezi_2/`、`.diag/ah_shots.png`。
 
+**§123 追加-XXV（2026-10-11 第二十五轮：给用户「暂停」按钮 + 坏帧姿态存档 ⇒ 症状交得进仪器）**
+
+- **产品改动**（`gallery_src/index.html`）：控制条加 `#l2Pause`（**空格**同效），点下去 `mdl.autoUpdate=false`。
+  机制在库里那段守卫上：`_render(){ … this.deltaTime && (this.internalModel.update(this.deltaTime,this.elapsedTime), this.deltaTime=0) }`，
+  而 `deltaTime` 只由挂在 `PIXI.Ticker.shared` 上的 `onTickerUpdate` 累加 ⇒ 关掉它等于把
+  motion、物理、`coreModel.update()` **整条**停掉（姿态真冻住），`app.ticker` 却照跑 ⇒ 画布仍渲染，
+  缩放/平移/判定区都还能用。存档同时 POST `/l2d_freeze` 落盘，条上直接显示文件名。
+- **为什么必须连参数向量一起存而不只是截图**：图只能说明"哪块没了"；
+  532 条参数向量才能用 ㉘ `{restoreVec}` 把**同一帧**在无头里原样摆回来，再上 ㉔ 反查、㉗ 强亮。
+  存档字段：`parameters`（全量向量）/ `parts` / `art`（每片 `[名, 不透明度, 宽, 高, x0, y0]`，只收 op>0.01）/
+  `counts{lit, collapsed, …}` / `view`（取景，供复现同一张构图）/ `flags`（取证开关是否被别的探针改过）/
+  `group` + `tInGroup`（这条动作第几秒）。实测一条 idle 存档 30KB、532 参数、423/770 片上屏。
+- ⚠️ **三层按 `performance.now()` 取时间的外挂必须一起处理**（残留复位 `rest`、环境层 `ambT0`、开关钉住 `snapHold`）：
+  暂停期间后两层根本不触发（它们的写入点在 `afterMotionUpdate`），但 `restTick` 挂在 `app.ticker` 上会继续爬，
+  恢复那一拍把攒下的渐变一次写完 ⇒ 参数跳。修法两半：`restTick` 顶部按 `l2Paused` 直接 return；
+  恢复时把三层的 `t0` **一起**平移"暂停掉的毫秒数"（只平移一层就漏——漏 `ambT0` 的症状是花瓣滚动/波纹瞬移）。
+  另外维护一个模型时钟 `l2Now()=performance.now()-累计暂停毫秒`，存档里的 `tInGroup` 用它算，
+  否则"冻了 20 秒再按下去"会把秒数报成墙上时间。
+- **服务器**（`_gallery_server.py`）：新增 `POST /l2d_freeze` —— JSON **原样落盘**（解析只用来验合法与取 tag），
+  文件名 = 服务端时间戳 + 清洗过的 tag，同秒重复不覆盖（否则连按两次会静默吞掉前一条）。
+  ⚠️ 存档目录按 `self.directory`（这台服务器正在服务的根）算，不按模块路径：探针从 `gallery_src/` 里的**正本**
+  import 本模块起临时服务器时，模块路径算出来的"项目根"是仓库根，落点就跑到项目外面去了。
+- **验收 `scripts/diag/l2d_pause_e2e.py`**（已并进 WF-16，七件套第 7 件）：自己按正本起一台带新接口的服务器
+  —— 8777 上那台可能是别的会话按旧代码起的，POST 只会 501，"页面没存档"与"服务器是旧的"必须分得开。
+  七条判据全 PASS，两条仪器设计值得抄：
+  ① **先证"会动"再证"冻住"**：暂停前逐拍最大相对位移 0.4477，暂停 400ms 里两次读完整向量 `drift=0`；
+     没有前者，"不变"完全可能是页面本来就死了。
+  ② 恢复跳变按**一拍对一拍**比（差值记在 `afterMotionUpdate` 里、按各参数量程归一），
+     不能按固定毫秒比 —— swiftshader 下只有 5~14 拍/秒，按秒比会把一次正常眨眼算成"姿态瞬移"。
+     实测恢复第一拍 0.073 ≤ max(0.2, 3×正常拍)。
+- **读档 `scripts/diag/l2d_freeze_read.py`**：单帧只报"哪些片被压成一个点"，**必须两帧比差集**才成结论——
+  实测一条**正常** idle 存档里就有 8 片零面积（停放件），所以"有片塌着"本身不是症状，
+  与一帧好画面的 `gone / crushed` 差集才是。
+- 这条通道把"找坏帧"从"我方 5.1 拍/秒撒网"换成"用户在 60fps 现场按停"：
+  **下一次手没了请直接按空格**，条上那串文件名就是可复现的证据。除本节所改，产品其余部分未动。
+- ⚠️ **判据 ⑨（残留复位渐变在飞时冻住）第一次根本装不上，原因有两条，都是仪器层面的**：
+  1. **无头的模型时钟比墙钟慢一个量级**：一条 18.25s 的 `home` 跑了 32 秒墙钟 `currentGroup` 还是 `home`
+     ⇒ "等 clip 自然播完再回落 idle"在这种环境里等不到。推时钟要走产品自己的入口分片推：
+     `while(剩){ m.update(120); await t(16) }`（`Live2DModel.update` 只累 `deltaTime`，下一次 `_render` 消费掉），
+     **不是**自己造一份假时钟；120ms 一片是为了不超出正常步长、不把物理积分推爆。
+  2. **那层渐变只有 ~1.1 秒墙钟窗口**（REST_DELAY 400ms + REST_MS 700ms）⇒ 推完时钟再回头轮询就错过了，
+     必须把 `__restDbg()` 的探测**嵌进推的那个子循环里**。
+  3. ⚠️ **这条判据是分皮肤的**：`restTick` 只处理「刚播过的 clip 驱动、而 idle 不驱动」的参数，
+     gezi_2 的 home / touch_head 全都落在 idle 的驱动集里 ⇒ `items` 为空 ⇒ `rest` 永远是 null，
+     这层在这块皮肤上根本不装填（合法 SKIP，脚本明写 SKIP 不算通过）。
+     要 exercise 它得换 `antu_2`（§21 的 `touch_idle1` 有 15 个 idle 不动的参数）——
+     实测 antu_2 上 11 条全 PASS、0 条 SKIP（渐变在飞时冻住：drift=0、恢复第一拍 0.0923）。
+     ⇒ **通用形状：判据依赖某个模型特性时，必须挑一个确实有这个特性的模型来跑，并把"没这个特性"打成显式 SKIP。**
+- **涉及文件（追加-XXV）**：`gallery_src/index.html`（`#l2Pause` / `l2SetPaused` / `l2FreezeDump` / `l2Now` / `restTick` 暂停门 / `__restDbg` / 空格快捷键）、
+  `gallery_src/_gallery_server.py`（`/l2d_freeze`、`_read_body`、`_freeze_dir`）、
+  `scripts/diag/l2d_pause_e2e.py`（新建）、`scripts/diag/l2d_freeze_read.py`（新建）、
+  `scripts/diag/gallery_server_range_test.py`（补 POST 写路径判据）、`scripts/diag/wf16_regression.py`（第 7 件）、
+  `.diag/l2d_freeze/*.json`（存档，gitignore）。
+
+
 
 ## §138. 页头那条「边墙」在照片背景前读作一条杠；分组标签是裸字 ⇒ 任何单一颜色都只有一半场景可读（2026-10-11 前端）
 
