@@ -875,19 +875,23 @@ function glBuild(){
   const cs=getComputedStyle(document.documentElement);
   const ring=parseFloat(cs.getPropertyValue('--lg-ring'))||12;
   const rad=parseFloat(cs.getPropertyValue('--r-card'))||16;
-  const mr=main.getBoundingClientRect(), hov=main.querySelector('.card:hover');
-  /* 环的纵坐标 = 「卡片相对滚动视口的位置」+「层相对视口的偏移」。
-     写成 off 而不是直接把 y 当 r.top-mr.top：锚点一变（上面那个往上留一视口）y 就整体错一个视口，
-     而且错得"看起来只是环偏了"，很容易当成观感问题去调参。 */
-  const off=main.scrollTop-top;
+  const hov=main.querySelector('.card:hover');
+  /* ⚠️ 位置一律取「布局位置」(offsetLeft/offsetTop 累加到 main)，**绝不能用
+     getBoundingClientRect()**：后者含 transform，而卡片 hover 会 perspective + 倾斜 ±11° +
+     上浮 + scale(1.015)，投影出来的矩形比布局盒大并且会**压到邻卡的矩形上**。
+     遮罩是 fill-rule:evenodd（按奇偶抵消），两个矩形一重叠，重叠区就从"环"翻成"实心"
+     ⇒ 现象是"某张卡整块糊住、连名字都看不见"（2026-10-11 用户实机撞到）。
+     尺寸同理用 offsetWidth/offsetHeight。悬停那张另有自己的 ::before（环跟着卡走），这里跳过它。
+     层与卡片同在 main 的 padding-box 坐标系里 ⇒ 层内坐标 = 布局位置 - 层的 top，不需要再绕视口。 */
   let d='', n=0;
   main.querySelectorAll('.card.g').forEach(c=>{
-    if(c===hov) return;                                   // 悬停那张走自己的 ::before
-    const r=c.getBoundingClientRect();
-    const y=Math.round(r.top-mr.top+off), x=Math.round(r.left-mr.left);
-    if(y<-40||y>H+40) return;                             // 只画锚点窗口内的（上下各留 40px 余量）
-    const w=Math.round(c.offsetWidth), h=Math.round(c.offsetHeight);
-    d+=glRR(x,y,w,h,rad)+glRR(x+ring,y+ring,Math.max(0,w-2*ring),Math.max(0,h-2*ring),Math.max(0,rad-ring));
+    if(c===hov) return;
+    let x=0, y=0, e=c;
+    while(e && e!==main){ x+=e.offsetLeft; y+=e.offsetTop; e=e.offsetParent; }
+    const w=c.offsetWidth, h=c.offsetHeight, yy=Math.round(y-top);
+    x=Math.round(x);
+    if(yy<-40||yy>H+40) return;                           // 只画锚点窗口内的（上下各留 40px 余量）
+    d+=glRR(x,yy,w,h,rad)+glRR(x+ring,yy+ring,Math.max(0,w-2*ring),Math.max(0,h-2*ring),Math.max(0,rad-ring));
     n++;
   });
   const el=GL.el||(GL.el=document.createElement('div'));

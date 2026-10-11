@@ -8916,3 +8916,27 @@ Qoder 内置浏览器标签是 `visibilityState=hidden` 的隐藏表面：**`Int
    下一轮同一条又两版完全相同。它该管的事已由结构闸门 `ov_boxes==0` 负责：
    **非悬停卡上不许出现任何 backdrop-filter 盒**。⇒ 教训：像素相等型判据只在"取景区内没有
    其他随时间变化的内容"时才有效；半透明层下面的动画背景会让它随机翻红。
+
+## §135. 一层遮罩画 N 个环：`fill-rule:evenodd` 让被 transform 的元素把邻卡"糊成实心"（2026-10-11）
+
+**现象**：用户实机截图——某一张卡**整块糊住，连舰名都看不见**，邻卡正常。"怎么选中就是模糊的了？"
+
+**根因**：`glBuild` 用 `getBoundingClientRect()` 取卡片位置。rect **含 transform**，而卡片 hover 会
+`perspective + rotateX/rotateY(±11°) + translateY(-5px) + scale(1.015)` ⇒ 投影出的矩形比布局盒大，
+**压到邻卡的矩形上**。遮罩是**一条 path、`fill-rule:evenodd`**（外矩形 + 内矩形两条子路径靠奇偶抵消成环），
+两个外矩形一重叠，重叠区的奇偶性翻转 ⇒ 那里从"环"变成"实心" ⇒ 整卡被 `backdrop-filter` 糊住。
+尺寸那侧我本来就用的 `offsetWidth/offsetHeight`（不含 transform），**只有位置漏了**——
+一半对一半错，所以静态检查一切正常：`--maskdiag` 打出 70 条环、内缩 12px 正确、无退化路径。
+
+**修法**：位置也改成**布局坐标**（`offsetLeft/offsetTop` 累加到 `main`），层内 y = 布局 y − 层的 top。
+布局盒永远不重叠 ⇒ 结构上不可能再触发奇偶翻转。悬停那张仍从层里扣掉、走自己的 `::before`。
+
+**判据（新增，缺了就会再犯）**：`glass_perf_probe.py --maskdiag` 现在直接判两件事——
+① `overlaps`：任意两张卡的遮罩盒**不许重叠**（重叠 = evenodd 翻实体的充要条件）；
+② `degenerate`：`offsetWidth/Height ≤ 2×环宽`（内圈被 `Math.max(0,…)` 夹成 0 ⇒ 环变实心），
+以及 `|offsetWidth − rect.width| > 2`（说明这张卡正被 transform，遮罩若还在用 rect 就是错的）。
+
+**通用教训**：`fill-rule:evenodd` / `mask` 这类**靠奇偶或相减抵消**的画法，对"图元重叠"零容忍。
+凡是用它画 N 个"环/框/洞"，就必须有一条"任意两个外框不相交"的断言，
+而且取坐标只能用不受 transform/动画影响的布局坐标——`getBoundingClientRect()` 是**视觉**矩形，
+不是**布局**矩形，这两者在有 transform 的页面上永远不等。

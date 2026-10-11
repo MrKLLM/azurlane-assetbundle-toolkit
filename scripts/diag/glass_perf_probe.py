@@ -38,6 +38,7 @@ AP.add_argument('--shots', action='store_true', help='成对取图：同一帧�
 AP.add_argument('--bend', action='store_true', help='配合 --shots：背后铺密集条纹，判「几何错」还是「背景没内容」')
 AP.add_argument('--depth', type=int, default=0, help='配合 --shots：临时把 --lg-depth 拉到这个值做极端检验')
 AP.add_argument('--caps', action='store_true', help='只跑 backdrop-filter 写法矩阵，定位哪一种被算成 none')
+AP.add_argument('--maskdiag', action='store_true', help='导出遮罩几何诊断（查"整块实心而不是环"）')
 A = AP.parse_args()
 W, H = (int(x) for x in A.win.split(','))
 URL = f'http://127.0.0.1:{A.port}/gallery_v2/index.html'
@@ -618,6 +619,36 @@ CAPS2 = """(()=>{
   return JSON.stringify(out);})()"""
 
 
+MASKDIAG = """(()=>{
+  const main=document.getElementById('main'), lay=document.getElementById('glassone');
+  const top=lay?parseFloat(lay.style.top):0, H=lay?parseFloat(lay.style.height):0;
+  const boxes=[]; let degenerate=[];
+  main.querySelectorAll('.card.g').forEach(c=>{
+    if(c.matches(':hover')) return;
+    let x=0,y=0,e=c;
+    while(e && e!==main){ x+=e.offsetLeft; y+=e.offsetTop; e=e.offsetParent; }
+    const w=c.offsetWidth, h=c.offsetHeight, yy=Math.round(y-top);
+    if(yy<-40||yy>H+40) return;
+    const r=c.getBoundingClientRect();
+    boxes.push({x:Math.round(x),y:yy,w,h});
+    // 尺寸退化（内圈会被 Math.max(0,...) 夹成 0 ⇒ 环变成实心矩形）与
+    // 「布局尺寸 ≠ 变换后尺寸」都记下来：后者说明这张卡正被 transform，
+    // 一旦遮罩改用 rect 就会和邻卡重叠、evenodd 翻成实体。
+    if(w<=24||h<=24) degenerate.push({why:'size',w,h});
+    else if(Math.abs(w-r.width)>2||Math.abs(h-r.height)>2)
+      degenerate.push({why:'transformed',w,h,rw:+r.width.toFixed(1),rh:+r.height.toFixed(1)});
+  });
+  const ov=[];   // 两两重叠 = evenodd 抵消失败 = 整块糊住，这就是本轮那个 bug 的充要条件
+  for(let i=0;i<boxes.length;i++) for(let j=i+1;j<boxes.length;j++){
+    const a=boxes[i],b=boxes[j];
+    if(a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h){ ov.push([i,j]); if(ov.length>4) break; }
+  }
+  const mk=(lay?String(getComputedStyle(lay).maskImage||getComputedStyle(lay).webkitMaskImage||''):'');
+  const svg=decodeURIComponent(mk);
+  return JSON.stringify({layer:!!lay, rings:boxes.length, mask_M:(svg.match(/M/g)||[]).length,
+    expect_M:boxes.length*2, overlaps:ov, degenerate:degenerate.slice(0,6)},null,1);})()"""
+
+
 def main():
     global websocket
     try:
@@ -669,6 +700,9 @@ def main():
             return
         if A.shots:
             shots(pg)
+            return
+        if A.maskdiag:
+            print(pg.ev(MASKDIAG))
             return
         if A.caps:
             print(json.dumps(json.loads(pg.ev(CAPS)), ensure_ascii=False, indent=1))
