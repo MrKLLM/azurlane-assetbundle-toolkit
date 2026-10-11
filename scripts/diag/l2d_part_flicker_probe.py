@@ -91,6 +91,7 @@
 """
 import argparse
 import base64
+import glob
 import json
 import os
 import re
@@ -1164,6 +1165,128 @@ JS_HANDDARK = r"""(async (cfg) => {
 })"""
 
 
+# ---------------------------------------------------------------- ㉔ 反查「画面上那两只手到底是哪批 mesh」
+#   为什么必须有这一臂（§123 追加-XX 的账）：过去十一轮所有"手在不在"的判据都挂在一份
+#   **从没验过**的名单上（臂 ⑤/⑲ 按显隐变化分出来的家族），本轮用两条阳性对照证伪了它 ——
+#   只留那 34 片渲染时画布上一个像素都没有。所以先别修，先把名单从**像素**反查出来。
+#   做法：走 UI 入口播 home、等到第 at 秒（用户确认"手此刻在"的相位），然后**逐批把 drawable 藏起来**
+#   （复用钩子的 __hideSet，它打在 core.update 之后 ⇒ 渲染读的就是这份缓冲），
+#   每藏一批就在"手的那块屏幕区域"里数还剩多少不透明像素。掉得多 ⇒ 这批里有手的片；再二分到位。
+#   ⚠️ 不用"只亮目标片"那条路：目标片此刻本来就亮着，而"藏"不会遇到"顶点被缩放压成一个点"的假阴性。
+JS_HANDFIND = r"""(async (cfg) => {
+  const m=window.__m, im=m.internalModel, M=im.coreModel._model, D=M.drawables;
+  const app=window.__app, R=app.renderer;
+  const ids=Array.from(D.ids);
+  const t=ms=>new Promise(r=>setTimeout(r,ms));
+  /* 判据 = 「这块区域的**颜色**变了多少像素」，不是「还剩多少不透明像素」。
+     上一版用 alpha 计数，被一层半透明背景钉死：整幅 457,835 = 889×515 每一帧都全不透明，
+     于是"藏掉全部亮片"区域读数一动不动（0 掉率），差点被读成"没有一片画在手里"。
+     半透明层照样让 alpha>10 ⇒ 只有比颜色才分得清"这块是谁画的"。 */
+  const cv=document.createElement('canvas'); const cx=cv.getContext('2d',{willReadFrequently:true});
+  const box=cfg.box;
+  const imgOf=async(url)=>{ const img=new Image();
+    await new Promise((ok,no)=>{ img.onload=ok; img.onerror=()=>no('img'); img.src=url; }); return img; };
+  const shot=async()=>{ const url=await R.extract.base64(app.stage,"image/png");
+    const img=await imgOf(url);
+    if(cv.width!==img.width||cv.height!==img.height){ cv.width=img.width; cv.height=img.height; }
+    cx.clearRect(0,0,img.width,img.height); cx.drawImage(img,0,0);
+    const x0=Math.max(0,box[0]), y0=Math.max(0,box[1]);
+    const w=Math.max(1,Math.min(img.width-x0, box[2]-box[0])), h=Math.max(1,Math.min(img.height-y0, box[3]-box[1]));
+    return {url, W:img.width, H:img.height, x0, y0, w, h,
+            px:cx.getImageData(x0,y0,w,h).data}; };
+  const diff=(a,b)=>{ let n=0;                        // 通道和变化 > 24 算一个"这块是它画的"像素
+    for(let i=0;i<a.length;i+=4){ if(Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2])>24) n++; }
+    return n; };
+  const log=[];
+  const sel=document.getElementById('l2Motion'), rb=document.getElementById('l2Replay');
+  if(!(sel&&rb)) return JSON.stringify({fail:'页面上找不到 #l2Motion / #l2Replay'});
+  sel.value=cfg.clip; sel.dispatchEvent(new Event('change')); rb.click();
+  const t0ref=performance.now();
+  /* ⚠️ "第几秒"两次运行对不上：同一个 --hfat 7，一次角色居中举手、一次只露画面底边的一对角
+     ⇒ 点击到真正起播之间的延迟每次都不同。所以靶框必须由**本趟自己的图**来量，sweep 就是干这个的。 */
+  if(cfg.sweep){ const sw=[];
+    for(let k=0;k<cfg.sweep.n;k++){
+      const want=cfg.sweep.t0+k*cfg.sweep.step, now=(performance.now()-t0ref)/1000;
+      if(want>now) await t((want-now)*1000);
+      const u=await R.extract.base64(app.stage,"image/png");
+      sw.push({t:+want.toFixed(2), b64:u});
+      if(sw.length>=40) break; }
+    return JSON.stringify({sweep:sw, clip:cfg.clip, box:cfg.box}); }
+  await t(cfg.at*1000);
+  /* ⚠️ 必须**真的冻住**才能量"这块是谁画的"：`autoUpdate` 开着时每次渲染都会把模型往前推一帧，
+     实测两连测自差 21,163/40,300 = 53% ⇒ 噪声比信号还大，任何掉率都读不出东西。
+     关掉 autoUpdate + 停 ticker 之后，基线自差必须≈0，这一条本身当作仪器对照（不 0 就判仪器坏）。 */
+  try{ m.autoUpdate=false; }catch(e){}
+  try{ im.autoUpdate=false; }catch(e){}
+  try{ app.ticker.stop(); }catch(e){}
+  await t(120);
+  const S0=await shot(), S1=await shot();
+  const area=S0.w*S0.h; const self0=diff(S0.px,S1.px);
+  log.push(['基线两连测自差（必须≈0）', self0, area,
+            self0<=0.02*area ? 'OK 冻住了' : '❌ 还在动（'+Math.round(100*self0/area)+'% 自差）⇒ 冻不住，本臂作废'])
+  const lit=[]; for(let i=0;i<D.count;i++) if(D.opacities[i]>0.5) lit.push(i);
+  const hide=(arr)=>{ window.__hideSet=new Set(arr); };
+  const show=()=>{ window.__hideSet=null; };
+  /* 三条仪器自对照，各钉一个失败模式：
+       ① 藏完读回缓冲：还有亮着 ⇒ __hideSet 没生效（钩子没跑/被重算覆盖）
+       ② 藏完全画面的颜色差：几乎为 0 ⇒ 藏对渲染没影响，本臂全部作废
+       ③ 藏与不藏两张 base64 完全相同 ⇒ extract 在回缓存 */
+  /* 冻帧之后"藏"反而失灵：`__hideSet` 是打在 `coreModel.update()` **之后**的，更新全停就没人去写缓冲。
+     所以要手动补一次"只重算、不推时钟"的 update —— 参数没变 ⇒ 姿态不变，但显隐缓冲被重写了。 */
+  const pump=()=>{ try{ im.coreModel.update(); }catch(e){} };
+  let nz=null, allDiff=null, sameImg=null, boxDiffAll=null;
+  /* ⚠️ 上一版这里量出 allDiff=0 而 boxDiffAll=40,295/40,300 —— 不是机制坏，是我读图顺序错：
+     还原之后**没有重拍一张**就去读全幅，等于拿"藏"和"藏"自比。对照自己也得有对照。 */
+  hide(lit); pump(); await t(60);
+  nz=0; for(const j of lit) if(D.opacities[j]>0.01) nz++;
+  const SH=await shot();
+  show(); pump(); await t(60); const SR=await shot();
+  boxDiffAll=diff(S0.px, SH.px);
+  const fullH=cx.getImageData(0,0,cv.width,cv.height).data;   // cx 里现在是**还原态** SR
+  hide(lit); pump(); await t(60); const SH2=await shot(); show(); pump(); await t(60);
+  const fullA=cx.getImageData(0,0,cv.width,cv.height).data;   // 这里才是还原态
+  let ad=0; for(let i=0;i<fullA.length;i+=4){ if(Math.abs(fullA[i]-fullH[i])+Math.abs(fullA[i+1]-fullH[i+1])+Math.abs(fullA[i+2]-fullH[i+2])>24) ad++; }
+  allDiff=ad; sameImg=(SH.url===SR.url);
+  log.push(['对照①：藏掉全部 %d 片后缓冲仍亮着 %s 片' % (lit.length, nz), 0,0,
+            nz===0?'OK 缓冲写进去了':'❌ __hideSet 没生效']);
+  log.push(['对照②：藏掉全部后 全幅变色 %s 像素 / 靶区变色 %s（靶区面积 %s）' % (allDiff, boxDiffAll, area), 0,0,
+            allDiff>2000 ? (boxDiffAll>0 ? 'OK 两个都在动' : '⚠️ 全幅动了但靶区没动 ⇒ 这批里没东西画在靶区')
+                          : '❌ 藏对渲染几乎无影响，本臂作废']);
+  log.push(['对照③：藏/不藏两张图是否同一张', 0,0, sameImg?'❌ extract 回缓存，仪器坏':'OK 两张不同']);
+  if(self0>0.02*area || nz!==0 || sameImg || allDiff<=2000){
+    try{ app.ticker.start(); m.autoUpdate=true; }catch(e){}
+    return JSON.stringify({at:cfg.at, box:cfg.box, area, instrumentDead:true, self0, nz:nz,
+      allDiff:allDiff, boxDiffAll:boxDiffAll, sameImg:sameImg, litCount:lit.length, total:D.count,
+      log:log, singles:[]});
+  }
+  const dropOf=async(arr)=>{ hide(arr); pump(); await t(60); const c=await shot(); show(); pump(); await t(50);
+                             const d=diff(S0.px, c.px); return {r: d/area, n:d}; };
+  const bs=cfg.batch||48, pos=[];
+  for(let i=0;i<lit.length;i+=bs){
+    const part=lit.slice(i,i+bs), d=await dropOf(part);
+    log.push(['批 %d/%d (%d 片)' % (Math.floor(i/bs)+1, Math.ceil(lit.length/bs), part.length),
+              d.n, area, '靶区变色 '+Math.round(d.r*100)+'%']);
+    if(d.r>=cfg.thr) pos.push(part);
+    if(log.length>cfg.budget) break; }
+  const found=[];
+  for(const grp of pos){
+    let cur=grp;
+    while(cur.length>1 && log.length<cfg.budget){
+      const mid=Math.ceil(cur.length/2), A=cur.slice(0,mid), B=cur.slice(mid);
+      if((await dropOf(A)).r>=cfg.thr) cur=A;
+      else if((await dropOf(B)).r>=cfg.thr) cur=B;
+      else { log.push(['二分两边都不掉，停在 %d 片'%cur.length,0,0,cur.map(j=>ids[j]).join(',')]); break; } }
+    if(cur.length===1) found.push(ids[cur[0]]); }
+  const fin=[];
+  for(const nm of found){ const j=ids.indexOf(nm); if(j<0) continue;
+    const q=await dropOf([j]);
+    fin.push([nm, +(q.r*100).toFixed(1), +D.opacities[j].toFixed(2), +(D.renderOrders[j]||0).toFixed(0)]); }
+  try{ app.ticker.start(); m.autoUpdate=true; }catch(e){}
+  return JSON.stringify({at:cfg.at, box:cfg.box, area, self0, nz, allDiff, boxDiffAll, sameImg,
+    litCount:lit.length, total:D.count, log:log, singles:fin});
+})"""
+
+
 # ---------------------------------------------------------------- ⑬ 台账矛盾判定：同一趟里把「扫 Param25」与「钉 Param25」合进同一次运行、同一套索引
 # 为什么要它（§6.37 交接的第一件事）：臂 ⑤ 的显隐台账说「全默认 + Param25=0.5 ⇒ ArtMesh325=1.0」，
 # 臂 ⑫ 用**逐位相同**的参数数组直读同一个下标(378) 得 **0**，且三个目标全灭（不是单片偶发）。
@@ -1753,9 +1876,18 @@ def main():
     ap.add_argument("--preroll", action="store_true", help="㉑ 预路过（补丁 ⑧）A/B：开/关各跑一遍全新页面，逐组量六组手亮几片")
     ap.add_argument("--handdark", action="store_true", help="㉒ 手部并集**逐拍**只记翻转与全灭窗口（不受截图速度限制）；"
                                                             "配 --hdclip/--hdsecs/--hdsmall/--hdparams")
-    ap.add_argument("--hdclip", default="home", help="㉒ 从 idle 强切到哪条 clip（时钟原点=切换那一刻）")
+    ap.add_argument("--handfind", action="store_true", help="㉔ 反查「画面上那两只手是哪批 mesh」：走 UI 入口播到第 --hfat 秒，"
+                                                            "逐批藏 drawable，看 --hfbox 那块屏幕区域的像素掉多少")
+    ap.add_argument("--hfat", type=float, default=7.0, help="㉔ 在第几秒开始量（要挑一个「手此刻在画面上」的相位）")
+    ap.add_argument("--hfbox", default="303,160,360,227", help="㉔ 目标屏幕区域 x0,y0,x1,y1（画布像素，默认＝用户确认的左手）")
+    ap.add_argument("--hfthr", type=float, default=0.25, help="㉔ 一批藏起来后区域掉多少比例算正（默认 0.25）")
+    ap.add_argument("--hfbatch", type=int, default=48, help="㉔ 第一层每批多少片（亮着的片里切）")
+    ap.add_argument("--hfbudget", type=int, default=90, help="㉔ 最多做多少次截图（预算用完就停，防跑飞）")
+    ap.add_argument("--hfsweep", default="", help="㉔ 只扫不判：按 起:止:步长 每帧存一张图（相位两次运行对不上，靶框必须由本趟自己的图来量）")
+    ap.add_argument("--hdclip", default="home", help="㉒/㉔ 从 idle 强切到哪条 clip（时钟原点=切换那一刻）")
     ap.add_argument("--hdsecs", type=float, default=20.0, help="㉒ 切换后连续测多少秒")
     ap.add_argument("--hdsmall", type=int, default=1, help="㉒ 1=先把渲染器缩到 360x260 换拍率（0=不缩）；拍率会随结果发布")
+    ap.add_argument("--hdnames", default="", help="㉒ 覆盖那份「手」名单（逗号分隔 drawable 名）—— 臂 ㉔ 反查出来的名单要用这里跑")
     ap.add_argument("--hdparams", default="Param25,Param27,Param28,Param145,Param144",
                     help="㉒ 每次翻转随行的参数读数（逗号分隔参数名）")
     ap.add_argument("--hdevery", type=int, default=4, help="㉒ 全模型逐顶点扫描每几拍做一次（1=每拍，拍率会掉一半）")
@@ -2305,13 +2437,17 @@ def main():
     #    "并集从没为 0"这个结论的**时间分辨率不够**，不能拿来判死。本臂把采样提到拍率自证 ≥25/s，
     #    并且只记翻转与全灭窗口，所以高频也不会把结果撑爆。
     if a.handdark:
-        HD34 = ["ArtMesh36", "ArtMesh42", "ArtMesh43", "ArtMesh44", "ArtMesh51",
+        if a.hdnames.strip():
+            HD34 = [x.strip() for x in a.hdnames.split(",") if x.strip()]
+            print("㉒ 名单换成臂 ㉔ 反查出来的 %d 片：%s" % (len(HD34), ",".join(HD34)))
+        else:
+            HD34 = ["ArtMesh36", "ArtMesh42", "ArtMesh43", "ArtMesh44", "ArtMesh51",
                 "ArtMesh331", "ArtMesh332", "ArtMesh333", "ArtMesh334", "ArtMesh335",
                 "ArtMesh325", "ArtMesh326", "ArtMesh327", "ArtMesh328", "ArtMesh329", "ArtMesh330",
                 "ArtMesh355", "ArtMesh379",
                 "ArtMesh356", "ArtMesh357", "ArtMesh358", "ArtMesh359", "ArtMesh360",
-                "ArtMesh364", "ArtMesh380", "ArtMesh381", "ArtMesh593", "ArtMesh594",
-                "ArtMesh365", "ArtMesh366", "ArtMesh367", "ArtMesh368", "ArtMesh369", "ArtMesh370"]
+                    "ArtMesh364", "ArtMesh380", "ArtMesh381", "ArtMesh593", "ArtMesh594",
+                    "ArtMesh365", "ArtMesh366", "ArtMesh367", "ArtMesh368", "ArtMesh369", "ArtMesh370"]
         j22 = reload_boot()
         if not j22.get("ok"):
             print("   [FAIL] ㉒ 重载失败：%s" % str(j22)[:160])
@@ -2487,6 +2623,68 @@ def main():
                         except Exception as e24:
                             print("          [阳性对照] hide %s 存图成功，比差异失败 %s"
                                   % (mm23.get("name"), str(e24)[:100]))
+
+    # —— ㉔ 反查「画面上那两只手到底是哪批 mesh」（旧名单已被 §123 追加-XX 判死，先有名单再谈修法）
+    if a.handfind:
+        box24 = [int(x) for x in a.hfbox.split(",") if x.strip()]
+        if len(box24) != 4:
+            print("   [FAIL] ㉔ --hfbox 要 4 个数 x0,y0,x1,y1")
+        else:
+            j24 = reload_boot()
+            if not j24.get("ok"):
+                print("   [FAIL] ㉔ 重载失败：%s" % str(j24)[:160])
+            else:
+                sw24 = [float(x) for x in a.hfsweep.split(":") if x.strip()] if a.hfsweep.strip() else None
+                cfg24 = {"clip": a.hdclip, "at": a.hfat, "box": box24, "thr": a.hfthr,
+                         "batch": max(4, a.hfbatch), "budget": max(8, a.hfbudget),
+                         "sweep": ({"t0": sw24[0], "step": sw24[2],
+                                     "n": max(1, int((sw24[1]-sw24[0])/sw24[2])+1)}
+                                    if sw24 and len(sw24) >= 3 else None)}
+                raw24 = ev(JS_HANDFIND + "(%s)" % json.dumps(cfg24))
+                try:
+                    r24 = json.loads(raw24) if isinstance(raw24, str) and raw24.strip().startswith("{") else {"err": str(raw24)[:300]}
+                except Exception:
+                    r24 = {"err": str(raw24)[:300]}
+                bb24 = r24.pop("baseB64", None) if isinstance(r24, dict) else None
+                if bb24:
+                    fp24b = os.path.join(ROOT, ".diag", "l2d_handfind_%s_at%s_base.png" % (a.model, a.hfat))
+                    with open(fp24b, "wb") as fh:
+                        fh.write(base64.b64decode(bb24.split(",", 1)[-1]))
+                    r24["basePng"] = os.path.basename(fp24b)
+                f24 = os.path.join(ROOT, ".diag", "l2d_handfind_%s_at%s.json" % (a.model, a.hfat))
+                with open(f24, "w", encoding="utf-8") as fh:
+                    json.dump(r24, fh, ensure_ascii=False)
+                print("\n== ㉔ 反查手部名单：第 %.1fs、屏幕区域 %s（%s）" % (a.hfat, box24, a.hdclip))
+                if isinstance(r24, dict) and r24.get("sweep"):
+                    d24 = os.path.join(ROOT, ".diag", "l2d_hfsweep_%s" % a.model)
+                    if not os.path.isdir(d24):
+                        os.makedirs(d24)
+                    for old in glob.glob(os.path.join(d24, "*.png")):
+                        os.remove(old)
+                    for fr in r24["sweep"]:
+                        with open(os.path.join(d24, "s%05.2fs.png" % fr["t"]), "wb") as fh:
+                            fh.write(base64.b64decode((fr["b64"] or "").split(",", 1)[-1]))
+                    print("   扫了 %d 帧（整幅不透明像素数随姿态变，可当粗相位标记）→ %s"
+                          % (len(r24["sweep"]), d24))
+                    for fr in r24["sweep"]:
+                        print("     t=%5.2fs 整幅 %6d" % (fr["t"], fr["all"]))
+                    r24 = None
+                if r24 is None:
+                    pass
+                elif "area" not in r24:
+                    print("   [FAIL] %s" % str(r24)[:300])
+                else:
+                    print("   自证：靶区面积 %s 像素，冻帧后基线自差 %s（%.2f%%）；亮着 %s/%s 片%s"
+                          % (r24["area"], r24.get("self0"),
+                             100.0 * (r24.get("self0") or 0) / max(1, r24["area"]),
+                             r24["litCount"], r24.get("total") or "?",
+                             "  ⇒ ⚠️ 仪器对照未通过，本臂结论不成立" if r24.get("instrumentDead") else ""))
+                    for e in r24["log"]:
+                        print("     %-22s %s" % (str(e[0]), e[3]))
+                    print("   收敛到单片（片名 / 单独藏它时区域掉多少%% / 当前透明度 / 绘制序）：")
+                    for s in (r24.get("singles") or []):
+                        print("     %-14s %s" % (str(s[0]), s[1:]))
+                    print("   明细 → %s" % f24)
 
     # —— ⑲ 锁存律：**一页只探一个值**（⑱ 证了显隐是路径函数之后，这是唯一还能拿到「边沿→写入」对应关系的形状）
     #    每页做三件事：冷基线 → 一次跳到 v（这份签名 = 该值的**干净响应** R(v)）→ 回默认打一拍 + 连打 pump 拍
