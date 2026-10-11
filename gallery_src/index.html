@@ -140,16 +140,10 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
   -webkit-mask-composite:xor;mask-composite:exclude;
   -webkit-backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08);
   backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08)}
-/* ②-b 真折射：把上面那层"只糊不推"的边墙换成 feDisplacementMap。
-   法线图由 JS 按这张卡的**实测尺寸**现算（见 LG），所以滤镜与遮罩环必须同源：
-   环宽取 --lg-ring、圆角取 --r-card。lgr 类是 JS 在图建好之后才加的。
-   ⚠️ 每个 var() 都必须带兜底值：CSS 变量解析失败是**整条声明作废**（不是只丢那一项），
-      于是 backdrop-filter 直接变成 none——连原来那层模糊都没了。实测踩过：theme.css 被
-      缓存成旧版 → --lg-blur 读空 → blur() 非法 → 边墙整圈没有任何滤镜，两张截图一模一样。
-      --lgf 的兜底故意写成上一版那条模糊，宁缺折射也不能退化成"什么都没有"。 */
-html.lg .card.lgr::before{
-  -webkit-backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.7) brightness(1.06) var(--lgf,blur(17px) saturate(2) brightness(1.08));
-  backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.7) brightness(1.06) var(--lgf,blur(17px) saturate(2) brightness(1.08))}
+/* ⚠️ 卡面**故意不做折射**（2026-10-11 用户看过实机否掉："卡面边缘还是不要折射的，看着脏脏的"）。
+   根因不是参数：卡片四周 14px 缝隙外就是邻卡的高对比立绘，折射会把那些画面拽进这一圈，
+   读起来是污渍而不是玻璃。折射只在"背后是滚动内容/天空"这种**低频背景**上才干净——
+   所以下面 ②-b 只留给导航栏那条边墙。别把这条再往卡片上接。 */
 /* ③ 反光：只留**常驻的那道斜向反光**（--spec2）。
    ⚠️ 原来这里还叠了一层"跟着鼠标跑的圆斑"（radial-gradient at var(--mx)/var(--my)），
    用户 2026-09-29 明确否掉："不要鼠标发光这个效果" —— 已删，JS 侧也不再写 --mx/--my。
@@ -728,14 +722,16 @@ mainEl.addEventListener('mousemove',e=>{
 });
 mainEl.addEventListener('mouseleave',tiltReset);
 
-/* ---------- 液态玻璃：真折射 ----------
+/* ---------- 液态玻璃：真折射（当前只挂在导航栏那条边墙上） ----------
    为什么非自己画法线图不可：挂在 backdrop-filter 上的 SVG 滤镜，它的 SourceGraphic
-   就是「身后那张已经合成好的背景图」——滤镜**拿不到元素自己的形状**。所以圆角矩形那一圈
-   的坡度只能预先按元素的实测尺寸算成一张图（R=横向推多少、G=纵向推多少），再用 feImage
-   喂给 feDisplacementMap。CSS 模糊永远推不动像素，这就是前几轮"还是毛玻璃"的物理原因。
-   ⚠️ 只给边墙那一圈：实测整块面板都折射 46.7ms/帧(≈21fps)，只有边墙 26.7ms/帧，预算 16.7ms。
-   ⚠️ 卡片高度会随标签换行变化，而图与尺寸绑定 ⇒ 按尺寸分桶（上限 LG.max），
-      桶满就复用**最接近**的那张，宁可边墙差一两像素也不让一半卡有折射、一半没有。 */
+   就是「身后那张已经合成好的背景图」——滤镜**拿不到元素自己的形状**。所以那一圈的坡度
+   只能预先按元素的实测尺寸算成一张图（R=横向推多少、G=纵向推多少），再用 feImage 喂给
+   feDisplacementMap。CSS 模糊永远推不动像素，这就是前几轮"还是毛玻璃"的物理原因。
+   ⚠️ 折射只给边墙那一圈，不给整块面板：实测整面折射 56.6ms/帧、边墙 20.0ms/帧（预算 16.7ms）。
+   ⚠️ 卡片**故意不接**（2026-10-11 用户否掉，理由见上面 ② 那条注释）：卡片缝隙外就是邻卡的
+      高对比立绘，折射会把画面拽进那一圈读成污渍。⇒ 只给"背后是滚动内容"这种低频背景用。
+   ⚠️ 成本主因是**同时存在几个不同滤镜**，不是滤镜复杂度：按精确尺寸分 5 桶 = 83.4ms，
+      归并成 2 桶 + 法线图降采样 = 30.1ms。别改回精确分桶。 */
 const LGNS='http://www.w3.org/2000/svg', XLINKNS='http://www.w3.org/1999/xlink';
 const LG = { on:!!(window.CSS&&CSS.supports&&CSS.supports('backdrop-filter','blur(1px) url(#lgprobe)')),
              svg:null, buckets:new Map(), max:2, gen:0, cv:null, mpx:96 };
@@ -842,7 +838,6 @@ function lgRefresh(){
   if(!LG.on) return;
   LG.buckets.clear();
   if(LG.svg) while(LG.svg.firstChild) LG.svg.removeChild(LG.svg.firstChild);
-  document.querySelectorAll('.card.g').forEach(c=>lgApply(c,'card'));
   lgApply(document.querySelector('header'),'nav');
 }
 
@@ -852,10 +847,6 @@ function lgRefresh(){
    卡片是每次筛选都整批新建的，不摘就会一路攒下去（泄漏）。 */
 const GLASS_IO = ('IntersectionObserver' in window) ? new IntersectionObserver(es=>{
   es.forEach(en=>en.target.classList.toggle('g', en.isIntersecting));
-  /* 折射图与元素尺寸绑定，所以只能在卡片**进视口**、尺寸确定的这一刻算；
-     出视口就把类摘掉，下次进来按当时的尺寸重新挑桶。 */
-  if(LG.on) es.forEach(en=>{ const c=en.target;
-    if(c.classList.contains('g')) lgApply(c,'card'); else c.classList.remove('lgr'); });
 },{rootMargin:'140px'}) : null;
 if(LG.on){
   lgApply(document.querySelector('header'),'nav');

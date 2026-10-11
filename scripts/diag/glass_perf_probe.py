@@ -236,15 +236,15 @@ CLIP = None
 
 
 def clip_shot(pg):
-    """取景必须**钉在某张卡的边墙上**：上一版写死在 (2%, 42%) 那块，落点是不是真有卡片边缘
-    没人核对过，于是「三格截图逐字节相同」这种结果既可能是折射没渲染，也可能只是取到了一片
-    没有边的背景——仪器本身不成立，任何结论都推不出来。"""
+    """取景必须**钉在会折射的那条边墙上**。2026-10-11 起那是导航栏下沿 14px，不是卡片边墙
+    （卡片折射被用户否掉，"看着脏脏的"）。上一版写死在 (2%, 42%) 那块，落点是不是真有边墙
+    没人核对过，于是「三格截图逐字节相同」既可能是折射没渲染、也可能只是取到了一片没有边的
+    背景——仪器本身不成立，任何结论都推不出来。"""
     global CLIP
     if CLIP is None:
-        CLIP = json.loads(pg.ev("""(()=>{const c=document.querySelector('.card.lgr')
-              ||document.querySelector('.card'); const r=c.getBoundingClientRect();
-            return JSON.stringify({x:Math.max(0,r.x-26), y:Math.max(0,r.y-26),
-              width:Math.min(460,r.width+52), height:Math.min(460,r.height+52), scale:2});})()"""))
+        CLIP = json.loads(pg.ev("""(()=>{const r=document.querySelector('header').getBoundingClientRect();
+            return JSON.stringify({x:Math.max(0,innerWidth*0.18), y:Math.max(0,r.bottom-30),
+              width:460, height:64, scale:3});})()"""))
     d = pg.cmd('Page.captureScreenshot', {'format': 'png', 'clip': CLIP})
     return hashlib.md5(base64.b64decode(d['data'])).hexdigest()[:12]
 
@@ -285,11 +285,11 @@ def run(pg, name, csskey, wave, pre=None):
         return None
     d = json.loads(r)
     d['bf'] = s['bf']
-    d['lgr'] = s['lgr']
+    d['hglg'] = s['hglg']
     d['html_lg'] = s['html_lg']
     d['shot'] = clip_shot(pg)
     print(f'  {name:16} med {d["med"]:>6}ms  p95 {d["p95"]:>6}ms  max {d["max"]:>6}ms  '
-          f'~{d["fps"]:>5}fps  lgr={d["lgr"]} lg={int(d["html_lg"])}  strokes={d["strokes"]}  '
+          f'~{d["fps"]:>5}fps  导航栏折射={int(d["hglg"])} lg={int(d["html_lg"])}  strokes={d["strokes"]}  '
           f'bg帧={d["bgframes"]}  图={d["shot"]}\n{"":18}材质={d["bf"][:44]}')
     return d
 
@@ -368,24 +368,28 @@ BEND_OFF = "(()=>{const d=document.getElementById('bendtest'); if(d)d.remove(); 
 
 
 # 材质落地状态：性能模式与取图模式必须共用同一份断言，否则一边验过、另一边没验。
-STATUS = """(()=>{const h=document.documentElement, c0=document.querySelector('.card.lgr');
+# ⚠️ 2026-10-11 起折射**只挂在导航栏**：卡片边墙的折射被用户否掉（"看着脏脏的"，理由见
+#    index.html ② 那条注释），所以这里读的是 header 的 ::before。别再把断言指回 .card.lgr
+#    —— 那会恒红，然后被人当"阈值太严"放宽，把这条判据彻底废掉。
+STATUS = """(()=>{const h=document.documentElement, nav=h.querySelector('header');
   const cs=getComputedStyle(h);
   return JSON.stringify({
     lg_on:LG.on, html_lg:h.classList.contains('lg'),
     cards_g:document.querySelectorAll('.card.g').length,
-    lgr:document.querySelectorAll('.card.lgr').length,
+    cards_lgr:document.querySelectorAll('.card.lgr').length,
+    hglg:nav.classList.contains('hglg'),
     buckets:LG.buckets.size, gen:LG.gen,
     filters:LG.svg?LG.svg.querySelectorAll('filter').length:0,
-    nav:h.querySelector('header').classList.contains('hglg'),
-    bf:c0?String(getComputedStyle(c0,'::before').backdropFilter).slice(0,46):'no .lgr',
-    bf_nolg:(()=>{const c=document.querySelector('.card.g'); if(!c)return 'no .g';
-      h.classList.remove('lg'); const v=getComputedStyle(c,'::before').backdropFilter;
+    bf:String(getComputedStyle(nav,'::before').backdropFilter).slice(0,46),
+    bf_nolg:(()=>{h.classList.remove('lg');
+      const v=getComputedStyle(nav,'::before').backdropFilter;
       h.classList.add('lg'); return String(v).slice(0,46);})(),
-    tok:['--lg-blur','--lg-ring','--lg-depth'].map(n=>n+'='+JSON.stringify(cs.getPropertyValue(n))).join(' '),
+    tok:['--lg-blur','--lg-ring','--lg-depth','--lg-mpx']
+      .map(n=>n+'='+JSON.stringify(cs.getPropertyValue(n))).join(' '),
     tok_ok:['--lg-blur','--lg-ring','--lg-depth'].every(n=>String(cs.getPropertyValue(n)).trim()!==''),
     feimg:(LG.svg&&LG.svg.querySelector('feImage'))?LG.svg.querySelector('feImage')
       .getAttribute('href').length:0,
-    size:(()=>{const c=document.querySelector('.card');const r=c.getBoundingClientRect();
+    nav_h:(()=>{const r=nav.getBoundingClientRect();
       return Math.round(r.width)+'x'+Math.round(r.height);})()});})()"""
 
 
@@ -404,11 +408,11 @@ def shots(pg):
           "s.id='shotsty';document.head.appendChild(s);}return 'ok';})()")
     st = json.loads(pg.ev(STATUS))
     print('落地状态:', json.dumps(st, ensure_ascii=False))
-    if (not st['filters'] or not st['nav'] or not st['lgr'] or not st['feimg']
+    if (not st['filters'] or not st['hglg'] or not st['feimg']
             or not st['tok_ok'] or 'url(' not in st['bf']):
         # 走 print 而不是 SystemExit：stderr 没设 utf-8，Windows 控制台上中文会变乱码（本轮撞到）
-        print('! 折射链路断在结构层：filters/nav/lgr/feImage 有空、--lg-* token 没读到、'
-              '或 ::before 计算后 backdrop-filter 不含 url() —— 取图无意义，先修实现')
+        print('! 折射链路断在结构层：filters/hglg/feImage 有空、--lg-* token 没读到、'
+              '或导航栏 ::before 计算后 backdrop-filter 不含 url() —— 取图无意义，先修实现')
         sys.exit(1)
     if A.depth:
         print(f'极端检验：--lg-depth 从默认 26 拉到 {A.depth}。这个量级下若仍看不到位移，'
@@ -419,11 +423,12 @@ def shots(pg):
     sweep(pg, 1600)
     pg.ev(FREEZE)
     time.sleep(0.7)
-    # 沿边特写的取景：钉在第一张卡的**左边缘中段**，6 倍放大 —— 折射只发生在 12px 环带里，
-    # 整屏缩着看必然看不见，必须把那一圈单独放大到能数清条纹。
-    r = json.loads(pg.ev("""(()=>{const b=document.querySelector('.card').getBoundingClientRect();
-        return JSON.stringify({x:b.left,y:b.top,w:b.width,h:b.height});})()"""))
-    edge = {'x': max(0, r['x'] - 26), 'y': r['y'] + r['h'] * 0.42, 'width': 88, 'height': 88, 'scale': 6}
+    # 沿边特写的取景：钉在**导航栏下沿那条 14px 边墙**上，6 倍放大 —— 折射只发生在这一圈里，
+    # 整屏缩着看必然看不见，必须把它单独放大到能数清棋盘格。
+    r = json.loads(pg.ev("""(()=>{const b=document.querySelector('header').getBoundingClientRect();
+        return JSON.stringify({x:b.left,y:b.bottom,w:b.width,h:b.height});})()"""))
+    edge = {'x': max(0, r['x'] + r['w'] * 0.18), 'y': max(0, r['y'] - 26),
+            'width': 96, 'height': 40, 'scale': 6}
     caps = {}
     for name, lg in (('1改前', False), ('2改后', True)):
         # 单变量对照：只切 html.lg 这一个类。上一版用 OLD_MAT 覆盖写法，等于同时改了两件事
@@ -445,7 +450,13 @@ def shots(pg):
     pg.ev(UNFREEZE)
     for tag in ('整屏', '特写', '沿边'):
         a, b = caps[('1改前', tag)], caps[('2改后', tag)]
-        print(f'  对照({tag}): {"✅ 两版像素不同" if a != b else "❌ 完全相同 —— 折射没落到画面上，白改"}')
+        diff = a != b
+        if tag == '特写':
+            # 特写取景是**卡片网格**。2026-10-11 起卡片故意不折射（用户："看着脏脏的"），
+            # 所以这一格反过来要求两版逐字节相同 —— 不同才说明折射又偷偷回到卡片上了。
+            print(f'  对照({tag}/卡片): {"❌ 卡片区两版不同 —— 折射又回到卡片边墙上了" if diff else "✅ 卡片区两版相同（折射已撤出卡片）"}')
+        else:
+            print(f'  对照({tag}/导航栏): {"✅ 两版像素不同" if diff else "❌ 完全相同 —— 折射没落到画面上，白改"}')
 
 
 CAPS = """(()=>{
