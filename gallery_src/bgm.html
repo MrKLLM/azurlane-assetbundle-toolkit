@@ -39,6 +39,17 @@ header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:14px
 header::after{content:'';position:absolute;inset:0;pointer-events:none;opacity:.5;
   background:linear-gradient(112deg,color-mix(in srgb,#fff 22%,transparent) 0%,transparent 34%,transparent 66%,
     color-mix(in srgb,var(--brand) 10%,transparent) 100%)}
+/* 下沿那条"厚边墙"：14px 实心带，折射强度明显高于栏体 —— 与首页导航栏同一手法（§133/§136）。
+   ⚠️ 这条带子从不被旋转，所以它可以安全挂 mask/折射；卡片和曲目行不行（§136）。 */
+header::before{content:'';position:absolute;left:0;right:0;bottom:0;height:14px;
+  pointer-events:none;z-index:0;
+  -webkit-backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14);
+  backdrop-filter:blur(var(--nav-rim)) saturate(2.2) brightness(1.14)}
+/* 折射版：var() 全部带兜底 —— 自定义属性解析失败会让**整条声明**作废（不是只作废那一项），
+   兜底写成上一版那条纯模糊，最坏情况是退回旧观感，而不是那一圈整个消失。 */
+html.lg header.hglg::before{
+  -webkit-backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14));
+  backdrop-filter:blur(var(--lg-blur,1px)) saturate(1.9) brightness(1.10) var(--lgf,blur(17px) saturate(2.2) brightness(1.14))}
 header>*{position:relative;z-index:1}
 header h1{font-size:17px;font-weight:800;letter-spacing:.02em;color:var(--title);white-space:nowrap}
 header .sub{font-size:12px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -74,12 +85,14 @@ input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel
 .chip.on{background:var(--grad-brand);color:#fff;border-color:transparent;box-shadow:var(--sh1)}
 .chip b{font-weight:400;opacity:.62;margin-left:4px;font-variant-numeric:tabular-nums}
 
-/* ── 曲目行：湿玻璃卡片。进场用一次交错浮现，之后只保留 hover/playing 两种状态 ── */
+/* ── 曲目行：湿玻璃卡片。进场用一次交错浮现，之后只保留 hover/playing 两种状态 ──
+   ⚠️ 这一行**不挂 backdrop-filter**（与首页卡片同一决定，§134/§136）：本页筛得动就是 500+ 行，
+      而背景模糊的成本单位就是"挂着的盒子个数"（半径/面积/链长都不要钱）⇒ 一整列模糊换不来
+      看得出的差别，只换来滚动掉帧。玻璃感靠：半透面板底 + 上沿内高光 + 描边。 */
 .row{display:grid;grid-template-columns:38px 1fr auto 40px;gap:13px;align-items:center;
   padding:11px 14px;margin-bottom:8px;border-radius:var(--r-card);
   background:color-mix(in srgb,var(--panel) 58%,transparent);
   border:1px solid color-mix(in srgb,var(--line) 70%,transparent);
-  backdrop-filter:blur(14px) saturate(1.35);-webkit-backdrop-filter:blur(14px) saturate(1.35);
   box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 42%,transparent),var(--sh1);
   opacity:0;transform:translateY(9px);
   transition:opacity .5s var(--ease-ios),transform .5s var(--ease-ios),
@@ -130,6 +143,12 @@ input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel
   box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 48%,transparent),var(--sh-float);
   transition:transform .55s var(--ease-ios),opacity .4s var(--ease-ios);opacity:0}
 .bar.on{transform:translateX(-50%) translateY(0);opacity:1}
+/* 液态玻璃：整块播放器面板挂折射。⚠️ 这里**不需要遮罩**——法线图中间是平的（不推像素），
+   只有贴边那一圈有坡度，所以"整盒挂滤镜"天然就等于"只折射边墙"。
+   这条同时绕开了 §136 那个坑：遮罩 + 背景模糊的组合一旦落在会被 3D 旋转的盒子上就失效，
+   而这里根本没用遮罩。板子自己的 transform 只有 2D translate（实测 2D 不触发那条失效）。 */
+html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.05) var(--lgf,blur(0px));
+  backdrop-filter:blur(26px) saturate(1.6) brightness(1.05) var(--lgf,blur(0px))}
 .bar .top{display:flex;align-items:center;gap:10px}
 .bar .cur{font-size:13.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .bar .cur i{font-style:normal;font-weight:400;color:var(--dim);margin-left:8px;font-size:11.5px}
@@ -151,10 +170,26 @@ input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel
 .bar .vol::-moz-range-thumb{width:11px;height:11px;border:2px solid var(--panel);border-radius:50%;
   background:var(--brand);cursor:pointer}
 
-/* 潮汐进度条：SVG 两层波 + 水面高光 + 悬停浮出的时间泡 */
-.tide{position:relative;height:46px;margin:6px 0 2px;cursor:pointer;touch-action:none}
-.tide svg{position:absolute;inset:0;width:100%;height:100%;display:block;overflow:visible}
-.tide .trough{fill:color-mix(in srgb,var(--line) 62%,transparent)}
+/* 玻璃管道：潮水装进一根胶囊管里。管壁靠三样读出来 —— 顶部内壁高光、底部内壁暗部、一圈细边；
+   液体仍是原来那两层正弦波（被圆角裁进管里），右端那道弯月面由 wavePath 的 Q 曲线负责。
+   ⚠️ 不用 overflow:hidden：那样会把悬停浮出的时间泡（.bub 在管子上方）一起裁掉。
+      改用 CSS `clip-path:inset(0 round 999px)` 只裁 <svg> —— 它是 .bub 的兄弟节点，互不影响。
+      也不用 SVG 自带的 clipPath 当胶囊：svg 是 preserveAspectRatio=none 拉伸的，
+      viewBox 里写死的 rx 在非等比缩放后两端会变成椭圆，窄窗口下尤其明显。 */
+.tide{position:relative;height:34px;margin:8px 0 4px;cursor:pointer;touch-action:none;
+  border-radius:999px;border:1px solid color-mix(in srgb,var(--glass-line) 85%,transparent);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 46%,transparent),
+             inset 0 -7px 9px -5px color-mix(in srgb,#000 26%,transparent),
+             0 1px 0 color-mix(in srgb,#fff 12%,transparent)}
+.tide svg{position:absolute;inset:0;width:100%;height:100%;display:block;overflow:visible;
+  clip-path:inset(0 round 999px)}
+/* 柱面明暗压在液体之上（pointer-events:none ⇒ 拖拽/悬停判定一点不受影响）；
+   z-index 让时间泡仍然浮在它上面。 */
+.tide::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;border-radius:999px;
+  background:linear-gradient(180deg,color-mix(in srgb,#fff 30%,transparent) 0 17%,
+    color-mix(in srgb,#fff 0%,transparent) 44%,color-mix(in srgb,#000 6%,transparent) 76%,
+    color-mix(in srgb,#000 14%,transparent) 100%)}
+.tide .trough{fill:color-mix(in srgb,var(--line) 46%,transparent)}
 .tide .w1{fill:color-mix(in srgb,var(--brand) 34%,transparent)}
 .tide .w2{fill:color-mix(in srgb,var(--brand) 20%,transparent)}
 .tide .crest{stroke:color-mix(in srgb,var(--brand) 92%,transparent);stroke-width:1.8;fill:none;
@@ -167,7 +202,7 @@ input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel
 .tide .rip{fill:none;stroke:color-mix(in srgb,var(--brand) 70%,transparent);stroke-width:1.4;opacity:0}
 .tide .rip.go{animation:rip .62s var(--ease-ios) forwards}
 @keyframes rip{from{opacity:.85;r:2}to{opacity:0;r:22}}
-.tide .bub{position:absolute;transform:translate(-50%,-100%);pointer-events:none;
+.tide .bub{position:absolute;transform:translate(-50%,-100%);pointer-events:none;z-index:2;
   font-size:11px;font-variant-numeric:tabular-nums;color:var(--txt);
   background:color-mix(in srgb,var(--panel) 88%,transparent);border:1px solid var(--chip-line);
   border-radius:var(--r-chip);padding:3px 8px;box-shadow:var(--sh1);
@@ -218,7 +253,6 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   <div class="tide" id="tide">
     <svg viewBox="0 0 1000 46" preserveAspectRatio="none" aria-hidden="true">
       <defs>
-        <clipPath id="clip"><rect x="0" y="0" width="1000" height="46" rx="12"/></clipPath>
         <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" style="stop-color:var(--brand);stop-opacity:.62"/>
           <stop offset="1" style="stop-color:var(--brand-d);stop-opacity:.30"/></linearGradient>
@@ -226,7 +260,10 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
           <stop offset="0" style="stop-color:var(--brand);stop-opacity:.26"/>
           <stop offset="1" style="stop-color:var(--brand);stop-opacity:.10"/></linearGradient>
       </defs>
-      <g clip-path="url(#clip)">
+      <!-- 裁形只用 CSS 那一条（.tide svg{clip-path:inset(0 round 999px)}）。
+           原来这里还有个 SVG clipPath rx=12：svg 是 preserveAspectRatio=none 拉伸的，
+           viewBox 里写死的圆角在非等比缩放后两端会成椭圆，比 CSS 胶囊更紧，会把管口削平。 -->
+      <g>
       <rect class="trough" x="0" y="0" width="1000" height="46"/>
       <path class="w2" id="w2" d="" fill="url(#g2)"/><path class="w1" id="w1" d="" fill="url(#g1)"/>
       <path class="spec" id="spec" d=""/>
@@ -249,6 +286,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   <div class="hint" id="hint">拖动水面就是进度 · 空格播放/暂停 · ↑↓ 音量 · / 搜索</div>
 </div>
 
+<script src="liquid_glass.js"></script>
 <script>
 const P='';
 let T=[],view=[],idx=-1,fU='',fS='',fA='',knownDur=0;
@@ -437,6 +475,20 @@ document.onkeydown=e=>{
   else if(e.ctrlKey&&e.code==='ArrowLeft')$('prev').click();};
 
 boot();
+
+/* ───────── 液态玻璃挂载（模块见 liquid_glass.js）─────────
+   只挂两处：页头那条 14px 边墙 + 播放器整块面板。都是**从不被 3D 旋转**的元素 ——
+   §136 那条失效模式（转角非 0 ⇒ Chrome 丢掉子元素遮罩、模糊铺满整盒）就是这么避开的。
+   曲目行与卡片故意不挂：数量大（本页可以筛出几百行），而 backdrop-filter 的成本单位
+   就是"挂着的盒子个数"（§134），为装饰付这笔钱不划算。
+   ⚠️ 播放器面板挂折射**不需要遮罩**：法线图中间是平的，只有贴边一圈有坡度，
+      所以整盒挂滤镜天然就等于"只折射边墙"。别顺手加 mask 把它退回 §136 那个坑。 */
+if(window.LiquidGlass&&LiquidGlass.on){
+  const bar=$('bar'), cs=getComputedStyle(bar);
+  LiquidGlass.auto(document.querySelector('header'),{cls:'hglg',band:true,kind:'nav'});
+  LiquidGlass.auto(bar,{cls:'bglg',kind:'panel',ring:16,
+    radius:parseFloat(cs.borderTopLeftRadius)||16});
+}
 </script>
 </body>
 </html>

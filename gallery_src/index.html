@@ -126,21 +126,13 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
   transform:perspective(620px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--sc));
   transition:transform .14s ease-out,box-shadow .24s var(--spring-slow),border-color .18s ease-out;
   animation:pop .34s var(--spring) backwards;animation-delay:calc(min(var(--i,0),24)*16ms)}
-/* 边墙：一圈 12px 的"更厚的玻璃"，玻璃拟态最出特征的一笔。
-   做法是 backdrop-filter 挂在 ::before 上，再用两层 mask 做 exclude，只留外圈那一环。
-   ⚠️ 厚度从 9px 加到 12px、模糊从 13px 加到 17px：上一版这一圈太薄，看不出"边"和"面"的差别。
-   ⚠️ 面板那层 blur(2.5px) **已删**（2026-10-11 性能轮）：实测成本是「每个挂 backdrop-filter 的
-      盒子一份固定开销」，与模糊半径、遮罩、面积、链上函数个数都无关（N/P/Q/R 四条对照全部与
-      不改动同价）⇒ 唯一的减法是**少一个盒子**。卡片原来是两个（面板 + 边墙），砍掉面板那个，
-      而 2.5px 底下压着的是不透明缩略图，本来就几乎看不出。`.g` 现在只表示"这张卡挂边墙"。
-   ⚠️ 这一圈**只是模糊**，推不动背景像素——真折射见下面"卡面故意不做折射"那条，它只留给导航栏。 */
-.card.g::before{content:'';position:absolute;inset:0;z-index:4;pointer-events:none;
-  border-radius:inherit;padding:var(--lg-ring,12px);
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-  -webkit-mask-composite:xor;mask-composite:exclude;
-  -webkit-backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08);
-  backdrop-filter:blur(var(--rim-blur)) saturate(2) brightness(1.08)}
+/* 边墙：**卡片上不再挂任何 backdrop-filter**（2026-10-11 定，判据与八态对照表见 docs/TROUBLESHOOTING.md §136）。
+   原来这一圈是 ::before 挂 blur，再用两层 mask 做 exclude 只留外圈 12px。它撞上一条浏览器行为：
+   **卡片一旦真的转起来（rotateX/rotateY ≠ 0），Chrome 就把这层 mask 整个丢掉，模糊铺满整张卡**
+   —— 静态转 8° 就够触发，与遮罩坐标怎么算、图元重不重叠、有没有并成一层遮罩都无关。
+   ⇒ 以后要加回"厚边"，只能走**不依赖遮罩**的实现（内容内缩一圈当相框，让模糊只从没被盖住的带子露出来）；
+      别再往会被旋转的盒子里接 mask + backdrop-filter 这一组合。
+   ⚠️ 导航栏那条边墙不受影响：它自己从不被旋转，量出来一直是锐的。 */
 /* ⚠️ 卡面**故意不做折射**（2026-10-11 用户看过实机否掉："卡面边缘还是不要折射的，看着脏脏的"）。
    根因不是参数：卡片四周 14px 缝隙外就是邻卡的高对比立绘，折射会把那些画面拽进这一圈，
    读起来是污渍而不是玻璃。折射只在"背后是滚动内容/天空"这种**低频背景**上才干净——
@@ -655,7 +647,6 @@ function makeCard(s){
     <div class="body"><div class="nm">${s.name}</div><div class="py">${s.id} · ${pseudoKind(s)||s.skins.length+'皮肤'}</div><div class="tags">${tags.join('')}</div></div>`;
   /* 卡片可 Tab 聚焦：以前整张网格只有鼠标一条路，键盘走不到任何一张卡（§6.18 ④）。
      Enter/Space 的激活走 mainEl 上的**一个**委托监听器，不给千张卡各挂一个。 */
-  if(GLASS_IO) GLASS_IO.observe(card); else card.classList.add('g');   // 毛玻璃按需挂载
   card.tabIndex=0; card.setAttribute('role','button');
   card.setAttribute('aria-label',s.name+' · '+(pseudoKind(s)||s.skins.length+' 个皮肤'));
   card.onclick=()=>openShip(s,card);
@@ -668,7 +659,6 @@ function makeCard(s){
   return card;
 }
 function renderGrid(){
-  if(GLASS_IO) GLASS_IO.disconnect();   // 卡片整批换新，旧目标必须全摘（见 GLASS_IO 注释）
   mainEl.innerHTML='';
   const cntEl=document.getElementById('count');
   if(!view.length){ mainEl.innerHTML='<div class="empty">没有匹配的内容</div>'; cntEl.textContent='共 0 项'; return; }
@@ -842,13 +832,9 @@ function lgRefresh(){
   lgApply(document.querySelector('header'),'nav');
 }
 
-/* 毛玻璃（backdrop-filter）只给**进过视口**的卡片挂：1008 张各挂一层背景模糊是必掉的帧，
-   而 IntersectionObserver 把同时生效的数量压到同屏那几十张。
-   ⚠️ 每次重画网格必须先 disconnect()：观察器会持有它 observe 过的元素，
-   卡片是每次筛选都整批新建的，不摘就会一路攒下去（泄漏）。 */
-const GLASS_IO = ('IntersectionObserver' in window) ? new IntersectionObserver(es=>{
-  es.forEach(en=>en.target.classList.toggle('g', en.isIntersecting));
-},{rootMargin:'140px'}) : null;
+/* 卡片这一层以前由 IntersectionObserver 按"进过视口"挂 .g，再给 .g 挂 backdrop-filter；
+   现在那条边墙整个撤了（理由与判据见上面 ② 那段注释和 §136），所以这个观察器也一起删掉——
+   留着它就是一只没有消费者的类名开关，而 .g 正是那圈模糊的入口。 */
 if(LG.on){
   lgApply(document.querySelector('header'),'nav');
   let lgPend=0;
