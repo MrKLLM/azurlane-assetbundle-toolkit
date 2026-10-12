@@ -602,7 +602,17 @@ def run_live_mask(docs, outdir, cmd, ev, montage):
           } else D.opacities[i]=0; }
         l2State.app.render();
         return {set:on,fresh:fresh,stale:stale,p:pv,lit:window.__l2saved.filter(x=>x>0.01).length};}
-      return {count:D.count,p:pv,lit:D.opacities.filter(x=>x>0.01).length,autoUpdate:m.autoUpdate};}"""
+      const im=m.internalModel,ppu=im.pixelsPerUnit||1,cux=im.width/ppu,cuy=im.height/ppu;
+      const tf=[+cux.toFixed(4),+cuy.toFixed(4),+ppu.toFixed(3),+m.scale.x.toFixed(5),
+                +m.x.toFixed(2),+m.y.toFixed(2)];
+      const box={};
+      if(a.boxes){for(const n of a.boxes){const i=idx[n];if(i===undefined)continue;const p=V[i];
+        if(!p||!p.length)continue; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+        for(let k=0;k+1<p.length;k+=2){if(p[k]<x0)x0=p[k];if(p[k]>x1)x1=p[k];
+          if(p[k+1]<y0)y0=p[k+1];if(p[k+1]>y1)y1=p[k+1];}
+        box[n]=[+D.opacities[i].toFixed(3),+x0.toFixed(3),+y0.toFixed(3),+x1.toFixed(3),+y1.toFixed(3)];}}
+      return {count:D.count,p:pv,lit:D.opacities.filter(x=>x>0.01).length,
+              autoUpdate:m.autoUpdate,tf:tf,box:box};}"""
     STEP = 120
     ev("(()=>{const m=l2State.app.stage.children[0],im=m.internalModel;"
        "if(im.__phEval) im.physics.evaluate=im.__phEval;"
@@ -634,7 +644,10 @@ def run_live_mask(docs, outdir, cmd, ev, montage):
             ev(f"l2State.app.stage.children[0].update({STEP})")
             ev("new Promise(r=>requestAnimationFrame(()=>r(1)))")
             t += STEP / 1000.0
-        probe = evj(f"({JSF})({json.dumps({})})")
+        probe = evj(f"({JSF})({json.dumps({'boxes': sorted(set(A) | set(B))})})")
+        json.dump({'probe': probe, 't': tgt, 'file': os.path.basename(f)},
+                  open(os.path.join(outdir, f'live_tf_{n}.json'), 'w', encoding='utf-8'),
+                  ensure_ascii=False)
         if probe.get('err'):
             print('  ⚠ 探针失败：', probe['err'], flush=True)
             return 2
