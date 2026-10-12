@@ -1,6 +1,6 @@
 ---
 name: shared-worktree-takeover-commit
-version: 1.1.0
+version: 1.2.0
 description: 多会话共用同一工作树时，核验并接管他人遗留改动的流水线。六步：① 先在盘上核实「文件已被修改」通知是否真的落盘（git status / git diff --numstat / ls / grep）；② 按 mtime + 归属把脏改动分成「孤儿（可接管）」与「活跃（绝不碰）」；③ 接管走两次提交——先原样入库不改写、再另起一次把「当前状态」节接回事实；④ 共享长文档只用单点 Edit 插入（整文件写回在 Windows 下会因行尾归一炸出上千行噪声 diff）；⑤ 改名/搬迁类提交前逐文件比 sha256 证无损，再用 git 的 rename 检测复核 0 行改动；⑥ 逐文件 add、提交前重跑 git status、双推后用 git ls-remote 三方对齐核对。当工作树里压着不明归属的未提交改动、不确定别人的改动还在不在盘上、要代提他人内容、或推送前要确认真正远端已收到时使用。触发词：并发会话、接管遗留改动、代提交、工作树脏、孤儿改动、行尾噪声 diff、双推核对、这个改动还要不要提、我那段文档怎么不见了、单点插入被覆盖。⚠️ 含一条反向陷阱：「只用单点 Edit」保护不了被插入方——别人整文件写回会**静默吞掉**你的插入，git 不报冲突，收尾必须 grep 自己那条锚点串还在不在。
 ---
 
@@ -162,6 +162,23 @@ git ls-remote <remote1> master; git ls-remote <remote2> master; git rev-parse HE
 
 - **核对远端别看本地跟踪引用**：以某远端名推送时，另一个远端的 `refs/remotes/<other>/master` 不会随之更新，`git log <other>/master..HEAD` 会一直显示虚假的「领先 N 个」。判据统一用 `ls-remote` 与 `rev-parse HEAD` 三方对齐（要消掉虚假领先就跑 `git fetch <other>`）。
 - 远端有独立历史被拒时**绝不 `--force`**，把分叉情况交回用户判断。
+
+## 第 5b 步：只提自己的 hunk —— tmp-swap 与临时索引的两个反向陷阱
+
+共享索引下要只提交自己的改动，常见两招都各埋一个**反向事故**（2026-10-12 两个都真踩中过）：
+
+- **tmp-swap（备份→用"HEAD+我的 hunk"整文件覆盖→git add→提交→还原备份）**：覆盖与还原之间的窗口里，
+  另一会话的 `git commit` 会把**你刚 add 的条目卷进它的 commit**（内容没丢、但消息是别人的，且你工作树里
+  被覆盖掉的**它的未暂存编辑**只能靠备份救——备份必须最先做）。⇒ 窗口内不得有别的操作；add 之后立刻
+  `git log -1` 核对 HEAD 还是不是建基线时那一个，变了就重读 HEAD 重建再 add。
+- **`GIT_INDEX_FILE=… git commit`（临时索引）**：tree 来自 `read-tree HEAD` 的那一刻。若另一会话在你
+  read-tree 之后又提交了，你的提交 = 旧 HEAD + 你的文件 ⇒ 对它的改动是**整块反向回退**（stat 里出现
+  大段 deletions 就是这个信号，绝不能留）。软撤销用 `git reset --soft HEAD~1`（不动索引与工作树），
+  随后第一件事是 `git show --stat HEAD` 逐项确认**没丢也没多**。
+- **事后发现自己被卷进他人 commit**：内容完好就别改历史（rebase 在共享工作树里是核弹）；把该 commit
+  的 stat 与自己的文件清单逐项对上，在自己的记录里写明"与 X 同车"，参考仓库先例 4d9417c 的留痕写法。
+- **判据**：提交完立刻 `git show --stat HEAD` 对文件清单——出现任何一个不属于本次任务的文件就是事故，
+  当场 soft-reset 收回，别等下一个命令跑完。
 
 ## 收尾必须能报出的东西
 
