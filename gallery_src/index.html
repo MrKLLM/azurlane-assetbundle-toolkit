@@ -1783,10 +1783,20 @@ async function renderLive2D(s, sk){
          restTick 里按 l2Paused 直接不动作，恢复时把三层的 t0 一起平移「暂停掉的毫秒数」。
        存档只是「把坏帧交给我」的通道：完整参数向量 + 每个上屏美术的包围盒（塌成一个点的正是手不见了的
        形状）落到 .diag/l2d_freeze/，文件名回填到条上。暂停本身不依赖服务器 —— POST 失败照样冻得住。 */
-    let l2TinG=0;
+    let l2TinG=0, l2PreVec=null;
+    /* ⚠️ 存档必须抓「渲染那一拍真正用过的」参数向量。库的顺序是：
+         motionManager.update → emit afterMotionUpdate → coreModel.saveParameters()
+         → 表情/眨眼/focus/自然摆动/物理/pose **改缓冲** → emit beforeModelUpdate → coreModel.update()（出画面）
+         → coreModel.loadParameters() **把缓冲还原成 save 时的值**。
+       所以在帧外读 `parameters.values` 拿到的是"物理之前"的那份 ⇒ 照它回放会少掉眨眼/物理/focus 的贡献
+       （实测：414 片亮 vs 现场 460 片，46 片的显隐摆不回来，一批停放件的包围盒差 7~28 单位）。
+       正确取法就是在 beforeModelUpdate 这一钩子上抓快照——那一刻的缓冲正是下一帧渲染要用的。 */
+    im.on('beforeModelUpdate',()=>{ const V=cm._model&&cm._model.parameters&&cm._model.parameters.values;
+      if(V&&V.length) l2PreVec=Array.from(V); });
     const l2FreezeDump=()=>{ const M=cm._model||{}, P=M.parameters||{}, D=M.drawables||{}, PA=M.parts||{};
       const pars=[], parts=[], art=[]; let lit=0, collapsed=0;
-      for(let i=0;i<(P.count|0);i++) pars.push([idName(P.ids[i]), +(P.values[i]).toFixed(4)]);
+      const PV=l2PreVec||P.values;              // 优先用渲染那一拍的快照
+      for(let i=0;i<(P.count|0);i++) pars.push([idName(P.ids[i]), +(PV[i]).toFixed(4)]);
       for(let i=0;i<(PA.count|0);i++) parts.push([idName(PA.ids[i]), +(PA.opacities[i]).toFixed(3)]);
       const V=D.vertexPositions||[];
       for(let i=0;i<(D.count|0);i++){ const op=D.opacities[i]; if(!(op>0.01)) continue; lit++;
@@ -1800,6 +1810,7 @@ async function renderLive2D(s, sk){
       const st=mm.state||{}, g=st.currentGroup||sel.value||'na';
       l2TinG=(l2Now()-l2GroupT0)/1000;
       return { kind:'l2d-freeze', tag:sk.live2dBase+'-'+g, skin:sk.key, model:model, base:sk.live2dBase,
+        paramSrc:l2PreVec?'preUpdate':'live',
         group:st.currentGroup||null, sel:sel.value, tInGroup:+l2TinG.toFixed(3), heldMs:Math.round(l2HeldMs),
         state:{currentGroup:st.currentGroup, currentIndex:st.currentIndex, currentPriority:st.currentPriority,
                reservePriority:st.reservePriority, tag:st.tag},

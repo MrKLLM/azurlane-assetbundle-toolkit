@@ -9418,7 +9418,25 @@ Qoder 内置浏览器标签是 `visibilityState=hidden` 的隐藏表面：**`Int
   ① 某个参数的值我们与游戏不同（源包状态机 `change_in/home` 那类交接我们没实现），
   ② moc3 里"参数→片不透明度"的绑定在我们运行时没被正确执行（回绕/钳位/key-form 差异），
   ③ 绘制序/遮挡（画了但被盖住）。**下一条先做①②的前置：在坏帧上反查出"那两只手到底是哪几片"。**
-- **涉及文件（追加-XXVI）**：`scripts/diag/l2d_freeze_replay.py`（新建）、
+- ⛔ **本轮最硬的发现：那份存档本身是不完整的**（回放差 46 片、停放件差 7~28 单位的**真因**）。
+  库每帧的顺序是：`motionManager.update` → `emit afterMotionUpdate` → **`coreModel.saveParameters()`**
+  → 表情 / 眨眼 / focus / 自然摆动 / **物理** / pose **改参数缓冲** → `emit beforeModelUpdate`
+  → `coreModel.update()`（出画面）→ **`coreModel.loadParameters()` 把缓冲还原回 save 时的值**。
+  ⇒ **在帧外读 `parameters.values` 拿到的是"物理之前"的那一份**，照它回放必然少掉眨眼/物理/focus 的贡献。
+  修法：在 `beforeModelUpdate` 钩子上抓一份快照，存档用它（字段 `paramSrc:'preUpdate'` 自证来源）。
+  **改前 / 改后的硬对比**（同一台回放仪器，只换向量来源）：
+  | | 上屏片数 | 逐片包围盒差（画出面积的那批） | 亚像素停放件 |
+  |---|---|---|---|
+  | 改前（帧外读值） | 414 / 460 ⇒ 46 片"参数解释不了" | 中位 0.004，最大 27 | 最大差 **28.62** 单位 |
+  | 改后（preUpdate 快照） | **423 / 423，零缺口** | 中位 0.004，最大 **0.039** | 最大差 **0.007** 单位 |
+  ⇒ 结论：**用户交来的那 6 条存档（旧格式）缺物理那一拍的值**，可以当"症状存在"的证据，
+  但不能当"可精确复现的帧"用；反查手是哪几片要用新格式重按一次。
+- ⚠️ 顺带把反查模式（`--light`）也踩了一次同类坑并留法：**分批强亮必须在 `update()` 之前点亮**，
+  否则那批片的顶点从没算过 ⇒ 八批全空白（差点得出"灭着的 310 片都画不出东西"的假结论）；
+  而 `update()` 之后 core 又会按参数重算不透明度 ⇒ 前后各钉一次才有意义。两条对照（空批 / 全亮批）
+  就是靠"空批居然也亮 414 片"暴露了这件事。
+- **涉及文件（追加-XXVI）**：`scripts/diag/l2d_freeze_replay.py`（新建，含 `--light` 反查模式）、
+  `gallery_src/index.html`（`beforeModelUpdate` 快照 + 存档字段 `paramSrc`）、、
   `.diag/l2d_replay/1012-080421/{montage.png,hand_montage.png,canvas_*.png,frame_*.png}`、
   `.diag/l2d_freeze/20261012-07*.json`（用户交来的 6 条坏帧）。
 

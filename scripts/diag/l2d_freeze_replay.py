@@ -48,8 +48,10 @@ import _gallery_server as GS    # noqa: E402
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
 FDIR = os.path.join(ROOT, '.diag', 'l2d_freeze')
 OUTROOT = os.path.join(ROOT, '.diag', 'l2d_replay')
-MED_TOL = 0.02      # 画出面积的片，包围盒差的**中位数**上限（单位）
-HAND_TOL = 0.05   # 要指认的那几片（手）逐片上限（单位）      # 逐片包围盒容差（Cubism 单位，画布半幅约 2.5）—— 这条才真正证明姿态摆回去了
+MED_TOL = 0.02      # 画出面积的片，包围盒差的**中位数**上限（Cubism 单位）—— 这条才真正证明姿态摆回去了
+HAND_TOL = 0.05     # 要指认的那几片（手）逐片上限（单位）
+LIGHT = False       # --light：反查模式（分批强亮灭着的片）
+BATCH = 40          # 反查模式每批点亮多少片
 
 JS_BOOT = r"""(async(key)=>{ try{
   const t=ms=>new Promise(r=>setTimeout(r,ms));
@@ -93,6 +95,12 @@ JS_RESTORE = r"""window.__l2Restore=function(a){
   for(const r of (a.art||[])){ const i=idx[r[0]]; if(i===undefined) continue; D.opacities[i]=r[1]; listed[i]=1; }
   let zeroed=0;
   for(let i=0;i<D.count;i++) if(!listed[i] && D.opacities[i]>0.01){ D.opacities[i]=0; zeroed++; }
+  /* 反查用：把指定那批**灭着的**片强制点亮、其余全灭 ⇒ 这一批在画面上画出什么，一眼可见。
+     ⚠️ 必须在 update() **之前**点亮：core 对不透明度为 0 的片跳过顶点计算，
+     事后再点亮，那批片的顶点还是没算过 ⇒ 八批全空白（第一版就得到这个假结论，靠"零批/全亮批"两条
+     对照才发现是仪器不合格，不是数据没有）。 */
+  if(a.light){ const on={}; for(const nm of a.light){ const i=idx[nm]; if(i!==undefined) on[i]=1; }
+    for(let i=0;i<D.count;i++) D.opacities[i]=on[i]?1:0; }
   const pinned=D.opacities.slice(0);
   cm.update();                                  // 一帧只跑一次，与直播同语义
   let over=0; for(let i=0;i<D.count;i++) if(Math.abs(D.opacities[i]-pinned[i])>0.01) over++;
@@ -134,7 +142,8 @@ JS_RESTORE = r"""window.__l2Restore=function(a){
     rect:[Math.round(rc.left), Math.round(rc.top), cv.clientWidth, cv.clientHeight],
     canvasUnits:[+cux.toFixed(3), +cuy.toFixed(3)],
     scale:+m.scale.x.toFixed(4), mx:+m.x.toFixed(1), my:+m.y.toFixed(1),
-    cw:cv.clientWidth, ch:cv.clientHeight, geo:geo});
+    cw:cv.clientWidth, ch:cv.clientHeight, geo:geo,
+    names:a.needNames?Array.from({length:D.count},(_,i)=>{const q=D.ids[i];return (q&&q.string)||q;}):null});
 }"""
 
 
@@ -215,8 +224,55 @@ def montage(rows, path, cell_w=420):
     return path
 
 
+def run_light(docs, outdir, cmd, ev, montage):
+    """反查模式：在坏帧上把**当前灭着**的片分批点亮，每批一张图 ⇒ 哪一批在手的位置画出手指，那批就是手。
+    四条自证：① 空批（一张都不点）必须全黑；② 存档里亮着的那批点回来后要能看见身体；
+    ③ 每批只动这一批；④ 最后拼总表交给人眼（本项目三次栽在"名单没在图上落过"）。"""
+    f, d = docs[0]
+    lit = {a[0] for a in d['art']}
+    base = json.dumps({'parameters': d['parameters'], 'parts': d['parts'],
+                       'view': d.get('view'), 'art': d['art'], 'needNames': True})
+    got = json.loads(ev(f"window.__l2Restore({base})"))
+    names = got['names']
+    dark = [n for n in names if n not in lit]
+    print(f'  坏帧 {os.path.basename(f)}：存档亮着 {len(lit)} 片、灭着 {len(dark)} 片；'
+          f'每批 {BATCH} 片 ⇒ {len(dark) // BATCH + 1} 张图', flush=True)
+    rows = []
+    shots = [('zero', [])] + [(f'b{i:02d}', dark[i * BATCH:(i + 1) * BATCH])
+                              for i in range(len(dark) // BATCH + 1)
+                              if dark[i * BATCH:(i + 1) * BATCH]]
+    shots.append(('litall', sorted(lit)))
+    for k, (tag, batch) in enumerate(shots, 1):
+        payload = json.dumps({'parameters': d['parameters'], 'parts': d['parts'],
+                              'view': d.get('view'), 'art': d['art'], 'light': batch})
+        g2 = json.loads(ev(f"window.__l2Restore({payload})"))
+        png = os.path.join(outdir, f'light_{k:02d}_{tag}.png')
+        open(png, 'wb').write(base64.b64decode(cmd('Page.captureScreenshot', {'format': 'png'})['data']))
+        cp = crop_canvas(png, g2['rect'], g2['dpr'], os.path.join(outdir, f'lightc_{k:02d}_{tag}.png'),
+                         scale_up=1.6) or png
+        rows.append(dict(n=k, file=f'{tag}·{len(batch)}片', t=d['tInGroup'], grp=tag,
+                         lit=len(batch), lit_now=g2['lit'], maxgeo=0, maxsub=0, med=0,
+                         nsubpx=0, worst=None, drift=0, unexplained=0, missP=0, missQ=0,
+                         ok=True, png=cp, top=f'{len(batch)} 片'))
+        print(f'    {k:02d} {tag:<7} 点亮 {len(batch):>3} 片 → 屏上 {g2["lit"]:>3} 片  {os.path.basename(cp)}',
+              flush=True)
+    mpath = montage(rows, os.path.join(outdir, 'light_montage.png'), cell_w=360)
+    print('', '反查总表:', mpath)
+    json.dump([{'tag': r['grp'], 'n': r['lit']} for r in rows],
+              open(os.path.join(outdir, '_light_index.json'), 'w', encoding='utf-8'),
+              ensure_ascii=False, indent=1)
+    return 0
+
+
 def main():
-    files = pick_files(sys.argv[1:])
+    global LIGHT, BATCH
+    LIGHT = '--light' in sys.argv
+    args = [a for a in sys.argv[1:] if a != '--light']
+    if '--batch' in args:
+        k = args.index('--batch')
+        BATCH = int(args[k + 1])
+        args = args[:k] + args[k + 2:]
+    files = pick_files(args)
     if not files:
         print(f'[用法] {FDIR} 里没有存档')
         return 2
@@ -301,6 +357,8 @@ def main():
         if 'EVALERR' in str(ev(JS_RESTORE)):
             print('[ERROR 2] 回放函数装不上')
             return 2
+        if LIGHT:
+            return run_light(docs, outdir, cmd, ev, montage)
         rows = []
         hrows = []
         for n, (f, d) in enumerate(docs, 1):
