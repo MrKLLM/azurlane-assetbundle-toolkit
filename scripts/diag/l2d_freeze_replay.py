@@ -644,7 +644,7 @@ def run_live_mask(docs, outdir, cmd, ev, montage):
             ev(f"l2State.app.stage.children[0].update({STEP})")
             ev("new Promise(r=>requestAnimationFrame(()=>r(1)))")
             t += STEP / 1000.0
-        probe = evj(f"({JSF})({json.dumps({'boxes': sorted(set(A) | set(B))})})")
+        probe = evj(f"({JSF})({json.dumps({'boxes': sorted({x[0] for x in d['art']} | set(A) | set(B))})})")
         json.dump({'probe': probe, 't': tgt, 'file': os.path.basename(f)},
                   open(os.path.join(outdir, f'live_tf_{n}.json'), 'w', encoding='utf-8'),
                   ensure_ascii=False)
