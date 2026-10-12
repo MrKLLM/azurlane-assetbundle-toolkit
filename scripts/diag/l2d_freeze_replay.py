@@ -570,13 +570,111 @@ def run_live_target(docs, outdir, cmd, ev, montage):
     return 0
 
 
+def run_live_mask(docs, outdir, cmd, ev, montage):
+    """停在用户报的那一拍，做"**只隐藏、不揭示**"的遮罩 ⇒ 绕开上一轮那个顶点坑。
+
+    为什么不能揭示：core 对不透明度为 0 的片**跳过顶点变形**，把一片从灭状态强点亮出来，
+    它画的是没算过的缓冲（本项目就因此把"没有第二套手"当成结论）。
+    而直播播到这一拍**已经亮着**的那些片，顶点是新鲜的 ⇒ 只隐藏其它片、不改变它们的可见性，
+    画出来什么就是什么。所以本模式只回答一个问题：**这一拍亮着的那批手画片，画在腕上还是别处**。
+
+    三条对照，缺一条这批图不能读：① 全归零必须**空白**（证明遮罩真的进了渲染）；
+    ② 原样（一片都不归零）必须**非空白**；③ 停住那拍的 Param25/27 必须与用户存档对上。
+    """
+    A, B = gate_ab_sets(docs[0][1]['skin'])
+    JSF = r"""(a)=>{const m=l2State.app.stage.children[0],cm=m.internalModel.coreModel;
+      const D=cm._model.drawables,P=cm._model.parameters;
+      const idx={};for(let i=0;i<D.count;i++){const q=D.ids[i];idx[(q&&q.string)||q]=i;}
+      const pv={};for(let i=0;i<P.count;i++){const q=((P.ids[i]&&P.ids[i].string)||P.ids[i]);
+        if(q==='Param25'||q==='Param27')pv[q]=+P.values[i].toFixed(3);}
+      const V=D.vertexPositions;
+      if(a.restore&&window.__l2saved){for(let i=0;i<D.count;i++)D.opacities[i]=window.__l2saved[i];
+        l2State.app.render(); return {restored:1,p:pv};}
+      if(a.set!==undefined){
+        if(!window.__l2saved) window.__l2saved=D.opacities.slice(0);
+        const keep={}; for(const n of a.names){const i=idx[n]; if(i!==undefined) keep[i]=1;}
+        let on=0,fresh=0,stale=0;
+        for(let i=0;i<D.count;i++){
+          const was=window.__l2saved[i]>0.01;
+          if(keep[i]&&was){ D.opacities[i]=window.__l2saved[i]; on++;
+            const p=V[i]; let nz=0; if(p)for(let k=0;k<p.length;k++)if(p[k]!==0)nz++;
+            if(nz)fresh++; else stale++;
+          } else D.opacities[i]=0; }
+        l2State.app.render();
+        return {set:on,fresh:fresh,stale:stale,p:pv,lit:window.__l2saved.filter(x=>x>0.01).length};}
+      return {count:D.count,p:pv,lit:D.opacities.filter(x=>x>0.01).length,autoUpdate:m.autoUpdate};}"""
+    STEP = 120
+    ev("(()=>{const m=l2State.app.stage.children[0],im=m.internalModel;"
+       "if(im.__phEval) im.physics.evaluate=im.__phEval;"
+       "const s=document.getElementById('l2Motion'); s.value='home';"
+       "s.dispatchEvent(new Event('change',{bubbles:true}));"
+       "const b=document.getElementById('l2Replay'); if(b)b.click();"
+       "m.autoUpdate=false; return 'ok';})()")
+    def evj(expr):
+        r = ev(expr)
+        return r if isinstance(r, dict) else (json.loads(r) if isinstance(r, str) and r.strip().startswith('{') else {'err': str(r)[:200]})
+    RECT = ev("(()=>{const cv=l2State.app.view,r=cv.getBoundingClientRect();"
+              "return JSON.stringify([r.left,r.top,cv.clientWidth,cv.clientHeight,"
+              "window.devicePixelRatio||1])})()")
+    RX, RY, RW, RH, RD = json.loads(RECT) if isinstance(RECT, str) else RECT
+    print(f'  画布矩形（只量这块）= {RX:.0f},{RY:.0f} {RW:.0f}x{RH:.0f} dpr={RD}', flush=True)
+
+    def blank(png):
+        from PIL import Image
+        im = Image.open(png).convert('RGB')
+        b = (int(RX*RD), int(RY*RD), int((RX+RW)*RD), int((RY+RH)*RD))
+        im = im.crop(b).resize((80, 50))
+        kinds = len(set(list(im.getdata())))
+        return kinds <= 4, kinds
+    rows = []
+    t = 0.0
+    for n, (f, d) in enumerate(sorted(docs, key=lambda x: x[1]['tInGroup']), 1):
+        tgt = round(d['tInGroup'], 2)
+        while t < tgt and t < 20.0:
+            ev(f"l2State.app.stage.children[0].update({STEP})")
+            ev("new Promise(r=>requestAnimationFrame(()=>r(1)))")
+            t += STEP / 1000.0
+        probe = evj(f"({JSF})({json.dumps({})})")
+        if probe.get('err'):
+            print('  ⚠ 探针失败：', probe['err'], flush=True)
+            return 2
+        want = {k: v for k, v in d['parameters'] if k in ('Param25', 'Param27')}
+        err = max(abs(probe['p'].get(k, -9) - v) for k, v in want.items())
+        print(f'  #{n} clip {tgt}s（推到 {round(t,2)}s）Param25 {probe["p"].get("Param25")} '
+              f'vs 存档 {want.get("Param25")} ⇒ 偏差 {round(err,3)}'
+              + ('' if err <= 0.05 else '  ⚠ 不是同一拍，下面这几张只能当参考')
+              + f' · 这一拍直播亮着 {probe["lit"]} 片', flush=True)
+        lit = [a[0] for a in d['art']]
+        for tag, names in (('none', []), ('all', lit), ('A', [x for x in A if x in lit]),
+                           ('B', [x for x in B if x in lit]),
+                           ('nohands', [x for x in lit if x not in set(A) | set(B)])):
+            st = evj(f"({JSF})({json.dumps({'set': 1, 'names': names})})")
+            png = os.path.join(outdir, f'mask_{n}_{tag}.png')
+            open(png, 'wb').write(base64.b64decode(
+                cmd('Page.captureScreenshot', {'format': 'png'})['data']))
+            isb, kinds = blank(png)
+            ok = isb if tag == 'none' else (not isb)
+            rows.append(dict(n=len(rows), file=f'{tag}·{os.path.basename(f)[9:15]}', t=tgt,
+                             grp=tag, lit=len(names), lit_now=st.get('set', 0), maxgeo=0,
+                             maxsub=0, med=0, nsubpx=0, worst=None, drift=round(err, 3),
+                             unexplained=0, missP=0, missQ=0, ok=ok, png=png,
+                             top=f'新鲜顶点 {st.get("fresh",0)} / 零顶点 {st.get("stale",0)}'))
+            print(f'     {tag:<8} 留 {st.get("set",0):>3} 片（顶点新鲜 {st.get("fresh",0)}、'
+                  f'零顶点 {st.get("stale",0)}）→ 空白={isb}（{kinds} 色）'
+                  + ('' if ok else '  ⚠ 对照不成立'), flush=True)
+        evj(f"({JSF})({json.dumps({'restore': 1})})")
+    if rows:
+        print('  遮罩总表:', montage(rows, os.path.join(outdir, 'mask_montage.png'), cell_w=360))
+    return 0
+
 def main():
-    global LIGHT, BATCH, GATE, BUFTRACE, LIVET
+    global LIGHT, BATCH, GATE, BUFTRACE, LIVET, LMASK
     LIGHT = '--light' in sys.argv
     GATE = '--gateab' in sys.argv
     BUFTRACE = '--buftrace' in sys.argv
     LIVET = '--livetarget' in sys.argv
-    args = [a for a in sys.argv[1:] if a not in ('--light', '--gateab', '--buftrace', '--livetarget')]
+    LMASK = '--livemask' in sys.argv
+    args = [a for a in sys.argv[1:] if a not in ('--light', '--gateab', '--buftrace', '--livetarget', '--livemask')]
     if '--batch' in args:
         k = args.index('--batch')
         BATCH = int(args[k + 1])
@@ -674,6 +772,8 @@ def main():
             return run_buftrace(docs, outdir, cmd, ev, montage)
         if LIVET:
             return run_live_target(docs, outdir, cmd, ev, montage)
+        if LMASK:
+            return run_live_mask(docs, outdir, cmd, ev, montage)
         rows = []
         hrows = []
         for n, (f, d) in enumerate(docs, 1):
