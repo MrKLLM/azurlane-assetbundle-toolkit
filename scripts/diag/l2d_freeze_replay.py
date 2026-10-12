@@ -52,6 +52,12 @@ MED_TOL = 0.02      # 画出面积的片，包围盒差的**中位数**上限（
 HAND_TOL = 0.05     # 要指认的那几片（手）逐片上限（单位）
 LIGHT = False       # --light：反查模式（分批强亮灭着的片）
 BATCH = 40          # 反查模式每批点亮多少片
+GATE = False        # --gateab：同一坏帧四种摆法的对照（判"亮着却看不见"还是"该亮的没亮"）
+BUFTRACE = False    # --buftrace：顶点缓冲区溯源（判"存档里的实形"是直播写的还是出厂残留）
+# 台账里那对左右手闸门参数。**按片名从台账现取，不写死名单**；L2DGATE=Param25 可只跑一侧，
+# 用来把"左右各一组交叉淡入淡出"拆成单侧，否则一张图里同时出现两套手，肉眼分不出谁画在哪。
+GATE_PARAMS = tuple(x.strip() for x in os.environ.get('L2DGATE', 'Param25,Param27').split(',')
+                    if x.strip())
 
 JS_BOOT = r"""(async(key)=>{ try{
   const t=ms=>new Promise(r=>setTimeout(r,ms));
@@ -71,7 +77,7 @@ JS_BOOT = r"""(async(key)=>{ try{
      用另一套内部粒子状态重演，实测表现是包围盒差 0.12~0.27 单位、46 片显隐被改写。
      （pose3.json 这个模型没有；呼吸层页面自己已经关了。） */
   const ph=!!m.internalModel.physics;
-  if(ph) m.internalModel.physics.evaluate=function(){};
+  if(ph){ m.internalModel.__phEval=m.internalModel.physics.evaluate; m.internalModel.physics.evaluate=function(){}; }
   return JSON.stringify({key, ok:true, physicsOff:ph, breathOff:!(m.internalModel.breath&&m.internalModel.breath.parameters&&m.internalModel.breath.parameters.length)});
 }catch(e){ return 'ERR '+(e.message||e); }})"""
 
@@ -103,7 +109,34 @@ JS_RESTORE = r"""window.__l2Restore=function(a){
     for(let i=0;i<D.count;i++) D.opacities[i]=on[i]?1:0; }
   const pinned=D.opacities.slice(0);
   cm.update();                                  // 一帧只跑一次，与直播同语义
-  let over=0; for(let i=0;i<D.count;i++) if(Math.abs(D.opacities[i]-pinned[i])>0.01) over++;
+  /* ⚠️ 必须在 relight 之前读：`D.opacities` 是**输出**数组，钉它只影响渲染，不影响 core 的判断。
+     core 在 update 里按参数**重算**每片显隐，并据此决定要不要跑它的顶点变形。
+     所以"geo 里 op=1 但顶点全 0"这种组合，唯一解释就是 core 自己算出来是 0 ——
+     relight 之后再读就永远读不到那个 0（本项目第一版 `overwrittenByCore` 就是这么被自己抵消的）。 */
+  const coreOwn=(a.watch||[]).filter(n=>idx[n]!==undefined)
+    .map(n=>{ const i=idx[n], p=D.vertexPositions[i];
+      let nz=0; if(p) for(let k=0;k<p.length;k++) if(p[k]!==0) nz++;
+      /* 父部件也要读：core 对**整棵不可见子树**跳过顶点变形，而 `setPartOpacityByIndex`
+         和钉每片显隐是同一个陷阱——那是**输出**数组，update 里 core 会按参数重算覆盖掉。
+         "片自己 op=1 但顶点全 0"最省事的解释就是父部件被重算成了 0。 */
+      const pi=D.parentPartIndices?D.parentPartIndices[i]:-1, Q=cm._model.parts;
+      return [n,+D.opacities[i].toFixed(3),p?p.length:-1,nz,
+              pi, pi>=0?((Q.ids[pi]&&Q.ids[pi].string)||Q.ids[pi]):null,
+              pi>=0?+Q.opacities[pi].toFixed(3):null]; });
+  /* 强亮必须**前后各钉一次**：update 前钉才有顶点（core 跳过不透明度为 0 的片的顶点计算），
+     update 后还要再钉一次，因为 core 会在 update 里按参数把不透明度重算回去（只钉前面 = 渲染还是灭的）。 */
+  const relight=()=>{ if(!a.light) return; const on={};
+    for(const nm of a.light){ const i=idx[nm]; if(i!==undefined) on[i]=1; }
+    for(let i=0;i<D.count;i++) D.opacities[i]=on[i]?1:0; };
+  const afterCore=D.opacities.slice(0);   // ⚠️ 必须在 relight 之前抄，否则"core 改写了多少片"永远量到 0
+  relight();
+  /* ⚠️ 第二次 update 是给"冷启动强亮"这条路径用的：**core 判断要不要跑顶点变形，看的是
+     上一次 update 时这片可不可见**，冷启动里那批片上一次是灭的 ⇒ 第一次 update 只把不透明度抬起来、
+     顶点数组还是空的（实测 ArtMesh325/331…29 片全报 0×0，而直播存档里它们是 0.5~1.8 单位的实形）。
+     不重跑一次就断言"这批片画不出东西"，等于把仪器缺陷当成产品结论 ——
+     本项目上一轮"310 片分批强亮全空白 ⇒ 没有第二套手"就是这么错的。 */
+  if(a.twice){ cm.update(); relight(); }
+  let over=0; for(let i=0;i<D.count;i++) if(Math.abs(afterCore[i]-pinned[i])>0.01) over++;
   let drift=0, dName=null;
   const PV=cm._model.parameters.values;
   for(const row of a.parameters){ const i=cm.getParameterIndex(row[0]); if(i<0) continue;
@@ -143,6 +176,14 @@ JS_RESTORE = r"""window.__l2Restore=function(a){
     canvasUnits:[+cux.toFixed(3), +cuy.toFixed(3)],
     scale:+m.scale.x.toFixed(4), mx:+m.x.toFixed(1), my:+m.y.toFixed(1),
     cw:cv.clientWidth, ch:cv.clientHeight, geo:geo,
+    /* 顶点缓冲自证：geo 里 w/h 全 0 的片，到底是"顶点数组是空的"还是"所有顶点重合于一点"。
+       这两种情况画面上一模一样，但结论完全相反（前者=仪器/索引问题，后者=姿态真的塌了）。 */
+    dbg:(a.light||[]).slice(0,6).map(nm=>{ const i=idx[nm]; if(i===undefined) return [nm,'noidx'];
+      const p=V[i]; let a2=null,b2=null;
+      if(p&&p.length){ a2=[p[0],p[1]]; b2=[p[p.length-2],p[p.length-1]]; }
+      return [nm,i,p?('len'+p.length):('type'+typeof p),a2,b2]; }),
+    dkeys:Object.keys(D).filter(k=>typeof D[k]!=='function'),
+    coreOwn:coreOwn,
     names:a.needNames?Array.from({length:D.count},(_,i)=>{const q=D.ids[i];return (q&&q.string)||q;}):null});
 }"""
 
@@ -264,10 +305,199 @@ def run_light(docs, outdir, cmd, ev, montage):
     return 0
 
 
+def gate_ab_sets(skin):
+    """从**台账**（不是名单猜测）取那条闸门参数的两组片：基准亮着被压灭的 A、基准灭着被抬起的 B。
+    台账缺文件或缺参数就报错退出——本模式的整个结论都建立在"两组片名是量出来的"之上。"""
+    fp = os.path.join(ROOT, '.diag', f'l2d_opacity_map_{skin}.json')
+    if not os.path.isfile(fp):
+        sys.exit(f'[用法] 没有显隐台账 {fp} —— 先跑 l2d_part_flicker_probe.py {skin} --mapall')
+    d = json.load(open(fp, encoding='utf-8'))
+    names, ref = d['names'], d['ref']
+    have = {r[1] for r in d['map']}
+    miss = [p for p in GATE_PARAMS if p not in have]
+    if miss:
+        sys.exit(f'[用法] 台账里没有参数 {miss} 的显隐记录，换参数名或重扫台账')
+    A, B = [], []
+    for row in d['map']:
+        if row[1] not in GATE_PARAMS:
+            continue
+        for didx, _curve in row[7]:
+            (A if ref[didx] > 0.5 else B).append(names[didx])
+    return A, B
+
+
+def run_gate_ab(docs, outdir, cmd, ev, montage):
+    """同一坏帧四种摆法并排出图，专判「片亮着却看不见」和「该亮的没亮」这两种完全不同的病：
+      faith  = 存档原样（自证用，应当等于用户按停那一刻）
+      onlyA  = 只点亮「基准亮、被闸门压灭」那组（默认姿势的那只手）
+      onlyB  = 只点亮「基准灭、被闸门抬起」那组（换姿势后的那只手）
+      pin0   = 把闸门参数钉回 0、显隐交给 core 自己算（等价于"闸门没合上"）
+    每格除了图还带一个数：该组里**真有面积**（宽≥1 且高≥1 单位）的片数 ⇒ "亮着但画在别处/塌成点"
+    会被这个数和图一起揭穿，不能只靠肉眼看整张。"""
+    skin = docs[0][1]['skin']
+    A, B = gate_ab_sets(skin)
+    print(f'  闸门参数 {GATE_PARAMS} ⇒ A(基准亮/被压灭) {len(A)} 片 {A[:5]}…  '
+          f'B(基准灭/被抬起) {len(B)} 片 {B[:5]}…', flush=True)
+    rows = []
+    dump = {}
+    n_ = 0
+    for f, d in docs:
+        base_p = [[k, 0.0 if k in GATE_PARAMS else v] for k, v in d['parameters']]
+        variants = [
+            ('faith', {'parameters': d['parameters'], 'parts': d['parts'],
+                       'view': d.get('view'), 'art': d['art']}, None),
+            ('onlyA', {'parameters': d['parameters'], 'parts': d['parts'],
+                       'view': d.get('view'), 'art': d['art'], 'light': A, 'twice': 1}, A),
+            ('onlyB', {'parameters': d['parameters'], 'parts': d['parts'],
+                       'view': d.get('view'), 'art': d['art'], 'light': B, 'twice': 1}, B),
+            ('pin0', {'parameters': base_p, 'parts': d['parts'], 'view': d.get('view'),
+                      'twice': 1}, A + B),
+        ]
+        for tag, payload, watch in variants:
+            n_ += 1
+            payload = dict(payload, watch=watch or (A + B))
+            g = json.loads(ev(f"window.__l2Restore({json.dumps(payload)})"))
+            png = os.path.join(outdir, f'ab_{n_:02d}_{tag}.png')
+            open(png, 'wb').write(base64.b64decode(cmd('Page.captureScreenshot', {'format': 'png'})['data']))
+            cp = crop_canvas(png, g['rect'], g['dpr'],
+                             os.path.join(outdir, f'abc_{n_:02d}_{tag}.png'), scale_up=1.6) or png
+            geo = g['geo']
+            npaint = nwild = 0
+            cen = []
+            if watch:
+                for nm in watch:
+                    q = geo.get(nm)
+                    if not q or q[0] <= 0.01:
+                        continue
+                    if q[1] >= 1.0 and q[2] >= 1.0:
+                        npaint += 1
+                    else:
+                        nwild += 1
+                    cen.append((nm, round(q[3] + q[1] / 2, 2), round(q[4] + q[2] / 2, 2),
+                                round(q[1], 2), round(q[2], 2), q[0]))
+            dump[f'{os.path.basename(f)[9:15]}_{tag}'] = {
+                'lit': g['lit'], 'watch': len(watch or []), 'npaint': npaint, 'nwild': nwild,
+                'cen': sorted(cen, key=lambda r: -max(r[3], r[4]))[:40], 'geo': geo,
+                'dbg': g.get('dbg'), 'dkeys': g.get('dkeys'), 'coreOwn': g.get('coreOwn')}
+            rows.append(dict(n=n_, file=f'{tag}·{os.path.basename(f)[9:15]}', t=d['tInGroup'],
+                             grp=tag, lit=len(watch or []), lit_now=g['lit'], maxgeo=0, maxsub=0,
+                             med=0, nsubpx=0, worst=None, drift=0, unexplained=0,
+                             missP=g['missParam'], missQ=g['missPart'], ok=not g['missParam'],
+                             png=cp,
+                             top=f'真有面积 {npaint} 塌成点 {nwild}'))
+            print(f'    {n_:02d} {tag:<6} 屏上 {g["lit"]:>3} 片 · 关注组真有面积 {npaint}'
+                  f' / 塌成点 {nwild} / 该组共 {len(watch or [])}'
+                  + f' · core 改掉钉进去的显隐 {g["overwrittenByCore"]} 片'
+                  + ('  最大几片中心 ' + str(cen[:3]) if cen else '')
+                  + (f' ⚠没索引 参数{g["missParam"]}' if g['missParam'] else ''), flush=True)
+    json.dump(dump, open(os.path.join(outdir, '_gate_ab_geo.json'), 'w', encoding='utf-8'),
+              ensure_ascii=False)
+    mpath = montage(rows, os.path.join(outdir, 'gate_ab_montage.png'), cell_w=360)
+    print('', '对照总表:', mpath)
+    return 0
+
+
+def run_buftrace(docs, outdir, cmd, ev, montage):
+    """**直播**取真画面 + 顶点缓冲区溯源，专治"仪器比产品好，于是把仪器缺陷当成产品 bug"。
+
+    为什么必须有这条：冻帧回放靠 `coreModel.update()` 手动跑一拍，而实测那 59 片"另一姿势的手"
+    在回放里**顶点全 0**（core 从没给它们算过变形），可直播存档里它们有 0.5~1.8 单位的实形。
+    ⇒ 回放图上"手不见了"不能证明直播也这样。唯一的裁判是**产品自己的播放路径**：
+    改 `#l2Motion` 下拉 + 点 `#l2Replay`（不是探针里直接 startMotion，那会绕过入口函数）。
+
+    三个时刻各读一次同一批片：① 刚加载（出厂顶点）② 直播播 home、闸门抬起时 ③ 冻帧后。
+    ② 同时落一张整页截图 —— 这张图才是"用户看到的"，回放图只是"我算出来的"。
+    """
+    f, d = docs[0]
+    skin = d['skin']
+    A, B = gate_ab_sets(skin)
+    watch = sorted(set(A + B))
+    JS = r"""(w)=>{const m=l2State.app.stage.children[0],cm=m.internalModel.coreModel,D=cm._model.drawables;
+      const idx={};for(let i=0;i<D.count;i++){const q=D.ids[i];idx[(q&&q.string)||q]=i;}
+      const P=cm._model.parameters; const pv={};
+      for(const nm of ['Param25','Param27']){ for(let i=0;i<P.count;i++){const q=P.ids[i];
+        if(((q&&q.string)||q)===nm) pv[nm]=+P.values[i].toFixed(3);} }
+      let aNz=0,bNz=0,aLit=0,bLit=0;
+      const rows=w.map(n=>{const i=idx[n];if(i===undefined)return[n,'noidx'];const p=D.vertexPositions[i];
+        let nz=0,x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+        if(p)for(let k=0;k+1<p.length;k+=2){if(p[k]||p[k+1])nz++;
+          if(p[k]<x0)x0=p[k];if(p[k]>x1)x1=p[k];if(p[k+1]<y0)y0=p[k+1];if(p[k+1]>y1)y1=p[k+1];}
+        const isA=(@@A@@).indexOf(n)>=0;
+        if(nz){ if(isA)aNz++; else bNz++; } if(D.opacities[i]>0.01){ if(isA)aLit++; else bLit++; }
+        return [n,+D.opacities[i].toFixed(3),p?p.length:-1,nz,
+                p&&p.length?[+(x1-x0).toFixed(2),+(y1-y0).toFixed(2),+x0.toFixed(2),+y0.toFixed(2)]:null];});
+      return {p:pv, autoUpdate:m.autoUpdate, aLit:aLit,bLit:bLit,aNz:aNz,bNz:bNz, rows:rows};}"""
+    JSS = JS.replace('@@A@@', json.dumps(A))
+
+    def evj(expr):
+        r = ev(expr)                      # returnByValue 对对象直接给 dict，不再 stringify
+        return json.loads(r) if isinstance(r, str) else r
+
+    out = {'setup': evj(f"({JSS})({json.dumps(watch)})")}
+    print(f'  ① 刚加载：A 套 {out["setup"]["aLit"]} 片亮 / {out["setup"]["aNz"]} 片有顶点；'
+          f'B 套 {out["setup"]["bLit"]} 片亮 / {out["setup"]["bNz"]} 片有顶点'
+          f'（B 套顶点全 0 = core 从没给它们算过变形）', flush=True)
+
+    # 走产品自己的入口：改下拉 + 点重播
+    trig = ev("(()=>{const s=document.getElementById('l2Motion');"
+              "if(!s)return 'no-select'; s.value='home';"
+              "if(s.value!=='home')return 'no-home-option';"
+              "s.dispatchEvent(new Event('change',{bubbles:true}));"
+              "const b=document.getElementById('l2Replay'); if(b)b.click();"
+              "const m=l2State.app.stage.children[0]; m.autoUpdate=true;"
+              "if(m.internalModel.__phEval) m.internalModel.physics.evaluate=m.internalModel.__phEval;"
+              "return 'ok';})()")
+    print('  触发直播 home（走 #l2Motion + #l2Replay）:', trig, flush=True)
+    shots = []
+    seen = set()
+    # 逐拍台账：手到底在不在，用"有多少片手画片既亮着、又有算出来的顶点"这一个数说话。
+    # A 亮但 B 也亮 ⇒ 交叉淡入淡出正常；两边同时为 0 ⇒ 那一刻画面上真的没有手（这才算复现）。
+    table = []
+    for k in range(120):
+        time.sleep(1.0)
+        st = evj(f"({JSS})({json.dumps(watch)})")
+        p25 = (st.get('p') or {}).get('Param25', -9)
+        hand = min(st['aNz'], st['aLit']) + min(st['bNz'], st['bLit'])
+        table.append([k, p25, (st['p'] or {}).get('Param27'), st['aLit'], st['aNz'],
+                      st['bLit'], st['bNz'], hand])
+        if k % 6 == 0:
+            print(f'  直播 t={k}s Param25={p25} Param27={(st["p"] or {}).get("Param27")}'
+                  f' · A 亮 {st["aLit"]}/有顶点 {st["aNz"]} · B 亮 {st["bLit"]}/有顶点 {st["bNz"]}'
+                  f' · 能画出的手片 {hand}', flush=True)
+        band = ('low' if p25 < 0.05 else 'mid' if p25 < 0.35 else 'high')
+        want_shot = band not in seen or (hand == 0 and f'nohand{k}' not in seen)
+        if p25 >= 0 and want_shot:
+            seen.add(band if band not in seen else f'nohand{k}')
+            out[f'live_{band}' if f'live_{band}' not in out else f'live_{k}'] = st
+            png = os.path.join(outdir, f'live_{band}_t{k}s_p25={p25}_hand={hand}.png')
+            open(png, 'wb').write(base64.b64decode(
+                cmd('Page.captureScreenshot', {'format': 'png'})['data']))
+            shots.append(dict(n=len(shots), file=os.path.basename(png), t=k, grp=band,
+                              lit=st['aLit'] + st['bLit'], lit_now=hand,
+                              maxgeo=0, maxsub=0, med=0, nsubpx=0, worst=None, drift=0,
+                              unexplained=0, missP=0, missQ=0, ok=hand > 0, png=png,
+                              top=f'p25={p25} 能画出的手片 {hand}'))
+            print(f'     ⇒ 抓到 [{band}] t={k}s Param25={p25}：A 有顶点 {st["aNz"]}/{len(A)}'
+                  f' B 有顶点 {st["bNz"]}/{len(B)} · 能画出的手片 {hand}'
+                  + ('  ⚠ 这一刻两只手都没有！' if hand == 0 else '')
+                  + f'  {os.path.basename(png)}', flush=True)
+        if seen >= {'low', 'mid', 'high'} and k > 24 and all(r[1] == 0 for r in table[-6:]):
+            break
+    out['table'] = table
+    json.dump(out, open(os.path.join(outdir, '_buftrace.json'), 'w', encoding='utf-8'),
+              ensure_ascii=False, indent=1)
+    if shots:
+        print('  直播总表:', montage(shots, os.path.join(outdir, 'live_montage.png'), cell_w=470))
+    print('  落盘:', os.path.join(outdir, '_buftrace.json'))
+    return 0
+
+
 def main():
-    global LIGHT, BATCH
+    global LIGHT, BATCH, GATE, BUFTRACE
     LIGHT = '--light' in sys.argv
-    args = [a for a in sys.argv[1:] if a != '--light']
+    GATE = '--gateab' in sys.argv
+    BUFTRACE = '--buftrace' in sys.argv
+    args = [a for a in sys.argv[1:] if a not in ('--light', '--gateab', '--buftrace')]
     if '--batch' in args:
         k = args.index('--batch')
         BATCH = int(args[k + 1])
@@ -359,6 +589,10 @@ def main():
             return 2
         if LIGHT:
             return run_light(docs, outdir, cmd, ev, montage)
+        if GATE:
+            return run_gate_ab(docs, outdir, cmd, ev, montage)
+        if BUFTRACE:
+            return run_buftrace(docs, outdir, cmd, ev, montage)
         rows = []
         hrows = []
         for n, (f, d) in enumerate(docs, 1):

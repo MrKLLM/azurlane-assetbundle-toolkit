@@ -11,6 +11,7 @@
   5. 稳健处理端口占用 / TIME_WAIT，避免窗口“闪退”。
 """
 import functools
+import base64
 import http.server
 import json
 import os
@@ -189,12 +190,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return os.path.normpath(os.path.join(root, os.pardir, FREEZE_SUB))
 
     def _save_freeze(self):
-        """Live2D「暂停」送来的姿态存档：JSON 原样落盘，文件名由服务端时间戳 + 白名单 tag 生成。
+        """Live2D「暂停」送来的姿态存档：JSON 落盘，文件名由服务端时间戳 + 白名单 tag 生成。
 
         不接受请求里带的任何路径/文件名 —— 页面只交数据，命名权在这边。
         响应体回文件名，页面上直接显示，用户念这一个字符串就能把坏帧交给我。
+
+        ⚠️ 请求里可以带 `png`（data URL，画布本身）：**它是这条记录里唯一"产品实际画了什么"的证据**，
+        姿态向量与逐片包围盒都只是"我算出来的"。2026-10-12 实测：冻帧回放器没能给"另一姿势的手"
+        那批片算出顶点（core 冷启动不覆写不可见片的缓冲），于是回放图上手是空的，
+        而**同一时刻的直播画面两只手都在** —— 只靠 JSON 反推会把仪器缺陷当成产品 bug 报上去。
+        所以 png 单独落成 `<stem>.png`，JSON 里剥掉这个大字段的副本（姿态数据本身仍原样落盘）。
         """
-        body = self._read_body(8 * 1024 * 1024)
+        body = self._read_body(24 * 1024 * 1024)
         if body is None:
             self.send_error(400, "bad size")
             return
@@ -206,6 +213,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not isinstance(data, dict):
             self.send_error(400, "not an object")
             return
+        png = data.pop("png", None)           # 附图单独落盘，不进 JSON
         tag = re.sub(r"[^A-Za-z0-9_.\-]", "", str(data.get("tag", "")))[:40] or "freeze"
         stem = time.strftime("%Y%m%d-%H%M%S") + "-" + tag
         fdir = self._freeze_dir()
@@ -213,9 +221,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         name, k = stem + ".json", 2
         while os.path.exists(os.path.join(fdir, name)):
             name, k = f"{stem}-{k}.json", k + 1   # 同一秒内连按两次暂停：不覆盖前一份
-        with open(os.path.join(fdir, name), "wb") as f:
-            f.write(body)          # 原样落盘：解析只用来验合法与取 tag，不改写上送的内容
-        self._reply(name.encode("utf-8"), "text/plain")
+        with open(os.path.join(fdir, name), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)   # 只剥 png，姿态向量逐字不动
+        got = ""
+        if isinstance(png, str) and png.startswith("data:image/png;base64,"):
+            try:
+                raw = base64.b64decode(png.split(",", 1)[1], validate=True)
+            except Exception:
+                raw = b""
+            if raw[:8] == b"\x89PNG\r\n\x1a\n":
+                with open(os.path.join(fdir, name[:-5] + ".png"), "wb") as f:
+                    f.write(raw)
+                got = " +图"
+            else:
+                got = " 图无效(画布可能是空的)"
+        self._reply((name + got).encode("utf-8"), "text/plain")
 
     def end_headers(self):
         # 本地工具页：每次强制回源校验，杜绝 index.html/index.js 改版后浏览器仍用旧缓存

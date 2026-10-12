@@ -128,6 +128,12 @@ function refresh(){
   for(var j=0;j<t.length;j++){ if(t[j].isConnected) mount(t[j], t[j].__lg||null); }
 }
 function auto(el,o){ if(el){ el.__lg=o; mount(el,o); } return el; }
+/* unmount(el)：把挂过的盒整个摘干净——去类、去 --lgf、并从 targets 里删掉。
+   少了第三步就是坑：refresh()（resize 触发）会把 targets 里还连在树上的元素原样重挂，
+   "曾经播放过、现在只是普通行"的那一行会带着玻璃边复活。 */
+function unmount(el,o){ if(!el) return;
+  el.classList.remove((o&&o.cls)||'lgr'); el.style.removeProperty('--lgf');
+  var i=LG.targets.indexOf(el); if(i>=0) LG.targets.splice(i,1); }
 
 /* 这里原来还有一套 rim()：把页头那条边墙做成栏的**兄弟节点** `.navrim`
    （挂在栏的子元素上时实测不落像素 —— 栏体自己挂着 backdrop-filter，它本身就是 backdrop root，
@@ -141,7 +147,7 @@ var pend=0;
 addEventListener('resize',function(){ if(pend) return;
   pend=requestAnimationFrame(function(){ pend=0; refresh(); }); });
 
-window.LiquidGlass={ on:LG.on, mount:mount, auto:auto, refresh:refresh,
+window.LiquidGlass={ on:LG.on, mount:mount, auto:auto, unmount:unmount, refresh:refresh,
                      get buckets(){return LG.buckets.length;}, get filters(){
                        return LG.svg?LG.svg.querySelectorAll('filter').length:0; } };
 })();

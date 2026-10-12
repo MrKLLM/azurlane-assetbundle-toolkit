@@ -52,7 +52,7 @@ FREEZE_CSS = ('.amb i{animation:none!important;transition:none!important}'
               ',.card{animation:none!important}')
 
 PAGES = {
-    'bgm.html': {'mount': [('#bar', 'bglg', '')],
+    'bgm.html': {'mount': [('#bar', 'bglg', ''), ('input.q', 'bglg', '')],
                  'forbid': [('header', '::before', '栏体已经是 62% 白 + blur26，带子在这只读作一条杠')],
                  'rows': '.row', 'tube': '#tide'},
     # 背景库 2026-10-11 起**整个不加载折射模块**：页头那条边墙先以 header::before 存在（不落像素），
@@ -145,10 +145,10 @@ FORBID_JS = """const F=%s;   // [[sel,pseudo,why],...]
     const bf=String(cs.backdropFilter||cs.webkitBackdropFilter||'none');
     out.forbidden.push({s,ok:(bf==='none'||!bf)&&cs.content==='none',why,bf:bf.slice(0,40)});}"""
 
-ROWS_JS = """(()=>{let n=0;document.querySelectorAll('%s').forEach(e=>{
-    ['','::before','::after'].forEach(p=>{const v=getComputedStyle(e,p).backdropFilter;
-      if(v&&v!=='none')n++;});});
-  return JSON.stringify({rows:document.querySelectorAll('%s').length, boxes:n});})()"""
+ROWS_JS = """(()=>{let n=0,p=0;document.querySelectorAll('%s').forEach(e=>{
+    ['','::before','::after'].forEach(q=>{const v=getComputedStyle(e,q).backdropFilter;
+      if(v&&v!=='none'){if(e.classList.contains('playing'))p++;else n++;}});});
+  return JSON.stringify({rows:document.querySelectorAll('%s').length, boxes:n, playBoxes:p});})()"""
 
 TUBE_JS = """(()=>{const t=document.querySelector('%s'), sv=t.querySelector('svg');
   const cs=getComputedStyle(t), ss=getComputedStyle(sv);
@@ -321,9 +321,15 @@ def check(page, spec, fails):
             fails.append(f'{page}: LiquidGlass.on=false —— 这台浏览器不支持 backdrop-filter+url()，下面全作废')
 
         rw = json.loads(pg.ev(ROWS_JS % (spec['rows'], spec['rows'])))
-        print(f"  反向 {rw['rows']} 行里挂着 backdrop-filter 的 {rw['boxes']} 处（必须 0，§136）")
+        # 2026-10-12 起音乐库开了一档口子：**正在播放的那一行**允许挂 1 个折射盒
+        # （结构件玻璃化，与播放器同材质）。普通行仍是零盒；播放行多于 1 个 = 摘不干净的复活 bug。
+        cap = 1 if page == 'bgm.html' else 0
+        print(f"  反向 {rw['rows']} 行里普通行挂 backdrop-filter 的 {rw['boxes']} 处（必须 0，§136）"
+              f"，播放行 {rw.get('playBoxes', 0)} 处（≤{cap}）")
         if rw['boxes']:
             fails.append(f"{page}: {rw['boxes']} 处列表元素挂着 backdrop-filter —— 一转/一动就整块糊（§136）")
+        if rw.get('playBoxes', 0) > cap:
+            fails.append(f"{page}: {rw['playBoxes']} 个播放行挂着折射 —— 换曲后旧行的盒没摘（unmount 漏了）")
 
         if 'tube' in spec:
             # 空管子里本来就没有水（prog=0 ⇒ wavePath 直接返回空串），所以必须先真的点一首再判。

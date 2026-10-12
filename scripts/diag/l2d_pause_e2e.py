@@ -25,6 +25,8 @@
   ⑩ 焦点停在「重播」按钮上按空格：只许暂停、不许把重播也点一次（产品里那句 blur()；
      必须用 CDP 发真键盘事件才测得到这条浏览器行为，页面里 dispatchEvent 测不到）
   ⑪ 再按一次空格放开冻结
+  ⑫ 暂停同时交出**画布本身**（同名 .png 落盘、合法、非空白、JSON 里剥掉 png）
+     —— 姿态向量证明"算出来有什么"，图证明"画出了什么"，两者不能互相替代
 
 用法: py -3 scripts/diag/l2d_pause_e2e.py [皮肤key，默认 gez_2]
       判据 ⑨ 要换 antu_2 才装得出来（gezi_2 上它合法 SKIP，见下）。
@@ -33,6 +35,8 @@
 import json
 import os
 import socket
+import io
+import re
 import subprocess
 import sys
 import threading
@@ -343,6 +347,41 @@ def main():
         st2 = json.loads(ev(PAUSE_STATE))
         say(st2['on'] is False and st2['autoUpdate'] is True and st2['label'] == '暂停',
             f"⑪ 再按一次空格放开冻结：{st2}")
+
+        # ⑫ 暂停必须**同时交出画布本身**。姿态向量只能证明"我算出来这一帧有什么"，
+        #    图才能证明"产品画出了什么"——2026-10-12 就是靠这条把"回放器没变形那批手片"
+        #    和"产品没手"分开的。判三件事：png 落成同名 .png、是合法 PNG、**不是空白图**
+        #    （WebGL 不保留绘制缓冲时 toDataURL 会回一张全透明/全黑，那种图比没图更坏）。
+        ev("document.getElementById('l2Pause').click()")
+        time.sleep(2.0)
+        pill = ev("document.getElementById('l2PauseInfo').textContent") or ''
+        m = re.search(r"([0-9]{8}-[0-9]{6}[A-Za-z0-9_.\-]*\.json)", pill)
+        fdir = os.path.join(ROOT, '.diag', 'l2d_freeze')
+        png_ok = png_px = blank = None
+        if m:
+            pj = os.path.join(fdir, m.group(1))
+            pp = pj[:-5] + '.png'
+            if os.path.isfile(pp):
+                raw = open(pp, 'rb').read()
+                png_ok = raw[:8] == b'\x89PNG\r\n\x1a\n'
+                try:
+                    from PIL import Image
+                    im = Image.open(io.BytesIO(raw)).convert('RGB')
+                    px = list(im.resize((64, 64)).getdata())
+                    png_px = im.size
+                    blank = len(set(px)) <= 2          # 64x64 采样里颜色种数 ≤2 ⇒ 空白
+                except Exception:
+                    blank = None
+                j2 = json.load(open(pj, encoding='utf-8'))
+                say(png_ok and blank is False and 'png' not in j2 and 'parameters' in j2,
+                    f"⑫ 暂停同时交出画布：{m.group(1)[:-5]}.png {png_px} "
+                    f"合法PNG={png_ok} 空白={blank} JSON里已剥掉png={'png' not in j2} "
+                    f"条上='{pill[:60]}'")
+            else:
+                say(False, f"⑫ 暂停没落图：条上='{pill[:70]}'，{pp} 不存在")
+        else:
+            say(False, f"⑫ 暂停后条上读不到存档名：'{pill[:70]}'")
+        ev("document.getElementById('l2Pause').click()")   # 放开，别把现场留在冻结态
     except Exception as e:
         print(f'[ERROR 2] 探针异常：{e}')
         return 2

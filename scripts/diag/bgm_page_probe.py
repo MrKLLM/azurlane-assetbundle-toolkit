@@ -270,13 +270,25 @@ def main():
         say(os.path.getsize(shot('bar', '#bar')) > 8000, f"潮水特写：{shot('bar', '#bar')}")
         # 标签行特写：整页图里那几个小 chip 糊成一片，"是不是重复了"根本判不了
         say(os.path.getsize(shot('row', '.row')) > 8000, f"首行特写：{shot('row', '.row')}")
+        # 上一组筛选可能把正在播的曲子筛出列表（`.row.playing` 就不存在了），
+        # 所以量材质前先就地重播当前视图的第一行——也让夜主题截图里能看到播放行的玻璃。
+        ev("""(()=>{document.querySelector('.row .play').click();return 1})()""")
+        time.sleep(0.8)
         ev("""(()=>{document.querySelector('#gTheme [data-t=dark]').click();return 1})()""")
         time.sleep(1.2)
         say(os.path.getsize(shot('dark')) > 20000, f"夜：{shot('dark')}")
-        d5 = ev("""(()=>{const r=getComputedStyle(document.querySelector('.row'));
-            return {bg:r.backgroundColor,filter:r.backdropFilter,bs:r.boxShadow.slice(0,40)}})()""")
-        say(isinstance(d5, dict) and 'blur' in str(d5.get('filter', '')),
-            f"夜主题下卡片仍是毛玻璃: {d5}")
+        d5 = ev("""(()=>{const el=document.querySelector('.row.playing');
+            const p=el?getComputedStyle(el).backdropFilter:'(无播放行)';
+            const q=getComputedStyle(document.querySelector('input.q')).backdropFilter;
+            const n=[...document.querySelectorAll('.row:not(.playing)')].slice(0,40)
+              .every(r=>(getComputedStyle(r).backdropFilter||'none')==='none');
+            return {play:p,search:q.slice(0,36),plainZero:n}})()""")
+        # 2026-10-12 改判据：普通行**故意不挂** backdrop-filter（§134/§136，见 bgm.html .row 注释），
+        # 旧判据"行卡有 blur"与该决定直接矛盾，是探针过期而非页面缺陷。
+        # 新口径：玻璃材质只认三处结构件——播放器、搜索框、正在播放的行；普通行必须零盒。
+        say(isinstance(d5, dict) and 'url(' in str(d5.get('play', ''))
+            and 'url(' in str(d5.get('search', '')) and d5.get('plainZero'),
+            f"夜主题：播放行+搜索框挂折射、普通行零 backdrop-filter: {d5}")
 
         print('== 主页入口 ==')
         d6 = ev("""(async()=>{ const r=await fetch('index.html'); const b=await r.text();

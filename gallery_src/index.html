@@ -1828,6 +1828,11 @@ async function renderLive2D(s, sk){
       if(l2Paused){ l2PauseT0=performance.now();
         info.style.display=''; info.textContent='已冻结 · 正在存档…';
         let j=null; try{ j=l2FreezeDump(); }catch(e){ info.textContent='已冻结 · 姿态读取失败：'+(e.message||e); return; }
+        /* 把**画布本身**一起交出去。姿态向量与逐片包围盒只能证明"我算出来这一帧有什么"，
+           而这张图证明"产品真的画出了什么"——2026-10-12 就是靠这条区分开"仪器没变形那批手片"
+           和"产品没手"。toDataURL 前必须同步 render 一次：WebGL 默认不保留绘制缓冲。 */
+        try{ app.render(); j.png=app.view.toDataURL('image/png'); }
+        catch(e){ j.pngErr=''+(e.message||e); }
         const head='已冻结 '+j.group+' 第 '+j.tInGroup+'s';
         try{ const r=await fetch('/l2d_freeze',{method:'POST',
             headers:{'Content-Type':'application/json'}, body:JSON.stringify(j)});

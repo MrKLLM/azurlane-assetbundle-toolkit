@@ -70,6 +70,10 @@ input.q{flex:1;min-width:230px;font:inherit;font-size:14px;color:var(--txt);
     background var(--t-col) var(--ease-ios)}
 input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel) 92%,transparent);
   box-shadow:0 0 0 4px var(--on-bg),inset 0 1px 2px color-mix(in srgb,var(--dim) 12%,transparent)}
+/* 搜索框与播放器同一材质：结构件玻璃化只占两个盒（这个 + 正在播放的那一行），
+   与 §134 的"成本单位是盒数"不冲突；普通行仍然零 backdrop-filter。 */
+html.lg input.q.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(--lgf,blur(0px));
+  backdrop-filter:blur(26px) saturate(1.6) var(--lgf,blur(0px))}
 .grp{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:2px 0 10px}
 /* 分组标签（用途 / 出处 / 专辑 / 收藏）：它是"这一排在筛什么"的名字，**不是又一个可点项**。
    原来它是裸字（--dim，11.5px）：纯色页面上 #93a3bd 压 #eef4fb ≈ 2.5:1，11.5px 中文笔画密 ⇒ 用户报
@@ -93,9 +97,10 @@ input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel
 .chip b{font-weight:400;opacity:.62;margin-left:4px;font-variant-numeric:tabular-nums}
 
 /* ── 曲目行：湿玻璃卡片。进场用一次交错浮现，之后只保留 hover/playing 两种状态 ──
-   ⚠️ 这一行**不挂 backdrop-filter**（与首页卡片同一决定，§134/§136）：本页筛得动就是 500+ 行，
+   ⚠️ **普通行**不挂 backdrop-filter（与首页卡片同一决定，§134/§136）：本页筛得动就是 500+ 行，
       而背景模糊的成本单位就是"挂着的盒子个数"（半径/面积/链长都不要钱）⇒ 一整列模糊换不来
-      看得出的差别，只换来滚动掉帧。玻璃感靠：半透面板底 + 上沿内高光 + 描边。 */
+      看得出的差别，只换来滚动掉帧。玻璃感靠：半透面板底 + 上沿内高光 + 描边。
+      唯一的例外是**正在播放的那一行**（恒 1 个盒），见下面 .row.playing.bglg。 */
 .row{display:grid;grid-template-columns:38px 1fr auto auto 40px;gap:13px;align-items:center;
   padding:11px 14px;margin-bottom:8px;border-radius:var(--r-card);
   background:color-mix(in srgb,var(--panel) 58%,transparent);
@@ -112,6 +117,10 @@ input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel
 .row.playing{border-color:color-mix(in srgb,var(--brand) 72%,transparent);
   background:color-mix(in srgb,var(--brand-l) 62%,transparent);
   box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 60%,transparent),0 0 0 3px var(--on-bg),var(--sh2)}
+/* 正在播放的行是全页唯一的"活行"，给它和播放器同一圈折射边——永远只挂 1 个盒：
+   换曲时旧行必须走 LiquidGlass.unmount 摘干净（含从 targets 删除），否则 resize 重挂会复活。 */
+html.lg .row.playing.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(--lgf,blur(0px));
+  backdrop-filter:blur(26px) saturate(1.6) var(--lgf,blur(0px))}
 .row .no{font-size:12px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
 .row .nm{font-size:14.5px;font-weight:650;line-height:1.35;word-break:break-word}
 .row .en{display:block;font-size:11.5px;color:var(--dim);font-weight:400;margin-top:3px;word-break:break-all}
@@ -415,6 +424,7 @@ function render(){
         <span class="eq"><u></u><u></u><u></u></span></button>
     </div>`).join(''):'<div class="empty">没有匹配的曲子</div>';
   reveal();
+  window.glassPlaying&&glassPlaying();   /* innerHTML 重建过，播放行的玻璃要迁到新节点 */
 }
 /* 进场浮现：只给新进入视口的行加 .in，滚回去不再重播 */
 let io=null;
@@ -436,6 +446,7 @@ function play(i){
   $('bar').classList.add('on');$('cur').innerHTML=esc(name(t))+(t.title_cn&&t.title!==t.title_cn?`<i>${esc(t.title)}</i>`:'');
   $('t1').textContent=mmss(knownDur);document.title=name(t)+' · 音乐库';
   [...document.querySelectorAll('.row')].forEach(r=>r.classList.toggle('playing',+r.dataset.i===i));
+  window.glassPlaying&&glassPlaying();
   $('hint').classList.add('off');
 }
 A.addEventListener('play',()=>{$('ppath').setAttribute('d','M6 5h4v14H6zm8 0h4v14h-4z')});
@@ -496,17 +507,33 @@ document.onkeydown=e=>{
 boot();
 
 /* ───────── 液态玻璃挂载（模块见 liquid_glass.js）─────────
-   本页只挂一处：播放器整块面板。它是**从不被 3D 旋转**的元素 —— §136 那条失效模式
-   （转角非 0 ⇒ Chrome 丢掉子元素遮罩、模糊铺满整盒）就是这么避开的。
+   本页挂三处：播放器面板、搜索框、正在播放的那一行（恒 1 个盒）。
+   共同点：都是**从不被 3D 旋转**的元素 —— §136 那条失效模式（转角非 0 ⇒ Chrome 丢掉
+   子元素遮罩、模糊铺满整盒）就是这么避开的；而且折射不需要遮罩（法线图中间是平的）。
    页头那条边墙已撤（理由见上面 header 那段注释：在照片背景前它读作"一条杠"）。
-   曲目行与卡片故意不挂：数量大（本页可以筛出几百行），而 backdrop-filter 的成本单位
-   就是"挂着的盒子个数"（§134），为装饰付这笔钱不划算。
-   ⚠️ 播放器面板挂折射**不需要遮罩**：法线图中间是平的，只有贴边一圈有坡度，
-      所以整盒挂滤镜天然就等于"只折射边墙"。别顺手加 mask 把它退回 §136 那个坑。 */
+   普通曲目行仍然故意不挂：本页可以筛出几百行，backdrop-filter 的成本单位就是
+   "挂着的盒子个数"（§134），为装饰付这笔钱不划算。 */
 if(window.LiquidGlass&&LiquidGlass.on){
   const bar=$('bar'), cs=getComputedStyle(bar);
   LiquidGlass.auto(bar,{cls:'bglg',kind:'panel',ring:16,
     radius:parseFloat(cs.borderTopLeftRadius)||16});
+  const qc=getComputedStyle($('q'));
+  LiquidGlass.auto($('q'),{cls:'bglg',kind:'panel',ring:12,
+    radius:parseFloat(qc.borderTopLeftRadius)||12});
+  /* 播放行的玻璃跟着 .playing 走：换曲/重渲染都先摘旧的再挂新的。
+     重渲染（render 里 innerHTML 整段重建）会留下"已脱离文档树"的旧元素，
+     refresh() 会自己跳过 not connected 的，但摘掉更干净，也防 targets 无界增长。 */
+  let playGlass=null;
+  window.glassPlaying=function(){
+    if(playGlass){LiquidGlass.unmount(playGlass,{cls:'bglg'});playGlass=null;}
+    const r=document.querySelector('.row.playing');
+    if(r&&r.isConnected){
+      LiquidGlass.auto(r,{cls:'bglg',kind:'panel',ring:14,
+        radius:parseFloat(getComputedStyle(r).borderTopLeftRadius)||16});
+      playGlass=r;
+    }
+  };
+  glassPlaying();   /* boot() 早于本块：若开机时已有播放行，这里补挂一次 */
 }
 </script>
 </body>
