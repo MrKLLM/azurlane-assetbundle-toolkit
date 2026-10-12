@@ -53,6 +53,7 @@ HAND_TOL = 0.05     # 要指认的那几片（手）逐片上限（单位）
 LIGHT = False       # --light：反查模式（分批强亮灭着的片）
 BATCH = 40          # 反查模式每批点亮多少片
 GATE = False        # --gateab：同一坏帧四种摆法的对照（判"亮着却看不见"还是"该亮的没亮"）
+LIVET = False       # --livetarget：按用户报的时刻推模型时钟取直播图
 BUFTRACE = False    # --buftrace：顶点缓冲区溯源（判"存档里的实形"是直播写的还是出厂残留）
 # 台账里那对左右手闸门参数。**按片名从台账现取，不写死名单**；L2DGATE=Param25 可只跑一侧，
 # 用来把"左右各一组交叉淡入淡出"拆成单侧，否则一张图里同时出现两套手，肉眼分不出谁画在哪。
@@ -492,12 +493,90 @@ def run_buftrace(docs, outdir, cmd, ev, montage):
     return 0
 
 
+def run_live_target(docs, outdir, cmd, ev, montage):
+    """按**用户交来的那几个时刻**，把直播画面取回来（不等墙钟，自己推模型时钟）。
+
+    为什么不用 `--buftrace` 那种"每秒轮询一次墙钟"：无头的模型时钟比墙钟慢一个量级，
+    18 秒的 clip 要两分多钟，而且抓不准用户报的那个时刻。这里改成**自己喂 dt**：
+    `Live2DModel.update(120)` 只累 `deltaTime`，下一次 `_render` 消费掉 ⇒ 走的还是产品
+    自己那条 `internalModel.update`（motion/物理/显隐全在），只是时间由我推进。
+    于是"clip 第几秒"是**精确可累计**的，能正好停在用户那几个 tInGroup 上。
+
+    自证（缺任何一条，图都不能当现场）：
+      · 停住那一刻的 `Param25/Param27` 要和用户存档里的值对得上（对不上=时钟或曲线不一致）；
+      · 同时读"既亮着、又有算出来的顶点"的手画片数 —— 这个数才回答"画面上到底有没有手"；
+      · 物理摆动必须是**开着的**（存档里那份向量含物理那一拍）。
+    """
+    A, B = gate_ab_sets(docs[0][1]['skin'])
+    targets = sorted({round(d['tInGroup'], 2): d for _, d in docs}.items())
+
+    def evj(expr):
+        r = ev(expr)                      # returnByValue 对对象直接给 dict
+        return json.loads(r) if isinstance(r, str) else r
+
+    JS = r"""(a)=>{const m=l2State.app.stage.children[0],im=m.internalModel,cm=im.coreModel;
+      const D=cm._model.drawables; const P=cm._model.parameters; const idx={};
+      for(let i=0;i<D.count;i++){const q=D.ids[i];idx[(q&&q.string)||q]=i;}
+      const pv={}; for(let i=0;i<P.count;i++){const q=((P.ids[i]&&P.ids[i].string)||P.ids[i]);
+        if(q==='Param25'||q==='Param27')pv[q]=+P.values[i].toFixed(3);}
+      let aL=0,aN=0,bL=0,bN=0;
+      for(const nm of a.A){const i=idx[nm];if(i===undefined)continue;const p=D.vertexPositions[i];
+        if(D.opacities[i]>0.01)aL++; if(p&&p.some(v=>v!==0))aN++;}
+      for(const nm of a.B){const i=idx[nm];if(i===undefined)continue;const p=D.vertexPositions[i];
+        if(D.opacities[i]>0.01)bL++; if(p&&p.some(v=>v!==0))bN++;}
+      return {p:pv, t:a.t, aL:aL,aN:aN,bL:bL,bN:bN, hand:Math.min(aN,aL)+Math.min(bN,bL),
+              autoUpdate:m.autoUpdate, phys:!!im.physics&&!!im.__phEval};}"""
+    STEP = 120
+    ev("(()=>{const m=l2State.app.stage.children[0],im=m.internalModel;"
+       "if(im.__phEval) im.physics.evaluate=im.__phEval;   /* 直播必须带物理那一拍 */"
+       "const s=document.getElementById('l2Motion'); s.value='home';"
+       "s.dispatchEvent(new Event('change',{bubbles:true}));"
+       "const b=document.getElementById('l2Replay'); if(b)b.click();"
+       "m.autoUpdate=false; return 'ok';})()")
+    print(f'  推模型时钟取直播图：目标时刻 {[t for t,_ in targets]}（每拍 {STEP}ms）', flush=True)
+    t = 0.0
+    ti = 0
+    shots = []
+    while ti < len(targets) and t < 20.0:
+        tgt, d = targets[ti]
+        while t < tgt and t < 20.0:
+            ev(f"l2State.app.stage.children[0].update({STEP})")
+            ev("new Promise(r=>requestAnimationFrame(()=>r(1)))")
+            t += STEP / 1000.0
+        st = evj(f"({JS})({json.dumps({'A': A, 'B': B, 't': round(t, 2)})})")
+        want = {k: v for k, v in d['parameters'] if k in ('Param25', 'Param27')}
+        got = st['p']
+        err = max(abs(got.get(k, -9) - v) for k, v in want.items())
+        ok = err <= 0.05
+        print(f'  clip {tgt}s（推到 {round(t,2)}s）Param25 {got.get("Param25")} vs 存档 '
+              f'{want.get("Param25")} · Param27 {got.get("Param27")} vs {want.get("Param27")}'
+              f' ⇒ 偏差 {round(err,3)} {"OK" if ok else "⚠ 对不上，这张图不能当现场"}', flush=True)
+        print(f'     A 亮{st["aL"]}/有顶点{st["aN"]}  B 亮{st["bL"]}/有顶点{st["bN"]}'
+              f'  能画出的手片 {st["hand"]}  物理={st["phys"]}', flush=True)
+        png = os.path.join(outdir, f'live_t{tgt}_hand={st["hand"]}.png')
+        open(png, 'wb').write(base64.b64decode(
+            cmd('Page.captureScreenshot', {'format': 'png'})['data']))
+        cp = crop_canvas(png, [0, 0, 1366, 809], 1, os.path.join(outdir, f'livec_t{tgt}.png'),
+                         scale_up=1.0) or png
+        shots.append(dict(n=len(shots), file=f't={tgt}s', t=tgt, grp='live',
+                          lit=st['aL'] + st['bL'], lit_now=st['hand'], maxgeo=0, maxsub=0,
+                          med=0, nsubpx=0, worst=None, drift=round(err, 3), unexplained=0,
+                          missP=0, missQ=0, ok=ok and st['hand'] >= 0, png=cp,
+                          top=f'p25={got.get("Param25")} 手片{st["hand"]}'))
+        ti += 1
+    if shots:
+        print('  直播总表:', montage(shots, os.path.join(outdir, 'live_target_montage.png'),
+                                     cell_w=470))
+    return 0
+
+
 def main():
-    global LIGHT, BATCH, GATE, BUFTRACE
+    global LIGHT, BATCH, GATE, BUFTRACE, LIVET
     LIGHT = '--light' in sys.argv
     GATE = '--gateab' in sys.argv
     BUFTRACE = '--buftrace' in sys.argv
-    args = [a for a in sys.argv[1:] if a not in ('--light', '--gateab', '--buftrace')]
+    LIVET = '--livetarget' in sys.argv
+    args = [a for a in sys.argv[1:] if a not in ('--light', '--gateab', '--buftrace', '--livetarget')]
     if '--batch' in args:
         k = args.index('--batch')
         BATCH = int(args[k + 1])
@@ -593,6 +672,8 @@ def main():
             return run_gate_ab(docs, outdir, cmd, ev, montage)
         if BUFTRACE:
             return run_buftrace(docs, outdir, cmd, ev, montage)
+        if LIVET:
+            return run_live_target(docs, outdir, cmd, ev, montage)
         rows = []
         hrows = []
         for n, (f, d) in enumerate(docs, 1):
