@@ -74,6 +74,9 @@ def main():
     ap.add_argument("params", help="逗号分隔的参数名")
     ap.add_argument("--meta", default="", help="moc3 参数序列表（运行时 dump，用于断言 A）")
     ap.add_argument("--allnames", action="store_true", help="打印该 clip 全部绑定名（核对用）")
+    ap.add_argument("--keys", action="store_true",
+                    help="把源侧与磁盘的键**并排列出**（断言 C 只在磁盘键时刻采样，"
+                         "源侧多出来的键——Unity 表示瞬切用的同刻双键——它看不见）")
     a = ap.parse_args()
     want = [p for p in a.params.split(",") if p]
 
@@ -138,9 +141,11 @@ def main():
     off_c = (st.curveCount or 0) + (dn.m_CurveCount or 0)
     frames = X.parse_streamed_clip(st)
     series = {}
+    tans = {}          # 切线：断言 C 只在键时刻采样 ⇒ 端点值相同、形状不同（陡切 vs 线性）它看不见
     for t, keys in frames:
-        for idx, val, _i, _o in keys:
+        for idx, val, i_t, o_t in keys:
             series.setdefault(idx, []).append((t, val))
+            tans.setdefault(idx, []).append((t, val, i_t, o_t))
     if a.allnames:
         print("\n绑定名清单（下标=curve index）:")
         for i, tg in enumerate(targets):
@@ -153,9 +158,11 @@ def main():
     for p in want:
         gi = next((i for i, tg in enumerate(targets) if tg and tg[1] == p), None)
         src = None
+        tsrc = []
         where = None
         if gi is not None and gi in series:
             src = sorted(series[gi])
+            tsrc = sorted(tans.get(gi, []))
             where = "streamed[%d]" % gi
         elif gi is not None and gi >= off_c and (gi - off_c) < n_const:
             v = float(list(ct.data)[gi - off_c])
@@ -186,6 +193,32 @@ def main():
         if bad:
             for t, dv, sv in bad[:6]:
                 print("       t=%-8.3f 磁盘 %-9s 源 %-9s" % (t, round(dv, 4), "None" if sv is None else round(sv, 4)))
+        if a.keys:
+            raw = d["Segments"]
+            tk, j = [], 0
+            while j + 1 < len(raw):
+                ty = raw[j + 2] if j + 2 < len(raw) else None
+                tk.append((raw[j], raw[j + 1], ty))
+                j += 5 if ty in (2, 3) else (2 if ty is None else 3)
+            print("       键并排（源 %d 键 / 磁盘 %d 键；磁盘段类型 0=线性 2/3=贝塞尔）"
+                  % (len(src), len(dk)))
+            print("       源侧切线 = in/out（Unity 的 dv/dt）；陡度 = |out 切线| ÷ 到下一键的平均斜率")
+            for i in range(len(src)):
+                t, v = src[i]
+                it = tans_i = None
+                if i < len(tsrc):
+                    _, _, it, tans_i = tsrc[i]
+                avg = None
+                if i + 1 < len(src) and src[i + 1][0] > t:
+                    avg = (src[i + 1][1] - v) / (src[i + 1][0] - t)
+                k = next((x for x in tk if abs(x[0] - t) < 1e-4), None)
+                steep = ""
+                if avg not in (None, 0) and tans_i is not None:
+                    steep = "  陡度=%.1f" % (abs(tans_i) / abs(avg))
+                print("       #%02d 源 t=%8.3f v=%6.3f  in=%-10.3g out=%-10.3g%s   磁盘[%s]"
+                      % (i, t, v, -3.4e38 if it is None else it,
+                         -3.4e38 if tans_i is None else tans_i, steep,
+                         "t=%.3f v=%.3f 类型=%s" % k if k else "无对应键"))
     return 0
 
 

@@ -236,8 +236,20 @@ def main():
             raise SystemExit(f'对照作废：{label} 三步内 motionManager 仍没切到 {GROUP}'
                              f'（当前 {cur_group()}）—— 这趟的任何差值都不许引用')
 
-        print(f'起播 {GROUP} …', flush=True)
+        print('起播 …', flush=True)
         t = start_play('第一遍')
+        # 阶梯层是否真的建起来了？n=0 ⇒ 页面侧取曲线的字段名不对，整层空转（别把空转当"修过了"）
+        print('  snapStair: ', ev('JSON.stringify(window.__snapStairDbg'
+                                  '?window.__snapStairDbg():{absent:1})'), flush=True)
+        print('  诊断: ', ev("""(()=>{const im=l2State.app.stage.children[0].internalModel;
+            const d=im.motionManager.definitions&&im.motionManager.definitions.home;
+            const o=d&&d[0];
+            return JSON.stringify({snapDbg:window.__snapDbg?window.__snapDbg():null,
+              defType:typeof o, defKeys:o?Object.keys(o).slice(0,12):null,
+              curve0:(o&&o.curves&&o.curves[0])?Object.keys(o.curves[0]):null,
+              nCurves:o&&o.curves?o.curves.length:null,
+              sample:(o&&o.curves)?o.curves.filter(c=>String(c.id||'').match(/^Param2[57]$/)).slice(0,1)
+                        .map(c=>[c.target,c.id,String(c.segments).slice(0,90)]):null});})()"""), flush=True)
         def snap_all(tag):
             head = ev(f'({JS_SNAP})({{}})')
             head = json.loads(head)
@@ -285,7 +297,8 @@ def main():
                     ev('new Promise(r=>requestAnimationFrame(()=>r(1)))')
                     t += step / 1000.0
                 snap = snap_all(tag)
-                key = f'{ptag}_{tag}'
+                # 单趟不加 p1_ 前缀：--sweep 的分析器把标签当 float 解析（10-13 加 --twice 时踩过）
+                key = f'{ptag}_{tag}' if len(passes) > 1 else tag
                 out[key] = dict(t=tgt, tReached=round(t, 2), pas=ptag, snap=snap)
                 line = (f'  [{ptag}] t={tgt}s（推到 {t:.2f}s）Param25={snap["p"].get("Param25")} '
                         f'Param27={snap["p"].get("Param27")} · {snap["count"]} 片')
