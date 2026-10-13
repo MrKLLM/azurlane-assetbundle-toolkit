@@ -9831,3 +9831,63 @@ X 族 = `{ArtMesh158, ArtMesh170, ArtMesh177, ArtMesh186}`（do500/ro41-69，中
 `snapStair` 与页面形状诊断打印）、`scripts/diag/l2d_source_curve_dump.py`（`--keys`）、
 `gallery_src/index.html`（净零，补丁已撤回）；
 数据：`.diag/l2d_sweep/1013-121617/`（改前 21 帧基线）、`1013-230417/`（空转补丁的复测，留作反例）。
+
+---
+
+## §142. 画廊 UI 玻璃化轮：站用背景下的「实色块」与四个连带判据（2026-10-13）
+
+**问题**（用户实机五条，连截图带质问）：① 设了站用背景后，搜索框与「★ 只看收藏」背后露
+出实色块，「很不美观」；② 音乐库选中标签与背景库不一致，「我喜欢背景库选中的效果」；
+③ 播放器按键太小、不高级，「要像荣耀的那种拟态玻璃」；④ 背景库排版臃肿，「感觉像是
+想把所有东西都写出来」；⑤ 主界面顶部挡住背景，「不能让顶部按钮的顶部画布真正做成玻璃
+吗？这样相当于只显示按钮的位置出来」。
+
+**根因**（三条，各对一条投诉）：
+1. `favorites.js` 的 has-sitebg 兜底规则把控件一律刷到 **92% 不透明面板**——那是
+   2026-10-11 为「立绘亮部洗掉灰字」加的可读性兜底，身后换成照片后读作贴纸；页头同理 90%。
+2. 顶栏控件（搜索/分段/下拉/开关/分组标签）全是实色 `--panel2` / 不透明品牌淡底，
+   叠成一条实带，把背景整个挡住。
+3. 音乐库 `.chip.on` 用实色 `--grad-brand`，与背景库 `--on-bg/--on-txt/--on-ring`
+   浅玻璃不是一套语言——同一「选中」在两个页面两种长相。
+
+**修法**：
+- has-sitebg 兜底 **92% → 78% + `backdrop-filter:blur(16px) saturate(1.5)`**（烟熏玻璃：
+  背后被糊掉 ⇒ 读作玻璃不读作块，12.5px 灰字仍压得住）；页头 90%→78%（模糊由各页 header
+  自己的 backdrop-filter 出，不叠第二层）；`.hint` 从灌底色改为文字晕影。
+- `theme.css` `--nav-blur` 6→13px；index 顶栏控件改 `color-mix(panel 55%)` 半透明
+  （子元素直接叠 header 的 backdrop ⇒ 零新增滤镜盒，§134 盒数红线不动）；`.ctl label`
+  去实色底改品牌色小字 + 晕影。
+- bgm：`.chip.on` / `.opt button.on` 统一为背景库同款浅玻璃；播放器次级键 30→**38px 玻璃
+  圆钮**、播放键 30→**52px 品牌光球**（渐变 + 顶部高光 + 品牌色外发光）、循环 34px，
+  音量滑轨 4→5px。
+- backgrounds：搜索框/chip/下拉半透明 + `blur(20px)`；**刻意不引 `liquid_glass.js`**——
+  has-sitebg 的 `!important` 会盖掉折射里的 `--lgf`，而本页只有搜索框一个常驻盒，CSS blur 就够；
+  筛选四行合并为一行流式 `.fbar`；提示条去方框改一行小字 + 文字钮；详情弹窗上一张/下一张
+  挪到图上做悬浮玻璃钮 `.pn`，底部六钮改「主动作通栏 + 次级行」，kv 长说明移 `dd[title]`。
+
+**连带踩坑（全部已进技能，别再原样重犯）**：
+- **同一文件的并行 Edit 会静默丢改动**：本轮一次连丢 4 笔且工具对每笔都回报成功
+  （症状：CSS 生效、HTML 没生效的「分裂态」，页面渲染出一半新一半旧）⇒ 同文件多次 Edit
+  必须串行，收尾用「grep 标记原子句」核验。→ `windows-hardlink-dedup-verify` v1.6.0。
+- **探针判据要跟着设计变更改**：kv 长说明移 title 后 `bg_page_probe` 两条文本断言假红，
+  改读「可见值 + title 合并串」——注意 dd-only 串里没有 dt 标签，拼串要把 `#ovkv` 的
+  textContent 一起带上，否则 FAIL 消息格式化还会再抛一次 IndexError。→ WF-41。
+- **`.zbadge` 有两个消费方**：全屏条 `.fs .cap` 里还有一个（#fsz），新的绝对定位样式
+  必须限定 `.sheet .imgbox`，否则全屏条里那个被拽出 flex 布局、钉到视角上去。
+- CDP 手写脚本：`Runtime.evaluate` / `Page.captureScreenshot` 的参数必须包在 `params` 里
+  （放顶层静默 KeyError）；无头注入 localStorage 要先导航到目标源再 set + reload
+  （在 `about:blank` 上设无效）；`venv` 需 websocket-client（本机在
+  `~/.workbuddy-ai/binaries/python/envs/default`）。
+
+**判据**：`glass_pages_probe.py`（挂载/禁挂/零盒/桶≤2）+ `bgm_page_probe.py` +
+`bg_page_probe.py` + `favorites_probe.py --shots` 四探针全绿；昼/夜 × 有/无背景四态
+人眼判图（播放器 52px 光球、选中态两主题一致、弹窗按钮重排、站用背景工具栏无实色块）。
+做法 **WF-41**，可复用判据在技能 `headless-chrome-cdp-batch-export` v1.8.17。
+
+### 涉及文件
+
+`gallery_src/theme.css`（--nav-blur）、`gallery_src/favorites.js`（has-sitebg 兜底规则）、
+`gallery_src/index.html`（顶栏玻璃化）、`gallery_src/bgm.html`（选中态统一 + 播放器重做）、
+`gallery_src/backgrounds.html`（控件玻璃化 + 工具栏合并 + 弹窗重排）、
+`scripts/diag/bg_page_probe.py`（判据随设计变更）、技能
+`.agents/skills/windows-hardlink-dedup-verify` v1.6.0 / `headless-chrome-cdp-batch-export` v1.8.17。

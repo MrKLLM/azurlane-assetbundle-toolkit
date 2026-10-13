@@ -446,7 +446,11 @@ def main():
               [...c.querySelectorAll('.badge')].some(b=>b.textContent==='同名另一张'));
           let srcDir='';
           if(hx.length){hx[0].click(); await t(700);
-            srcDir=(document.getElementById('ovkv').textContent||''); }
+            /* 2026-10-13 kv 改版：长说明进 dd 的 title（CSS 给 dd[title] 画了虚下纹）⇒
+               判据要读「可见值 + title」合并串；只读 textContent 会把挪进 title 的
+               源目录出处误判成"抹掉来源" */
+            srcDir=[...document.querySelectorAll('#ovkv dd')]
+              .map(d=>d.textContent+' '+d.title).join(' '); }
           const ovOpen=document.getElementById('ov').classList.contains('open');
           document.getElementById('ovfs').click(); await t(900);
           const fs=document.getElementById('fs');
@@ -497,7 +501,10 @@ def main():
             en:document.getElementById('oven').textContent,
             imgSrc:im.getAttribute('src'), decoded:im.complete&&im.naturalWidth>0,
             nat:im.naturalWidth+'x'+im.naturalHeight,
-            kv:document.getElementById('ovkv').textContent.slice(0,150),
+            /* 同 d4b：长说明在 dd 的 title 里，判据读「dt 标签 + 可见值 + title」合并串 */
+            kv:document.getElementById('ovkv').textContent+' '+
+               [...document.querySelectorAll('#ovkv dd')]
+              .map(d=>d.textContent+' '+d.title).join(' '),
             ev:(document.getElementById('ovev').textContent||'').slice(0,180),
             warn:document.getElementById('ovwarn').textContent.slice(0,60),
             theme:getComputedStyle(document.documentElement).getPropertyValue('--brand').trim()};

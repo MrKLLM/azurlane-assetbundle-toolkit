@@ -140,18 +140,31 @@ function css(){
    'color-mix(in srgb,var(--panel) 95%,transparent) 46%)}'+
    'html.has-sitebg .row{background:color-mix(in srgb,var(--panel) 88%,transparent)}'+
    'html.has-sitebg .card .nm{background:color-mix(in srgb,var(--panel) 90%,transparent)}'+
-   /* 光晕之外还有一整类东西会被立绘洗掉：**筛选控件**（chip / 搜索框 / 下拉 / 分组标签 / 提示条）。
+   /* 光晕之外还有一整类东西会被立绘洗掉：**筛选控件**（chip / 搜索框 / 下拉 / 开关 / 工具条 / 标签页）。
       它们平时是"半透明白 + 次级灰字"，压在浅色立绘的亮部上就彻底读不出（2026-10-11 用户截图：
       音乐库昼间模式，用途/出处/专辑那一排 chip 全糊）。同样只给控件自己加底，不动背景图。
-      ⚠️ 用 !important：room3d 的 <style> 排在本模块之后，同特异度会把它自己的规则赢回去。 */
-   'html.has-sitebg :is(.chip:not(.on),.q,.sel,.opt,.hint,.tools,.tabs,.ctl select){'+
-   'background:color-mix(in srgb,var(--panel) 92%,transparent)!important}'+
-   /* 页头：栏体平时只有 62%（音乐库）甚至 16%（首页 / 背景库）白，身后换成一张照片就压不住
-      标题与统计行 ⇒ 一律给到九成。图本身仍不加模糊、不加压暗（用户 2026-10-11 拍板"原图清楚铺满"），
-      这条只把"放字的那一条 UI"垫实。 */
-   'html.has-sitebg header{background:color-mix(in srgb,var(--panel) 90%,transparent)!important}'+
-   /* 分组标签（.grp>span / .ctl label）**不再需要 has-sitebg 特判**：三页都改成了
-      "不透明品牌淡底 + 方角 + 700 字重"，照片背景本来就压不动它，而半透明白底会和 chip 撞脸。 */
+      ⚠️ 用 !important：room3d 的 <style> 排在本模块之后，同特异度会把它自己的规则赢回去。
+      ⚠️ 2026-10-13 用户实机："设置背景后，搜索框和只看收藏背后的色块全露出来了，很不美观"——
+         根因就是这里原来一律刷到 **92% 不透明**：那不是兜底，那是一块贴纸。改成 78% + blur(16px)：
+         背后被糊掉 ⇒ 读作"烟熏玻璃"而不是"实色块"，12.5px 灰字也照样压得住。
+      ⚠️ .hint 故意不在这串里：它是纯文字行，灌底色就是用户说的那种色块，改走文字晕影（下面单独一条）。 */
+   'html.has-sitebg :is(.chip:not(.on),.q,.sel,.opt,.tools,.tabs,.ctl select){'+
+   'background:color-mix(in srgb,var(--panel) 78%,transparent)!important;'+
+   '-webkit-backdrop-filter:blur(16px) saturate(1.5)!important;'+
+   'backdrop-filter:blur(16px) saturate(1.5)!important}'+
+   /* 页头：平时只有 62%（音乐库）甚至 16%（首页 / 背景库）白，身后换成照片就压不住标题 ⇒ 78%。
+      模糊由各页 header 自己的 backdrop-filter 出（首页 --nav-blur 13px、音乐库 26px），
+      这里只降不透明度，不叠第二层 —— 90% 那版会把顶栏糊成一条实带，把背景整个挡住。 */
+   'html.has-sitebg header{background:color-mix(in srgb,var(--panel) 78%,transparent)!important}'+
+   /* .hint（首页统计行 / 背景库提示条）：不灌底，一行小字 + 同色系晕影。
+      晕影在纯色页面上几乎不可见，只在身后是照片时把字"托"出来。 */
+   'html.has-sitebg .hint{background:transparent!important;'+
+   'text-shadow:0 1px 3px color-mix(in srgb,var(--panel) 72%,transparent)}'+
+   /* 分组标签的两种活法（2026-10-13 起分家）：
+      · .grp>span（音乐库 / 背景库的筛选行名）**仍是不透明品牌淡底 + 方角 + 700 字重** ——
+        照片背景压不动它，且要和 chip 明确区分开，所以不需要 has-sitebg 特判；
+      · .ctl label（主界面顶栏的"类别/阵营/…"）**改成纯字形**（品牌色 + 字重 + 文字晕影）——
+        顶栏要玻璃化（用户 2026-10-13："只显示按钮的位置出来"），实色小方块会把栏切成贴纸。 */
    'html.has-sitebg :is(.sub,.en,.mt,.dim){color:var(--txt)!important;opacity:.9}'+
    /* ⚠️ 上面这一串**必须以 '+ 结尾**：这里曾经写成 ';'，于是 textContent 就地结束，
       后面四条（压光晕、藏首页水面 canvas、星标 .corner/.tr 定位）全被静默丢掉 ——

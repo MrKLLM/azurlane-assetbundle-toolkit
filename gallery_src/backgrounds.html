@@ -48,24 +48,45 @@ header .sp{flex:1}
 .opt button.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
 
 .wrap{max-width:1560px;margin:0 auto;padding:18px 22px 56px}
-.tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
-.q{flex:1;min-width:240px;font-size:14px;color:var(--txt);background:var(--panel);
-  border:1px solid var(--line);border-radius:var(--r-in);padding:10px 14px;outline:none;
-  transition:box-shadow var(--t-col) var(--ease-ios),border-color var(--t-col) var(--ease-ios)}
-.q:focus{border-color:var(--on-ring);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 16%,transparent)}
-.grp{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
+.tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+/* 搜索框：与音乐库同一套"湿玻璃"——66% 半透明 + blur(20px)。设了站用背景时由 favorites.js
+   的 has-sitebg 兜底规则换成 78% + blur(16px)（烟熏玻璃，不再是实色块）。 */
+.q{flex:1;min-width:240px;font:inherit;font-size:14px;color:var(--txt);
+  background:color-mix(in srgb,var(--panel) 66%,transparent);
+  border:1px solid var(--line);border-radius:var(--r-chip);padding:10px 16px;outline:none;
+  box-shadow:inset 0 1px 2px color-mix(in srgb,var(--dim) 18%,transparent);
+  transition:box-shadow var(--t-col) var(--ease-ios),border-color var(--t-col) var(--ease-ios),
+    background var(--t-col) var(--ease-ios)}
+.q:focus{border-color:var(--on-ring);
+  box-shadow:0 0 0 3px var(--on-bg),inset 0 1px 2px color-mix(in srgb,var(--dim) 12%,transparent)}
+/* ⚠️ 这里刻意**不引 liquid_glass.js**：本页只搜索框一个常驻盒要模糊，CSS blur 就够；
+   而且 has-sitebg 兜底规则会用 !important 改 backdrop-filter，会盖掉折射里的 --lgf。
+   真折射留给音乐库的播放器面板（liquid_glass.js 注释里的既有结论不变）。
+   ⚠️ 选择器不能写成 html.lg .q：本页不加载 liquid_glass.js ⇒ 没有那个类，整条规则白发。 */
+.q{-webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6)}
+/* 筛选区：三组同一套语言，2026-10-13 合并成**一行流式**（原来每组各占一行 + 下方提示方框，
+   用户判"臃肿，像想把所有东西都写出来"）。组与组之间 14px 间距，窄屏自然换行。 */
+.fbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 10px}
+.grp{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0}
 /* 分组标签：与音乐库同一套区分（方角 7px / 不透明品牌淡底 / 700 字重），
    刻意**不像** chip（胶囊 + 半透明白 + 描边）—— 它是"这一排的名字"，不是第五个选项。
    ⚠️ `:not(.chip)` 不能省：`.grp>span` 特异度 (0,1,1) 高于 `.chip` (0,1,0)。 */
 .grp>span:not(.chip){font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--txt2);
-  padding:3px 8px;border-radius:7px;
+  padding:3px 8px;border-radius:7px;white-space:nowrap;
   background:color-mix(in srgb,var(--brand) 10%,var(--panel))}
-.chip{font-size:12.5px;color:var(--txt2);background:var(--chip);border:1px solid var(--chip-line);
-  border-radius:var(--r-chip);padding:5px 12px;cursor:pointer;
-  transition:all var(--t-col) var(--ease-ios)}
-.chip:hover{color:var(--txt)}
+/* chip 与音乐库同一套：58% 半透明面板 + 描边（原来是实色 --chip，设了站用背景
+   就是一块贴纸）；hover 上浮 1px + 描边转品牌色。选中态沿用背景库原有浅玻璃
+   （--on-bg/--on-txt/--on-ring），音乐库 2026-10-13 已对齐到这一套。 */
+.chip{font-size:12.5px;color:var(--txt2);background:color-mix(in srgb,var(--panel) 58%,transparent);
+  border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:5px 12px;cursor:pointer;
+  white-space:nowrap;user-select:none;
+  transition:transform var(--t-col) var(--ease-ios),background var(--t-col) var(--ease-ios),
+    color var(--t-col) var(--ease-ios),border-color var(--t-col) var(--ease-ios)}
+.chip:hover{transform:translateY(-1px);border-color:var(--brand);color:var(--brand-d)}
 .chip:active{transform:scale(.97)}
-.chip.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+.chip.on{background:var(--on-bg);color:var(--on-txt);border-color:transparent;
+  box-shadow:inset 0 0 0 1px var(--on-ring)}
+.chip.on:hover{color:var(--on-txt);transform:none}
 .chip b{font-weight:600;opacity:.7;margin-left:5px;font-variant-numeric:tabular-nums}
 
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:14px}
@@ -94,8 +115,8 @@ header .sp{flex:1}
 .badge.var{top:auto;bottom:8px;left:8px;background:color-mix(in srgb,var(--pop) 70%,transparent);color:var(--panel)}
 
 /* ── 二级下拉（「其他」展开成子类目 / 场景背景按词根细分）── */
-.sel{font:inherit;font-size:12.5px;color:var(--txt);background:var(--chip);border:1px solid var(--chip-line);
-  border-radius:var(--r-chip);padding:5px 10px;cursor:pointer;max-width:340px;
+.sel{font:inherit;font-size:12.5px;color:var(--txt);background:color-mix(in srgb,var(--panel) 62%,transparent);
+  border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:5px 10px;cursor:pointer;max-width:340px;
   transition:box-shadow var(--t-col) var(--ease-ios)}
 .sel:focus{outline:none;border-color:var(--on-ring);
   box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 16%,transparent)}
@@ -104,14 +125,17 @@ header .sp{flex:1}
 /* ── 「默认藏了多少」必须常驻可见 ──
    筛选把图藏起来而页面上没有任何痕迹，是这类图库最恶性的失效：用户会以为库里有 1,139 张。
    所以隐藏条数不是一句 toast，而是与 chip 同区的常驻行，且**按当前搜索范围**算
-   （搜"温泉"结果空了，得能看出是被「画面」筛掉的，而不是"库里没有"）。 */
-.hint{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--txt2);
-  background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-in);
-  padding:8px 12px;margin:0 0 12px}
+   （搜"温泉"结果空了，得能看出是被「画面」筛掉的，而不是"库里没有"）。
+   2026-10-13 瘦身：去掉方框底与内边距，改一行小字 + 文字钮「看全部」——
+   原版是个带边框的灰盒子，用户判"臃肿"；信息一个字没少，只是不再拿盒子吓人。 */
+.hint{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11.5px;color:var(--txt2);
+  margin:0 0 10px;padding:0 2px}
 .hint[hidden]{display:none}
 .hint b{font-weight:600;color:var(--txt);font-variant-numeric:tabular-nums}
-.hint button{font:inherit;font-size:12px;color:var(--on-txt);background:var(--chip);
-  border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:4px 10px;cursor:pointer}
+.hint button{font:inherit;font-size:11.5px;color:var(--on-txt);background:transparent;
+  border:0;padding:2px 4px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;
+  text-decoration-color:color-mix(in srgb,var(--on-ring) 80%,transparent)}
+.hint button:hover{color:var(--brand-d)}
 
 /* ── 全屏壁纸模式：只留图，UI 全隐 ── */
 .fs{position:fixed;inset:0;z-index:90;display:none;background:var(--stage)}
@@ -143,27 +167,69 @@ header .sp{flex:1}
 .sheet .imgbox img{cursor:zoom-in}
 .sheet .imgbox.zoomed img,.fs.zoomed img{cursor:grab}
 .sheet .imgbox.grabbing img,.fs.grabbing img{cursor:grabbing}
+/* 通用态（.fs .cap 全屏条内是 flex 行内元素）：最小宽 + 居中 */
 .zbadge{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;
   min-width:46px;text-align:center;align-self:center}
 .zhint{font-size:11px;color:var(--dim);margin-left:auto;align-self:center}
+/* 倍率徽章与操作提示：从按钮行挪进图片四角（2026-10-13 弹窗瘦身）。
+   两者都是非交互信息 ⇒ pointer-events:none，滚轮/拖拽判定一点不受影响。
+   ⚠️ 必须限定 .imgbox：.zbadge 在**.fs .cap**（全屏 caption 条）里还有一个（#fsz），
+      那条是 flex 行内元素，吃绝对定位会被拽出布局、钉到视角上去。 */
+.sheet .imgbox .zbadge{position:absolute;left:12px;bottom:10px;z-index:3;pointer-events:none;
+  font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;
+  background:color-mix(in srgb,var(--panel) 62%,transparent);
+  border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:3px 9px}
+.sheet .imgbox .zhint{position:absolute;right:12px;bottom:10px;z-index:3;pointer-events:none;
+  font-size:11px;color:var(--dim)}
+/* 图上悬浮玻璃钮：hover 才显现，不占布局、不挤信息栏 */
+.pn{position:absolute;top:50%;transform:translateY(-50%);z-index:3;
+  width:40px;height:40px;border:0;border-radius:50%;cursor:pointer;
+  display:grid;place-items:center;font-size:24px;line-height:1;color:var(--txt);
+  background:color-mix(in srgb,var(--panel) 55%,transparent);
+  border:1px solid var(--chip-line);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 30%,transparent),var(--sh1);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  opacity:0;transition:opacity .22s var(--ease-ios),transform .16s var(--ease-ios),
+    color var(--t-col) var(--ease-ios)}
+.imgbox:hover .pn,.pn:focus-visible{opacity:1}
+.pn:hover{transform:translateY(-50%) scale(1.07);color:var(--on-txt)}
+.pn:active{transform:translateY(-50%) scale(.95)}
+.pn.p{left:12px}.pn.n{right:12px}
 .sheet .side{padding:20px;border-left:1px solid var(--line)}
 .sheet h2{font-size:17px;color:var(--title);margin-bottom:4px;line-height:1.35}
 .sheet .en{font-size:12px;color:var(--dim);font-family:ui-monospace,Consolas,monospace;word-break:break-all}
-.kv{margin:16px 0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12.5px}
-.kv dt{color:var(--dim)}.kv dd{color:var(--txt2)}
+/* kv 元数据：长说明整体挪到 dd 的 title 里（虚下划线 + help 光标示意"有得看"）——
+   值是短句，解释不占版面。带 title 的 dd 由 paint() 生成，见下方 rows。 */
+.kv{margin:14px 0;display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:12.5px}
+.kv dt{color:var(--dim);white-space:nowrap}
+.kv dd{color:var(--txt2);min-width:0}
+.kv dd[title]{cursor:help;text-decoration:underline dotted color-mix(in srgb,var(--dim) 55%,transparent);
+  text-underline-offset:3px}
 .ev{margin-top:14px}
 .ev h3{font-size:12px;color:var(--dim);font-weight:600;margin-bottom:8px;letter-spacing:.4px}
-.ev .row{font-size:12px;color:var(--txt2);padding:7px 10px;background:var(--panel2);
-  border-radius:var(--r-in);margin-bottom:6px;line-height:1.45}
+.ev .row{font-size:11.5px;color:var(--txt2);padding:6px 9px;background:var(--panel2);
+  border-radius:var(--r-in);margin-bottom:5px;line-height:1.45}
 .ev .row .src{display:block;color:var(--dim);font-size:10.5px;font-family:ui-monospace,Consolas,monospace;
   margin-top:2px;word-break:break-all}
-.nav{display:flex;gap:8px;margin-top:18px}
-.nav button,.nav a.dl{flex:1;font-size:12.5px;color:var(--txt2);background:var(--chip);
+/* 底部动作：主动作（设为网站背景）单独一行通栏，次级动作（全屏/下载/关闭）一行三个。
+   原版六钮 flex:1 挤在 320px 侧栏里三行半，是"想把所有东西都写出来"的典型现场。 */
+.nav{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+.nav .prim{width:100%;font-size:13px;font-weight:600;color:var(--on-txt);
+  background:var(--on-bg);border:1px solid var(--on-ring);border-radius:var(--r-in);
+  padding:10px;cursor:pointer;text-align:center;text-decoration:none;
+  transition:all var(--t-col) var(--ease-ios)}
+.nav .prim:hover{box-shadow:var(--sh1)}
+.nav .prim:active{transform:scale(.97)}
+/* syncBg() 切 .on：已是当前背景 ⇒ 品牌色浓一档，文本由 JS 改（"已设为背景（点一下取消）"） */
+.nav .prim.on{background:color-mix(in srgb,var(--brand) 24%,var(--panel))}
+.nav2{display:flex;gap:8px}
+.nav2 button,.nav2 .dl{flex:1;font-size:12.5px;color:var(--txt2);
+  background:color-mix(in srgb,var(--panel) 70%,transparent);
   border:1px solid var(--chip-line);text-decoration:none;text-align:center;
-  border-radius:var(--r-in);padding:9px;cursor:pointer;transition:all var(--t-col) var(--ease-ios)}
-.nav button:hover,.nav a.dl:hover{color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
-.nav button:active{transform:scale(.97)}
-.warn{margin-top:14px;font-size:11.5px;color:var(--dim);line-height:1.6;
+  border-radius:var(--r-in);padding:8px;cursor:pointer;transition:all var(--t-col) var(--ease-ios)}
+.nav2 button:hover,.nav2 .dl:hover{color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+.nav2 button:active{transform:scale(.97)}
+.warn{margin-top:12px;font-size:11px;color:var(--dim);line-height:1.55;
   border-left:2px solid var(--line);padding-left:10px}
 .empty{text-align:center;color:var(--dim);padding:60px 0;font-size:13px}
 @media (max-width:900px){.sheet{grid-template-columns:1fr}.sheet .side{border-left:0;border-top:1px solid var(--line)}}
@@ -183,10 +249,12 @@ header .sp{flex:1}
 
 <div class="wrap">
   <div class="tools"><span class="chip" id="cFav" title="只看已收藏的背景图" style="align-self:center">★ 只看收藏<b id="favN">0</b></span><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"></div>
-  <div class="grp" id="gTier"><span>命名档</span></div>
-  <div class="grp" id="gChar" hidden><span>画面</span></div>
-  <div class="grp" id="gGroup"><span>类目</span></div>
-  <div class="grp" id="gSub" hidden><span id="gSubLab">细分</span><select class="sel" id="gSubSel"></select></div>
+  <div class="fbar">
+    <div class="grp" id="gTier"><span>命名档</span></div>
+    <div class="grp" id="gChar" hidden><span>画面</span></div>
+    <div class="grp" id="gGroup"><span>类目</span></div>
+    <div class="grp" id="gSub" hidden><span id="gSubLab">细分</span><select class="sel" id="gSubSel"></select></div>
+  </div>
   <div class="hint" id="gHint" hidden></div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" style="display:none">没有符合条件的背景图</div>
@@ -203,7 +271,15 @@ header .sp{flex:1}
 
 <div class="ov" id="ov">
   <div class="sheet">
-    <div class="imgbox" id="ovbox"><img id="ovimg" alt=""></div>
+    <!-- 2026-10-13：上一张/下一张从右边信息栏挪到图上做悬浮玻璃钮（.pn），
+         底部按钮行只留主动作 + 次级行 —— 六个按钮挤在 320px 侧栏里是"臃肿"的主源。
+         所有 id 原样保留，JS 一行不用改；缩放/平移的 chrome() 判据本来就排除 button。 -->
+    <div class="imgbox" id="ovbox"><img id="ovimg" alt="">
+      <button class="pn p" id="ovprev" title="上一张（←）" aria-label="上一张">‹</button>
+      <button class="pn n" id="ovnext" title="下一张（→）" aria-label="下一张">›</button>
+      <span class="zbadge" id="ovz">适配</span>
+      <span class="zhint">滚轮缩放 · 拖拽平移 · 双击 1:1</span>
+    </div>
     <div class="side">
       <h2 id="ovname"></h2>
       <div class="en" id="oven"></div>
@@ -211,14 +287,12 @@ header .sp{flex:1}
       <div class="ev"><h3>配置表里的出处</h3><div id="ovev"></div></div>
       <div class="warn" id="ovwarn"></div>
       <div class="nav">
-        <button id="ovprev">← 上一张</button>
-        <button id="ovnext">下一张 →</button>
-        <button id="ovfs">全屏看壁纸</button>
-        <a class="dl" id="ovdl" download>下载原图</a>
-        <button id="ovbg">设为网站背景</button>
-        <button id="ovclose">关闭（Esc）</button>
-        <span class="zbadge" id="ovz">适配</span>
-        <span class="zhint">滚轮缩放 · 拖拽平移 · 双击 1:1</span>
+        <button id="ovbg" class="prim">设为网站背景</button>
+        <div class="nav2">
+          <button id="ovfs">全屏看壁纸</button>
+          <a class="dl" id="ovdl" download>下载原图</a>
+          <button id="ovclose">关闭（Esc）</button>
+        </div>
       </div>
     </div>
   </div>
@@ -425,19 +499,26 @@ function paint(){
   if(window.SiteBg) syncBg();
   $('ovname').textContent=title(it);
   const grp=(META.groups[it.group]||{}).cn||it.group;
-  const rows=[['命名档',TIER[it.tier]+(it.tier==='inferred'?'（继承自同词根「'+it.inferred_from+'」）':'')],
-              ['类目',grp+' / '+((META.dirs[it.dir]||{}).cn||it.dir)
-                      +(it.root_dir&&it.root_dir!==it.dir?('（源目录 '+it.root_dir+'）'):'')],
-              ['变体',it.variant==='hx'?'和谐版（_hx）'
-                      :(it.same_name_of?('同名另一张，主图 '+it.same_name_of):'—')],
+  /* 2026-10-13：kv 的值一律短句，解释进 dd 的 title（CSS 给 dd[title] 画了虚下纹 + help 光标）。
+     "这一档到底什么意思"的完整版仍在下方 .warn —— 两处不重复，只是分工：
+     面上给结论，悬停/说明区给依据。 */
+  const rows=[['命名档',TIER[it.tier],
+               it.tier==='inferred'?('继承自同词根「'+it.inferred_from+'」'):''],
+              ['类目',grp+' / '+((META.dirs[it.dir]||{}).cn||it.dir),
+               (it.root_dir&&it.root_dir!==it.dir)?('源目录 '+it.root_dir):''],
+              ['变体',it.variant==='hx'?'和谐版':(it.same_name_of?'同名另一张':'—'),
+               it.variant==='hx'?'文件名后缀 _hx'
+                      :(it.same_name_of?('主图 '+it.same_name_of):'')],
               /* 「没判过」必须和「判过=无角色」分开写：前者是标注覆盖面，后者是结论 */
-              ['画面',it.has_char==null?'未标注（该类目没做过逐格目视标注）'
-                      :(it.has_char?'有角色':'无角色')+'（人工逐格标注，非文件名规则）'],
-              ['尺寸',it.w+' × '+it.h],['原图体积',mb(it.bytes)],
-              ['词根',it.root||'（无）']];
-  if(it.baked) rows.push(['OCR 原文',it.baked.ocr_raw+'（置信 '+it.baked.ocr_conf+'，与定稿重合 '+it.baked.overlap+'）']);
-  if(it.series) rows.splice(1,0,['系列名',it.series]);
-  $('ovkv').innerHTML=rows.map(r=>'<dt>'+esc(r[0])+'</dt><dd>'+esc(r[1])+'</dd>').join('');
+              ['画面',it.has_char==null?'未标注':(it.has_char?'有角色':'无角色'),
+               it.has_char==null?'该类目没做过逐格目视标注':'人工逐格标注，非文件名规则'],
+              ['尺寸',it.w+' × '+it.h,''],['原图体积',mb(it.bytes),''],
+              ['词根',it.root||'（无）','']];
+  if(it.baked) rows.push(['OCR 原文',it.baked.ocr_raw,
+    '置信 '+it.baked.ocr_conf+'，与定稿重合 '+it.baked.overlap+'；取证方式：'+it.baked.via]);
+  if(it.series) rows.splice(1,0,['系列名',it.series,'']);
+  $('ovkv').innerHTML=rows.map(r=>'<dt>'+esc(r[0])+'</dt><dd'+
+    (r[2]?' title="'+esc(r[2])+'"':'')+'>'+esc(r[1])+'</dd>').join('');
   const ev=[];
   for(const c of (it.cn||[])){
     const srcs=(c.src||[]).map(s=>s.t+'.'+s.f+' 行 '+s.id).join(' ｜ ');
@@ -597,9 +678,11 @@ addEventListener('keydown',e=>{
 if(!REDUCE){/* 动效本身已由 token 收在 0.2~0.34s，这里只是给"减少动效"偏好留一个钩子 */}
 boot();
 
-/* 液态玻璃：本页**不再挂任何折射盒**（2026-10-11 用户实机：页头那条带子"和首页一样是一条杠"）。
+/* 材质说明（2026-10-13）：搜索框自带一层 CSS blur(20px) saturate(1.6)（"湿玻璃"），
+   但本页**不挂任何折射盒**——2026-10-11 用户实机：页头那条带子"和首页一样是一条杠"。
    卡片也不挂：数量大、hover 有位移，而 backdrop-filter 的成本单位就是盒子个数（§134），
-   且 §136 那条失效模式正是"被旋转的盒子里挂遮罩"。判据与像素量法见 §138。 */
+   且 §136 那条失效模式正是"被旋转的盒子里挂遮罩"。判据与像素量法见 §138。
+   真折射留给音乐库播放器面板那一盒（liquid_glass.js 的既有结论不变）。 */
 </script>
 </body>
 </html>

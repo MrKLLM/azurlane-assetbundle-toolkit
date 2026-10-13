@@ -4238,3 +4238,53 @@ prefab→res 材质），必须按 `(file_id, path_id)` 跨包取回真实对象
 - **改完 `gallery_src/` 正本，验证之前必须先 `deploy_gallery.py`（默认模式）再 `--check`**。
   Edit 走"写临时文件 + 改名"的原子保存，**会断硬链**；本轮第一次"复测"测的正是没打补丁的旧副本，
   差点把一次空测当验证结果报出去。（那次废跑反过来当成了仪器的可重复性对照，不算白跑。）
+
+### WF-41: 画廊 UI / CSS 材质轮——观感反馈怎么定位、怎么改、怎么验（2026-10-13）
+
+**目标**：用户实机观感反馈（控件像贴纸 / 选中态两个长相 / 按键不高级 / 排版臃肿 / 顶栏挡背景）
+→ 定位到具体规则 → 改材质 → 四探针 + 人眼判据全过才算完。听觉类改动不适用。
+
+**改哪里**（一处处对投诉）：
+
+| 层 | 文件 | 改法 | 对应投诉 |
+|---|---|---|---|
+| 共用兜底 | `gallery_src/favorites.js` 的 has-sitebg 规则 | 控件 92%→78% + `blur(16px) saturate(1.5)`；页头 90%→78%；`.hint` 改文字晕影 | ① 实色块 |
+| token | `gallery_src/theme.css` | `--nav-blur` 6→13px | ⑤ 顶栏 |
+| 主界面 | `gallery_src/index.html` | 搜索/分段/下拉/开关改 `color-mix(panel 55%)`；label 去实色底；hint 晕影 | ⑤ |
+| 音乐库 | `gallery_src/bgm.html` | 选中态统一 `--on-bg/--on-txt/--on-ring`；播放器 38/52/34px | ②③ |
+| 背景库 | `gallery_src/backgrounds.html` | 控件半透明 + blur(20px)；`.fbar` 合并筛选行；弹窗 `.pn` 悬浮钮 + 主/次级行；kv 移 title | ①④ |
+
+**三条设计判据**（这轮之后固化，别回退）：
+1. **站用背景下的控件 = 烟熏玻璃**：不透明上限 78% + blur(16px)。92% 那版读作贴纸；
+   再低（<70%）12.5px 灰字在亮立绘前压不住。模糊比不透明度更能「去块感」。
+2. **顶栏玻璃化不新增滤镜盒**：header 自己有 blur，子控件只降透明度直接叠它的 backdrop ⇒
+   §134「成本单位是盒个数」红线不动。折射（`liquid_glass.js`）只给「身后是低频背景」的
+   常驻单盒；has-sitebg 的 `!important` 会盖掉 `--lgf`，别在会被它命中的页里引折射模块。
+3. **协议语言全站一套**：选中 = 更亮一档玻璃 + 一圈细彩色内描边 + 彩色文字（`--on-*`），
+   实色渐变只留给主行动钮（播放键 / 主动作）。
+
+**验证（按序，任一红就停）**：
+```bash
+py -3 -m http.server 8777 --bind 127.0.0.1 -d Output   # 常驻，glass/favorites 两个探针要用
+py -3 scripts/diag/glass_pages_probe.py --port 8777    # 挂载/禁挂/零盒/桶≤2
+py -3 scripts/diag/bgm_page_probe.py                   # 音乐库功能 + 双主题截图
+py -3 scripts/diag/bg_page_probe.py                    # 背景库功能 + 双主题截图
+py -3 scripts/diag/favorites_probe.py --port 8777 --shots  # 站用背景场景 + 铺满判图
+py -3 scripts/deploy_gallery.py --check                # 硬链/漂移
+```
+探针判据只说「功能生效」；**审美必须人眼看 `.diag/*_shot_*.png` / `favshots/`**——
+每轮挑 3~5 张判图，一张钉住一个投诉。
+
+**踩坑记录**（四条，两条已进技能）：
+- ⚠️ **同一文件的并行 Edit 静默丢改动**（一次丢 4 笔、全部回报成功，页面渲染出「分裂态」）
+  ⇒ 同文件多次 Edit 串行 + grep 标记原子句核验。→ 技能 `windows-hardlink-dedup-verify` v1.6.0。
+- ⚠️ **探针判据不随设计变更就是假红**：文本断言读的是正文，说明挪进 `title` 后必红
+  ⇒ 改读「可见值 + title」合并串（`#ovkv` 的 dt 标签也要带上）。判据语义不许降级——
+  信息仍在 DOM，只是换了渲染。
+- `.zbadge` 有两个消费方（弹窗 + 全屏条 `.fs .cap`），新样式必须限定 `.sheet .imgbox`。
+- 无头环境：websocket-client 在 venv（`~/.workbuddy-ai/binaries/python/envs/default`）；
+  CDP 消息参数必须包 `params`；localStorage 注入要先导航到目标源再 set + reload。
+
+**涉及文件**：`gallery_src/{theme.css,favorites.js,index.html,bgm.html,backgrounds.html}`、
+`scripts/diag/{glass_pages_probe,bgm_page_probe,bg_page_probe,favorites_probe}.py`、
+`.agents/skills/{windows-hardlink-dedup-verify,headless-chrome-cdp-batch-export}/SKILL.md`。

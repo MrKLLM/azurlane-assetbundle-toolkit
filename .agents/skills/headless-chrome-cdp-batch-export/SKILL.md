@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。触发词（验收向）：点击没落地、开关无效还是探针没点到、画面改变判据全红而可逆判据全绿、取样哨兵值 None 参与比较、ES module 整块不初始化、vendor import 闭包。
-version: 1.8.16
+version: 1.8.17
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -577,6 +577,21 @@ version: 1.8.16
       换成"因为 B 的底更透所以应该读得出来"的说法在 B 上保留，仍会被用户实机判死。⇒ 要么在 B 上
       拿到独立证据（含最暗背景那一档），要么一起撤。
 
+### 画廊 UI / CSS 改动轮的验证探针清单（2026-10-13 玻璃化一轮攒下的）
+
+改 `gallery_src/` 的**视觉层**（配色 / 材质 / 排版 / 控件）不动数据与交互逻辑时，按这张表选探针，别现造：
+
+| 改动面 | 探针 | 服务器 | 判据要点 |
+|---|---|---|---|
+| 液态玻璃挂载 / 禁挂 / 盒数 | `scripts/diag/glass_pages_probe.py --port 8777` | 8777 静态服务 | 挂载的 `backdrop-filter` 计算值必须含 `url()`（只看类名会骗人）；桶 ≤2；背景库页保持零折射盒；普通行零 backdrop-filter |
+| 音乐库（bgm.html） | `scripts/diag/bgm_page_probe.py` | 自起，隔离端口 | 播放/潮水/拖动/筛选 + 双主题截图 + 夜主题播放行/搜索框折射 |
+| 背景库（backgrounds.html） | `scripts/diag/bg_page_probe.py` | 自起，隔离端口 | 解码/筛选/详情层/缩放 1:1 + 双主题截图 + **served 字节 == 正本字节**（防跑旧副本） |
+| 收藏 / 站用背景（四页共用） | `scripts/diag/favorites_probe.py --port 8777 --shots` | 8777 静态服务 | `has-sitebg` 生效、跨页持久、取消后空态 + 铺满判图 |
+
+三条纪律（每条对应一次真实返工）：
+1. **设计变更后必须先改探针判据再重跑**。实例：kv 长说明从正文移进 `title` 属性后，`bg_page_probe` 两条文本断言假红——判据改成读「可见值 + title 合并串」，语义不降级（信息仍在 DOM，只是换渲染）。注意 `dt` 标签不在合并串里，拼串要把 `#ovkv` 的 textContent 一起带上。
+2. **探针判据只证功能，审美必须人眼看截图**（`.diag/bg_shot_*.png` / `bgm_shot_*.png` / `favshots/`）。本轮四张人眼判图各自钉住一个投诉：播放器按键尺寸、选中态统一、弹窗按钮重排、站用背景下的工具栏无实色块。
+3. **一次性截图探针写 `.diag/`、用完即归档**（`check_diag_hygiene.py`）；CDP 手写脚本的 `Runtime.evaluate` 消息必须带 `params`、`Page.captureScreenshot` 的 `clip` 同属 params（放顶层会静默 KeyError）。无头注入 localStorage 要先导航到目标源再 set + reload（在 `about:blank` 上设无效）。
 
 ## 验证
 

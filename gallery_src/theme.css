@@ -75,7 +75,7 @@
   /* 导航栏是"厚材质"：比卡片实，但仍然是玻璃——下沿一条亮发丝边代替灰边 */
   --nav-bg:rgba(255,255,255,.16); --nav-line:rgba(255,255,255,.18);
   --title:var(--brand-d);
-  --nav-blur:6px;
+  --nav-blur:13px;
   --gloss:linear-gradient(180deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,.06) 42%,rgba(255,255,255,0) 60%);
   /* 材质态三件套：选中不再整块填色，而是"更亮一档的玻璃 + 一圈细彩色内描边 + 彩色文字"。
      整页只留 brand 一个强调色（pop 从此只出现在标签/角标这类**内容**上，不再出现在控件上）。 */
@@ -114,7 +114,7 @@
   --body-tint:rgba(10,16,30,.32);
   --sh-float:0 14px 30px rgba(0,0,0,.42);
   --nav-bg:rgba(10,16,30,.2); --nav-line:rgba(255,255,255,.10);
-  --nav-blur:6px;
+  --nav-blur:13px;
   --gloss:linear-gradient(180deg,rgba(255,255,255,.08) 0%,rgba(255,255,255,.025) 42%,rgba(255,255,255,0) 60%);
   --on-bg:color-mix(in srgb,var(--brand) 18%,transparent);
   --on-ring:color-mix(in srgb,var(--brand) 46%,transparent);

@@ -93,7 +93,12 @@ html.lg input.q.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(--lgf,
   transition:transform var(--t-col) var(--ease-ios),background var(--t-col) var(--ease-ios),
     color var(--t-col) var(--ease-ios),border-color var(--t-col) var(--ease-ios)}
 .chip:hover{transform:translateY(-1px);border-color:var(--brand);color:var(--brand-d)}
-.chip.on{background:var(--grad-brand);color:#fff;border-color:transparent;box-shadow:var(--sh1)}
+/* 选中态 2026-10-13 统一为背景库同款"浅玻璃"（--on-bg 底 + --on-txt 字 + --on-ring 细描边），
+   替掉原来的实色品牌渐变 --grad-brand：用户原话"我喜欢背景库选中的效果"。
+   整页只留 brand 一个强调色，选中 = 更亮一档的玻璃，不再靠"一整块蓝"喊话。 */
+.chip.on{background:var(--on-bg);color:var(--on-txt);border-color:transparent;
+  box-shadow:inset 0 0 0 1px var(--on-ring)}
+.chip.on:hover{color:var(--on-txt);transform:none}
 .chip b{font-weight:400;opacity:.62;margin-left:4px;font-variant-numeric:tabular-nums}
 
 /* ── 曲目行：湿玻璃卡片。进场用一次交错浮现，之后只保留 hover/playing 两种状态 ──
@@ -165,25 +170,50 @@ html.lg .row.playing.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(-
    而这里根本没用遮罩。板子自己的 transform 只有 2D translate（实测 2D 不触发那条失效）。 */
 html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.05) var(--lgf,blur(0px));
   backdrop-filter:blur(26px) saturate(1.6) brightness(1.05) var(--lgf,blur(0px))}
-.bar .top{display:flex;align-items:center;gap:10px}
+/* gap 12px：38/52px 的钮之间需要比原来 30px 时代多一口呼吸 */
+.bar .top{display:flex;align-items:center;gap:12px}
 .bar .cur{font-size:13.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .bar .cur i{font-style:normal;font-weight:400;color:var(--dim);margin-left:8px;font-size:11.5px}
 .bar .tm{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;min-width:38px;text-align:center}
-.bar button{border:0;background:transparent;cursor:pointer;color:var(--txt2);width:30px;height:30px;
-  border-radius:50%;display:grid;place-items:center;
-  transition:transform var(--t-col) var(--ease-ios),background var(--t-col) var(--ease-ios),
-    color var(--t-col) var(--ease-ios)}
-.bar button:hover{background:color-mix(in srgb,var(--panel2) 85%,transparent);transform:scale(1.08)}
-.bar button:active{transform:scale(.95)}
-.bar button.on{color:var(--brand-d);background:color-mix(in srgb,var(--brand-l) 70%,transparent)}
-.bar svg{width:15px;height:15px;fill:currentColor}
-.bar .vol{width:74px;height:4px;-webkit-appearance:none;appearance:none;outline:none;cursor:pointer;
+/* 播放器按键（2026-10-13 重做）：用户原话"按键的太小了，而且看着不够高级，不像现代的
+   拟态玻璃感，要像荣耀的那种拟态玻璃"。配方三件套——
+     ① 次级键 = 38px 玻璃圆钮：半透明渐变底 + 上沿内高光 + 细描边 + 柔投影，hover 上浮 1px；
+     ② 播放键 = 52px 品牌光球：渐变 + 顶部高光 + 品牌色外发光，整条播放器的视觉锚点；
+     ③ 循环键 34px，模式开关比 transport 键小一档，不抢主语。
+   全部坐在 .bar 自己的 backdrop-filter 上 ⇒ 半透明即磨砂，不新增滤镜盒（§134 盒数红线）。
+   ⚠️ 别改回"透明底 30px"：那版是几个看不见的小圆点，用户实机点名太小、不高级。 */
+.bar button{border:0;cursor:pointer;color:var(--txt2);width:38px;height:38px;
+  border-radius:50%;display:grid;place-items:center;position:relative;
+  background:linear-gradient(180deg,color-mix(in srgb,#fff 26%,transparent) 0%,
+    color-mix(in srgb,var(--panel) 24%,transparent) 100%);
+  border:1px solid color-mix(in srgb,var(--glass-line) 85%,transparent);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 42%,transparent),var(--sh1);
+  transition:transform .18s var(--ease-ios),box-shadow .18s var(--ease-ios),
+    color var(--t-col) var(--ease-ios),background var(--t-col) var(--ease-ios)}
+.bar button:hover{transform:translateY(-1px);color:var(--brand-d);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 55%,transparent),var(--sh2)}
+.bar button:active{transform:translateY(0) scale(.95)}
+.bar button.on{color:var(--on-txt);background:var(--on-bg);
+  border-color:color-mix(in srgb,var(--on-ring) 85%,transparent);
+  box-shadow:inset 0 0 0 1px var(--on-ring)}
+.bar svg{width:17px;height:17px;fill:currentColor;position:relative}
+/* 播放键：唯一的实心大钮。外发光用品牌色 32%，昼/夜都由 token 派生，不写字面色。 */
+#pp{width:52px;height:52px;background:var(--grad-brand);color:#fff;border-color:transparent;
+  box-shadow:var(--sh2),inset 0 1px 0 color-mix(in srgb,#fff 48%,transparent),
+    0 6px 16px color-mix(in srgb,var(--brand) 32%,transparent)}
+#pp svg{width:21px;height:21px}
+#pp:hover{color:#fff;transform:translateY(-1px) scale(1.04);
+  box-shadow:var(--sh3),inset 0 1px 0 color-mix(in srgb,#fff 48%,transparent),
+    0 8px 20px color-mix(in srgb,var(--brand) 40%,transparent)}
+#pp:active{transform:translateY(0) scale(.96)}
+#lp{width:34px;height:34px}
+.bar .vol{width:80px;height:5px;-webkit-appearance:none;appearance:none;outline:none;cursor:pointer;
   background:color-mix(in srgb,var(--line) 80%,transparent);border-radius:var(--r-chip)}
-.bar .vol::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;
+.bar .vol::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
   background:var(--brand);border:2px solid var(--panel);box-shadow:var(--sh1);cursor:pointer;
   transition:transform var(--t-col) var(--ease-ios)}
-.bar .vol:hover::-webkit-slider-thumb{transform:scale(1.18)}
-.bar .vol::-moz-range-thumb{width:11px;height:11px;border:2px solid var(--panel);border-radius:50%;
+.bar .vol:hover::-webkit-slider-thumb{transform:scale(1.15)}
+.bar .vol::-moz-range-thumb{width:13px;height:13px;border:2px solid var(--panel);border-radius:50%;
   background:var(--brand);cursor:pointer}
 
 /* 玻璃管道：潮水装进一根胶囊管里。管壁靠三样读出来 —— 顶部内壁高光、底部内壁暗部、一圈细边；
@@ -235,7 +265,7 @@ html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.
   color:var(--txt2);transition:background var(--t-col) var(--ease-ios),color var(--t-col) var(--ease-ios)}
 .opt button+button{border-left:1px solid var(--chip-line)}
 .opt button:hover{background:color-mix(in srgb,var(--panel2) 80%,transparent)}
-.opt button.on{background:var(--grad-brand);color:#fff}
+.opt button.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
 .empty{padding:46px 10px;text-align:center;color:var(--dim);font-size:13.5px;line-height:1.9}
 code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   background:color-mix(in srgb,var(--panel2) 80%,transparent);
