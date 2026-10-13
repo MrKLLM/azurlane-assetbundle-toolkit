@@ -44,6 +44,11 @@ CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
 KEY = 'gezi_2'
 STOPS = [(10.87, 'good'), (15.40, 'bad')]   # (clip 内秒, 标签)
 OUT = os.path.join(ROOT, '.diag', 'wrist_ledger.json')
+# --group idle —— 换一条动作跑同一套台账（验"腕口那族整窗 op=0 是不是被 idle 的 PartOpacity 闸着"）
+GROUP = sys.argv[sys.argv.index('--group') + 1] if '--group' in sys.argv else 'home'
+GROUP_STEP = 0.12
+if GROUP != 'home':
+    OUT = os.path.join(ROOT, '.diag', f'wrist_ledger_{GROUP}.json')
 
 # 两种模式（默认保持原样：两拍对照台账，别的会话还在用）：
 #   --sweep 15.00:16.00:0.05  同一趟播放里按细时刻跑一串（判"手短暂消失"到底是哪几帧）
@@ -71,17 +76,18 @@ JS_BOOT = r"""(async(key)=>{ try{
   return JSON.stringify({key, ok:true, physicsOff:ph});
 }catch(e){ return 'ERR '+(e.message||e); }})"""
 
-JS_PLAY = r"""(()=>{const m=l2State.app.stage.children[0],im=m.internalModel;
+JS_PLAY = r"""(async(a)=>{const m=l2State.app.stage.children[0],im=m.internalModel;
   if(im.__phEval) im.physics.evaluate=im.__phEval;
-  const s=document.getElementById('l2Motion'); s.value='home';
+  const s=document.getElementById('l2Motion'); s.value=a.g;
   s.dispatchEvent(new Event('change',{bubbles:true}));
   const b=document.getElementById('l2Replay'); if(b)b.click();
   m.autoUpdate=false;
   /* ⚠️ 必须回报"到底起播了没有"：产品侧 play() 是 try{playVoice(); mm.startMotion()}catch{return false}
      —— 语音一抛异常动作就不起播，而按钮点击本身不报错。10-13 的 --twice 第一版就是因为
      只看点击的返回值，把"模型停在默认参数上空推时钟"当成了第二遍，对照整个作废。 */
+  await new Promise(r=>setTimeout(r,400));      // 换组要等库把动作表切过去，否则读到的还是上一条
   const st=im.motionManager.state;
-  return JSON.stringify({group:st.currentGroup, idx:st.currentIndex, playing:!!st.motion});})()"""
+  return JSON.stringify({want:a.g, group:st.currentGroup, idx:st.currentIndex, playing:!!st.motion});})"""
 
 JS_SNAP = r"""(async(a)=>{
   const m=l2State.app.stage.children[0], cm=m.internalModel.coreModel, D=cm._model.drawables;
@@ -207,25 +213,30 @@ def main():
             产品侧 play() 是 try{playVoice(); mm.startMotion()}catch{return false}，语音抛异常
             就真的不起播，所以这一步不能省，只是不能读太早。
             """
-            ev(JS_PLAY)
+            def fire():
+                r = ev(f'({JS_PLAY})({{g:"{GROUP}"}})')
+                try:
+                    return json.loads(r)
+                except Exception:
+                    return {'raw': str(r)[:120]}
+
+            st = fire()
             spent = 0.0
             for k in range(3):
                 for _ in range(3):                     # 推 0.36s 让队列落地
-                    ev('l2State.app.stage.children[0].update(120)')
+                    ev(f'l2State.app.stage.children[0].update({int(GROUP_STEP * 1000)})')
                     ev('new Promise(r=>requestAnimationFrame(()=>r(1)))')
-                    spent += 0.12
-                if cur_group() == 'home':
-                    print(f'  {label}: 已起播 home（验真烧掉 {spent:.2f}s）', flush=True)
+                    spent += GROUP_STEP
+                if cur_group() == GROUP:
+                    print(f'  {label}: 已起播 {GROUP}（验真烧掉 {spent:.2f}s）{st}', flush=True)
                     return spent
-                print(f'  {label} 第 {k + 1} 次验真失败（当前 {cur_group()}）⇒ 先切 idle 再切回', flush=True)
-                ev("(()=>{const s=document.getElementById('l2Motion');s.value='idle';"
-                   "s.dispatchEvent(new Event('change',{bubbles:true}));})()")
-                time.sleep(0.4)
-                ev(JS_PLAY)
-            raise SystemExit(f'对照作废：{label} 三步内 motionManager 仍没切到 home'
+                print(f'  {label} 第 {k + 1} 次验真失败（当前 {cur_group()}，fire 返回 {st}）'
+                      f'⇒ 再点一次', flush=True)
+                st = fire()
+            raise SystemExit(f'对照作废：{label} 三步内 motionManager 仍没切到 {GROUP}'
                              f'（当前 {cur_group()}）—— 这趟的任何差值都不许引用')
 
-        print('起播 home …', flush=True)
+        print(f'起播 {GROUP} …', flush=True)
         t = start_play('第一遍')
         def snap_all(tag):
             head = ev(f'({JS_SNAP})({{}})')
