@@ -245,14 +245,29 @@ def main():
           q.value=''; q.dispatchEvent(new Event('input')); await t(300);
           const cu=[...document.querySelectorAll('.chip[data-k=usage]')][0]; cu.click(); await t(300);
           const n2=document.querySelectorAll('.row').length; const on1=cu.classList.contains('on');
+          const cs0=getComputedStyle(cu), fg=cs0.color, bg=cs0.backgroundColor;
+          const rgb=s=>{let m=s.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+            if(m)return [+m[1],+m[2],+m[3]];m=s.match(/rgba?\(([^)]+)\)/i);
+            if(m)return m[1].replace(/\//g,' ').split(/[ ,]+/).filter(Boolean).slice(0,3).map(Number);
+            m=s.match(/oklab\(\s*([\d.]+)\s+([-\d.]+)\s+([-\d.]+)/i);if(!m)return null;
+            const L=+m[1],a=+m[2],b=+m[3],l=L+.3963377774*a+.2158037573*b,
+              m0=L-.1055613458*a-.0638541728*b,n=L-.0894841775*a-1.291485548*b;
+            return [4.0767416621*l**3-3.3077115913*m0**3+.2309699292*n**3,
+              -1.2684380046*l**3+2.6097574011*m0**3-.3413193965*n**3,
+              -.0041960863*l**3-.7034186147*m0**3+1.707614701*n**3].map(x=>Math.max(0,Math.min(1,x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055))*255)};
+          const lum=a=>{if(!a)return NaN;const c=a.map(x=>x>1?x/255:x).map(x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4);
+            return .2126*c[0]+.7152*c[1]+.0722*c[2]};
+          const lf=lum(rgb(fg)), lb=lum(rgb(bg)), contrast=Number.isFinite(lf+lb)?(Math.max(lf,lb)+.05)/(Math.min(lf,lb)+.05):0;
           cu.click(); await t(300); const n3=document.querySelectorAll('.row').length;
           const cs=[...document.querySelectorAll('.chip[data-k=scene]')][0]; cs.click(); await t(300);
           const n4=document.querySelectorAll('.row').length; cs.click(); await t(300);
-          return {n0,n1,n2,n3,n4,on1,first:cu.dataset.v,scene:cs.dataset.v};
+          return {n0,n1,n2,n3,n4,on1,first:cu.dataset.v,scene:cs.dataset.v,fg,bg,contrast};
         })()""")
         if isinstance(d4, dict) and '__err' not in d4:
             say(d4['n1'] >= 1 and d4['n1'] < d4['n0'], f"搜「灾厄」得 {d4['n1']} 行")
             say(0 < d4['n2'] < d4['n0'] and d4['on1'], f"按用途「{d4['first']}」筛出 {d4['n2']} 行且 chip 高亮")
+            say(d4['contrast'] >= 4.5,
+                f"昼主题选中 chip 字/底对比度 ≥4.5:1（{d4['contrast']:.2f}:1，{d4['fg']} / {d4['bg']}）")
             say(d4['n3'] == d4['n0'], f"再点一次取消筛选，恢复 {d4['n3']} 行")
             say(0 < d4['n4'] < d4['n0'], f"按出处「{d4['scene']}」筛出 {d4['n4']} 行")
         else:
@@ -277,18 +292,35 @@ def main():
         ev("""(()=>{document.querySelector('#gTheme [data-t=dark]').click();return 1})()""")
         time.sleep(1.2)
         say(os.path.getsize(shot('dark')) > 20000, f"夜：{shot('dark')}")
-        d5 = ev("""(()=>{const el=document.querySelector('.row.playing');
+        d5 = ev(r"""(()=>{const el=document.querySelector('.row.playing');
             const p=el?getComputedStyle(el).backdropFilter:'(无播放行)';
             const q=getComputedStyle(document.querySelector('input.q')).backdropFilter;
             const n=[...document.querySelectorAll('.row:not(.playing)')].slice(0,40)
               .every(r=>(getComputedStyle(r).backdropFilter||'none')==='none');
-            return {play:p,search:q.slice(0,36),plainZero:n}})()""")
+            const chip=document.querySelector('.chip[data-k=usage]');chip.click();
+            const s=getComputedStyle(chip), fg=s.color, bg=s.backgroundColor;
+            const rgb=v=>{let m=v.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+              if(m)return [+m[1],+m[2],+m[3]];m=v.match(/rgba?\(([^)]+)\)/i);
+              if(m)return m[1].replace(/\//g,' ').split(/[ ,]+/).filter(Boolean).slice(0,3).map(Number);
+              m=v.match(/oklab\(\s*([\d.]+)\s+([-\d.]+)\s+([-\d.]+)/i);if(!m)return null;
+              const L=+m[1],a=+m[2],b=+m[3],l=L+.3963377774*a+.2158037573*b,
+                m0=L-.1055613458*a-.0638541728*b,n=L-.0894841775*a-1.291485548*b;
+              return [4.0767416621*l**3-3.3077115913*m0**3+.2309699292*n**3,
+                -1.2684380046*l**3+2.6097574011*m0**3-.3413193965*n**3,
+                -.0041960863*l**3-.7034186147*m0**3+1.707614701*n**3].map(x=>Math.max(0,Math.min(1,x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055))*255)};
+            const lum=a=>{if(!a)return NaN;const x=a.map(v=>v>1?v/255:v).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
+              return .2126*x[0]+.7152*x[1]+.0722*x[2]};
+            const l1=lum(rgb(fg)),l2=lum(rgb(bg)),contrast=Number.isFinite(l1+l2)?(Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05):0;
+            return {play:p,search:q.slice(0,36),plainZero:n,fg,bg,contrast}})()""")
         # 2026-10-12 改判据：普通行**故意不挂** backdrop-filter（§134/§136，见 bgm.html .row 注释），
         # 旧判据"行卡有 blur"与该决定直接矛盾，是探针过期而非页面缺陷。
         # 新口径：玻璃材质只认三处结构件——播放器、搜索框、正在播放的行；普通行必须零盒。
         say(isinstance(d5, dict) and 'url(' in str(d5.get('play', ''))
             and 'url(' in str(d5.get('search', '')) and d5.get('plainZero'),
             f"夜主题：播放行+搜索框挂折射、普通行零 backdrop-filter: {d5}")
+        say(isinstance(d5, dict) and d5.get('contrast', 0) >= 4.5,
+            f"夜主题选中 chip 字/底对比度 ≥4.5:1（{d5.get('contrast', 0):.2f}:1，"
+            f"{d5.get('fg')} / {d5.get('bg')}）")
 
         print('== 主页入口 ==')
         d6 = ev("""(async()=>{ const r=await fetch('index.html'); const b=await r.text();

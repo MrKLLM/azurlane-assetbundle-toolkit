@@ -160,11 +160,33 @@ def main():
           const chips=[...document.querySelectorAll('#gChar .chip')];
           const num=t=>+((t.match(/(\d+)\s*$/)||[0,0])[1]);
           const h=document.getElementById('gHint');
+          const toolsBg=getComputedStyle(document.querySelector('.tools')).backgroundColor;
+          const fb=document.querySelector('.fbar'), groups=[...fb.querySelectorAll('.grp:not([hidden])')];
+          const layout={toolsBg,bar:getComputedStyle(fb).display,
+            groups:groups.map(g=>({id:g.id,display:getComputedStyle(g).display,
+              tray:g.querySelector('.chipset')&&getComputedStyle(g.querySelector('.chipset')).flexWrap,
+              label:g.firstElementChild&&g.firstElementChild.textContent.trim()}))};
+          const active=chips.find(x=>x.classList.contains('on')), cs=active&&getComputedStyle(active);
+          const rgb=s=>{let m=s.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+            if(m)return [+m[1],+m[2],+m[3]];m=s.match(/rgba?\(([^)]+)\)/i);
+            if(m)return m[1].replace(/\//g,' ').split(/[ ,]+/).filter(Boolean).slice(0,3).map(Number);
+            m=s.match(/oklab\(\s*([\d.]+)\s+([-\d.]+)\s+([-\d.]+)/i);
+            if(!m)return null;
+            const L=+m[1],a=+m[2],b=+m[3],l=L+0.3963377774*a+0.2158037573*b,
+              m0=L-0.1055613458*a-0.0638541728*b,n=L-0.0894841775*a-1.2914855480*b;
+            return [1.226879873*l**3-0.557814996*m0**3+0.281391050*n**3,
+              -0.040575746*l**3+1.112286829*m0**3-0.071711066*n**3,
+              -0.076372949*l**3-0.421493324*m0**3+1.586924024*n**3].map(v=>Math.max(0,Math.min(1,v))*255)};
+          const lum=a=>{if(!a)return NaN;const x=a.map(v=>v>1?v/255:v).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
+            return .2126*x[0]+.7152*x[1]+.0722*x[2]};
+          const l1=cs&&lum(rgb(cs.color)),l2=cs&&lum(rgb(cs.backgroundColor));
+          const contrast=Number.isFinite(l1+l2)?(Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05):0;
           return {cards:document.querySelectorAll('.card').length,
                   nChips:chips.length,
                   on:chips.filter(x=>x.classList.contains('on')).map(x=>x.textContent),
                   counts:chips.map(x=>[x.textContent.replace(/\s*\d+$/,''),num(x.textContent)]),
-                  hintHidden:h.hidden, hintText:h.textContent.trim()};
+                  hintHidden:h.hidden, hintText:h.textContent.trim(),filterLayout:layout,
+                  contrast,fg:cs&&cs.color,bg:cs&&cs.backgroundColor};
         })()""")
         say(isinstance(d0, dict) and d0.get('nChips') == 5,
             f"「画面」chip 建出来了（{d0.get('nChips')} 颗）: {d0.get('counts') if isinstance(d0, dict) else d0}")
@@ -174,6 +196,15 @@ def main():
             f"只有**明确判过无角色**的才许被藏）")
         say(isinstance(d0, dict) and d0.get('on') and str(d0['on'][0]).startswith('隐藏无角色'),
             f"默认选中的 chip: {d0.get('on')!r}")
+        fl=d0.get('filterLayout', {}) if isinstance(d0, dict) else {}
+        say(fl.get('bar') == 'grid' and len(fl.get('groups') or []) == 3
+            and all(g.get('display') == 'grid' and g.get('tray') == 'wrap' for g in fl.get('groups', [])),
+            f"筛选按维度分行、标签独立换行: {fl}")
+        say(fl.get('toolsBg') == 'rgba(0, 0, 0, 0)',
+            f"搜索/收藏父容器不铺满宽度的底色: {fl.get('toolsBg')}")
+        say(isinstance(d0, dict) and d0.get('contrast', 0) >= 4.5,
+            f"昼主题选中 chip 字/底对比度 ≥4.5:1（{d0.get('contrast', 0):.2f}:1，"
+            f"{d0.get('fg')} / {d0.get('bg')}）")
         say(isinstance(d0, dict) and not d0.get('hintHidden') and str(CH['none']) in d0.get('hintText', ''),
             f"常驻「已隐藏 N 张」条在位: {d0.get('hintText')!r}")
         p0 = shot('char_default')
@@ -241,7 +272,7 @@ def main():
         d = ev(r"""(async()=>{
           const t=ms=>new Promise(r=>setTimeout(r,ms));
           for(let i=0;i<120 && !document.querySelector('.card');i++) await t(200);
-          await t(1500);
+          await t(3000);
           const imgs=[...document.querySelectorAll('.card img')];
           const inView=imgs.filter(i=>{const b=i.getBoundingClientRect();
             return b.top<innerHeight&&b.bottom>0&&b.width>0;});
@@ -574,6 +605,24 @@ def main():
         time.sleep(1.0)
         p4 = shot('dark')
         say(os.path.getsize(p4) > 30000, f"夜：{p4}")
+        dDark=ev(r"""(()=>{const c=document.querySelector('#gTier .chip.on'),s=getComputedStyle(c);
+          const rgb=v=>{let m=v.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+            if(m)return [+m[1],+m[2],+m[3]];m=v.match(/rgba?\(([^)]+)\)/i);
+            if(m)return m[1].replace(/\//g,' ').split(/[ ,]+/).filter(Boolean).slice(0,3).map(Number);
+            m=v.match(/oklab\(\s*([\d.]+)\s+([-\d.]+)\s+([-\d.]+)/i);if(!m)return null;
+            const L=+m[1],a=+m[2],b=+m[3],l=L+.3963377774*a+.2158037573*b,
+              m0=L-.1055613458*a-.0638541728*b,n=L-.0894841775*a-1.291485548*b;
+            return [4.0767416621*l**3-3.3077115913*m0**3+.2309699292*n**3,
+              -1.2684380046*l**3+2.6097574011*m0**3-.3413193965*n**3,
+              -.0041960863*l**3-.7034186147*m0**3+1.707614701*n**3].map(x=>Math.max(0,Math.min(1,x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055))*255)};
+          const lum=a=>{if(!a)return NaN;const x=a.map(v=>v>1?v/255:v).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
+            return .2126*x[0]+.7152*x[1]+.0722*x[2]};
+          const a=lum(rgb(s.color)),b=lum(rgb(s.backgroundColor));
+          return {contrast:Number.isFinite(a+b)?(Math.max(a,b)+.05)/(Math.min(a,b)+.05):0,
+            fg:s.color,bg:s.backgroundColor}})()""")
+        say(isinstance(dDark, dict) and dDark.get('contrast', 0) >= 4.5,
+            f"夜主题选中 chip 字/底对比度 ≥4.5:1（{dDark.get('contrast', 0):.2f}:1，"
+            f"{dDark.get('fg')} / {dDark.get('bg')}）")
 
         print()
         if FAIL:

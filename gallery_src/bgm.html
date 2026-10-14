@@ -96,8 +96,8 @@ html.lg input.q.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(--lgf,
 /* 选中态 2026-10-13 统一为背景库同款"浅玻璃"（--on-bg 底 + --on-txt 字 + --on-ring 细描边），
    替掉原来的实色品牌渐变 --grad-brand：用户原话"我喜欢背景库选中的效果"。
    整页只留 brand 一个强调色，选中 = 更亮一档的玻璃，不再靠"一整块蓝"喊话。 */
-.chip.on{background:var(--on-bg);color:var(--on-txt);border-color:transparent;
-  box-shadow:inset 0 0 0 1px var(--on-ring)}
+.chip.on{background:var(--on-bg);color:var(--on-txt);border-color:var(--on-ring);
+  box-shadow:inset 0 0 0 1px var(--on-ring),inset 0 1px 0 color-mix(in srgb,#fff 30%,transparent)}
 .chip.on:hover{color:var(--on-txt);transform:none}
 .chip b{font-weight:400;opacity:.62;margin-left:4px;font-variant-numeric:tabular-nums}
 
@@ -155,14 +155,21 @@ html.lg .row.playing.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(-
 .eq u:nth-child(2){animation-delay:.18s}.eq u:nth-child(3){animation-delay:.36s}
 @keyframes bob{0%,100%{height:26%}50%{height:100%}}
 
-/* ── 播放器：整块抬起来的一片玻璃，潮水进度条是它的主角 ── */
+/* ── 播放器：悬浮的双层玻璃台；波形进度是轻薄的水面刻度 ── */
 .bar{position:fixed;left:50%;transform:translateX(-50%) translateY(105%);bottom:14px;z-index:40;
-  width:min(1020px,calc(100vw - 26px));padding:12px 18px 14px;border-radius:var(--r-panel);
-  background:color-mix(in srgb,var(--panel) 66%,transparent);
+  width:min(940px,calc(100vw - 28px));padding:13px 20px 11px;border-radius:26px;
+  background:linear-gradient(128deg,color-mix(in srgb,var(--panel) 68%,transparent),
+    color-mix(in srgb,var(--panel) 54%,transparent) 52%,color-mix(in srgb,var(--panel) 66%,transparent));
   backdrop-filter:blur(30px) saturate(1.7);-webkit-backdrop-filter:blur(30px) saturate(1.7);
   border:1px solid color-mix(in srgb,var(--glass-line) 90%,transparent);
-  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 48%,transparent),var(--sh-float);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 58%,transparent),
+    inset 0 -1px 0 color-mix(in srgb,var(--brand) 14%,transparent),
+    0 18px 46px color-mix(in srgb,var(--brand) 18%,transparent),var(--sh-float);
   transition:transform .55s var(--ease-ios),opacity .4s var(--ease-ios);opacity:0}
+.bar::before{content:'';position:absolute;inset:1px;border-radius:inherit;pointer-events:none;z-index:0;
+  background:linear-gradient(116deg,color-mix(in srgb,#fff 18%,transparent),transparent 38%,
+    color-mix(in srgb,var(--brand) 9%,transparent) 100%)}
+.bar>*{position:relative;z-index:1}
 .bar.on{transform:translateX(-50%) translateY(0);opacity:1}
 /* 液态玻璃：整块播放器面板挂折射。⚠️ 这里**不需要遮罩**——法线图中间是平的（不推像素），
    只有贴边那一圈有坡度，所以"整盒挂滤镜"天然就等于"只折射边墙"。
@@ -174,7 +181,7 @@ html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.
 .bar .top{display:flex;align-items:center;gap:12px}
 .bar .cur{font-size:13.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .bar .cur i{font-style:normal;font-weight:400;color:var(--dim);margin-left:8px;font-size:11.5px}
-.bar .tm{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;min-width:38px;text-align:center}
+.bar .tm{font-size:11.5px;color:var(--txt2);font-weight:600;font-variant-numeric:tabular-nums;min-width:38px;text-align:center}
 /* 播放器按键（2026-10-13 重做）：用户原话"按键的太小了，而且看着不够高级，不像现代的
    拟态玻璃感，要像荣耀的那种拟态玻璃"。配方三件套——
      ① 次级键 = 38px 玻璃圆钮：半透明渐变底 + 上沿内高光 + 细描边 + 柔投影，hover 上浮 1px；
@@ -222,7 +229,7 @@ html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.
       改用 CSS `clip-path:inset(0 round 999px)` 只裁 <svg> —— 它是 .bub 的兄弟节点，互不影响。
       也不用 SVG 自带的 clipPath 当胶囊：svg 是 preserveAspectRatio=none 拉伸的，
       viewBox 里写死的 rx 在非等比缩放后两端会变成椭圆，窄窗口下尤其明显。 */
-.tide{position:relative;height:34px;margin:8px 0 4px;cursor:pointer;touch-action:none;
+.tide{position:relative;height:24px;margin:9px 0 5px;cursor:pointer;touch-action:none;
   border-radius:999px;border:1px solid color-mix(in srgb,var(--glass-line) 85%,transparent);
   box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 46%,transparent),
              inset 0 -7px 9px -5px color-mix(in srgb,#000 26%,transparent),
@@ -254,7 +261,7 @@ html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.
   border-radius:var(--r-chip);padding:3px 8px;box-shadow:var(--sh1);
   opacity:0;transition:opacity .22s var(--ease-ios)}
 .tide:hover .bub,.tide.drag .bub{opacity:1}
-.hint{font-size:11px;color:var(--dim);text-align:center;margin-top:2px;
+.hint{font-size:11px;color:var(--txt2);text-align:center;letter-spacing:.02em;margin-top:3px;
   transition:opacity .5s var(--ease-ios)}
 .hint.off{opacity:0}
 /* 主题切换：`.opt` 的样式在 index.html 自己的 <style> 里（theme.css 只有 token），
@@ -270,6 +277,21 @@ html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.
 code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   background:color-mix(in srgb,var(--panel2) 80%,transparent);
   border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+@media(max-width:560px){
+  body{padding-bottom:112px}
+  .bar{left:10px;right:10px;bottom:8px;width:auto;padding:9px 11px 8px;border-radius:22px;
+    transform:translateY(105%)}
+  .bar.on{transform:translateY(0)}
+  .bar .top{display:grid;grid-template-columns:34px 44px 34px minmax(30px,auto) minmax(0,1fr) minmax(30px,auto) 34px;gap:6px}
+  .bar button{width:34px;height:34px}
+  .bar #pp{width:44px;height:44px}
+  .bar #lp{width:30px;height:30px}
+  .bar .tm{font-size:10px;min-width:0}
+  .bar .cur{font-size:12px}
+  .bar .vol{display:none}
+  .bar .hint{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tide{height:21px}
+}
 @media (prefers-reduced-motion:reduce){
   .amb i{animation:none}.row{transition:opacity .2s linear,transform .2s linear}
   .row.playing .eq u{animation:none;height:60%}}

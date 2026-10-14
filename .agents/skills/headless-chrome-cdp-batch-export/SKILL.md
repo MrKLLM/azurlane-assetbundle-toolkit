@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。触发词（验收向）：点击没落地、开关无效还是探针没点到、画面改变判据全红而可逆判据全绿、取样哨兵值 None 参与比较、ES module 整块不初始化、vendor import 闭包。
-version: 1.8.17
+version: 1.8.18
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -586,12 +586,13 @@ version: 1.8.17
 | 液态玻璃挂载 / 禁挂 / 盒数 | `scripts/diag/glass_pages_probe.py --port 8777` | 8777 静态服务 | 挂载的 `backdrop-filter` 计算值必须含 `url()`（只看类名会骗人）；桶 ≤2；背景库页保持零折射盒；普通行零 backdrop-filter |
 | 音乐库（bgm.html） | `scripts/diag/bgm_page_probe.py` | 自起，隔离端口 | 播放/潮水/拖动/筛选 + 双主题截图 + 夜主题播放行/搜索框折射 |
 | 背景库（backgrounds.html） | `scripts/diag/bg_page_probe.py` | 自起，隔离端口 | 解码/筛选/详情层/缩放 1:1 + 双主题截图 + **served 字节 == 正本字节**（防跑旧副本） |
-| 收藏 / 站用背景（四页共用） | `scripts/diag/favorites_probe.py --port 8777 --shots` | 8777 静态服务 | `has-sitebg` 生效、跨页持久、取消后空态 + 铺满判图 |
+| 收藏 / 站用背景（四页共用） | `scripts/diag/favorites_probe.py --port 8777 --shots --shots-dir favshots-ui` | 8777 静态服务 | `has-sitebg` 生效、跨页持久、取消后空态；主页只局部玻璃、子页选中态对比度 ≥4.5:1 + 昼夜/背景截图（脚本追加 PID/时间戳） |
 
 三条纪律（每条对应一次真实返工）：
 1. **设计变更后必须先改探针判据再重跑**。实例：kv 长说明从正文移进 `title` 属性后，`bg_page_probe` 两条文本断言假红——判据改成读「可见值 + title 合并串」，语义不降级（信息仍在 DOM，只是换渲染）。注意 `dt` 标签不在合并串里，拼串要把 `#ovkv` 的 textContent 一起带上。
-2. **探针判据只证功能，审美必须人眼看截图**（`.diag/bg_shot_*.png` / `bgm_shot_*.png` / `favshots/`）。本轮四张人眼判图各自钉住一个投诉：播放器按键尺寸、选中态统一、弹窗按钮重排、站用背景下的工具栏无实色块。
-3. **一次性截图探针写 `.diag/`、用完即归档**（`check_diag_hygiene.py`）；CDP 手写脚本的 `Runtime.evaluate` 消息必须带 `params`、`Page.captureScreenshot` 的 `clip` 同属 params（放顶层会静默 KeyError）。无头注入 localStorage 要先导航到目标源再 set + reload（在 `about:blank` 上设无效）。
+2. **探针判据只证功能，审美必须人眼看截图**（`.diag/bg_shot_*.png` / `bgm_shot_*.png` / `favshots-*/`）。站用背景的主页、音乐库与背景库都要取实际背景图下的截图；逐张确认搜索框、收藏选中态、空白 header 与满宽父容器没有变成实色带。
+3. **一次性截图探针写 `.diag/` 且用唯一子目录名**（如 `--shots-dir favshots-ui-<date>`），避免清理/覆盖其它会话已有的证据；Chrome profile 也用 PID/时间戳建新目录，禁止对共享 `.diag` 旧目录宽泛 `rmtree`。处理完后先按具体目录清单决定保留/归档，不自动删。
+4. **对比度探针必须解析 Chrome 的实际计算颜色格式**：`color-mix()` 可能返回 `oklab(... / alpha)` 而非 `rgb/rgba`；若只认 RGB 会把结果误判成 0。判据读 `.chip.on` 实际字色与底色，识别 `srgb`、`rgb/rgba`、`oklab` 后换算亮度，并在昼/夜主题各断言 ≥4.5:1。脚本里的 JS regex 若写在 Python 普通三引号字符串里，要用 raw string 或正确转义反斜线，避免探针启动时产生 `SyntaxWarning` / 正则失配。
 
 ## 验证
 

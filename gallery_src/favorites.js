@@ -140,21 +140,30 @@ function css(){
    'color-mix(in srgb,var(--panel) 95%,transparent) 46%)}'+
    'html.has-sitebg .row{background:color-mix(in srgb,var(--panel) 88%,transparent)}'+
    'html.has-sitebg .card .nm{background:color-mix(in srgb,var(--panel) 90%,transparent)}'+
-   /* 光晕之外还有一整类东西会被立绘洗掉：**筛选控件**（chip / 搜索框 / 下拉 / 开关 / 工具条 / 标签页）。
-      它们平时是"半透明白 + 次级灰字"，压在浅色立绘的亮部上就彻底读不出（2026-10-11 用户截图：
-      音乐库昼间模式，用途/出处/专辑那一排 chip 全糊）。同样只给控件自己加底，不动背景图。
+   /* 站用背景会洗掉**具体控件**（chip / 搜索框 / 下拉 / 开关 / 标签页）的文字：默认用 78% 烟熏玻璃，
+      搜索框单独增强到 24px blur；选中项使用不透底色保证对比度。背景图本身不动。
+      ⚠️ 满宽的 .tools/header 父容器不是控件，不能跟着铺底；实际 input/button 各自承载材质。
       ⚠️ 用 !important：room3d 的 <style> 排在本模块之后，同特异度会把它自己的规则赢回去。
-      ⚠️ 2026-10-13 用户实机："设置背景后，搜索框和只看收藏背后的色块全露出来了，很不美观"——
-         根因就是这里原来一律刷到 **92% 不透明**：那不是兜底，那是一块贴纸。改成 78% + blur(16px)：
-         背后被糊掉 ⇒ 读作"烟熏玻璃"而不是"实色块"，12.5px 灰字也照样压得住。
-      ⚠️ .hint 故意不在这串里：它是纯文字行，灌底色就是用户说的那种色块，改走文字晕影（下面单独一条）。 */
-   'html.has-sitebg :is(.chip:not(.on),.q,.sel,.opt,.tools,.tabs,.ctl select){'+
+      .hint 是纯文字行，不灌底色，改走文字晕影（下面单独一条）。 */
+   'html.has-sitebg :is(.chip:not(.on),.sel,.opt,.tabs,.seg,.dd-btn,.ctl select,.ctl input[type=text]){'+
    'background:color-mix(in srgb,var(--panel) 78%,transparent)!important;'+
    '-webkit-backdrop-filter:blur(16px) saturate(1.5)!important;'+
    'backdrop-filter:blur(16px) saturate(1.5)!important}'+
-   /* 页头：平时只有 62%（音乐库）甚至 16%（首页 / 背景库）白，身后换成照片就压不住标题 ⇒ 78%。
-      模糊由各页 header 自己的 backdrop-filter 出（首页 --nav-blur 13px、音乐库 26px），
-      这里只降不透明度，不叠第二层 —— 90% 那版会把顶栏糊成一条实带，把背景整个挡住。 */
+   'html.has-sitebg .q{background:color-mix(in srgb,var(--panel) 78%,transparent)!important;'+
+   '-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;'+
+   'backdrop-filter:blur(24px) saturate(1.6)!important}'+
+   /* `.tools` / header 是满宽布局容器，不是控件；绝不在父容器上铺一整条玻璃底。 */
+   /* `.chip.on` 原先被上面的 :not(.on) 排除，只有 13% 淡色底；照片可直接透进字里。
+      选中控件改为不透明的面板/品牌混色，确保字清楚，同时不改变背景图本身。 */
+   'html.has-sitebg .chip.on{background:color-mix(in srgb,var(--panel) 78%,var(--brand) 22%)!important;'+
+   'color:var(--on-txt)!important;border-color:var(--on-ring)!important;'+
+   '-webkit-backdrop-filter:none!important;backdrop-filter:none!important;'+
+   'box-shadow:inset 0 0 0 1px var(--on-ring),inset 0 1px 0 color-mix(in srgb,#fff 28%,transparent)!important}'+
+   /* 首页控件只保留各自的玻璃面；空白顶栏保持透明，不再铺成整条实色背景。 */
+   'html.has-sitebg header.main-toolbar{background:transparent!important;'+
+   'backdrop-filter:none!important;-webkit-backdrop-filter:none!important}'+
+   /* 子页 header 平时只有 62%（音乐库）或 16%（背景库）白，站用背景下需提到 78% 托住标题；
+      模糊仍由子页已有 header filter 负责，不叠第二层。首页则保持整个 header 透明，只有真实控件有玻璃面。 */
    'html.has-sitebg header{background:color-mix(in srgb,var(--panel) 78%,transparent)!important}'+
    /* .hint（首页统计行 / 背景库提示条）：不灌底，一行小字 + 同色系晕影。
       晕影在纯色页面上几乎不可见，只在身后是照片时把字"托"出来。 */

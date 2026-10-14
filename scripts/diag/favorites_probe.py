@@ -13,8 +13,9 @@ stopPropagation 漏了、localStorage 键写错，页面看起来都完全正常
 
 用法：先起服务（py -3 -m http.server 8777 --bind 127.0.0.1 -d Output），再
   py -3 scripts/diag/favorites_probe.py --port 8777
+带 --shots 时用 --shots-dir 指定前缀；脚本会自动追加 PID/时间戳，绝不覆写既有截图。
 """
-import sys, os, json, time, base64, shutil, argparse, subprocess, urllib.request
+import sys, os, json, time, base64, argparse, subprocess, urllib.request
 
 sys.stdout.reconfigure(encoding='utf-8')
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -28,8 +29,9 @@ AP = argparse.ArgumentParser()
 AP.add_argument('--port', default='8777')
 AP.add_argument('--win', default='1440,900')
 AP.add_argument('--shots', action='store_true',
-                help='跑完判据后再取两张人眼判图：背景图(cover 铺满) 与 皮肤立绘(contain 贴底)，'
-                     '落在 .diag/favshots/。判据只说"生效了"，铺得对不对只能看')
+                help='跑完判据后再取人眼判图：主页、音乐库与背景库站用背景态，落在 .diag/<shots-dir>/')
+AP.add_argument('--shots-dir', default='favshots',
+                help='截图输出子目录（.diag 下；用于保留已有判图，默认 favshots）')
 A = AP.parse_args()
 W, H = (int(x) for x in A.win.split(','))
 BASE = f'http://127.0.0.1:{A.port}/gallery_v2'
@@ -39,13 +41,9 @@ fails = []
 
 class Br:
     def __init__(self):
-        prof = os.path.abspath('.diag/fav_profile')
-        shutil.rmtree(prof, ignore_errors=True)
-        for _ in range(20):
-            try:
-                os.makedirs(prof); break
-            except FileExistsError:
-                time.sleep(0.4)
+        # 每次用全新 profile，避免清理旧缓存目录触发批量删除闸，也不碰其它会话的 Chrome 数据。
+        prof = os.path.abspath(os.path.join(ROOT, '.diag', f'fav_profile_{os.getpid()}_{time.time_ns()}'))
+        os.makedirs(prof, exist_ok=False)
         self.proc = chrome_tree.install(subprocess.Popen(
             [CHROME, '--headless=new', f'--remote-debugging-port={CDP}', '--remote-allow-origins=*',
              f'--user-data-dir={prof}', '--no-first-run', '--window-size=%d,%d' % (W, H),
@@ -141,6 +139,16 @@ sb = b.ev('JSON.stringify({cls:document.documentElement.classList.contains("has-
           'fit:document.documentElement.style.getPropertyValue("--site-fit")})')
 sb = json.loads(sb) if isinstance(sb, str) else {}
 ck('设为网站背景生效', sb.get('cls') is True and 'url(' in str(sb.get('v')), str(sb))
+nav = b.ev('JSON.stringify((()=>{const h=getComputedStyle(document.querySelector("header.main-toolbar"));'
+          'const s=document.querySelector("#search"),o=document.querySelector("#gOpt"),seg=document.querySelector(".seg");'
+          'const bf=e=>{const c=getComputedStyle(e);return c.backdropFilter||c.webkitBackdropFilter||"none"};'
+          'return {headerBg:h.backgroundColor,headerFilter:h.backdropFilter||h.webkitBackdropFilter||"none",'
+          'search:bf(s),option:bf(o),segment:bf(seg),toolsBg:getComputedStyle(document.querySelector("header.main-toolbar")).backgroundColor}})())')
+nav = json.loads(nav) if isinstance(nav, str) else {}
+ck('主页空白顶栏与控件容器无整条底色，玻璃只落在实际按钮/搜索框',
+   'none' in str(nav.get('headerFilter')) and 'blur(' in str(nav.get('search'))
+   and 'blur(' in str(nav.get('option')) and 'blur(' in str(nav.get('segment')),
+   str(nav))
 
 # ── 4：音乐库（跨页持久，同一浏览器会话）──
 b.go('bgm.html', 2.6)
@@ -168,6 +176,32 @@ ck('模块加载', b.ev('!!(window.Fav&&window.SiteBg)') is True)
 b.ev('document.querySelectorAll(".card .favbtn")[0].click();1'); time.sleep(0.5)
 ck('背景卡点星落盘',
    b.ev('JSON.parse(localStorage.getItem("gallery.fav")||"{}").bg.length') == 1)
+b.ev('document.getElementById("cFav").click();1'); time.sleep(0.3)
+ui = b.ev(r"""JSON.stringify((()=>{const q=document.querySelector('.q'),c=document.querySelector('#cFav');
+  const qs=getComputedStyle(q),cs=getComputedStyle(c),ts=getComputedStyle(document.querySelector('.tools')),
+    fg=cs.color,bg=cs.backgroundColor,toolsBg=ts.backgroundColor;
+  const rgb=s=>{let m=s.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+    if(m)return [+m[1],+m[2],+m[3]];m=s.match(/rgba?\(([^)]+)\)/i);
+    if(m)return m[1].replace(/\//g,' ').split(/[ ,]+/).filter(Boolean).slice(0,3).map(Number);
+    m=s.match(/oklab\(\s*([\d.]+)\s+([-\d.]+)\s+([-\d.]+)/i);if(!m)return null;
+    const L=+m[1],a=+m[2],b=+m[3],l=L+.3963377774*a+.2158037573*b,
+      m0=L-.1055613458*a-.0638541728*b,n=L-.0894841775*a-1.291485548*b;
+    return [4.0767416621*l**3-3.3077115913*m0**3+.2309699292*n**3,
+      -1.2684380046*l**3+2.6097574011*m0**3-.3413193965*n**3,
+      -.0041960863*l**3-.7034186147*m0**3+1.707614701*n**3].map(x=>Math.max(0,Math.min(1,x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055))*255)};
+  const lum=a=>{if(!a)return NaN;const x=a.map(v=>v>1?v/255:v).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
+    return .2126*x[0]+.7152*x[1]+.0722*x[2]};
+  const l1=lum(rgb(fg)),l2=lum(rgb(bg)),contrast=Number.isFinite(l1+l2)?(Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05):0;
+  const am=bg.match(/\/\s*([\d.]+)\s*\)/)||bg.match(/rgba?\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/i);
+  return {filter:qs.backdropFilter||qs.webkitBackdropFilter||'none',bg,fg,toolsBg,
+    alpha:am?+am[1]:1,contrast,on:c.classList.contains('on')}})())""")
+ui = json.loads(ui) if isinstance(ui, str) else {}
+ck('站用背景下搜索框烟熏模糊生效', 'blur(' in str(ui.get('filter')), str(ui.get('filter')))
+ck('背景库工具行本身无满宽底色', ui.get('toolsBg') == 'rgba(0, 0, 0, 0)', str(ui.get('toolsBg')))
+ck('「只看收藏」选中底色不透图且文字对比度达标', ui.get('on') and ui.get('alpha', 0) >= 0.98
+   and ui.get('contrast', 0) >= 4.5,
+   f"contrast={ui.get('contrast')} alpha={ui.get('alpha')} fg/bg={ui.get('fg')} / {ui.get('bg')}")
+b.ev('document.getElementById("cFav").click();1')
 b.ev('document.querySelector(".card").click();1'); time.sleep(1.2)
 b.ev('document.getElementById("ovbg").click();1'); time.sleep(0.7)
 ck('查看器「设为网站背景」生效',
@@ -192,9 +226,10 @@ ck('取消最后一项后「只看收藏」是空态（不是把全部放出来�
 ck('角标归零', empt.get('n') == '0', 'n=' + str(empt.get('n')))
 
 if A.shots:
-    print('\n---- 人眼判图（.diag/favshots/）----')
-    shotd = os.path.join(ROOT, '.diag', 'favshots')
-    shutil.rmtree(shotd, ignore_errors=True); os.makedirs(shotd, exist_ok=True)
+    shotname = f'{A.shots_dir}_{os.getpid()}_{time.time_ns()}'
+    print(f'\n---- 人眼判图（.diag/{shotname}/）----')
+    shotd = os.path.join(ROOT, '.diag', shotname)
+    os.makedirs(shotd, exist_ok=False)
     b.go('backgrounds.html', 2.6)
     # 挑一张真图：第一张有缩略图且非"缺失"占位的卡
     pick = b.ev("""(()=>{for(const c of document.querySelectorAll('.card')){
@@ -236,6 +271,16 @@ if A.shots:
                 base64.b64decode(b.cmd('Page.captureScreenshot', {'format': 'png'})['data']))
             b.ev("document.documentElement.dataset.theme='light';1"); time.sleep(0.8)
             open(os.path.join(shotd, f'bgm_{kind}_light.png'), 'wb').write(
+                base64.b64decode(b.cmd('Page.captureScreenshot', {'format': 'png'})['data']))
+            # 本轮追加背景库判图：搜索与「只看收藏」正是用户反馈的两处透底控件。
+            b.go('backgrounds.html', 2.2)
+            b.ev('SiteBg.set(%s);1' % json.dumps({'url': url, 'kind': kind, 'key': label, 'label': label}))
+            b.ev("document.getElementById('cFav').click();1")
+            b.ev("document.documentElement.dataset.theme='light';1"); time.sleep(1.0)
+            open(os.path.join(shotd, f'backgrounds_{kind}_light.png'), 'wb').write(
+                base64.b64decode(b.cmd('Page.captureScreenshot', {'format': 'png'})['data']))
+            b.ev("document.documentElement.dataset.theme='dark';1"); time.sleep(0.8)
+            open(os.path.join(shotd, f'backgrounds_{kind}_dark.png'), 'wb').write(
                 base64.b64decode(b.cmd('Page.captureScreenshot', {'format': 'png'})['data']))
         b.ev('SiteBg.clear();1')
 

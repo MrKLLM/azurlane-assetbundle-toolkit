@@ -24,7 +24,7 @@
   py -3 scripts/diag/glass_pages_probe.py --port 8777
 取图落在 .diag/glasspages/。
 """
-import sys, os, json, time, base64, shutil, hashlib, argparse, subprocess, urllib.request
+import sys, os, json, time, base64, hashlib, argparse, subprocess, urllib.request
 
 sys.stdout.reconfigure(encoding='utf-8')
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,7 +41,7 @@ AP.add_argument('--rim', action='store_true',
                 help='额外跑"页头边墙为什么不落像素"的四档对照（V0/V1/V6 sticky/兄弟节点）')
 A = AP.parse_args()
 W, H = (int(x) for x in A.win.split(','))
-SHOTD = os.path.join(ROOT, '.diag', 'glasspages')
+SHOTD = os.path.join(ROOT, '.diag', f'glasspages_{os.getpid()}_{time.time_ns()}')
 # 像素对照的前置：这三处都在自己动（光晕 drift / 波形 rAF / 播放中的均衡器），
 # 不冻住的话 A/A 就不稳，「两版不同」量的到底是动画还是材质，说不清。
 # ⚠️ 音乐库还有一处在动：`.row` 的进场浮现（IntersectionObserver 给每行 setTimeout 错峰加 .in），
@@ -278,9 +278,9 @@ RIM_KILL = "(()=>{const d=document.getElementById('rimtest');if(d)d.remove();ret
 
 def check(page, spec, fails):
     url = f'http://127.0.0.1:{A.port}/gallery_v2/{page}'
-    prof = os.path.join(ROOT, '.diag', 'glasspages_profile')
-    shutil.rmtree(prof, ignore_errors=True)
-    os.makedirs(prof, exist_ok=True)
+    # 本轮独占 profile 和截图目录，不删除旧的 .diag 证据或其它会话的缓存。
+    prof = os.path.join(ROOT, '.diag', f'glasspages_profile_{os.getpid()}_{time.time_ns()}')
+    os.makedirs(prof, exist_ok=False)
     print(f'\n──── {page} ────')
     pg = Page(9349, prof, url, (W, H))
     try:
@@ -488,8 +488,7 @@ def main():
     except Exception as e:
         print(f'! {A.port} 上没有静态服务：{e}\n  先起 py -3 -m http.server {A.port} --bind 127.0.0.1 -d Output')
         sys.exit(1)
-    shutil.rmtree(SHOTD, ignore_errors=True)
-    os.makedirs(SHOTD, exist_ok=True)
+    os.makedirs(SHOTD, exist_ok=False)
     fails = []
     for page, spec in PAGES.items():
         check(page, spec, fails)

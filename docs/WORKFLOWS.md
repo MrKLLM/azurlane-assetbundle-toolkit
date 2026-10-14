@@ -4248,20 +4248,16 @@ prefab→res 材质），必须按 `(file_id, path_id)` 跨包取回真实对象
 
 | 层 | 文件 | 改法 | 对应投诉 |
 |---|---|---|---|
-| 共用兜底 | `gallery_src/favorites.js` 的 has-sitebg 规则 | 控件 92%→78% + `blur(16px) saturate(1.5)`；页头 90%→78%；`.hint` 改文字晕影 | ① 实色块 |
-| token | `gallery_src/theme.css` | `--nav-blur` 6→13px | ⑤ 顶栏 |
-| 主界面 | `gallery_src/index.html` | 搜索/分段/下拉/开关改 `color-mix(panel 55%)`；label 去实色底；hint 晕影 | ⑤ |
-| 音乐库 | `gallery_src/bgm.html` | 选中态统一 `--on-bg/--on-txt/--on-ring`；播放器 38/52/34px | ②③ |
-| 背景库 | `gallery_src/backgrounds.html` | 控件半透明 + blur(20px)；`.fbar` 合并筛选行；弹窗 `.pn` 悬浮钮 + 主/次级行；kv 移 title | ①④ |
+| 共用兜底 | `gallery_src/favorites.js` 的 has-sitebg 规则 | 控件 78% 烟熏玻璃 + `blur(16px)`；搜索增强到 24px；选中 chip 不透底、背景库容器不铺满；首页 header 自身透明、只有实际控件有玻璃 | ①⑤ |
+| token | `gallery_src/theme.css` | 选中态昼/夜均加深对比度，字/底目标 ≥4.5:1 | ② |
+| 主界面 | `gallery_src/index.html` | 搜索/分段/下拉/开关各自半透玻璃；顶栏及控件父级不铺色带；label 去实色底 | ⑤ |
+| 音乐库 | `gallery_src/bgm.html` | 选中态共用高对比 `--on-*`；播放器双层悬浮玻璃、薄水位管、紧凑移动布局 | ②③ |
+| 背景库 | `gallery_src/backgrounds.html` | 搜索和收藏控件并列；命名档/画面/类目分行、chip 组内换行；加入站用背景下搜索强化玻璃 | ①④ |
 
 **三条设计判据**（这轮之后固化，别回退）：
-1. **站用背景下的控件 = 烟熏玻璃**：不透明上限 78% + blur(16px)。92% 那版读作贴纸；
-   再低（<70%）12.5px 灰字在亮立绘前压不住。模糊比不透明度更能「去块感」。
-2. **顶栏玻璃化不新增滤镜盒**：header 自己有 blur，子控件只降透明度直接叠它的 backdrop ⇒
-   §134「成本单位是盒个数」红线不动。折射（`liquid_glass.js`）只给「身后是低频背景」的
-   常驻单盒；has-sitebg 的 `!important` 会盖掉 `--lgf`，别在会被它命中的页里引折射模块。
-3. **协议语言全站一套**：选中 = 更亮一档玻璃 + 一圈细彩色内描边 + 彩色文字（`--on-*`），
-   实色渐变只留给主行动钮（播放键 / 主动作）。
+1. **站用背景下的常用控件 = 烟熏玻璃**：不透明上限 78% + blur(16px)；搜索框可单独加至 24px 以压住高频图案。92% 读作贴纸；工具行、header 等满宽布局容器必须透明，只给具体按钮/输入框做玻璃，不能把留白也铺成一条色带。
+2. **顶栏玻璃化不新增滤镜盒**：空白 header 与控件父级保持透明、无滤镜；子控件各自半透并挂到既有背景环境，避免一整条顶栏挡背景。折射（`liquid_glass.js`）只给音乐库固定数量的常驻盒；has-sitebg 的 `!important` 会覆盖 `--lgf`，别在会被它命中的页里引折射模块。
+3. **协议语言全站一套**：选中 = 更亮一档玻璃 + 细彩色内描边 + 清晰强调文字（`--on-*`），字/底对比度在昼夜主题都量到 ≥4.5:1；实色渐变只留给主行动钮（播放键 / 主动作）。
 
 **验证（按序，任一红就停）**：
 ```bash
@@ -4269,22 +4265,25 @@ py -3 -m http.server 8777 --bind 127.0.0.1 -d Output   # 常驻，glass/favorite
 py -3 scripts/diag/glass_pages_probe.py --port 8777    # 挂载/禁挂/零盒/桶≤2
 py -3 scripts/diag/bgm_page_probe.py                   # 音乐库功能 + 双主题截图
 py -3 scripts/diag/bg_page_probe.py                    # 背景库功能 + 双主题截图
-py -3 scripts/diag/favorites_probe.py --port 8777 --shots  # 站用背景场景 + 铺满判图
+py -3 scripts/diag/favorites_probe.py --port 8777 --shots --shots-dir favshots-ui  # 程序自动追加 PID/时间戳，不覆盖既有证据
 py -3 scripts/deploy_gallery.py --check                # 硬链/漂移
 ```
 探针判据只说「功能生效」；**审美必须人眼看 `.diag/*_shot_*.png` / `favshots/`**——
 每轮挑 3~5 张判图，一张钉住一个投诉。
 
-**踩坑记录**（四条，两条已进技能）：
+**踩坑记录**（六条，两条已进技能）：
 - ⚠️ **同一文件的并行 Edit 静默丢改动**（一次丢 4 笔、全部回报成功，页面渲染出「分裂态」）
   ⇒ 同文件多次 Edit 串行 + grep 标记原子句核验。→ 技能 `windows-hardlink-dedup-verify` v1.6.0。
 - ⚠️ **探针判据不随设计变更就是假红**：文本断言读的是正文，说明挪进 `title` 后必红
   ⇒ 改读「可见值 + title」合并串（`#ovkv` 的 dt 标签也要带上）。判据语义不许降级——
   信息仍在 DOM，只是换了渲染。
 - `.zbadge` 有两个消费方（弹窗 + 全屏条 `.fs .cap`），新样式必须限定 `.sheet .imgbox`。
+- **computed color 可能序列化为 `oklab(... / alpha)`**：只解析 rgb/rgba 会把对比度判为 0；探针需支持 OKLab→sRGB，再量实际字/底对比度。
+- **截图/profile 是既有证据**：不得用宽泛 `rmtree` 清理旧 `.diag` 目录；每次创建带 PID/时间戳的独立 profile 与截图目录，避免删掉其它会话或以往的人眼判图。
 - 无头环境：websocket-client 在 venv（`~/.workbuddy-ai/binaries/python/envs/default`）；
   CDP 消息参数必须包 `params`；localStorage 注入要先导航到目标源再 set + reload。
 
 **涉及文件**：`gallery_src/{theme.css,favorites.js,index.html,bgm.html,backgrounds.html}`、
 `scripts/diag/{glass_pages_probe,bgm_page_probe,bg_page_probe,favorites_probe}.py`、
 `.agents/skills/{windows-hardlink-dedup-verify,headless-chrome-cdp-batch-export}/SKILL.md`。
+**结果补记（2026-10-14）**：站用背景下搜索框升至 blur(24px)；实际筛选文字/底对比度昼夜均 ≥4.5:1；主页仅具体控件局部玻璃化、header 本身透明且无滤镜；背景库筛选分行。回归截图保存在唯一目录 `.diag/favshots-ui-final-20261014_<pid>_<ns>/`，勿覆盖。

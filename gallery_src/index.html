@@ -14,31 +14,14 @@ html.theming *{transition:background-color var(--t-col),color var(--t-col),
 body{font-family:'Segoe UI',"Microsoft YaHei",system-ui,sans-serif;color:var(--txt);height:100vh;
   display:flex;flex-direction:column;overflow:hidden;
   background:linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%) fixed}
-/* 导航栏：和卡片同一块玻璃。⚠️ 上一版它是"一眼就看出是毛玻璃"的元凶——
-   62% 白 + 20px 背景模糊，那就是磨砂玻璃的标准配方（模糊越大越像磨砂，越不像玻璃）。
-   真玻璃的配方反过来：**几乎不糊**（6px，够让背后的形状保持轮廓）+ **近乎全透**
-   （底色只留 16%，够压住文字对比度即可）+ 三样"玻璃特征"：
-     ① 下沿一条亮发丝边（玻璃的截面高光）
-     ② 下沿 14px 一条更厚的"边墙"，折射强度明显高于栏体
-     ③ 一道斜穿整条栏的反光（--spec2，和卡片同一张材质）
-   ⚠️ 伪元素是 ::before/::after，栏内所有子元素必须抬到它们上面（下面 header>* 那条）。 */
-header{background:var(--nav-bg);
-  backdrop-filter:blur(var(--nav-blur)) saturate(1.8) brightness(1.05);
-  -webkit-backdrop-filter:blur(var(--nav-blur)) saturate(1.8) brightness(1.05);
-  border-bottom:1px solid transparent;padding:9px 14px;
+/* 顶栏不再铺连续色板：只保留轻微背景折射感，控件各自承载玻璃面，空白处让画面透出。
+   页头禁止额外挂「厚边墙」：照片暗部会被抬亮成一条杠（§138）；折射盒数也不在此增加。 */
+header{background:transparent;
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+  border:0;padding:9px 14px;
   display:flex;align-items:center;gap:12px;flex-wrap:wrap;
-  box-shadow:inset 0 -1px 0 var(--rim-hi),
-             0 8px 26px color-mix(in srgb,var(--brand) 12%,transparent);
-  position:relative;z-index:10}
-/* ② 下沿那条 18px「厚边墙」**已撤**（2026-10-11 用户实机：首页与背景库也报"横幅下边有条杠"）。
-   判死过程与逐行像素量法见 docs/TROUBLESHOOTING.md §138：那条带子挂
-   `blur(17px) saturate(2.2) brightness(1.14)`，身后是站用背景照片时暗部被抬亮 47/255 级、
-   上沿一条硬接缝 ⇒ 读作"多出来的一条杠"，不读作玻璃截面。三页同一个装置一起退役，
-   折射只留音乐库播放器那一盒（`liquid_glass.js`）。栏体自己那层 blur(6px) 保留 —— 那是"湿玻璃"，
-   不是"杠"。⚠️ 别再把它挂回来：`glass_perf_probe.py` 有禁挂档，挂了直接红。 */
-/* ③ 斜穿整条栏的反光：静止就在，不跟鼠标（栏子长，跟着鼠标会太吵） */
-header::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:-1;
-  background:var(--spec2)}
+  box-shadow:none;position:relative;z-index:10}
+header::after{content:none}
 /* ⚠️ 这里**绝不能给 header 的直接子元素设 z-index**：一设就各自生成层叠上下文，
    下拉面板那个 z-index:40 就被关在自己那个 .ctl 里出不来，于是排在后面的提示文字
    会压在展开的面板上（用户截图里的"混在一起了"就是这个）。
@@ -47,11 +30,10 @@ header>*{position:relative}
 header h1{font-size:16px;color:var(--title);white-space:nowrap;font-weight:800;letter-spacing:.02em}
 header .sub{font-size:11px;color:var(--dim)}
 .ctl{display:flex;align-items:center;gap:6px}
-.ctl label{font-size:11px;color:var(--txt2);font-weight:700;letter-spacing:.06em;
-  padding:3px 8px;border-radius:7px;background:color-mix(in srgb,var(--brand) 10%,var(--panel))}
-/* 这八个"排名字"（类别/阵营/稀有度/…）与音乐库·背景库的 .grp>span 用同一套区分：
-   方角 + 不透明品牌淡底 + 700 字重，刻意不像它右边那颗胶囊控件（§138 之后它们先有了底，
-   又被用户判"和子标签长一样"，所以区分靠形状/填充/字重三条一起，不只靠底）。 */
+.ctl label{font-size:11px;color:var(--brand-d);font-weight:750;letter-spacing:.06em;
+  padding:3px 5px;border-radius:7px;background:transparent;text-shadow:0 1px 3px color-mix(in srgb,var(--panel) 72%,transparent)}
+/* 顶栏筛选行名用纯字形 + 品牌色与晕影，避免在透明玻璃上再叠一块小贴纸；
+   可点项则保留各自半透胶囊面，层级靠形状与材质区分。 */
 
 /* ── 自绘下拉 ──────────────────────────────────────────────────────────
    原生 <select> 展开的那层是**操作系统画的**，CSS 一行都碰不到 ⇒ 想要"落下来"
@@ -61,14 +43,16 @@ header .sub{font-size:11px;color:var(--dim)}
 .dd{position:relative;display:inline-block}
 .dd>select{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;margin:0}
 .dd-btn{display:inline-flex;align-items:center;gap:10px;justify-content:space-between;min-width:106px;
-  background:var(--panel2);color:var(--txt);border:1.5px solid var(--line);padding:6px 12px;
+  background:color-mix(in srgb,var(--panel) 56%,transparent);color:var(--txt);
+  border:1px solid color-mix(in srgb,var(--glass-line) 78%,transparent);padding:6px 12px;
   border-radius:var(--r-chip);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;
+  box-shadow:inset 0 1px 0 var(--rim-hi),var(--sh1);
   transition:border-color .16s var(--spring),box-shadow .16s,background .16s}
-.dd-btn:hover{border-color:var(--glass-line);background:var(--panel)}
+.dd-btn:hover{border-color:var(--glass-line);background:color-mix(in srgb,var(--panel) 72%,transparent)}
 .dd-btn:focus-visible{outline:none;border-color:var(--brand);
   box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}
-.dd-btn[aria-expanded=true]{border-color:var(--brand);background:var(--panel);
-  box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}
+.dd-btn[aria-expanded=true]{border-color:var(--on-ring);background:var(--on-bg);
+  box-shadow:inset 0 0 0 1px var(--on-ring),var(--sh1)}
 .dd-arw{font-style:normal;font-size:9px;color:var(--dim);transition:transform .24s var(--spring)}
 .dd-btn[aria-expanded=true] .dd-arw{transform:rotate(180deg)}
 .dd-panel{position:absolute;top:calc(100% + 6px);left:0;z-index:40;min-width:100%;width:max-content;
@@ -84,11 +68,14 @@ header .sub{font-size:11px;color:var(--dim)}
 .dd-opt:hover,.dd-opt.cur{background:var(--brand-l);color:var(--brand-d)}
 .dd-opt .n{color:var(--dim);font-weight:700}
 .dd-opt:hover .n{color:var(--brand-d)}
-input[type=text],select{background:var(--panel2);color:var(--txt);border:1.5px solid var(--line);
+input[type=text],select{background:color-mix(in srgb,var(--panel) 56%,transparent);color:var(--txt);
+  border:1px solid color-mix(in srgb,var(--glass-line) 78%,transparent);
   padding:6px 12px;border-radius:var(--r-chip);font-size:13px;outline:none;font-weight:600;
+  box-shadow:inset 0 1px 0 var(--rim-hi),var(--sh1);
   transition:border-color .16s var(--spring),box-shadow .16s,background .16s}
-input[type=text]:hover,select:hover{border-color:var(--brand);background:var(--panel)}
-input[type=text]:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}
+input[type=text]:hover,select:hover{border-color:var(--brand);background:color-mix(in srgb,var(--panel) 72%,transparent)}
+input[type=text]:focus,select:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel) 78%,transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent),inset 0 1px 0 var(--rim-hi)}
 #search{width:190px;flex:none;transition:width .28s var(--spring-slow),border-color .16s var(--spring),
   box-shadow .16s,background .16s}
 #search:focus{width:270px}
@@ -185,16 +172,17 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
 .empty{color:var(--dim);text-align:center;padding:44px;font-size:14px;font-weight:600}
 
 /* 分段控件：整颗胶囊，选中那颗由一粒会滚的胶囊承担（和弹层标签条同一套语言） */
-.seg{display:inline-flex;gap:4px;background:var(--panel2);border:1px solid var(--line);
-  border-radius:var(--r-chip);padding:3px;position:relative}
+.seg{display:inline-flex;gap:4px;background:color-mix(in srgb,var(--panel) 56%,transparent);
+  border:1px solid color-mix(in srgb,var(--glass-line) 78%,transparent);
+  border-radius:var(--r-chip);padding:3px;position:relative;box-shadow:var(--sh1)}
 .seg>span.segslide{position:absolute;left:0;top:var(--y,3px);width:var(--w,0);height:var(--h,26px);
   border-radius:var(--r-chip);background:var(--on-bg);
   box-shadow:inset 0 0 0 1px var(--on-ring), var(--sh1);
   transform:translateX(var(--x,0));transition:transform .32s var(--spring),width .32s var(--spring);z-index:0}
 .seg button{background:transparent;color:var(--dim);border:none;padding:5px 13px;font-size:12px;
   font-weight:700;border-radius:var(--r-chip);cursor:pointer;transition:all .18s var(--spring);position:relative;z-index:1}
-.seg button:hover{color:var(--brand-d);background:var(--panel)}
-.seg button.on{background:transparent;color:var(--on-txt)}   /* 选中胶囊变浅了，文字必须跟着从白换成强调色，否则白字压浅底=看不见 */
+.seg button:hover{color:var(--brand-d);background:color-mix(in srgb,var(--panel) 44%,transparent)}
+.seg button.on{background:transparent;color:var(--on-txt)}
 .seg button.on:hover{background:transparent;color:var(--on-txt)}
 .sec-hd{font-size:15px;color:var(--txt);font-weight:800;margin:20px 4px 11px;display:flex;align-items:center;gap:9px}
 .sec-hd:first-child{margin-top:2px}
@@ -281,7 +269,9 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
   to{opacity:1;transform:translateX(-50%)}}
 .talksub .who{display:block;font-size:11px;color:var(--pop-d);margin-bottom:2px;font-weight:800}
 /* 顶部全局交互开关：胶囊组，开=樱粉渐变，关=浅底 */
-.opt{display:inline-flex;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-chip);padding:3px}
+.opt{display:inline-flex;gap:4px;background:color-mix(in srgb,var(--panel) 56%,transparent);
+  border:1px solid color-mix(in srgb,var(--glass-line) 78%,transparent);border-radius:var(--r-chip);padding:3px;
+  box-shadow:var(--sh1)}
 .opt button{background:transparent;color:var(--dim);border:none;padding:5px 12px;font-size:12px;
   font-weight:700;border-radius:var(--r-chip);cursor:pointer;transition:all .18s var(--spring)}
 .opt button:hover{color:var(--txt)}
@@ -488,7 +478,7 @@ main{position:relative;z-index:1}
 </head>
 <body>
 <div id="bgfx" aria-hidden="true"><div class="bfield"><i class="glow g1"></i><i class="glow g2"></i><i class="glow g3"></i></div></div>
-<header>
+<header class="main-toolbar">
   <h1>碧蓝航线资产浏览器</h1>
   <div class="ctl"><input type="text" id="search" placeholder="搜索 中文名 / 拼音ID"></div>
   <div class="ctl"><label>类别</label><div class="seg" id="fCat">

@@ -9880,14 +9880,15 @@ X 族 = `{ArtMesh158, ArtMesh170, ArtMesh177, ArtMesh186}`（do500/ro41-69，中
   `~/.workbuddy-ai/binaries/python/envs/default`）。
 
 **判据**：`glass_pages_probe.py`（挂载/禁挂/零盒/桶≤2）+ `bgm_page_probe.py` +
-`bg_page_probe.py` + `favorites_probe.py --shots` 四探针全绿；昼/夜 × 有/无背景四态
-人眼判图（播放器 52px 光球、选中态两主题一致、弹窗按钮重排、站用背景工具栏无实色块）。
+`bg_page_probe.py` + `favorites_probe.py --shots`；昼/夜 × 有/无背景人眼判图。
+**2026-10-14 扩展回归**：bgm、背景库、收藏/站用背景三探针通过；音乐库昼/夜选中态实测对比度分别 5.93:1 / 9.57:1，背景库 5.99:1 / 9.69:1，站用背景「只看收藏」对比度 5.80:1；主页 header 与背景库 `.tools` 均实测透明，index 搜索/分段/开关自身为局部玻璃，站用背景下搜索为 blur(16px)～blur(24px)。`glass_pages_probe.py` 通过挂载/禁挂/盒数、列表零盒与管道判据（其动态像素 A/A 因图片继续懒加载而不可用，按脚本规定只跳过像素对照，不外推折射已落像素）。
+**截图**：玩家面板/昼夜页见 `.diag/bgm_shot_*.png`；背景库见 `.diag/bg_shot_*.png`；站用背景 UI 的新截图目录 `.diag/favshots-ui-final-20261014_<pid>_<ns>/`。最终版本目视确认：背景图完整显示，空白顶栏与筛选容器未铺整条遮罩；搜索、选中收藏各自是有层次的玻璃控件。
 做法 **WF-41**，可复用判据在技能 `headless-chrome-cdp-batch-export` v1.8.17。
 
 ### 涉及文件
 
-`gallery_src/theme.css`（--nav-blur）、`gallery_src/favorites.js`（has-sitebg 兜底规则）、
-`gallery_src/index.html`（顶栏玻璃化）、`gallery_src/bgm.html`（选中态统一 + 播放器重做）、
-`gallery_src/backgrounds.html`（控件玻璃化 + 工具栏合并 + 弹窗重排）、
-`scripts/diag/bg_page_probe.py`（判据随设计变更）、技能
+`gallery_src/theme.css`（--on-* 对比度）、`gallery_src/favorites.js`（has-sitebg 局部玻璃规则）、
+`gallery_src/index.html`（局部顶栏控件玻璃化）、`gallery_src/bgm.html`（选中态 + 悬浮播放器）、
+`gallery_src/backgrounds.html`（控件/筛选分行）、
+`scripts/diag/{bgm_page_probe,bg_page_probe,favorites_probe,glass_pages_probe}.py`、技能
 `.agents/skills/windows-hardlink-dedup-verify` v1.6.0 / `headless-chrome-cdp-batch-export` v1.8.17。
