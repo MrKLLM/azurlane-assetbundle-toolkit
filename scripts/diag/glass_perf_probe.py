@@ -241,6 +241,8 @@ PH_INSTR = """(()=>{
   const g=BG.gl, acc={n:0,step:0,upload:0,render:0,fin:0};
   window.__PH=acc;
   if(!window.__ORIG) window.__ORIG={s:bgStep,u:bgUpload,r:bgRender};
+  if(!window.__U0) window.__U0=window.__ORIG.u;      /* 页面自己那份，交替时要还原回去 */
+  if(!window.__U0) window.__U0=window.__ORIG.u;      /* 页面自己那份，交替时要还原回去 */
   const s=window.__ORIG.s, u=window.__ORIG.u, r=window.__ORIG.r;
   window.bgStep=function(dt){const t=performance.now(); s(dt); acc.step+=performance.now()-t;};
   window.bgUpload=function(){const t=performance.now(); u(); acc.upload+=performance.now()-t;};
@@ -259,6 +261,20 @@ PH_SUBIMAGE = """(()=>{
       allocated=BG.sw*BG.sh; }
     else g.texSubImage2D(g.TEXTURE_2D,0,0,0,BG.sw,BG.sh,g.RED,g.UNSIGNED_BYTE,BG.pack); };
   return 'ok';})()"""
+
+
+PH_TEXIMAGE = """(()=>{window.__ORIG.u=function(){ const g=BG.gl, cur=BG.cur, pk=BG.pack, HS=BG.HS;
+  for(let i=0;i<pk.length;i++){ let v=128+cur[i]*HS; pk[i]=v<0?0:(v>255?255:v|0); }
+  g.bindTexture(g.TEXTURE_2D,BG.tex);
+  g.texImage2D(g.TEXTURE_2D,0,g.R8,BG.sw,BG.sh,0,g.RED,g.UNSIGNED_BYTE,pk); }; return 'ok';})()"""
+PH_RESTORE = "(()=>{window.__ORIG.u=window.__U0; return 'ok';})()"
+
+
+PH_TEXIMAGE = """(()=>{window.__ORIG.u=function(){ const g=BG.gl, cur=BG.cur, pk=BG.pack, HS=BG.HS;
+  for(let i=0;i<pk.length;i++){ let v=128+cur[i]*HS; pk[i]=v<0?0:(v>255?255:v|0); }
+  g.bindTexture(g.TEXTURE_2D,BG.tex);
+  g.texImage2D(g.TEXTURE_2D,0,g.R8,BG.sw,BG.sh,0,g.RED,g.UNSIGNED_BYTE,pk); }; return 'ok';})()"""
+PH_RESTORE = "(()=>{window.__ORIG.u=window.__U0; return 'ok';})()"
 
 
 def ph_report(pg, label):
@@ -280,19 +296,41 @@ def ph_report(pg, label):
 
 
 def phases(pg):
-    """把水面那 20ms 拆到「CPU 模拟 / 纹理上传 / 绘制提交 / GPU 等待」四段上，并当场试一条候选优化。"""
-    print('\n── 水面 20ms 的构成（每帧内插 gl.finish() 强制同步，故合计会略高于表 C）──')
-    out = {}
-    out['base'] = ph_report(pg, '现状（每帧 texImage2D）')
-    pg.ev(PH_SUBIMAGE)
-    out['subimage'] = ph_report(pg, '候选①：texSubImage2D 覆写')
-    pg.ev("(()=>{window.bgStep=window.__ORIG.s;window.bgUpload=window.__ORIG.u;"
-          "window.bgRender=window.__ORIG.r;delete window.__ORIG;return 'ok';})()")
-    d1, d2 = out['base']['total'], out['subimage']['total']
-    print(f'\n候选①收益：{d1:.2f} → {d2:.2f} ms/帧（{(d1-d2):+.2f}，{(d2/d1-1)*100:+.1f}%）'
-          if d1 else '')
-    json.dump(out, open(os.path.join(ROOT, '.diag', 'water_phase_cost.json'), 'w', encoding='utf-8'),
-              ensure_ascii=False, indent=1)
+    """把水面那几毫秒拆到「CPU 模拟 / 纹理上传 / 绘制提交 / GPU 等待」四段上。
+
+    ⚠️ **必须交替配对量，不能顺序跑两次**（2026-10-14 撞到）：顺序 A→B 的两次采样之间
+    机器状态会漂，实测两轮的**帧率**差 40%（31.8ms/帧 vs 22.5ms/帧），连本轮根本没改的
+    「模拟」那一段都差 2 倍（0.30 vs 0.15）。于是"上传 0.13→0.05"看着像省了 62%，
+    其实整份差都是漂移 —— 那次的 −34% 结论因此作废。
+    改成 A/B 交替各 3 轮、只读**配对差值**，漂移就被配对消掉了。"""
+    print(chr(10)+'── 水面四段耗时（A/B 交替各 3 轮，只读配对差值）──')
+    runs = {'sub': [], 'tex': []}
+    for i in range(3):
+        runs['sub'].append(ph_report(pg, f'第{i+1}轮 现状 texSubImage2D'))
+        pg.ev(PH_TEXIMAGE)
+        runs['tex'].append(ph_report(pg, f'第{i+1}轮 候选 每帧 texImage2D'))
+        pg.ev(PH_RESTORE)
+    pairs = []
+    for a, b in zip(runs['sub'], runs['tex']):
+        if a and b:
+            pairs.append({k: round(b[k] - a[k], 3) for k in ('step', 'upload', 'render', 'finish', 'total')})
+    if not pairs:
+        print('! 配对样本为空，无法下结论')
+        return
+    print(chr(10)+'  配对差值（候选 − 现状，正数 = 候选更贵）：')
+    for k in ('step', 'upload', 'render', 'finish', 'total'):
+        v = sorted(p[k] for p in pairs)
+        med = v[len(v) // 2]
+        print(f'    {k:8} 各轮 {[p[k] for p in pairs]}  中位 {med:+.3f} ms/帧')
+    ups = sorted(p['upload'] for p in pairs)
+    med_up = ups[len(ups) // 2]
+    same_sign = all(x > 0 for x in ups) or all(x < 0 for x in ups)
+    print(chr(10)+f'  「每帧 texImage2D」比「texSubImage2D 覆写」贵 {med_up:+.3f} ms/帧'
+          f'（上传段，3 轮同号={same_sign}）')
+    if not same_sign:
+        print('  ! 三轮不同号 ⇒ 这个差在噪声里，不许当成收益写进文档')
+    json.dump({'pairs': pairs, 'runs': runs}, open(os.path.join(ROOT, '.diag', 'water_phase_cost.json'),
+              'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     print('落盘 .diag/water_phase_cost.json')
 
 
@@ -345,7 +383,7 @@ STATUS = """(()=>{const h=document.documentElement, nav=h.querySelector('header'
       for(const s of document.styleSheets){ let rs; try{ rs=s.cssRules; }catch(e){ continue; }
         if(!rs) continue;
         for(const r of rs){ const sel=r.selectorText||'';
-          if(sel && /(^|,)\s*\.card\b/.test(sel) && /backdrop-filter/.test(r.cssText||'')) hit.push(sel); } }
+          if(sel && /(^|,)\\s*\\.card\\b/.test(sel) && /backdrop-filter/.test(r.cssText||'')) hit.push(sel); } }
       return hit;})(),
     card_boxes:(()=>{let n=0; const cs=document.querySelectorAll('.card');
       const bad=(el,p)=>{ const v=getComputedStyle(el,p); return v && v.backdropFilter && v.backdropFilter!=='none'; };

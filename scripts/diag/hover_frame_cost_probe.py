@@ -50,8 +50,11 @@ AP.add_argument('--cdp', default='9342')
 AP.add_argument('--win', default='2560,1600')
 AP.add_argument('--ms', type=int, default=2500, help='每格采样时长')
 AP.add_argument('--step', type=float, default=40.0, help='鼠标事件节拍 ms')
-AP.add_argument('--mode', default='ab', choices=['ab', 'share'])
+AP.add_argument('--mode', default='ab', choices=['ab', 'share', 'layout'])
 AP.add_argument('--thr', type=int, default=8, help='share 模式：逐像素判定阈值')
+AP.add_argument('--dpr', type=float, default=0,
+                help='强制 devicePixelRatio（0=不干预）。用来验"画布分辨率随 dpr 变化"那类改动——'
+                     '无头默认 dpr=1，不强制就永远量不到 HiDPI 分支')
 A = AP.parse_args()
 W, H = (int(x) for x in A.win.split(','))
 URL = f'http://127.0.0.1:{A.port}/gallery_v2/index.html'
@@ -70,6 +73,73 @@ CSSV = {
                 '.card:hover{box-shadow:var(--sh2),inset 0 1px 0 var(--rim-hi)!important;'
                 'border-color:var(--glass-line)!important}'
                 '.card:hover .thumb img{transform:none!important}'),
+    # ── 候选优化（先在这里量，便宜才落到正本；§134 的"先在探针里注入验证"）──────────
+    # 候选A：把 transform 从过渡列表里摘掉，只让「抬起」那两个变量过渡。
+    #   现状 `.card{transition:transform .14s}` 而跟手倾斜**每次 mousemove 都写 --rx/--ry**
+    #   ⇒ 140ms 的过渡被无限重启，主线程动画永远在跑。
+    #   @property 把 --lift/--sc 注册成可插值，于是"抬起"仍有缓动、倾斜变成立即。
+    'cand_tilt_instant': (
+        "@property --lift{syntax:'<length>';inherits:false;initial-value:0px}"
+        "@property --sc{syntax:'<number>';inherits:false;initial-value:1}"
+        '.card{transition:--lift .24s ease-out,--sc .24s ease-out,'
+        'box-shadow .24s ease-out,border-color .18s ease-out!important}'),
+    # 候选B：离屏卡整棵子树跳过样式/布局/绘制。DOM 里 1021 张、屏上只有 70 张。
+    #   contain-intrinsic-size 用 auto 关键字记住上次渲染尺寸，避免滚动条跳动。
+    # 估计值取实测卡高（2560 窗实测 320.3px）。⚠️ 卡宽走 `minmax(154px,1fr)` 会随窗宽拉伸，
+    #   卡高因此有 ~320~339px 的带宽；固定估计值只能取中值，`auto` 关键字会在首次渲染后自校正。
+    'cand_cv': '.card{content-visibility:auto;contain-intrinsic-size:auto 330px}',
+    # 候选C：只留 transform 那条过渡，把 box-shadow / border-color 的过渡摘掉。
+    #   上一轮 A（只摘 transform 那条）没用 ⇒ 贵的应该是**不能合成的那两条属性上的过渡**：
+    #   box-shadow 无法合成 ⇒ 过渡期间只能主线程逐帧重绘；而 transform 可以合成。
+    'cand_trans_only': '.card{transition:transform .14s ease-out!important}',
+    'cand_noshadow_trans': '.card{transition:transform .14s ease-out,'
+                           'border-color .18s ease-out!important}',
+    'cand_cv_trans_only': ('.card{transition:transform .14s ease-out!important;'
+                           'content-visibility:auto;contain-intrinsic-size:auto 420px}'),
+    # 候选H：决定性实验 —— 把 hover 反馈整体搬到**可合成的 opacity** 上。
+    #   若 H ≈ 「过渡全摘」，说明"任何主线程过渡 ⇒ 每帧重栅格化"这条机制成立，
+    #   于是存在"既省又不丢缓动"的改法；若 H 仍慢，则 opacity 也救不了，得换思路。
+    'cand_opacity_hover': (
+        '.card{transition:none!important}'
+        '.card::before{content:"";position:absolute;inset:0;z-index:4;pointer-events:none;'
+        'border-radius:var(--r-card);background:color-mix(in srgb,var(--brand) 26%,transparent);'
+        'opacity:0;transition:opacity .24s ease-out}'
+        '.card:hover::before{opacity:1}'),
+    # 候选I：H + 让那层自己成合成层（will-change:opacity）。判"搬去 opacity 不行"
+    #   到底是因为属性不可合成，还是因为那层没被提升。
+    'cand_opacity_wc': (
+        '.card{transition:none!important}'
+        '.card::before{content:"";position:absolute;inset:0;z-index:4;pointer-events:none;'
+        'border-radius:var(--r-card);background:color-mix(in srgb,var(--brand) 26%,transparent);'
+        'opacity:0;transition:opacity .24s ease-out;will-change:opacity}'
+        '.card:hover::before{opacity:1}'),
+    # 候选J：**一行、零观感改动**——原过渡全保留，只在悬停时给卡片一个提升提示，
+    #   让 transform 过渡真的跑在合成器上。若 J ≈ 10ms，就是"既省又不丢缓动"的答案。
+    'cand_wc_hover': '.card:hover{will-change:transform}',
+    # 候选K：**折中**——缓动保留但时长压短。若代价正比于"过渡在跑的帧数"，
+    #   240ms→90ms 应该能拿到大半个收益，而观感只差在"稍微干脆一点"。
+    'cand_short_trans': ('.card{transition:transform .09s ease-out,'
+                         'box-shadow .1s ease-out,border-color .09s ease-out!important}'),
+    'cand_short_cv': ('.card{transition:transform .09s ease-out,'
+                      'box-shadow .1s ease-out,border-color .09s ease-out!important;'
+                      'content-visibility:auto;contain-intrinsic-size:auto 420px}'),
+    # 候选L：`contain:content`（= layout paint style）—— **不需要尺寸估计**，因此不会动滚动高度。
+    #   它不像 content-visibility 那样整棵跳过，但能收窄样式/布局的失效范围。
+    'cand_contain': '.card{contain:content}',
+    'cand_contain_notrans': '.card{contain:content;transition:none!important}',
+    # 候选M：把 content-visibility 的估计值改成贴着实测卡高（320.3），验证"漂移只是估计值的问题"。
+    'cand_cv320': '.card{content-visibility:auto;contain-intrinsic-size:auto 320px}',
+    'cand_cv_notrans_330': ('.card{transition:none!important;content-visibility:auto;'
+                            'contain-intrinsic-size:auto 330px}'),
+    # 候选F：上界组合 —— 过渡全摘 + 离屏卡跳过。用来判"这两条能不能叠加"。
+    'cand_notrans_cv': ('.card{transition:none!important;'
+                        'content-visibility:auto;contain-intrinsic-size:auto 420px}'),
+    'cand_both': (
+        "@property --lift{syntax:'<length>';inherits:false;initial-value:0px}"
+        "@property --sc{syntax:'<number>';inherits:false;initial-value:1}"
+        '.card{transition:--lift .24s ease-out,--sc .24s ease-out,'
+        'box-shadow .24s ease-out,border-color .18s ease-out!important;'
+        'content-visibility:auto;contain-intrinsic-size:auto 420px}'),
 }
 SETCSS = """(()=>{let s=document.getElementById('hov');
   if(!s){s=document.createElement('style');s.id='hov';document.head.appendChild(s);}
@@ -109,6 +179,8 @@ def open_page(profile):
     flags = ['--headless=new', f'--remote-debugging-port={A.cdp}', '--remote-allow-origins=*',
              f'--user-data-dir={profile}', '--no-first-run', '--no-default-browser-check',
              f'--window-size={A.win}', '--disable-background-timer-throttling', '--hide-scrollbars']
+    if A.dpr:
+        flags.append(f'--force-device-scale-factor={A.dpr}')
     proc = chrome_tree.install(subprocess.Popen([CHROME] + flags + [URL],
                                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     ws = None
@@ -184,6 +256,8 @@ def main():
 
         if A.mode == 'share':
             return mode_share(ev, dom, env)
+        if A.mode == 'layout':
+            return mode_layout(ev)
 
         def metrics():
             d = dom('Performance.getMetrics')
@@ -228,10 +302,27 @@ def main():
         r['4_water_off_hover_off'] = run('4 划卡·水停·悬停摘', False, 'all_off')
         r['5_water_on_hover_off'] = run('5 划卡·水开·悬停摘', True, 'all_off')
         print('\n单变量二分（基准 = 条件 2）')
-        for k, lbl in (('6_no_img', '6 只摘缩略图放大'), ('7_no_shadow', '7 只摘悬停投影'),
-                       ('8_no_trans', '8 只摘卡片过渡'), ('9_no_tilt', '9 只摘跟手倾斜')):
-            r[k] = run(lbl, True, {'6_no_img': 'no_img', '7_no_shadow': 'no_shadow',
-                                   '8_no_trans': 'no_trans', '9_no_tilt': 'no_tilt'}[k])
+        print('\n候选优化（先量再决定改不改正本）')
+        for k, lbl, key in (('6_no_img', '6 只摘缩略图放大', 'no_img'),
+                            ('7_no_shadow', '7 只摘悬停投影', 'no_shadow'),
+                            ('8_no_trans', '8 只摘卡片过渡', 'no_trans'),
+                            ('9_no_tilt', '9 只摘跟手倾斜', 'no_tilt'),
+                            ('A_tilt_instant', 'A 倾斜立即·抬起仍缓动', 'cand_tilt_instant'),
+                            ('B_cv_auto', 'B 离屏卡 content-visibility', 'cand_cv'),
+                            ('AB_both', 'A+B 一起上', 'cand_both'),
+                            ('C_trans_only', 'C 只留 transform 过渡', 'cand_trans_only'),
+                            ('D_noshadow_trans', 'D 摘投影过渡留描边', 'cand_noshadow_trans'),
+                            ('E_cv_plus_C', 'E = B + C', 'cand_cv_trans_only'),
+                            ('F_cv_notrans', 'F = B + 过渡全摘', 'cand_notrans_cv'),
+                            ('H_opacity_hover', 'H hover 走 opacity', 'cand_opacity_hover'),
+                            ('I_opacity_wc', 'I = H + 那层成合成层', 'cand_opacity_wc'),
+                            ('J_willchange_hover', 'J 悬停时 will-change', 'cand_wc_hover'),
+                            ('K_short_trans', 'K 缩短过渡时长', 'cand_short_trans'),
+                            ('K2_short_cv', 'K2 = K + 离屏跳过', 'cand_short_cv'),
+                            ('L_contain', 'L contain:content', 'cand_contain'),
+                            ('L2_contain_notrans', 'L2 = L + 过渡全摘', 'cand_contain_notrans'),
+                            ('M_cv320', 'M cv + 估计值320', 'cand_cv320')):
+            r[k] = run(lbl, True, key)
         ev(WATER_ON)
         ev(SETCSS % (repr(''),))
 
@@ -247,8 +338,21 @@ def main():
                  r['3_water_off_hover_on']['med'], r['4_water_off_hover_off']['med']))
         print('\n── 单变量二分（比基准省多少）──')
         for k, lbl in (('6_no_img', '摘缩略图放大'), ('7_no_shadow', '摘悬停投影'),
-                       ('8_no_trans', '摘卡片过渡'), ('9_no_tilt', '摘跟手倾斜')):
-            print(f'  {lbl:12} med {r[k]["med"]:>6}ms  省 {base-r[k]["med"]:+7.2f}ms')
+                       ('8_no_trans', '摘卡片过渡'), ('9_no_tilt', '摘跟手倾斜'),
+                       ('A_tilt_instant', 'A 倾斜立即'), ('B_cv_auto', 'B content-visibility'),
+                       ('AB_both', 'A+B 一起上'), ('C_trans_only', 'C 只留 transform 过渡'),
+                       ('D_noshadow_trans', 'D 摘投影过渡留描边'), ('E_cv_plus_C', 'E = B + C'),
+                       ('F_cv_notrans', 'F = B + 过渡全摘'),
+                       ('H_opacity_hover', 'H hover 走 opacity'),
+                       ('I_opacity_wc', 'I = H + 那层成合成层'),
+                       ('J_willchange_hover', 'J 悬停时 will-change'),
+                       ('K_short_trans', 'K 缩短过渡时长'),
+                       ('K2_short_cv', 'K2 = K + 离屏跳过'),
+                       ('L_contain', 'L contain:content'),
+                       ('L2_contain_notrans', 'L2 = L + 过渡全摘'),
+                       ('M_cv320', 'M cv + 估计值320')):
+            print(f'  {lbl:16} med {r[k]["med"]:>6}ms  省 {base-r[k]["med"]:+7.2f}ms  '
+                  f'p95 {r[k]["p95"]:>6}ms  fps {r[k]["fps"]:>5}')
         print(f'  {"全摘（上界）":12} med {r["5_water_on_hover_off"]["med"]:>6}ms  '
               f'省 {base-r["5_water_on_hover_off"]["med"]:+7.2f}ms')
 
@@ -284,6 +388,49 @@ def main():
             proc.wait(timeout=10)
         except Exception:
             chrome_tree.kill_tree(proc.pid)
+
+
+LAY = """(()=>{
+  /* 自动找真正的滚动容器：scrollHeight 明显大于 clientHeight 且 overflow-y 允许滚动的那个。
+     上一版写死 '#grid'.parentElement，量到一个不滚的元素（scroll==client，判据恒绿=空转）。 */
+  let best=null, bestOver=0;
+  for(const el of document.querySelectorAll('body *')){
+    const cs=getComputedStyle(el);
+    if(!/auto|scroll/.test(cs.overflowY)) continue;
+    const over=el.scrollHeight-el.clientHeight;
+    if(over>bestOver){ bestOver=over; best=el; }
+  }
+  const g=document.getElementById('grid')||document.querySelector('[class*=grid]')||document.body;
+  const c=document.querySelector('.card');
+  const r=c?c.getBoundingClientRect():{width:0,height:0};
+  const gcs=getComputedStyle(g);
+  return JSON.stringify({scroller:best?(best.tagName+'#'+(best.id||'')+'.'+(best.className||'').toString().split(' ')[0]):null,
+    scroll:best?best.scrollHeight:0, client:best?best.clientHeight:0,
+    gridTag:g.tagName+'#'+(g.id||''), display:gcs.display, gap:gcs.gap,
+    cols:gcs.gridTemplateColumns.split(' ').length,
+    cardW:+r.width.toFixed(1), cardH:+r.height.toFixed(1),
+    cards:document.querySelectorAll('.card').length});})()"""
+
+
+def mode_layout(ev):
+    """content-visibility 的**代价闸**：它给离屏卡一个估计尺寸，估错了滚动高度就会漂。
+    判据：加规则前后 `scrollHeight` 变化必须 < 2%（卡高估计值要贴着实测卡高取）。"""
+    print('\n── content-visibility 的滚动高度代价 ──')
+    ev(SETCSS % (repr(''),))
+    a = json.loads(ev(LAY))
+    print('  原状  ', json.dumps(a, ensure_ascii=False))
+    ev(SETCSS % (repr(CSSV['cand_cv_notrans_330']),))
+    time.sleep(1.2)
+    b = json.loads(ev(LAY))
+    print('  加 cv ', json.dumps(b, ensure_ascii=False))
+    ev(SETCSS % (repr(''),))
+    d = abs(b['scroll'] - a['scroll']) / max(1, a['scroll'])
+    print(f'\n  scrollHeight {a["scroll"]} → {b["scroll"]}（{d*100:+.2f}%）')
+    print(f'  实测卡高 {a["cardH"]}px ｜ 落选用的估计值 330px ｜ 列数 {a["cols"]} ｜ '
+          f'容器 {a["gridTag"]} display={a["display"]} 滚动容器 {a["scroller"]}')
+    ok = d < 0.02
+    print('  判据: ' + ('✅ 漂移 < 2%' if ok else f'❌ 漂移 {d*100:.2f}% ≥ 2%，估计值要改成贴着 {a["cardH"]}px'))
+    return 0 if ok else 1
 
 
 def mode_share(ev, dom, env):

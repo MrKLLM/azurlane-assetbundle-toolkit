@@ -2688,7 +2688,7 @@ paintTheme();
    ⚠️ 这段仍放在脚本末尾：它引用 mask / RM，写在它们前面会踩到 const 的暂时性死区。 */
 const BG = { mode:'none', err:'', cv:null, gl:null, prog:null, u:{}, tex:null, pack:null,
              raf:0, lastT:0, last:null, t0:0, w:0, h:0, sw:0, sh:0, cur:null, prv:null, buf:null,
-             energy:0, peak:0, frames:0, strokes:0, rs:0.72, HS:620, P:null };
+             energy:0, peak:0, frames:0, strokes:0, rs:0.72, HS:620, P:null, texN:0 };
 function bgHex(h){ h=(h||'').trim();
   if(h[0]!=='#'||(h.length!==7&&h.length!==4)) return [1,1,1];
   let s=h.slice(1); if(s.length===3) s=s.split('').map(c=>c+c).join('');
@@ -2704,13 +2704,17 @@ function bgColors(){
 function bgResize(){
   if(!BG.cv) return;
   BG.w=innerWidth; BG.h=innerHeight;
-  const k=Math.min(1.5, window.devicePixelRatio||1)*BG.rs;
+  /* ⚠️ dpr 上限取 1，不是 1.5（2026-10-14 改，理由见 docs/TROUBLESHOOTING.md §143）：
+     画布是 0.72× CSS 分辨率再被 CSS 拉满视口的软水，**dpr 提高买不到任何观感**，
+     而填充率按像素数走 —— dpr=2 的屏上原式给到 1.08× CSS（1080p 视口 = 2.42Mpx，比 dpr=1 多 2.2 倍）。
+     水面的实测帧时增量只有 0.8ms，但那是 dpr=1 的量；这条是把 HiDPI 那 2.2 倍提前掐掉。 */
+  const k=Math.min(1, window.devicePixelRatio||1)*BG.rs;
   BG.cv.width=Math.max(2,Math.floor(BG.w*k)); BG.cv.height=Math.max(2,Math.floor(BG.h*k));
   /* 场按视口长宽比取格子：短边固定 240 格，够细到看不出方块、又少到 CPU 扛得住。 */
   BG.sw=240; BG.sh=Math.max(60, Math.round(240*BG.h/Math.max(1,BG.w)));
   const n=BG.sw*BG.sh;
   BG.cur=new Float32Array(n); BG.prv=new Float32Array(n); BG.buf=new Float32Array(n);
-  BG.pack=new Uint8Array(n); BG.t0=0;
+  BG.pack=new Uint8Array(n); BG.t0=0; BG.texN=0;   /* texN=0 ⇒ 下一帧重新分配纹理存储 */
   BG.last=null; BG.energy=0; BG.peak=0;
   if(BG.gl){ BG.gl.viewport(0,0,BG.cv.width,BG.cv.height); bgClear(); }
 }
@@ -2746,7 +2750,16 @@ function bgUpload(){
   const g=BG.gl, cur=BG.cur, pk=BG.pack, HS=BG.HS;
   for(let i=0;i<pk.length;i++){ let v=128+cur[i]*HS; pk[i]=v<0?0:(v>255?255:v|0); }
   g.bindTexture(g.TEXTURE_2D, BG.tex);
-  g.texImage2D(g.TEXTURE_2D,0,g.R8,BG.sw,BG.sh,0,g.RED,g.UNSIGNED_BYTE,pk);
+  /* ⚠️ 首帧 texImage2D 分配、之后一律 texSubImage2D 覆写（2026-10-14 改，§143）：
+     原来每帧都调 texImage2D，那会**重新分配整张纹理存储**。四段拆分实测
+     上传 0.13 → 0.05ms/帧（整条水面 0.44 → 0.29ms/帧，−34%）。
+     判据是"分配过没有"按像素数记，bgResize() 换尺寸时把 BG.texN 清 0 强制重分配。 */
+  if(BG.texN !== pk.length){
+    g.texImage2D(g.TEXTURE_2D,0,g.R8,BG.sw,BG.sh,0,g.RED,g.UNSIGNED_BYTE,pk);
+    BG.texN = pk.length;
+  } else {
+    g.texSubImage2D(g.TEXTURE_2D,0,0,0,BG.sw,BG.sh,g.RED,g.UNSIGNED_BYTE,pk);
+  }
 }
 const BG_VS = '#version 300 es\nin vec2 a_pos; out vec2 vUv;\nvoid main(){ vUv = a_pos*0.5+0.5; gl_Position = vec4(a_pos,0.0,1.0); }';
 const BG_FS = [
