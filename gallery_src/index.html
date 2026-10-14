@@ -1751,7 +1751,7 @@ async function renderLive2D(s, sk){
       return {group:g,index:i,state:rec?rec.state:(g?'not-loaded':'idle'),file:rec&&rec.file||null,
         curves:rec?rec.curves:0,parameterCurves:rec?rec.parameterCurves:0,switchCurves:targets.length,
         switchKeys:targets.reduce((n,k)=>n+book.keys[k].length,0),
-        switchParams:targets.map(k=>({id:book.ids[k],keys:book.keys[k]})),
+        switchParams:targets.map(k=>({id:book.ids[k],keys:book.keys[k]})),gate:snapMidGate.slice(),
         frames:snapKeyStats.frames,writes:snapKeyStats.writes,changed:snapKeyStats.changed,
         changedIds:Array.from(snapKeyStats.changedIds).sort(),last:snapKeyStats.last,error:rec&&rec.error||''};
     };
@@ -1811,16 +1811,23 @@ async function renderLive2D(s, sk){
       for(const it of h.items) if(now<h.t0+it[2]){ alive=true;
         try{ cm.setParameterValueByIndex(it[0],it[1]); }catch(e){} }
       if(!alive) snapHold=null; });
-    /* v2：只对 snapswitch 表认定的开关参数，把当前 motion3 曲线插值出的中间值贴回最近的作者键值。
+    /* v2：把当前 motion3 曲线插值出的中间值贴回作者键值，但**只钉 snapMidGate 列出的参数**。
        曲线取自 definitions[group][index].File 对应的 motion3.json，不从运行时 definition 猜；
-       若当前参数正处于跨 clip 的 snapHold 中则让上一层优先。window.__snapOff 同时关闭两层，供 A/B。 */
+       若当前参数正处于跨 clip 的 snapHold 中则让上一层优先。window.__snapOff 同时关闭两层，供 A/B。
+       ⚠️ 收窄范围（2026-10-14，判据 §141）：「手成虚影」只由 Param27 闸着（ArtMesh0/1/338/377/378
+       这 5 片），所以 clip 内部只钉它一个。snapswitch 表里其余 18 个参数（GL1~14 / Param25 /
+       Param121/144/145/166/172 / ParamCheek / ParamJTEyeOpen）**一律平滑插值**——游戏侧 Unity 曲线
+       在线性段上就是逐帧滑过去，全表钉成阶梯会让手势与高光的切换时刻/方式都和游戏对不上
+       （2026-10-14 用户拿游戏实录与网页实录逐条比对后报的两条）。跨 clip 的 snapHold 是另一层，
+       治的是切动作死区，不受本表影响；要扩 mid-clip 钉值范围必须先证明该参数单独造成虚影。 */
+    const snapMidGate=['Param27'];
     im.on('afterMotionUpdate',()=>{
       if(window.__snapOff) return;
       const st=mm.state, g=st&&st.currentGroup, raw=Number(st&&st.currentIndex);
       if(!g||!Number.isInteger(raw)||raw<0) return;
       const key=snapClipKey(g,raw), book=snapKeyBooks[key], rec=snapKeyLoads[key];
       if(!book||!rec||rec.state!=='ok') return;
-      const targets=Object.keys(book.keys).filter(k=>Object.prototype.hasOwnProperty.call(snapP,k));
+      const targets=Object.keys(book.keys).filter(k=>snapP[k]&&snapMidGate.indexOf(book.ids[k])>=0);
       if(!targets.length) return;
       const now=performance.now(), held=new Set();
       if(snapHold) for(const it of snapHold.items) if(now<snapHold.t0+it[2]) held.add(it[0]);

@@ -350,7 +350,9 @@ def main():
                         if 0.15 < row[4] < 0.85:
                             ghosts.append((frame['t'], row[0], row[4]))
             expected = 5 * len(frames)
-            allowed = {x.get('id') for x in (snap_end or {}).get('switchParams', [])}
+            # mid-clip 钉值白名单以页面钩子报的 gate 为准（2026-10-14 收窄为 ['Param27']）：
+            # changedIds 必须是 gate 的子集，防止又悄悄钉宽回全表。
+            allowed = set((snap_end or {}).get('gate') or [])
             escaped = sorted(set((snap_end or {}).get('changedIds', [])) - allowed)
             print(f'  ghost gate: 5片采样 {seen}/{expected} · 中间态 {len(ghosts)} · '
                   f'本轮回贴参数 {len((snap_end or {}).get("changedIds", []))} · '

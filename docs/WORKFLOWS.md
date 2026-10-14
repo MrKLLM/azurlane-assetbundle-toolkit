@@ -816,6 +816,15 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 
 ### WF-16: Live2D 画廊前端交互改动与回归验证（改哪里 → 怎么验证才算过）
 
+#### WF-16 追加二（2026-10-14 晚）：钉值范围必须收窄到「有因果证据的那个参数」
+
+- **触发**：上一轮把 snapswitch 全表匹配到的 19 个开关参数一律 nearest-key 阶梯化，用户拿游戏实录对比发现**手势切换时刻不对、身上/手臂高光切换不对**。
+- **根因判据**：曲线形态决定该不该钉。`GL1/4/5/7/8/9/10/11/12/14` 在 home 里全是 **0→18.25s 单段长坡**（只有首末两个作者端点）——最近键法会在坡中点（~9.1s）整体翻端点，高光当场突跳；`ParamCheek`/`ParamJTEyeOpen` 也是长坡。真正造成虚影的只有 `Param27`（ArtMesh0/1/338/377/378 的门）。**snapswitch 表的含义是「跨 clip 切换时钉住防死区」，不是「clip 内每个过渡都该瞬切」。**
+- **做法**：页面 `snapMidGate=['Param27']` 限定 clip 内回写目标；`__snapKeyDbg()` 增报 `gate`；探针逃逸检查改成 `changedIds ⊆ gate`（再被悄悄钉宽回全表直接判红）。
+- **验收**：全 clip 0–18.2s 步长 0.25（74 帧 ×5 片=370）：修复态影带 0/370、`--snap-off` 反向 140/370、非 P27 参数确认逐帧插值（Param25 0.5→0.567→0.6 连续、GL1/GL8 连续爬升）；`l2d_pause_e2e.py gezi_2` 12 PASS+1 合法 SKIP。数据 `.diag/l2d_sweep/1014-235035`（修复态）与 `1015-001923`（反向）。
+- **踩坑记录**：钉值范围要和病因一样窄——先证明某参数单独造成症状再入名单，「整表都钉更保险」会把游戏里连续的过渡全变成跳变。跨 clip 的 `snapHold` 与 clip 内的 `snapMidGate` 是两层，范围互不覆盖；扩名单前必须逐参数/逐转场做 A/B，并把「消除半透明」与「手势时序/其它高光保持正确」分开验收。
+- **涉及文件**：`gallery_src/index.html`、`scripts/diag/l2d_wrist_ledger.py`、`docs/TROUBLESHOOTING.md` §141、`docs/HANDOFF_6.37_手不见了_2026-10-12.md`。
+
 #### WF-16 追加（2026-10-14）：同一 clip 内开关参数穿越淡变带的作者键回贴
 
 - **判据**：问题若发生在同一个 motion 播放过程中，不能只扩跨 clip 的 snapswitch。页面应按 `definitions[group][currentIndex].File` 取当前 motion3，解析 `Target=Parameter` 的端点作者键，只回写 snapswitch 白名单参数；调试钩子需报告已解析曲线数/开关曲线数/作者键数/实际写入数。gezi_2 的 `l2d_wrist_ledger.py --sweep 15.00:16.00:0.05 --ghost-gate` 以产品 UI 起播，5 片 ×21 帧须完整；启用态 0 个 `0.15<op<0.85`，`--snap-off --ghost-gate` 反向态必须出现中间值。
