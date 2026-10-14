@@ -4287,3 +4287,58 @@ py -3 scripts/deploy_gallery.py --check                # 硬链/漂移
 `scripts/diag/{glass_pages_probe,bgm_page_probe,bg_page_probe,favorites_probe}.py`、
 `.agents/skills/{windows-hardlink-dedup-verify,headless-chrome-cdp-batch-export}/SKILL.md`。
 **结果补记（2026-10-14）**：站用背景下搜索框升至 blur(24px)；实际筛选文字/底对比度昼夜均 ≥4.5:1；主页仅具体控件局部玻璃化、header 本身透明且无滤镜；背景库筛选分行。回归截图保存在唯一目录 `.diag/favshots-ui-final-20261014_<pid>_<ns>/`，勿覆盖。
+
+### WF-42: 帧时归因——把「滑鼠标卡顿」钉到具体某一层（水面 / 悬停 / 输入通路）（2026-10-14）
+
+**适用**：用户报"动一下鼠标就卡"这类**与指针移动相关**的卡顿，或任何"背景层动效是不是罪魁"的追问。
+先跑这个，别先改代码——本轮就是靠它把锅从水面挪到了卡片悬停上（差 30 倍）。
+
+**判据**
+
+1. **场景必须含 `:hover`。** 页面内 `dispatchEvent(new PointerEvent('pointermove'))` **不命中 CSS `:hover`**。
+   凡是"滑鼠标"类的问题，一律用 CDP `Input.dispatchMouseEvent`（可信事件）。用合成事件的探针
+   （`glass_perf_probe.py` 的划水）答这类问题是**在量一个缺了一半的场景**，它的数字不是错的，是**答错问题**。
+2. **事件发送要"发而不等"**（fire-and-forget + 末尾一次性 drain）。逐条等 CDP 回复会把事件速率压到 30/s，
+   于是帧时变成"发事件的速度"（§133 坑三）。但反方向也有坑：发太快页面消费不过来，帧时又会等于事件间隔。
+   ⇒ **别用事件速率阈值当闸门，用正面对照**（见第 3 条）。
+3. **必须跑满 2×2，四格都要。** 只跑"背景开/关"两格会撞上一个致命陷阱：
+   如果两格都卡在同一个平台上（无头常见 30fps 平台），**差值恒为 0，看起来像"背景免费"**，
+   实际上可能是"背景的钱被平台吃了"。补上"悬停关"那两格，其中 **"背景开 + 悬停关"** 那一格是关键：
+   它让背景真跑（查 `bg帧 > 0`）却跑回地板速度 ⇒ 背景的总代价被这一格**夹住**，不靠差值猜。
+4. **G1–G4 四道闸**（`hover_frame_cost_probe.py` 内置，任一红则整份数字作废）：
+   G1 地板格 `bg帧==0`（"有浪才跑"要成立）｜G2 水关格 `bg帧==0`（"停"要是真的）｜
+   G3 **悬停摘掉那两格必须跑回地板速度（≤ 地板×2+2ms）**——这是仪器的**阳性对照**：
+   跑不回去就说明瓶颈是输入通路本身，第 3 条那个"背景免费"的结论就是仪器造出来的｜
+   G4 四格极差 ≥5ms（仪器分得开，否则判据无意义）。
+5. **单变量才归因，全摘只当上界。** 一次摘四件事得到的差值**不能**说成"某属性是元凶"（§133 坑二）。
+   要么逐条单摘（本轮结论：单摘都不动，只有四条一起摘才掉 ⇒ **归不到单条属性**，这个"归不到"
+   本身就是结论），要么换 `chrome://tracing` / Performance 面板看 Scripting/Painting/Composite 三段占比。
+6. **差值不可复现就不写进结论。** 本轮有一条单变量（`transition:none` 省 16.7ms）第一次跑出来、后两次不复现
+   ⇒ 按不可复现处理，只在文档里留一行说明，不作为结论。
+7. **背景层的"可见面积"要逐像素量，不要几何推断。** 停循环 → 高度场填 0（全透明）拍 A1/A2
+   → 填满拍 B → `|B−A2|` = 信号、`|A2−A1|` = 仪器噪声。噪声必须远小于信号。
+   几何采样（`elementFromPoint` + 沿祖先链算遮光率）也能做，但遮光率要累乘 `(1-α)`，
+   第一版写成累乘 `α` 会输出"全被挡住"，而且它要自己推断"这层算不算遮住"，比逐像素差多一层假设。
+
+**踩坑记录**
+
+- **本机 `HTTP_PROXY`/`HTTPS_PROXY` 会劫持 `127.0.0.1`** ⇒ CDP 的 `/json` 与页面请求全变
+  `502 Bad Gateway`，报错文本长得像"服务没起"。跑本地 CDP 探针前先清代理环境变量
+  （`HTTP_PROXY= HTTPS_PROXY= NO_PROXY=127.0.0.1,localhost`）。
+- **后台服务别用 `(cmd &)`**：工具调用一返回就被收掉，下一次调用立刻 502。要用真正的后台任务起。
+- **`Performance.enable` / `Page.enable` 是 CDP 域方法，不能塞进 `Runtime.evaluate`**：
+  会被当 JS 表达式求值，域从未开启，六个指标全读成 0 —— 而打印出来的表格看起来"很正常"，
+  是最容易带病收工的那种假绿灯。
+- **托管 Python 环境（3.13，有 `websocket-client`）与 `py -3`（3.11.9，有 `PIL`）分工不同**：
+  要用到两者就先在托管环境里 `pip install pillow`（隔离目录），别去污染系统环境。
+- **别 `shutil.rmtree` 共享 profile / 截图目录**：会被安全策略拦（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`），
+  而且那些目录本身是取证材料。一律 **PID + 时间戳**唯一命名，旧的不删。
+- **`--win` 与实际视口不等**：`--window-size=2560,1600` 量出来 `innerWidth×innerHeight = 2538×1502`
+  （被窗口装饰吃掉），画布尺寸按视口算，别按 `--win` 算。
+
+**涉及文件**
+
+- 探针：`scripts/diag/hover_frame_cost_probe.py`（`--mode ab` 2×2 + 单变量二分；`--mode share` 可见占比）
+- 旧探针（量水面自身、不含 `:hover`）：`scripts/diag/glass_perf_probe.py`（`--phases` 四段拆分）
+- 被量对象：`gallery_src/index.html`（`#bgfx` 水面 canvas + `.card` 悬停/倾斜 + `pointermove` 监听）
+- 结论：`docs/TROUBLESHOOTING.md` **§143**（含 2×2 原始数字、四段拆分、优化方向清单）
