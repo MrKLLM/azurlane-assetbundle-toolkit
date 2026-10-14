@@ -286,8 +286,13 @@ def main():
             el = time.time() - t0
             d['m'] = {k: round((m1.get(k, 0) - m0.get(k, 0)) * 1000, 1) for k in MET}
             d['rate'] = d['ev'] / el
+            # 水面自己的出帧率：这才是"波纹看着卡不卡"对应的量。
+            # 页面的 rAF 帧率和水面的出帧率在实测里始终相等（水面从不独立掉帧）⇒
+            # 波纹的卡顿就是页面帧率的卡顿，不是水面自己慢。
+            d['wfps'] = d['bgframes'] / (A.ms / 1000.0 + 0.3)
             print(f'  {label:22} med {d["med"]:>6}ms  p95 {d["p95"]:>6}ms  max {d["max"]:>7}ms  '
-                  f'~{d["fps"]:>5}fps  帧{d["n"]:>4}  ev {d["rate"]:4.0f}/s  bg帧 {d["bgframes"]:>4}')
+                  f'~{d["fps"]:>5}fps  帧{d["n"]:>4}  ev {d["rate"]:4.0f}/s  '
+                  f'bg帧 {d["bgframes"]:>4}（水面 {d["wfps"]:5.1f}/s）')
             mm = d['m']
             print(f'{"":24}主线程任务 {mm["TaskDuration"]:7.0f}ms  脚本 {mm["ScriptDuration"]:6.0f}ms  '
                   f'样式重算 {mm["RecalcStyleDuration"]:6.0f}ms({mm["RecalcStyleCount"]:>7}次)  '
@@ -336,6 +341,13 @@ def main():
         print('  四格中位数：水开/悬停开 %.1f ｜ 水开/悬停关 %.1f ｜ 水关/悬停开 %.1f ｜ 水关/悬停关 %.1f'
               % (r['2_water_on_hover_on']['med'], r['5_water_on_hover_off']['med'],
                  r['3_water_off_hover_on']['med'], r['4_water_off_hover_off']['med']))
+        won = r['2_water_on_hover_on']['wfps']
+        woff = r['5_water_on_hover_off']['wfps']
+        print(f'\n── 水面的出帧率（"波纹看着卡不卡"就是这个数）──')
+        print(f'  水面开·悬停开（用户报的场景）: {won:6.1f}/s')
+        print(f'  水面开·悬停关              : {woff:6.1f}/s   ← 同一份水面代码，摘掉悬停后的上限')
+        if won > 0:
+            print(f'  ⇒ 悬停那套把水面的出帧率压掉了 {woff/won:.1f} 倍')
         print('\n── 单变量二分（比基准省多少）──')
         for k, lbl in (('6_no_img', '摘缩略图放大'), ('7_no_shadow', '摘悬停投影'),
                        ('8_no_trans', '摘卡片过渡'), ('9_no_tilt', '摘跟手倾斜'),
