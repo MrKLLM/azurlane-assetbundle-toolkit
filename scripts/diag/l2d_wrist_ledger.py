@@ -93,10 +93,11 @@ JS_SNAP = r"""(async(a)=>{
   const m=l2State.app.stage.children[0], cm=m.internalModel.coreModel, D=cm._model.drawables;
   const P=cm._model.parameters;
   if(a.from===undefined){
-    const pv={}; for(let i=0;i<P.count;i++){ const q=P.ids[i];
-      if(q==='Param25'||q==='Param27')pv[q]=+P.values[i].toFixed(3); }
+    const pv={}, params=[]; for(let i=0;i<P.count;i++){ const q=P.ids[i], id=String((q&&q.string)||q);
+      if(id==='Param25'||id==='Param27')pv[id]=+P.values[i].toFixed(3);
+      params.push([id,+P.values[i].toFixed(6)]); }
     const im=m.internalModel, ppu=im.pixelsPerUnit||1;
-    return JSON.stringify({head:1, count:D.count, p:pv,
+    return JSON.stringify({head:1, count:D.count, p:pv, params,
       tf:[+(im.width/ppu).toFixed(4),+(im.height/ppu).toFixed(4),
           +ppu.toFixed(3), +m.scale.x.toFixed(5), +m.x.toFixed(2), +m.y.toFixed(2)]});
   }
@@ -201,6 +202,10 @@ def main():
             print('[ERROR 2] 页面没起来：', boot)
             return 2
         print('boot ok · 物理摆动已停' if boot.get('physicsOff') else 'boot ok')
+        snap_off = '--snap-off' in sys.argv
+        if snap_off:
+            ev('window.__snapOff=true')
+            print('A/B: __snapOff=true（关闭跨 clip 与 v2 钉值）', flush=True)
         def cur_group():
             return ev("(()=>String(l2State.app.stage.children[0].internalModel.motionManager"
                       ".state.currentGroup))()")
@@ -238,18 +243,21 @@ def main():
 
         print('起播 …', flush=True)
         t = start_play('第一遍')
-        # 阶梯层是否真的建起来了？n=0 ⇒ 页面侧取曲线的字段名不对，整层空转（别把空转当"修过了"）
-        print('  snapStair: ', ev('JSON.stringify(window.__snapStairDbg'
-                                  '?window.__snapStairDbg():{absent:1})'), flush=True)
+        if not snap_off:
+            snap_loaded = ev('window.__snapKeyWait?window.__snapKeyWait():null')
+            print('  snapKey(v2) 起播确认: ', snap_loaded, flush=True)
+            if not isinstance(snap_loaded, dict) or snap_loaded.get('state') != 'ok':
+                raise SystemExit(f'v2 motion3 键未就绪，拒绝把此趟当验证结果：{snap_loaded}')
+        # v2 的首个有效证据是页面从 definitions[group][index].File 取到 motion3 作者键，
+        # 而不是只看动作轨迹；end 处再读逐帧回贴计数，防止异步请求尚未完成时误判空转。
+        print('  snapKey(v2) 起始: ', ev('JSON.stringify(window.__snapKeyDbg'
+                                      '?window.__snapKeyDbg():{absent:1})'), flush=True)
         print('  诊断: ', ev("""(()=>{const im=l2State.app.stage.children[0].internalModel;
-            const d=im.motionManager.definitions&&im.motionManager.definitions.home;
-            const o=d&&d[0];
+            const st=im.motionManager.state, g=st&&st.currentGroup, i=st&&st.currentIndex;
+            const d=im.motionManager.definitions&&im.motionManager.definitions[g];
+            const o=d&&d[i];
             return JSON.stringify({snapDbg:window.__snapDbg?window.__snapDbg():null,
-              defType:typeof o, defKeys:o?Object.keys(o).slice(0,12):null,
-              curve0:(o&&o.curves&&o.curves[0])?Object.keys(o.curves[0]):null,
-              nCurves:o&&o.curves?o.curves.length:null,
-              sample:(o&&o.curves)?o.curves.filter(c=>String(c.id||'').match(/^Param2[57]$/)).slice(0,1)
-                        .map(c=>[c.target,c.id,String(c.segments).slice(0,90)]):null});})()"""), flush=True)
+              group:g,index:i,defKeys:o?Object.keys(o):null,file:o&&o.File||null});})()"""), flush=True)
         def snap_all(tag):
             head = ev(f'({JS_SNAP})({{}})')
             head = json.loads(head)
@@ -265,7 +273,7 @@ def main():
                     print(f'  [ERROR] 第 {f} 批缺 rows：{str(pj)[:300]}')
                     return 2
                 rows += pj['rows']
-            return dict(count=n, p=head['p'], tf=head['tf'], rows=rows)
+            return dict(count=n, p=head['p'], params=head['params'], tf=head['tf'], rows=rows)
 
         out = {}
         # t 不在这里归零：start_play 验真时已经推掉 0.36s，抹掉它会让整趟比真实 clip 时刻晚这么多
@@ -318,9 +326,40 @@ def main():
                     else:
                         line += f' · 抓图失败 {str(d)[:70]}'
                 print(line, flush=True)
+        snap_end = ev('window.__snapKeyDbg?window.__snapKeyDbg():null')
+        print('  snapKey(v2) 结束: ', snap_end, flush=True)
+        if not snap_off:
+            if not isinstance(snap_end, dict) or snap_end.get('state') != 'ok':
+                raise SystemExit(f'结束时当前 motion3 作者键未加载：{snap_end}')
+            if snap_end.get('switchCurves', 0) <= 0 or snap_end.get('writes', 0) <= 0:
+                raise SystemExit(f'v2 空转：没有开关曲线或没有逐帧写入：{snap_end}')
+        out['_run'] = {'snapOff': snap_off, 'snapKey': snap_end}
         out['_png'] = pngs
         json.dump(out, open(outfile, 'w'), ensure_ascii=False)
         print('落盘', outfile, '· 图在', OUTDIR if '--png' in sys.argv else '(没抓图)')
+        if '--ghost-gate' in sys.argv:
+            if GROUP != 'home':
+                raise SystemExit('--ghost-gate 只适用于 gezi_2 的 home 样本')
+            ids = {'ArtMesh0', 'ArtMesh1', 'ArtMesh338', 'ArtMesh377', 'ArtMesh378'}
+            frames = [v for k, v in out.items() if not k.startswith('_')]
+            seen, ghosts = 0, []
+            for frame in frames:
+                for row in frame['snap']['rows']:
+                    if row[0] in ids:
+                        seen += 1
+                        if 0.15 < row[4] < 0.85:
+                            ghosts.append((frame['t'], row[0], row[4]))
+            expected = 5 * len(frames)
+            allowed = {x.get('id') for x in (snap_end or {}).get('switchParams', [])}
+            escaped = sorted(set((snap_end or {}).get('changedIds', [])) - allowed)
+            print(f'  ghost gate: 5片采样 {seen}/{expected} · 中间态 {len(ghosts)} · '
+                  f'本轮回贴参数 {len((snap_end or {}).get("changedIds", []))} · '
+                  f'模式={"off反向阳性" if snap_off else "on修复验收"}', flush=True)
+            if (seen != expected or (snap_off and not ghosts) or (not snap_off and ghosts)
+                    or (not snap_off and (not allowed or escaped))):
+                print('  [FAIL] 虚影判据反向或采样不完整：', ghosts[:12], flush=True)
+                return 3
+            print('  [PASS] ' + ('关闭态确实复现中间态' if snap_off else '启用态无中间态虚影'), flush=True)
         return 0
     finally:
         try:

@@ -63,21 +63,17 @@
 只在**换 clip 那一下**跑（`index.html` 的 `beforeMotionUpdate` 里 `if(!changed) return;`）
 ⇒ **同一条动作中途的穿越没人管**。
 
-### 下一件事 = 修 v2（v1 已试过、空转、已撤回 —— 别当成"这条没用"）
+### v2 已实施（2026-10-14）：motion3 作者键回贴；目标症状 A/B 通过
 
-v1 = "开关类参数每帧贴到最近的作者键值"。验证时 `__snapStairDbg()` 报 **`n:0`**，整层空转，
-因为 **`mm.definitions[g][0]` 只有 `{File}`，曲线不在库的定义里**。补丁已 `git checkout` 撤回、
-正副本一致。**它根本没运行过，所以不构成对这条路线的否证。**
+页面按 `motionManager.definitions[group][currentIndex].File` fetch 当前 motion3，读取 `Target=Parameter` 的作者端点键；仅对 snapswitch 白名单参数逐帧贴回最近键，正在跨 clip `snapHold` 的索引跳过。实现与诊断钩子在 `gallery_src/index.html`，流程与复用判据见 `docs/WORKFLOWS.md` WF-16 追加，踩坑与细节见 `docs/TROUBLESHOOTING.md` §141 追加。
 
-| v2 路线 | 做法 | 代价 |
-|---|---|---|
-| ① 页面自己解析（推荐） | 按 `File` 路径 fetch `home.motion3.json` 解析 `Curves` 取键值（与 snapswitch 同一种异步加载） | 最准确；多一次本地小文件请求 + 就绪时序 |
-| ② 运行时驻留学习 | 连续 ≥3 帧不变的值当作者键值，其余贴最近键 | 不依赖库内部；慢速停靠可能被误判成键 |
+结果：`home` 实际加载 502 条参数曲线；snapshots 显示 33 个开关曲线、58 个作者键值。15.00–16.00s 细扫目标 5 片共 105 个样本，启用态 0 个落在 `0.15<op<0.85`；`--snap-off` 反向阳性 15/105 有中间态。几何画布对照能看到关闭态手部淡虚、启用态手完整显现。`l2d_pause_e2e.py gezi_2` 回归 12 条 PASS、1 条合法 SKIP（该皮肤不装残留复位层）。
 
-验收现成：`.diag/l2d_sweep/1013-121617/` 是**改前 21 帧基线**；改后要求"那 5 片的 op 不再落在
-0.15–0.85"，且 `Param25/27` 之外的姿态轨迹逐帧不变（防 §6.35 的塌帧回来）。
-⚠️ 改完 `gallery_src/` 正本，**验证之前**必须先 `deploy_gallery.py` 再 `--check`——
-Edit 会断硬链，v1 那次差点把断链状态下的空测当成验证结果。
+**结论边界**：这轮只确认淡变虚影被切除，不宣称全姿态 A/B 锁相通过。两次独立 headless 的同名义秒并不同相；现有改前 `.diag/l2d_sweep/1013-121617/` 仅作改前参考，按同秒逐帧对比不是有效的姿态零回退证据。snap 参数白名单以外未被该回写器写入；`home` 无 PartOpacity 的独立缺口不在本任务范围，也不是这次手虚影的原因。
+
+### 本轮收尾边界
+
+v1 的 `__snapStairDbg() → n:0` 空转来自 definition 只有 `{File}`，该失败已在 §141 记录；v2 通过同 UI 路径加载键值并以开/关反向对照验收。本轮到此止，不扩到其它 clip、其它皮肤或独立 PartOpacity 缺口。跨环境继续验证前，仍须先部署正本并 `deploy_gallery.py --check`。
 
 已判死、别再重跑的旁路（详述 §139/§141）：手镯锚点、PartOpacity 缺口、拼音名当标尺、snap 覆盖面、
 预加载/时序、"第三套被 idle 闸着"、X 族=手、导出掉瞬切键、单参数拟合找门、

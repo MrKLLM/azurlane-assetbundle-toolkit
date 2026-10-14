@@ -9818,7 +9818,7 @@ X 族 = `{ArtMesh158, ArtMesh170, ArtMesh177, ArtMesh186}`（do500/ro41-69，中
 3. **单参数拟合会误判门**：先用 `op≈P` / `op≈1−P` 去配 21 帧序列，最好误差 0.42 ⇒ 会得出"没有单门"的错结论；
    实际门是 `Param27`，映射是带缩放的线性段。**查门要用绑定表，不是用曲线拟合。**
 
-### v2 的两条取键值路线（下一轮）
+### v2 取键值路线评估（2026-10-13；已选①并实现，结果见下方追加）
 
 | 路线 | 做法 | 代价 |
 |---|---|---|
@@ -9831,6 +9831,16 @@ X 族 = `{ArtMesh158, ArtMesh170, ArtMesh177, ArtMesh186}`（do500/ro41-69，中
 `snapStair` 与页面形状诊断打印）、`scripts/diag/l2d_source_curve_dump.py`（`--keys`）、
 `gallery_src/index.html`（净零，补丁已撤回）；
 数据：`.diag/l2d_sweep/1013-121617/`（改前 21 帧基线）、`1013-230417/`（空转补丁的复测，留作反例）。
+
+### 追加（2026-10-14）：v2 按当前动作的 motion3 作者键值回贴，gezi_2 A/B 通过
+
+**实现**：页面不再从 `motionManager.definitions` 猜曲线，而是取 `definitions[group][currentIndex].File`，fetch 对应 motion3；按 `Target=Parameter` 解析 `Segments` 的作者端点键值。每帧只处理 snapswitch 表白名单中的参数，把运行时插值值贴到最近作者键；跨 clip 的 `snapHold` 仍优先，普通姿态参数不写。异步 fetch 加载态/错误态可由 `window.__snapKeyDbg()` 与 `window.__snapKeyWait()` 读取；动作起播时立即预取对应文件。
+
+**判据与结果**：`scripts/diag/l2d_wrist_ledger.py --sweep 15.00:16.00:0.05 --ghost-gate` 按产品 UI 的重播入口走同一条 home，逐帧读目标 5 片的 op；启用态必须满足 5×21=105 条完整样本、0 条 `0.15 < op < 0.85`，且 motion3 已加载、开关曲线与实际回贴计数均非零。gezi_2 实测读取 `motion/home.motion3.json` 的 502 条曲线、33 条开关曲线 / 58 个作者键值，启用态 **0/105 虚影**；反向对照 `--snap-off --ghost-gate` 关闭跨 clip snap 与 v2，虚影 **15/105**，阳性对照成立。更直接地说，`Param27` 不再停在 0.30–0.50 的作者未写值，5 片 op 保持端点态。
+
+**验证边界**：改前 `.diag/l2d_sweep/1013-121617/` 仍是原始 21 帧基线；本轮两次独立 headless 起播的动作时钟存在偏移，不能把同一名义秒数当成严格同相比较。代码钩子证明 v2 只写 snapswitch 参数白名单；逐曲线相位锁定下的全姿态 A/B 尚未作定量结论，不把它冒充已验证。测试脚本额外保存全参数向量；`_run.snapKey` 记录模式、加载状态与回贴计数。原有 `home` 不含 PartOpacity 的独立缺口仍真实存在，但坏帧 195 个 parts 全为 1，它不是本症状原因。
+
+**踩坑与文件**：复用既有 `motionSegs()` 读段，不在页面另写一套变长步长解析；`definitions[group][0]` 只有 `File`，v1 因此 `n:0` 空转。探针必须先以 `__snapKeyWait()` 证明曲线/键确实到手，再看 op；只看“加载成功”或参数有变化都不够。另用反向阳性对照确认判据会红。涉及 `gallery_src/index.html`、`scripts/diag/l2d_wrist_ledger.py`、`docs/HANDOFF_6.37_手不见了_2026-10-12.md`；页面部署后 `deploy_gallery.py --check` 10/10 同 inode、漂移 0。
 
 ---
 

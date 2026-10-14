@@ -816,6 +816,12 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 
 ### WF-16: Live2D 画廊前端交互改动与回归验证（改哪里 → 怎么验证才算过）
 
+#### WF-16 追加（2026-10-14）：同一 clip 内开关参数穿越淡变带的作者键回贴
+
+- **判据**：问题若发生在同一个 motion 播放过程中，不能只扩跨 clip 的 snapswitch。页面应按 `definitions[group][currentIndex].File` 取当前 motion3，解析 `Target=Parameter` 的端点作者键，只回写 snapswitch 白名单参数；调试钩子需报告已解析曲线数/开关曲线数/作者键数/实际写入数。gezi_2 的 `l2d_wrist_ledger.py --sweep 15.00:16.00:0.05 --ghost-gate` 以产品 UI 起播，5 片 ×21 帧须完整；启用态 0 个 `0.15<op<0.85`，`--snap-off --ghost-gate` 反向态必须出现中间值。
+- **踩坑记录**：`motionManager.definitions[group][0]` 只有 `File`，不能从内存 definition 直接读曲线（v1 因此 n=0 空转）。必须先等 `__snapKeyWait()` 报出已加载的 motion3，再把数据判为有效；只看 fetch/页面无报错不算生效。A/B 分两趟时不能按相同名义秒声称姿态逐帧一致，需先做独立时钟/相位校准。snapHold 跨 clip 值优先，v2 跳过仍在 hold 的索引。
+- **涉及文件**：`gallery_src/index.html`、`scripts/diag/l2d_wrist_ledger.py`、`docs/TROUBLESHOOTING.md` §141、`docs/HANDOFF_6.37_手不见了_2026-10-12.md`。改正本后必须先部署，再 `deploy_gallery.py --check`，随后执行功能专用探针与反向阳性对照。
+
 **日期**: 2026-09-23
 **目标**: 改动 `gallery_src/index.html` 的 Live2D 交互层（命中判定、动作、检查器 UI）后，用「不循环论证」的方式证明改动真的对。
 **适用场景**: 用户反馈「点部位触发错动作 / 动作被切 / 模型发死 / 判定框画错位置」，或要加 Live2D 相关 UI。

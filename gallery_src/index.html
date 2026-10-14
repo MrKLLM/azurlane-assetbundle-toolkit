@@ -1671,15 +1671,20 @@ async function renderLive2D(s, sk){
     const snapP=Object.create(null);                  // 参数索引 -> {flips,mn,mx,step,maxjump}
     const snapHead=Object.create(null);               // group   -> { 参数索引: [边界值, 该值恒定多少秒] }
     let snapHold=null, snapPrevG=null, snapPending=false;
+    const snapKeyBooks=Object.create(null), snapKeyLoads=Object.create(null);
+    const snapKeyStats={frames:0,writes:0,changed:0,changedIds:new Set(),last:null};
+    let snapReadyResolve, snapReadyDone=false;
+    const snapReadyP=new Promise(r=>{ snapReadyResolve=r; });
+    const finishSnapReady=()=>{ if(!snapReadyDone){ snapReadyDone=true; snapReadyResolve(); } };
     const snapUrl=P+model+'/'+String(model).split('/').pop()+'.snapswitch.json';
     window.__snapDbg=()=>({url:snapUrl, state:'loading'});
     (async()=>{ let j=null;
       try{ const r=await fetch(snapUrl);
-        if(!r.ok){ window.__snapDbg=()=>({url:snapUrl, state:'http-'+r.status}); return; }
+        if(!r.ok){ window.__snapDbg=()=>({url:snapUrl, state:'http-'+r.status}); finishSnapReady(); return; }
         j=await r.json(); }
-      catch(e){ window.__snapDbg=()=>({url:snapUrl, state:'err '+String(e)}); return; }
+      catch(e){ window.__snapDbg=()=>({url:snapUrl, state:'err '+String(e)}); finishSnapReady(); return; }
       const ps=j&&j.params, cl=j&&j.clips;
-      if(!ps||!cl){ window.__snapDbg=()=>({url:snapUrl, state:'no-params-or-clips'}); return; }
+      if(!ps||!cl){ window.__snapDbg=()=>({url:snapUrl, state:'no-params-or-clips'}); finishSnapReady(); return; }
       const mj=(+j.maxjump>0)? +j.maxjump:0.5, ix=Object.create(null);
       for(const name in ps){ let k=-1; try{ k=cm.getParameterIndex(name); }catch(e){}
         if(k<0) continue; ix[name]=k;
@@ -1692,11 +1697,65 @@ async function renderLive2D(s, sk){
         groups:Object.keys(snapHead).length,
         held:snapHold?snapHold.items.map(x=>[x[0],x[1],Math.round(x[2])]):[],
         off:!!window.__snapOff });
+      finishSnapReady();
     })();
+    const snapClipKey=(g,i)=>String(g)+'#'+String(i);
+    const loadSnapKeys=(g,i)=>{
+      const key=snapClipKey(g,i);
+      if(snapKeyLoads[key]) return snapKeyLoads[key].promise||Promise.resolve(snapKeyLoads[key]);
+      const defs=mm.definitions&&mm.definitions[g], d=defs&&defs[i];
+      const rec={state:'loading',group:g,index:i,file:d&&d.File||null,curves:0,parameterCurves:0,error:'',promise:null};
+      snapKeyLoads[key]=rec;
+      if(!d||!d.File){ rec.state='no-file'; return Promise.resolve(rec); }
+      rec.promise=(async()=>{ try{
+        const r=await fetch(P+model+'/'+d.File);
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const j=await r.json(); if(!Array.isArray(j.Curves)) throw new Error('no-Curves');
+        const sets=Object.create(null), ids=Object.create(null);
+        for(const c of j.Curves){ if(!c||c.Target!=='Parameter') continue;
+          const id=curveId(c); if(!id) continue;
+          let idx=-1; try{ idx=cm.getParameterIndex(id); }catch(e){}
+          if(idx<0) continue;
+          const sg=motionSegs(c.Segments||[]); if(!sg) continue;
+          const values=[sg[0].v0]; for(const x of sg) values.push(x.v1);
+          const finite=values.filter(Number.isFinite); if(!finite.length) continue;
+          if(!sets[idx]) sets[idx]=new Set();
+          finite.forEach(v=>sets[idx].add(+v)); ids[idx]=id; rec.curves++;
+        }
+        const keys=Object.create(null);
+        for(const ix in sets) keys[ix]=Array.from(sets[ix]).sort((a,b)=>a-b);
+        rec.parameterCurves=Object.keys(keys).length;
+        snapKeyBooks[key]={keys,ids}; rec.state='ok';
+      }catch(e){ rec.state='err'; rec.error=String(e&&e.message||e); }
+      return rec; })();
+      return rec.promise;
+    };
+    window.__snapKeyDbg=()=>{
+      const st=mm.state||{}, g=st.currentGroup||null, raw=Number(st.currentIndex);
+      const i=Number.isInteger(raw)&&raw>=0?raw:null, key=(g&&i!==null)?snapClipKey(g,i):null;
+      const rec=key?snapKeyLoads[key]:null, book=key?snapKeyBooks[key]:null;
+      const targets=book?Object.keys(book.keys).filter(k=>Object.prototype.hasOwnProperty.call(snapP,k)):[];
+      return {group:g,index:i,state:rec?rec.state:(g?'not-loaded':'idle'),file:rec&&rec.file||null,
+        curves:rec?rec.curves:0,parameterCurves:rec?rec.parameterCurves:0,switchCurves:targets.length,
+        switchKeys:targets.reduce((n,k)=>n+book.keys[k].length,0),
+        switchParams:targets.map(k=>({id:book.ids[k],keys:book.keys[k]})),
+        frames:snapKeyStats.frames,writes:snapKeyStats.writes,changed:snapKeyStats.changed,
+        changedIds:Array.from(snapKeyStats.changedIds).sort(),last:snapKeyStats.last,error:rec&&rec.error||''};
+    };
+    window.__snapKeyWait=async()=>{
+      await snapReadyP;
+      const st=mm.state||{}, g=st.currentGroup||null, raw=Number(st.currentIndex);
+      if(!g||!Number.isInteger(raw)||raw<0) return window.__snapKeyDbg();
+      return await loadSnapKeys(g,raw), window.__snapKeyDbg();
+    };
     const fadeOf=(g,key)=>{ const d=g&&mm.definitions&&mm.definitions[g]&&mm.definitions[g][0];
       return d&&typeof d[key]==='number'? d[key]:0.5; };
     const origStartMotion=mm.startMotion.bind(mm);
-    mm.startMotion=(g,i,mode,opt)=>{ snapPending=true; return origStartMotion(g,i,mode,opt); };
+    mm.startMotion=(g,i,mode,opt)=>{ snapPending=true;
+      const ix=Number(i);
+      if(g&&Number.isInteger(ix)&&ix>=0) snapReadyP.then(()=>{
+        if(Object.keys(snapP).length) loadSnapKeys(g,ix); });
+      return origStartMotion(g,i,mode,opt); };
     /* 抓"切换前的实际值"必须写在 beforeMotionUpdate：afterMotionUpdate 之后缓冲里已经是混合值了。
        钉住的时长 = 淡化窗口（进来的 FadeInTime 与上一条的 FadeOutTime 取大者 + 余量），
        且**不许超过该值在源 clip 里恒定的秒数** —— 超过就钉到了一个 clip 自己后面会走的值上。 */
@@ -1729,18 +1788,45 @@ async function renderLive2D(s, sk){
         const hold=Math.min(win, +hv[1]-0.02); if(hold<0.08) continue;
         items.push([idx,to,hold*1000]); }
       if(items.length) snapHold={items, t0:performance.now()}; });
-    /* 只有第一层（跨 clip 切换时钉住）。第二层「整族全灭就退回上一好值」实测后已撤销：
-       量出来 修法关/开 两种模式下**每一帧都有 18~20 个开关家族整族灭着**（那些家族本就不属于这条动作），
-       ⇒ "整族全灭"在模型级别不区分「该灭」与「闪了一下」，兜住它们一帧都没救回来，
-       反而每次家族正常关闭时把参数白钉 0.4 秒（把已经该消失的美术多留 0.4 秒）。
-       留下的教训记在 §123 追加-XIII：闪烁是**家族内子组**灭、别的成员还亮着，
-       所以判据必须落在子组上，而"哪几片是一组"正是还没判清的那道门。 */
+    /* 跨 clip 切换时仍由上面的 snapHold 钉边界；同一 clip 中途的淡变则由 v2 贴回作者键值。
+       第二层「整族全灭就退回上一好值」实测后已撤销：两种模式每帧都有 18~20 个开关家族整族灭着，
+       那些家族本就不属于当前动作；整族信号分不清「该灭」与「闪了一下」，反会把该消失的美术多留 0.4 秒。
+       教训见 §123 追加-XIII：判据必须落在子组上，不能把模型级整族全灭当作异常。 */
     im.on('afterMotionUpdate',()=>{ const h=snapHold; if(!h) return;
       if(window.__snapOff){ snapHold=null; return; }
       const now=performance.now(); let alive=false;
       for(const it of h.items) if(now<h.t0+it[2]){ alive=true;
         try{ cm.setParameterValueByIndex(it[0],it[1]); }catch(e){} }
       if(!alive) snapHold=null; });
+    /* v2：只对 snapswitch 表认定的开关参数，把当前 motion3 曲线插值出的中间值贴回最近的作者键值。
+       曲线取自 definitions[group][index].File 对应的 motion3.json，不从运行时 definition 猜；
+       若当前参数正处于跨 clip 的 snapHold 中则让上一层优先。window.__snapOff 同时关闭两层，供 A/B。 */
+    im.on('afterMotionUpdate',()=>{
+      if(window.__snapOff) return;
+      const st=mm.state, g=st&&st.currentGroup, raw=Number(st&&st.currentIndex);
+      if(!g||!Number.isInteger(raw)||raw<0) return;
+      const key=snapClipKey(g,raw), book=snapKeyBooks[key], rec=snapKeyLoads[key];
+      if(!book||!rec||rec.state!=='ok') return;
+      const targets=Object.keys(book.keys).filter(k=>Object.prototype.hasOwnProperty.call(snapP,k));
+      if(!targets.length) return;
+      const now=performance.now(), held=new Set();
+      if(snapHold) for(const it of snapHold.items) if(now<snapHold.t0+it[2]) held.add(it[0]);
+      let writes=0, changed=0, last=null;
+      for(const k of targets){ const idx=+k, vals=book.keys[k];
+        if(!vals||!vals.length||held.has(idx)) continue;
+        let before; try{ before=cm.getParameterValueByIndex(idx); }catch(e){ continue; }
+        if(!Number.isFinite(before)) continue;
+        let best=vals[0], dist=Math.abs(before-best);
+        for(let q=1;q<vals.length;q++){ const d=Math.abs(before-vals[q]);
+          if(d<dist){ best=vals[q]; dist=d; } }
+        try{ cm.setParameterValueByIndex(idx,best); }catch(e){ continue; }
+        writes++; if(Math.abs(before-best)>1e-5){ changed++; snapKeyStats.changedIds.add(book.ids[k]); }
+        if(book.ids[k]==='Param27') last={group:g,index:raw,id:'Param27',before:+before.toFixed(5),
+          after:+best.toFixed(5),keys:vals};
+      }
+      snapKeyStats.frames++; snapKeyStats.writes+=writes; snapKeyStats.changed+=changed;
+      if(last) snapKeyStats.last=last;
+    });
     /* Cubism 的 id 在有些版本里是 {string} 对象、有些是裸字符串；取名一律走这个（面板与暂停存档共用） */
     const idName=id=>(id&&id.string)||(typeof id==='string'?id:(id&&id.toString())||'?');
     const bar=document.getElementById('l2bar');
