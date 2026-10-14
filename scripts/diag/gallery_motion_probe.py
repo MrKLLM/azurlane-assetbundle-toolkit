@@ -879,7 +879,7 @@ def main():
     silky = t.j("""
       const cs=(s,p)=>getComputedStyle(document.querySelector(s),p||null);
       const bez=[...document.styleSheets].flatMap(sh=>{try{return [...sh.cssRules].map(r=>r.cssText)}catch(e){return []}}).join('|');
-      const all=(bez.match(/cubic-bezier\([^)]*\)/g)||[]);
+      const all=(bez.match(/cubic-bezier\\([^)]*\\)/g)||[]);
       const over=all.filter(b=>{const n=b.replace('cubic-bezier(','').replace(')','').split(',').map(Number);
         return n[1]>1.001||n[3]>1.001;});
       const hi=cs('header'), hb=hi.backdropFilter||hi.webkitBackdropFilter||'none';
@@ -910,7 +910,7 @@ def main():
     def sc_of():
         return t.j("""const b=document.querySelector('#gOpt button[data-k=voice]');
           const m=getComputedStyle(b).transform;
-          const n=(m.match(/matrix\(([^)]*)\)/)||[])[1];
+          const n=(m.match(/matrix\\(([^)]*)\\)/)||[])[1];
           return JSON.stringify({m:m, a:n?parseFloat(n.split(',')[0]):1,
             d:n?parseFloat(n.split(',')[3]):1, act:b.matches(':active'), hov:b.matches(':hover')});""")
     t.move(g[0], g[1]); time.sleep(0.6)

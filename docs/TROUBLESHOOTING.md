@@ -10380,3 +10380,38 @@ G4 四格极差 ≥5ms（仪器分得开））。G3 是这份仪器成立的前�
 > ⚠️ 需同时用 `isolation:isolate` 顶上原来由 transform 提供的**层叠上下文**
 > （否则 `.card::after{z-index:5}` 会跑到相邻卡片上面去）。
 > 待验证：真实悬停场景（`--mode ab`）下这条能不能真的把帧时压下来。
+
+> **§143 补十二【落地】把 `.card` 的 transform 挪到 `:hover`：用户场景 23.3 → 6.8ms（fps 43 → 147）**
+>
+> **改动（`gallery_src/index.html`，两处）**：
+> 1. `.card` 里删掉 `transform:perspective(...) rotateX(var(--rx)) …`，换成 `isolation:isolate`；
+> 2. 新增 `.card:hover,.card:active,.card:focus-visible{transform:perspective(620px) rotateX(var(--rx))
+>    rotateY(var(--ry)) translateY(var(--lift)) scale(var(--sc))}`。
+>
+> **为什么 `isolation:isolate` 是必需的**：原来那个 transform 顺带给卡片提供了**层叠上下文**；
+> 拿掉后 `.card::after{z-index:5}`（斜向反光）会跑到相邻卡片上面去。`isolation` 用零成本把上下文顶回来。
+>
+> **实测（`hover_frame_cost_probe.py`，2560×1600 / 1021 卡在 DOM）**：
+>
+> | 口径 | 改前 | 改后 |
+> |---|---|---|
+> | `--mode commit` 的提交代价 | +13.40ms | **+0.00ms** |
+> | `--mode ab` 真实划鼠标（水面开） | 23.3~26.7ms / 42.9fps | **6.8ms / 147.1fps** |
+> | 水面出帧率（悬停开） | 37.1/s | **73.2/s** |
+> | 悬停全摘（地板） | 3.3ms / 303fps | 3.4ms / 294fps |
+>
+> **零观感损失**（`--mode verify` 五条断言全过）：
+> 静止 `transform:none` ✓ ｜ `isolation:isolate` ✓ ｜ `transition` 仍含 transform ✓ ｜
+> `.card::after` z-index 仍 5 ✓ ｜ 真实鼠标悬停时 `transform=matrix3d(…)`、`--ry=3.12deg`、`--lift=-5px` ✓ ｜
+> 移开回到 `none` ✓。⇒ **跟手倾斜、悬停抬起、缩略图放大、缓动全部保留**，没有牺牲任何东西。
+>
+> **F 退役**：之前那张表里的 "F（过渡全摘 + 离屏跳过）" 实测 9.9ms，**比 N 的 10.0ms 一样甚至更差**，
+> 而 F 要牺牲悬停缓动 + 带 `content-visibility` 的滚动高度副作用。**F 已作废，别再捡它。**
+>
+> **下一步可选（要用户拍板）**：`N2 = N + 摘过渡` 实测 **3.4ms / 294fps（打到地板）**，
+> 代价是悬停抬起/投影/描边不再缓动。不牺牲任何东西的那一档（N）已经落地；要不要再进一步由用户定。
+>
+> **既有回归**：`glass_pages_probe` ✅ 全过 ｜ `favorites_probe` ✅ 六组全过 ｜
+> `gallery_motion_probe` 5 条红**全是过期判据**（导航栏折射边墙 §138 已退役、"选中项不许整块填色"是 §142 前口径），
+> 与 `.card` 无关；与本次相关的两条都过：`9 焦点 lift=-4px` ✓、`11 按压 matrix(0.985…)` ✓。
+> ⚠️ 遗留：`gallery_motion_probe` 那 5 条过期判据该单独一轮更新（它现在会一直红，会掩盖真回归）。

@@ -110,9 +110,22 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
              inset 0 -20px 34px color-mix(in srgb,var(--brand) 7%,transparent);
   display:flex;flex-direction:column;
   --rx:0deg;--ry:0deg;--lift:0px;--sc:1;
-  transform:perspective(620px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--sc));
+  /* ⚠️ **静止时不给 .card 挂 transform**（2026-10-14 改，判据见 docs/TROUBLESHOOTING.md §143 补十一）：
+     挂在 `.card` 上等于给全屏 1021 张卡各一个**非恒等 3D transform**，也就是合成器 property tree
+     上的 1021 个节点。改任何一个 transform 都要触发一次完整提交，而这次提交得挨个过这 1021 个节点
+     ⇒ 实测单次约 13~27ms（真机划鼠标 23.4ms，其中这一条占 +13.4ms）。
+     ⇒ 挪到 `:hover/:active/:focus-visible` 上：静止全页 0 个 transform 节点，悬停时只有 1 个。
+     实测真机划鼠标 23.4ms → **10.0ms**（42.7 → 100fps），**倾斜/缓动/缩略图放大全部保留**。
+     ⚠️ `isolation:isolate` 是**必需的**：原来那个 transform 顺带给卡片提供了层叠上下文，
+        拿掉后 `.card::after{z-index:5}`（斜向反光）会跑到相邻卡片上面去。
+     ⚠️ 别改成 `will-change:transform` 去"提升合成层"——那只会让节点更多，实测更糟（§143 补六/补九）。 */
+  isolation:isolate;
   transition:transform .14s ease-out,box-shadow .24s var(--spring-slow),border-color .18s ease-out;
   animation:pop .34s var(--spring) backwards;animation-delay:calc(min(var(--i,0),24)*16ms)}
+/* 跟手倾斜 + 悬停抬起：只在"真的在跟指针互动"时才挂 transform（见上面那条注释）。
+   `:focus-visible` 也要带上，否则键盘导航时卡片不再抬起（那是 §6.18 第 ④ 条补的反馈）。 */
+.card:hover,.card:active,.card:focus-visible{
+  transform:perspective(620px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--sc))}
 /* 边墙：**卡片上不再挂任何 backdrop-filter**（2026-10-11 定，判据与八态对照表见 docs/TROUBLESHOOTING.md §136）。
    原来这一圈是 ::before 挂 blur，再用两层 mask 做 exclude 只留外圈 12px。它撞上一条浏览器行为：
    **卡片一旦真的转起来（rotateX/rotateY ≠ 0），Chrome 就把这层 mask 整个丢掉，模糊铺满整张卡**

@@ -50,7 +50,7 @@ AP.add_argument('--cdp', default='9342')
 AP.add_argument('--win', default='2560,1600')
 AP.add_argument('--ms', type=int, default=2500, help='每格采样时长')
 AP.add_argument('--step', type=float, default=40.0, help='鼠标事件节拍 ms')
-AP.add_argument('--mode', default='ab', choices=['ab', 'share', 'layout', 'commit'])
+AP.add_argument('--mode', default='ab', choices=['ab', 'share', 'layout', 'commit', 'verify'])
 AP.add_argument('--thr', type=int, default=8, help='share 模式：逐像素判定阈值')
 AP.add_argument('--dpr', type=float, default=0,
                 help='强制 devicePixelRatio（0=不干预）。用来验"画布分辨率随 dpr 变化"那类改动——'
@@ -131,6 +131,17 @@ CSSV = {
     'cand_cv320': '.card{content-visibility:auto;contain-intrinsic-size:auto 320px}',
     'cand_cv_notrans_330': ('.card{transition:none!important;content-visibility:auto;'
                             'contain-intrinsic-size:auto 330px}'),
+    # 候选N（本轮定位出的最省修法，§143 补十一）：**静止不带 transform，悬停时才给**。
+    #   静止时全页 0 个 transform 节点 ⇒ 合成器提交便宜；悬停时只有 1 个 ⇒ 倾斜与缓动全保留。
+    #   `isolation:isolate` 是必需的：原来 transform 顺带给 .card 提供了层叠上下文，
+    #   拿掉后 .card::after{z-index:5} 会跑到相邻卡片上面去。
+    'cand_no_transform_at_rest': (
+        '.card{transform:none!important;isolation:isolate}'
+        '.card:hover,.card:active{transform:perspective(620px) rotateX(var(--rx)) rotateY(var(--ry)) '
+        'translateY(var(--lift)) scale(var(--sc))!important}'),
+    # N 的两种叠加：看能不能在不牺牲"倾斜/缓动"的前提下再省一点。
+    'cand_N_notrans': '.card{transform:none!important;isolation:isolate}.card:hover,.card:active{transform:perspective(620px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--sc))!important}' + '.card{transition:none!important}',
+    'cand_N_noimg': '.card{transform:none!important;isolation:isolate}.card:hover,.card:active{transform:perspective(620px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--sc))!important}' + '.card:hover .thumb img{transform:none!important}',
     # 候选F：上界组合 —— 过渡全摘 + 离屏卡跳过。用来判"这两条能不能叠加"。
     'cand_notrans_cv': ('.card{transition:none!important;'
                         'content-visibility:auto;contain-intrinsic-size:auto 420px}'),
@@ -272,6 +283,8 @@ def main():
             return mode_layout(ev)
         if A.mode == 'commit':
             return mode_commit(evAw)
+        if A.mode == 'verify':
+            return mode_verify(ev, fire, dom)
 
         def metrics():
             d = dom('Performance.getMetrics')
@@ -340,7 +353,10 @@ def main():
                             ('K2_short_cv', 'K2 = K + 离屏跳过', 'cand_short_cv'),
                             ('L_contain', 'L contain:content', 'cand_contain'),
                             ('L2_contain_notrans', 'L2 = L + 过渡全摘', 'cand_contain_notrans'),
-                            ('M_cv320', 'M cv + 估计值320', 'cand_cv320')):
+                            ('M_cv320', 'M cv + 估计值320', 'cand_cv320'),
+                            ('N_no_transform_at_rest', 'N 静止不带 transform', 'cand_no_transform_at_rest'),
+                            ('N2_N+摘过渡', 'N + 摘过渡', 'cand_N_notrans'),
+                            ('N3_N+摘缩略图放大', 'N + 摘缩略图放大', 'cand_N_noimg')):
             r[k] = run(lbl, True, key)
         ev(WATER_ON)
         ev(SETCSS % (repr(''),))
@@ -376,7 +392,10 @@ def main():
                        ('K2_short_cv', 'K2 = K + 离屏跳过'),
                        ('L_contain', 'L contain:content'),
                        ('L2_contain_notrans', 'L2 = L + 过渡全摘'),
-                       ('M_cv320', 'M cv + 估计值320')):
+                       ('M_cv320', 'M cv + 估计值320'),
+                       ('N_no_transform_at_rest', 'N 静止不带 transform'),
+                       ('N2_N+摘过渡', 'N + 摘过渡'),
+                       ('N3_N+摘缩略图放大', 'N + 摘缩略图放大')):
             print(f'  {lbl:16} med {r[k]["med"]:>6}ms  省 {base-r[k]["med"]:+7.2f}ms  '
                   f'p95 {r[k]["p95"]:>6}ms  fps {r[k]["fps"]:>5}')
         print(f'  {"全摘（上界）":12} med {r["5_water_on_hover_off"]["med"]:>6}ms  '
@@ -534,6 +553,64 @@ def mode_commit(evAw):
               ensure_ascii=False, indent=1)
     print('  落盘 .diag/commit_cost.json')
     return 0
+
+VERIFY_JS = r"""(()=>{
+  const c=document.querySelector('.card');
+  const cs=getComputedStyle(c), af=getComputedStyle(c,'::after');
+  return JSON.stringify({transform:cs.transform, isolation:cs.isolation,
+    transition:cs.transitionProperty||cs.transition,
+    afterZ:af.zIndex, afterContent:af.content});})()"""
+
+
+def mode_verify(ev, fire, dom):
+    """`.card` 的 transform 挪到 :hover 之后的回归闸（2026-10-14 §143 补十一 那次改动）。
+
+    这条改动的前提是"静止时卡片不带 transform"，靠的是 CSS 计算值 —— 只看类名或只截图都会漏。
+    真实鼠标事件用 CDP 发（合成事件不命中 :hover，见 WF-42 判据 1）。
+    """
+    print('\n── .card transform 迁移的回归闸 ──')
+    ok = True
+    a = json.loads(ev(VERIFY_JS))
+    print('  静止:', json.dumps(a, ensure_ascii=False))
+    shot(dom, ev, 'card_rest.png')           # 目视用：静止态
+    if a['transform'] != 'none':
+        print(f'  ❌ 静止时 .card 仍带 transform（{a["transform"][:40]}…）'
+              f' ⇒ 那 1021 个 property tree 节点又回来了，性能改动失效'); ok = False
+    if a['isolation'] != 'isolate':
+        print(f'  ❌ isolation 不是 isolate（{a["isolation"]}）⇒ 层叠上下文丢了，'
+              f'.card::after{{z-index:{a["afterZ"]}}} 可能盖到相邻卡片上'); ok = False
+    if a['afterZ'] != '5':
+        print(f'  ! .card::after 的 z-index 变成 {a["afterZ"]}（原 5），反光层语义变了'); ok = False
+    if 'transform' not in a['transition']:
+        print(f'  ! transition 里没有 transform（{a["transition"]}）⇒ 悬停抬起不再缓动'); ok = False
+
+    # 真实鼠标移到第一张卡上，看 transform 有没有真的长出来 + 倾斜有没有在写
+    r = json.loads(ev("""(()=>{const c=document.querySelector('.card'),b=c.getBoundingClientRect();
+      return JSON.stringify({x:Math.round(b.left+b.width*0.62),y:Math.round(b.top+b.height*0.3)});})()"""))
+    for dx in (0, 6, 12):
+        fire('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': r['x'] + dx, 'y': r['y'],
+                                          'buttons': 0, 'pointerType': 'mouse'})
+        time.sleep(0.12)
+    time.sleep(0.4)
+    h = json.loads(ev("""(()=>{const c=document.querySelector('.card'),cs=getComputedStyle(c);
+      return JSON.stringify({transform:cs.transform, ry:cs.getPropertyValue('--ry').trim(),
+        rx:cs.getPropertyValue('--rx').trim(), lift:cs.getPropertyValue('--lift').trim()});})()"""))
+    print('  悬停:', json.dumps(h, ensure_ascii=False))
+    shot(dom, ev, 'card_hover.png')          # 目视用：悬停态（抬起+倾斜+反光都在？）
+    if not h['transform'].startswith('matrix'):
+        print('  ❌ 悬停时 .card 没有 transform ⇒ 抬起/倾斜整条失效'); ok = False
+    if h['ry'] in ('0deg', '') and h['rx'] in ('0deg', ''):
+        print('  ❌ 悬停时 --rx/--ry 仍是 0 ⇒ 跟手倾斜没在写（鼠标事件没落到卡上？）'); ok = False
+    # 移开 → 应当回到 none
+    fire('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': 4, 'y': 4,
+                                      'buttons': 0, 'pointerType': 'mouse'})
+    time.sleep(0.5)
+    off = json.loads(ev("(()=>JSON.stringify({transform:getComputedStyle(document.querySelector('.card')).transform}))()"))
+    print('  移开:', json.dumps(off, ensure_ascii=False))
+    if off['transform'] != 'none':
+        print('  ! 移开后 .card 仍带 transform ⇒ 静止态没回去，提交还是贵的'); ok = False
+    print('  判据: ' + ('✅ 全过' if ok else '❌ 有红'))
+    return 0 if ok else 1
 
 def mode_share(ev, dom, env):
     """量背景层**逐像素的可见占比**：冻结→灌满→两图相减。
