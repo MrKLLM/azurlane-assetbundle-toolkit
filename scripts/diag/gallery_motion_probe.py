@@ -886,7 +886,8 @@ def main():
       const nb=getComputedStyle(document.querySelector('header'),'::before');
       const na=getComputedStyle(document.querySelector('header'),'::after');
       return JSON.stringify({nav_rim:(nb.backdropFilter||nb.webkitBackdropFilter||'none'),
-        nav_spec:na.backgroundImage.slice(0,60),
+        nav_spec:na.backgroundImage.slice(0,60), navAfterContent:na.content,
+        segBg:cs('.seg').backgroundColor, ddBg:cs('.dd-btn').backgroundColor,
         ease:cs(':root').getPropertyValue('--ease-ios').trim(),
         btnTf:cs('#gOpt button').transitionTimingFunction, over:over.slice(0,5), nOver:over.length,
         hdr:{bf:hb, bg:hi.backgroundColor, sh:hi.boxShadow.slice(0,70)},
@@ -942,26 +943,34 @@ def main():
     # ⚠️ 2026-09-29 用户点名的第二条："尤其是导航栏，一眼看就是毛玻璃"。
     #    磨砂玻璃的配方特征就两条：**底色白 + 模糊大**（越大越像磨砂）。真玻璃反过来。
     #    所以这条判据从"模糊要够大"整条翻面：模糊 > 10px、底色不透明度 > .30 直接红。
+    # ⚠️ 2026-10-14 整条翻面（§138 / §142）：旧口径是"整条栏必须是玻璃"（底色半透 + 模糊 3~8px +
+    #    上沿亮边 + 下沿 18px 边墙 + 斜反光）。那套**已被用户实机否掉** —— 那条边墙在照片背景前
+    #    读作"横幅下面多出来的一条杠"，整条退役；顶栏也不再铺连续色板，只让**实际控件**各自承载玻璃。
+    #    ⇒ 现在断言"整条栏完全透明"，并把"玻璃还在不在"移到**控件**上量。
+    #    ⚠️ 只断言"透明"是把判据放宽成恒真（材质整块丢了也会绿）—— 所以必须带正面那半条。
     hb = silky['hdr']['bf']
-    print(f'11 导航栏 backdrop={hb[:44]!r} 底色={silky["hdr"]["bg"]} '
-          f'下沿边墙={silky["nav_rim"][:30]!r}')
-    if 'blur' not in hb:
-        fails.append(f'11 导航栏：没有 backdrop-filter，那是块不透明的板（{hb[:30]}）')
-    else:
-        bv = re.search(r'blur\(([0-9.]+)px\)', hb)
-        if bv and float(bv.group(1)) > 10:
-            fails.append(f'11 导航栏：背后模糊 {bv.group(1)}px —— 模糊越大越像磨砂，'
-                         f'真玻璃只要够看出轮廓的 3~8px')
-    ha = [float(x) for x in re.findall(r'rgba\([^)]*?,\s*[0-9.]+\s*,\s*([0-9.]+)\)', silky['hdr']['bg'])]
-    if ha and max(ha) > 0.30:
-        fails.append(f'11 导航栏：底色不透明度 {max(ha):.2f} —— 奶白配方，'
-                     f'就是"一眼看是毛玻璃"的那个来源')
-    if 'inset' not in silky['hdr']['sh']:
-        fails.append(f'11 导航栏：没有那条亮截面（box-shadow={silky["hdr"]["sh"][:50]}）')
-    if 'blur' not in silky['nav_rim']:
-        fails.append('11 导航栏：下沿缺那条更厚的"边墙"（::before 的 backdrop-filter）')
-    if 'linear-gradient' not in silky['nav_spec']:
-        fails.append(f'11 导航栏：缺斜穿整条栏的反光（::after={silky["nav_spec"][:40]}）')
+    print(f'11 导航栏 backdrop={hb[:26]!r} 底色={silky["hdr"]["bg"]} 阴影={silky["hdr"]["sh"][:26]!r} '
+          f'::after content={silky["navAfterContent"]!r}')
+    print(f'11 导航栏 控件玻璃面 .seg a={_alpha(silky["segBg"]):.2f} / .dd-btn a={_alpha(silky["ddBg"]):.2f}')
+    if hb not in ('none', ''):
+        fails.append(f'11 导航栏：整条栏又挂上了 backdrop-filter（{hb[:30]}）—— '
+                     f'全宽色带在照片前读成"一条杠"，§138 已判死')
+    if _alpha(silky['hdr']['bg']) > 0.01:
+        fails.append(f'11 导航栏：整条栏又有了底色（a={_alpha(silky["hdr"]["bg"]):.2f}）'
+                     f'—— 材质应当只在控件上，空白处让画面透出')
+    if silky['hdr']['sh'] not in ('none', ''):
+        fails.append(f'11 导航栏：整条栏又挂上了 box-shadow（{silky["hdr"]["sh"][:40]}）')
+    if silky['navAfterContent'] not in ('none', ''):
+        fails.append(f'11 导航栏：::after 又长出来了（content={silky["navAfterContent"]!r}）'
+                     f'—— 那条斜反光属于页头边墙，随 §138 一起退役')
+    for nm, bg in (('分段控件 .seg', silky['segBg']), ('下拉按钮 .dd-btn', silky['ddBg'])):
+        # ⚠️ 变量名别用单字母 `a`：本函数里 `a` 是 argparse 命名空间，末尾 `a.out` 要用它。
+        #    这里一度写成 `a = _alpha(bg)`，直接把后面 `pg.shot(os.path.join(a.out, …))` 打崩
+        #    （AttributeError: 'float' object has no attribute 'out'）—— 判据本身绿了，探针却崩在收尾。
+        av = _alpha(bg)
+        if not (0.05 < av < 0.98):
+            fails.append(f'11 导航栏：{nm} 的底色 a={av:.2f} 不在 (0.05,0.98) —— '
+                         f'a≈0 是"控件丢了"，a≈1 是"又变成实色贴纸"')
 
     # ── 12. 材质态：选中不靠整块填色，控件只有一个强调色，悬停不动位置 ──────────
     # 用户 2026-09-29："玻璃感还是不够高级，包括按钮的配色和交互"。
@@ -981,15 +990,36 @@ def main():
         segColor:seg.color, segBgImg:seg.backgroundImage,
         popOnCtl:(css.match(/[^}]*\\.on[^}]*grad-pop/g)||[]).length,
         rim:rim, rimA:al(rim),
-        spec2:(getComputedStyle(q('.card'),'::after').backgroundImage.match(/rgba\\(255, 255, 255, ([0-9.]+)\\)/g)||[]).slice(0,2)});""")
+        spec2:(getComputedStyle(q('.card'),'::after').backgroundImage.match(/rgba\\(255, 255, 255, ([0-9.]+)\\)/g)||[]).slice(0,2),
+        onContrast:(()=>{const rgbs=v=>{let m=v.match(/color\\(srgb\\s+([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)/i);
+          if(m)return [+m[1],+m[2],+m[3]];m=v.match(/rgba?\\(([^)]+)\\)/i);
+          if(m)return m[1].replace(/\\//g,' ').split(/[ ,]+/).filter(Boolean).slice(0,3).map(Number);
+          m=v.match(/oklab\\(\\s*([\\d.]+)\\s+([-\\d.]+)\\s+([-\\d.]+)/i);if(!m)return null;
+          const L=+m[1],a=+m[2],b=+m[3],l=L+.3963377774*a+.2158037573*b,
+            m0=L-.1055613458*a-.0638541728*b,n=L-.0894841775*a-1.291485548*b;
+          return [4.0767416621*l**3-3.3077115913*m0**3+.2309699292*n**3,
+            -1.2684380046*l**3+2.6097574011*m0**3-.3413193965*n**3,
+            -.0041960863*l**3-.7034186147*m0**3+1.707614701*n**3]
+            .map(x=>Math.max(0,Math.min(1,x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055))*255)};
+          const lum=v=>{const x=rgbs(v);if(!x)return NaN;const y=x.map(t=>t>1?t/255:t)
+            .map(t=>t<=.04045?t/12.92:((t+.055)/1.055)**2.4);return .2126*y[0]+.7152*y[1]+.0722*y[2]};
+          const l1=lum(on.color),l2=lum(on.backgroundColor);
+          return Number.isFinite(l1+l2)?+(Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05):0;})()});""")
     print(f'12 材质  选中项 background-image={mat["onBgImg"][:26]!r} 底色a={_alpha(mat["onBgCol"]):.2f} '
-          f'文字色={mat["onColor"]}')
+          f'文字色={mat["onColor"]} 对比度={mat.get("onContrast")}')
     print(f'12 材质  亮边 --rim-hi={mat["rim"].strip()!r}（a={mat["rimA"]:.2f}）；'
           f'控件上残留的粉色实心渐变 {mat["popOnCtl"]} 处')
     if 'gradient' in mat['onBgImg']:
         fails.append(f'12 材质：选中项还是实心渐变填充（{mat["onBgImg"][:40]}）—— 那正是"不够高级"的来源')
-    if _alpha(mat['onBgCol']) > 0.30:
-        fails.append(f'12 材质：选中项底色不透明度 {_alpha(mat["onBgCol"]):.2f}，整块填色又回来了')
+    # ⚠️ 2026-10-14 改口径（§142）：旧口径是"选中不许整块填色（a ≤ 0.30）"—— 那是**站用背景之前**的
+    #    设计。设了背景图之后，选中态若是半透，壁纸会从文字底下透出来、读不清（用户实机报"看不清"）。
+    #    ⇒ 现在的口径反过来：**选中底要够实（a ≥ 0.98）挡住背景，并且文字对比度 ≥ 4.5:1**。
+    if _alpha(mat['onBgCol']) < 0.98:
+        fails.append(f'12 材质：选中项底色 a={_alpha(mat["onBgCol"]):.2f} < 0.98 —— '
+                     f'站用背景会透过来，文字读不清（§142 的口径是"选中底要够实"）')
+    if mat.get('onContrast', 0) < 4.5:
+        fails.append(f'12 材质：选中项文字对比度 {mat.get("onContrast")} < 4.5:1 —— '
+                     f'文字色={mat["onColor"]} 底色={mat["onBgCol"]}')
     if mat['popOnCtl']:
         fails.append(f'12 材质：控件上还有 {mat["popOnCtl"]} 处用粉色渐变当选中态 —— 强调色不止一个')
     # 白字压浅底：选中胶囊改成浅色材质后，原来写死的 #fff 会直接看不见（本轮真犯过）
