@@ -50,7 +50,7 @@ AP.add_argument('--cdp', default='9342')
 AP.add_argument('--win', default='2560,1600')
 AP.add_argument('--ms', type=int, default=2500, help='每格采样时长')
 AP.add_argument('--step', type=float, default=40.0, help='鼠标事件节拍 ms')
-AP.add_argument('--mode', default='ab', choices=['ab', 'share', 'layout'])
+AP.add_argument('--mode', default='ab', choices=['ab', 'share', 'layout', 'commit'])
 AP.add_argument('--thr', type=int, default=8, help='share 模式：逐像素判定阈值')
 AP.add_argument('--dpr', type=float, default=0,
                 help='强制 devicePixelRatio（0=不干预）。用来验"画布分辨率随 dpr 变化"那类改动——'
@@ -230,6 +230,18 @@ def open_page(profile):
             return 'EXC ' + json.dumps(ed, ensure_ascii=False)[:300]
         return r.get('result', {}).get('value')
 
+    def evAw(expr):
+        n[0] += 1
+        mid = n[0]
+        conn.send(json.dumps({'id': mid, 'method': 'Runtime.evaluate',
+                              'params': {'expression': expr, 'returnByValue': True,
+                                         'awaitPromise': True}}))
+        r = drain(mid, timeout=300)
+        ed = r.get('exceptionDetails')
+        if ed:
+            return 'EXC ' + json.dumps(ed, ensure_ascii=False)[:400]
+        return r.get('result', {}).get('value')
+
     dom('Page.enable')
     dom('Performance.enable')
     for _ in range(60):
@@ -238,12 +250,12 @@ def open_page(profile):
             break
         time.sleep(0.5)
     time.sleep(3.0)
-    return proc, conn, fire, drain, dom, ev
+    return proc, conn, fire, drain, dom, ev, evAw
 
 
 def main():
     prof = os.path.join(ROOT, '.diag', f'hovercost_profile_{os.getpid()}')
-    proc, conn, fire, drain, dom, ev = open_page(prof)
+    proc, conn, fire, drain, dom, ev, evAw = open_page(prof)
     try:
         env = json.loads(ev("""JSON.stringify({mode:BG.mode, canvas:BG.cv?BG.cv.width+'x'+BG.cv.height:null,
           vp:innerWidth+'x'+innerHeight, dpr:devicePixelRatio,
@@ -258,6 +270,8 @@ def main():
             return mode_share(ev, dom, env)
         if A.mode == 'layout':
             return mode_layout(ev)
+        if A.mode == 'commit':
+            return mode_commit(evAw)
 
         def metrics():
             d = dom('Performance.getMetrics')
@@ -444,6 +458,82 @@ def mode_layout(ev):
     print('  判据: ' + ('✅ 漂移 < 2%' if ok else f'❌ 漂移 {d*100:.2f}% ≥ 2%，估计值要改成贴着 {a["cardH"]}px'))
     return 0 if ok else 1
 
+
+COMMIT_JS = r"""(()=>{
+  /* 「一次合成提交有多贵」——全程不动鼠标，输入确定 ⇒ 各格直接可比。
+     背景见 docs/TROUBLESHOOTING.md §143 补八~补十一：
+     改 transform 会动合成器的 property tree ⇒ 触发一次完整提交；提交要遍历 main 里的子元素。
+     本模式就是量「这次提交的代价 ∝ 什么」。 */
+  const measure = ms => new Promise(res => {
+    const t=[]; let last=performance.now(); const t0=last;
+    (function f(now){ t.push(now-last); last=now;
+      if(now-t0<ms) requestAnimationFrame(f);
+      else { const s=t.slice(4).sort((a,b)=>a-b); res(s[s.length>>1]); } })(last);
+  });
+  const st=document.createElement('style'); document.head.appendChild(st);
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;left:10px;top:10px;width:154px;height:320px;z-index:99999;background:#4a90d9';
+  document.body.appendChild(d);
+  const cards=[...document.querySelectorAll('.card')];
+  const showFirst=n=>cards.forEach((c,i)=>{ c.style.display = i<n ? '' : 'none'; });
+  let stop=true, a=0;
+  const loop=()=>{ if(stop) return; a=((a+1.7)%20)-10;
+    d.style.transform='perspective(620px) rotateY('+a.toFixed(2)+'deg) rotateX('+(-a).toFixed(2)+'deg)';
+    requestAnimationFrame(loop); };
+  const out=[];
+  const phase=(name,css,n,anim)=> (async()=>{
+    stop=true; st.textContent=css; showFirst(n);
+    await new Promise(r=>setTimeout(r,300));
+    if(anim){ stop=false; requestAnimationFrame(loop); }
+    await new Promise(r=>setTimeout(r,700));
+    out.push([name, +(await measure(2200)).toFixed(2)]);
+  })();
+  return (async()=>{
+    await phase('① 静止（壳不动）','',cards.length,false);
+    await phase('② 每帧改 transform · 原状','',cards.length,true);
+    await phase('③ ② + 卡片 transform:none','.card{transform:none!important}',cards.length,true);
+    await phase('④ ② + 只留前 200 张卡','',200,true);
+    await phase('⑤ ② + 只留前 20 张卡','',20,true);
+    await phase('⑥ ② + 藏掉 main','main{display:none!important}',cards.length,true);
+    stop=true; st.remove(); showFirst(cards.length); d.remove();
+    return JSON.stringify({cards:cards.length, out:out});
+  })();
+})()"""
+
+
+def mode_commit(evAw):
+    """量「合成提交的代价 ∝ 什么」：全程不动鼠标（消除人手变量，见 §143 补七的教训）。"""
+    print('\n── 合成提交的代价 ∝ 什么（全程不动鼠标）──')
+    r = evAw(COMMIT_JS)
+    if not isinstance(r, str) or r.startswith('EXC'):
+        print('! 脚本失败：', r)
+        return 1
+    d = json.loads(r)
+    print(f'  卡片总数 {d["cards"]}')
+    base = None
+    for name, ms in d['out']:
+        if base is None:
+            base = ms
+        print(f'  {name:26} {ms:8.2f}ms   相对① {ms-base:+7.2f}ms')
+    m = dict(d['out'])
+    idle = m['① 静止（壳不动）']
+    orig = m['② 每帧改 transform · 原状']
+    t_none = m['③ ② + 卡片 transform:none']
+    n200 = m['④ ② + 只留前 200 张卡']
+    n20 = m['⑤ ② + 只留前 20 张卡']
+    hidemain = m['⑥ ② + 藏掉 main']
+    print(f'\n  提交的代价 = {orig - idle:+.2f}ms（原状 − 静止）')
+    if hidemain <= idle * 2:
+        print('  ✅ 藏掉 main 即回落地板 ⇒ 贵的是 main 的子元素数（本页 = 1021 张卡）')
+    else:
+        print('  ! 藏掉 main 也没回落地板 ⇒ 本机复现不出"main 是元凶"，与用户机器不同')
+    print(f'  transform 节点数这一路：③ 卡片 transform:none = {t_none:.2f}ms'
+          f'（{"有效" if t_none < (orig + idle) / 2 else "无效"}）')
+    print(f'  元素数量这一路：④ 前200张 = {n200:.2f}ms  ⑤ 前20张 = {n20:.2f}ms')
+    json.dump(d, open(os.path.join(ROOT, '.diag', 'commit_cost.json'), 'w', encoding='utf-8'),
+              ensure_ascii=False, indent=1)
+    print('  落盘 .diag/commit_cost.json')
+    return 0
 
 def mode_share(ev, dom, env):
     """量背景层**逐像素的可见占比**：冻结→灌满→两图相减。
