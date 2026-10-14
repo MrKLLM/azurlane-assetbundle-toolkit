@@ -2751,9 +2751,12 @@ function bgUpload(){
   for(let i=0;i<pk.length;i++){ let v=128+cur[i]*HS; pk[i]=v<0?0:(v>255?255:v|0); }
   g.bindTexture(g.TEXTURE_2D, BG.tex);
   /* ⚠️ 首帧 texImage2D 分配、之后一律 texSubImage2D 覆写（2026-10-14 改，§143）：
-     原来每帧都调 texImage2D，那会**重新分配整张纹理存储**。四段拆分实测
-     上传 0.13 → 0.05ms/帧（整条水面 0.44 → 0.29ms/帧，−34%）。
-     判据是"分配过没有"按像素数记，bgResize() 换尺寸时把 BG.texN 清 0 强制重分配。 */
+     原来每帧都调 texImage2D，等于**每帧重新分配整张纹理存储**。
+     ⚠️ **别以为这条省了多少**：交替配对实测（A/B 各 3 轮）上传段中位 **+0.000ms/帧、三轮不同号**
+     ⇒ CPU 侧**量不出差**。曾一度在这里写"上传 0.13→0.05、合计 −34%"，那是顺序 A/B 吃机器漂移
+     造出来的假收益，已作废（§143 补）。保留理由是 **API 语义**——不再每帧重新分配存储，
+     这是驱动层的已知隐患、本仪器的 CPU 侧读不到，**量不出来不等于不存在，但也不许说它省了多少**。
+     判据：分配与否按像素数记（BG.texN），bgResize() 换尺寸时清 0 强制重分配。 */
   if(BG.texN !== pk.length){
     g.texImage2D(g.TEXTURE_2D,0,g.R8,BG.sw,BG.sh,0,g.RED,g.UNSIGNED_BYTE,pk);
     BG.texN = pk.length;
