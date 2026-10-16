@@ -4418,3 +4418,50 @@ py -3 scripts/deploy_gallery.py --check                # 硬链/漂移
 **验证**：`py -3 scripts/diag/gallery_motion_probe.py --page index.html`
 （⚠️ 默认页 `index_q.html` 已不存在，必须显式 `--page index.html`）⇒
 `通过：… 跟随鼠标倾斜(满偏够大且对角翻符号、离手归零) … 全部落到位`，无 `!! 未通过`。
+
+---
+
+### WF-43: 前端共享层抽成新文件（多页共用）——FILES / 硬链 / 多页探针三件套（2026-10-16）
+
+**适用场景**：某个页面里的一层（本例：首页的水波背景 `#bgfx` + WebGL 场 + 指针注入，约 300 行）
+要被另外两个页面复用。抽文件本身很容易，**失败模式全是静默的**，所以三件事缺一不可。
+
+**步骤**
+
+1. **抽成自包含模块**：`gallery_src/water_bg.js`（IIFE，对外只暴露 `window.WaterBg`）。
+   自包含的判据是"这页什么都没有也能跑"：CSS 由模块自己注入（`<style>`），宿主 `#bgfx` 由模块自己建，
+   `prefers-reduced-motion` 用自己的 `matchMedia`，站用背景读 `window.SiteBg`（**带存在性判断**，
+   因为不是每页都加载 `favorites.js`）。⚠️ 宿主与 CSS 都要在**模块内**建，别留在各页的 HTML 里——
+   留在页面里就会变成"三页各写一份、漏一页就那页没水"这种最难查的差别。
+2. **正本里删干净**：`index.html` 里原来的 CSS / 宿主 / 实现整段删掉，只留一句指针注释
+   （"实现已搬到 water_bg.js"），否则会出现"两套定义、改一处不生效"。
+3. **三页各加一行** `<script src="water_bg.js">`（放在 `favorites.js` 之后：模块要用 `SiteBg`）。
+4. **⭐ 更新 `scripts/deploy_gallery.py` 的 `FILES` 白名单**——这一步漏了的话，
+   运行目录 `Output/gallery_v2/` 里**永远不会出现这个新文件**，页面 404 加载不到模块，
+   而首页因为缓存/旧副本还可能"看起来正常"。硬链检查的"同 inode N/M"里的 **M 也会跟着变**（别抄数字，以脚本为准）。
+5. **首次是新文件 ⇒ 只能是复制，不是硬链**：`deploy_gallery.py` 默认模式会 copy 过去（内容一致但不同 inode），
+   `--check` 会报 `已断链（内容仍一致）`。按 DoD 的硬顺序收：**默认模式刷平 → 提交 → `--relink` → 再 `--check`**；
+   `--relink` 会跳过"正本有未提交改动"的文件，所以不能先补链。
+6. **验收要覆盖每一页**：新写 `scripts/diag/water_bg_check.py`，每页四条判据 ——
+   ① `mode==='gl'` 且宿主/canvas 都在；② 发**可信鼠标事件**后 `frames`/`strokes`/`peak` 都在涨
+   （证明循环真的在画）；③ 设了站用背景 ⇒ 循环停 + canvas 被 CSS 藏；④ 取消背景 ⇒ 循环自己回来。
+   ⚠️ ④ **要走产品按钮**（`#clearBg`），直接调 `SiteBg.clear()` 验不到"按钮点了有没有用"；
+   没有该按钮的页才回落 API。
+
+**判据**
+
+- `py -3 scripts/deploy_gallery.py --check` → 全部"同一份数据（硬链）"、漂移 0（数字以脚本为准）。
+- `py -3 scripts/diag/water_bg_check.py` → 三页 `[PASS]`（`mode=gl` / frames 涨 / 背景开停循环 / 按钮置灰语义）。
+- 三页内联脚本语法：`node -e` 逐页 `new Function(<inline script>)`（`check_page_js.py` 亦可）。
+
+**踩坑记录**
+
+- **别只测首页**：抽层的价值在子页，而子页"没水"是零报错的静默失败（模块没引 / 宿主没建 / WebGL 起不来 / 循环没被唤醒）。
+  只有把判据落在可读数字上（`mode` / `frames` / `strokes`）才能分辨"静止"与"没跑"——水面这版的正常态本来就是静止。
+- **新文件忘进 FILES** 是本流程最容易漏的一步（改了代码、三页也引了，但运行目录里没有那个文件）。
+- **`--relink` 不能抢跑**：正本未提交时它会跳过该文件，白跑一趟。
+- 子页加载顺序：`water_bg.js` 必须排在 `favorites.js` 之后（`SiteBg` 来源），否则 `siteBgOn()` 恒假 ⇒
+  设了背景水面还在跑（不会报错，只是白烧帧）。
+
+**涉及文件**：`gallery_src/water_bg.js`（新）、`gallery_src/index.html`、`gallery_src/bgm.html`、
+`gallery_src/backgrounds.html`、`scripts/deploy_gallery.py`（`FILES`）、`scripts/diag/water_bg_check.py`（新）。

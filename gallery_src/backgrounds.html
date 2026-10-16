@@ -248,6 +248,7 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
   <div class="opt" id="gTheme" title="昼 / 夜配色（状态会记住）">
     <button data-t="light">昼</button><button data-t="dark">夜</button>
   </div>
+  <button id="clearBg" title="取消站用背景图，回到水面背景（等于把当前选中的那张取消）">去掉背景图</button>
 </header>
 
 <div class="wrap">
@@ -302,6 +303,7 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
 </div>
 
 <script src="favorites.js"></script>
+<script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
 <script>
 /* 命名四档的语义（与 scripts/build_bg_meta.py 一致，页面不许自己升档）：
    exact    这张图自己被配置表的背景字段整值引用，且那行有中文名 → 中文关卡名
@@ -651,6 +653,13 @@ function syncBg(){
     b.textContent=on?'已设为背景（点一下取消）':'设为网站背景';
     b.classList.toggle('on',on); });
 }
+/* 「去掉背景图」：与首页同款（管理背景的地方各放一个）。没设背景时置灰 ——
+   按钮点了没反应比按钮不存在更让人困惑。状态统一听 sitebgchange，不各存各的。 */
+function paintClearBg(){ const b=$('clearBg'); if(!b) return;
+  const on=!!(window.SiteBg&&SiteBg.get()); b.disabled=!on; b.classList.toggle('on',on); }
+$('clearBg').onclick=()=>{ if(window.SiteBg&&SiteBg.get()) SiteBg.clear(); };
+document.addEventListener('sitebgchange',()=>{ paintClearBg(); syncBg(); });
+paintClearBg();
 $('q').addEventListener('input',e=>{q=e.target.value;apply()});
 $('gTheme').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   document.documentElement.dataset.theme=b.dataset.t;

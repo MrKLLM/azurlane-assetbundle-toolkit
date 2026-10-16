@@ -273,6 +273,10 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
 .vbox{display:flex;gap:6px;align-items:center}
 .spine-bar select{font-size:12px;padding:5px 10px;border-radius:var(--r-chip);border:1.5px solid var(--chip-line);
   background:var(--chip);color:var(--txt);font-weight:700}
+/* 倍速滑杆：0.1×–2×，值显示用等宽数字，避免拖动时右边数字宽度跳动 */
+.spine-bar .spd{display:flex;align-items:center;gap:6px;color:var(--dim);font-weight:700}
+.spine-bar .spd input[type=range]{width:104px;accent-color:var(--brand-d);cursor:pointer;margin:0}
+.spine-bar .spd b{color:var(--txt2);font-variant-numeric:tabular-nums;min-width:36px;text-align:right}
 /* 台词字幕条：出现时从下方弹进 */
 .talksub{position:absolute;left:50%;bottom:58px;max-width:min(760px,88%);
   background:var(--panel);border:1.5px solid var(--line);border-radius:var(--r-in);padding:9px 15px;box-shadow:var(--sh2);
@@ -289,6 +293,8 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
   font-weight:700;border-radius:var(--r-chip);cursor:pointer;transition:all .18s var(--spring)}
 .opt button:hover{color:var(--txt)}
 .opt button.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+/* 置灰态（「去掉背景图」在没设背景时）：保留占位、明确不可点，不要让它看起来能按 */
+.opt button:disabled{opacity:.42;cursor:default;pointer-events:none}
 /* 配色胶囊用主色，和上面三个功能开关（樱粉）区分开 */
 #gTheme button.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
 .view img.full{max-width:100%;max-height:100%;object-fit:contain;user-select:none}
@@ -350,32 +356,9 @@ audio{height:32px;width:100%;flex:none}
      · 停下后 = 场在 ~2 秒内衰减回平面，循环自己停掉，回到"完全不动"
    ⇒ 于是这版对不对有一条极干脆的硬指标：**静止时任意两帧逐像素完全相同**
      （前几版做不到，它们一直在漂），而**划过之后必须先亮起来、再回到那个静止态**。
-   实现：CPU 上跑 240×N 的波动方程（Float32 三缓冲，一次遍历几千次加法），
-   高度场当纹理上传，WebGL 只负责按法线画高光与泡沫。零噪声函数、零 fbm、零域扭曲
-   ——上一版"蓝色绸缎"的肌理就是从那几个函数里长出来的，这版结构上不存在它们。
-   色块仍然纯 CSS、颜色全走 token ⇒ 切主题背景自己跟着换，不需要 JS 参与。
-   三条硬约束不变：pointer-events:none；z-index 低于内容；卡片是不透明面板。 */
-#bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
-/* ⚠️ 这里**不留四周渐隐遮罩**（上一版留了，是错的）：#bgfx 是 inset:0 的固定层，
-   它的四条边就是屏幕的四条边 —— 被裁在屏幕边上根本看不见，遮罩换不来任何东西；
-   而它偏偏把**底部那条唯一露着背景的空带**淡掉了 9%，等于把浪藏起来不给看。 */
-#bgfx .bfield{position:absolute;inset:-10%}
-/* closest-side + 中间停靠点 = 平滑衰减；不用 filter:blur（74vmax 的元素上那是白烧 GPU，
-   而且径向渐变本身已经足够软）。**没有 animation**：静止就是这版的卖点。 */
-#bgfx .glow{position:absolute;width:74vmax;height:74vmax;border-radius:50%}
-#bgfx .g1{left:-24vmax;top:-28vmax;
-  background:radial-gradient(closest-side,color-mix(in srgb,var(--brand) 80%,transparent) 0%,
-    color-mix(in srgb,var(--brand) 36%,transparent) 40%,transparent 100%)}
-#bgfx .g2{right:-26vmax;bottom:-32vmax;width:68vmax;height:68vmax;
-  background:radial-gradient(closest-side,color-mix(in srgb,var(--pop) 66%,transparent) 0%,
-    color-mix(in srgb,var(--pop) 26%,transparent) 40%,transparent 100%)}
-#bgfx .g3{right:2vmax;top:-26vmax;width:54vmax;height:54vmax;
-  background:radial-gradient(closest-side,color-mix(in srgb,var(--ok) 56%,transparent) 0%,
-    color-mix(in srgb,var(--ok) 22%,transparent) 40%,transparent 100%)}
-[data-theme=light] #bgfx .glow{opacity:.8}
-[data-theme=dark]  #bgfx .glow{opacity:.62}
-/* 水面画布盖在色块之上：静止时它是全透明的，所以看上去就是"柔色底"本身 */
-#bgfx canvas{position:absolute;inset:0;width:100%;height:100%}
+   ⚠️ 2026-10-15：样式与实现**已抽到 `water_bg.js`**（音乐库/背景库也要这一层，
+   不能在这三页各留一份正本）。这一页只留 `#bgfx` 宿主与这一行说明，
+   模块自己注入上面那套 CSS（`#bgfx` / `.bfield` / 三团光晕 / canvas）并按需起停循环。 */
 header{position:relative;z-index:10}   /* 原本就有，这里只是把"内容压在背景上"这件事写全 */
 main{position:relative;z-index:1}
 /* 弹层开着的时候不再 wake 水面 —— 这条**只在 JS 侧做**（既不注入脉冲也不排下一帧）。
@@ -516,6 +499,7 @@ main{position:relative;z-index:1}
     <button data-t="light">昼</button><button data-t="dark">夜</button>
   </div></div>
   <div class="ctl"><label>页面</label><div class="opt"><button onclick="location.href='bgm.html'" title="游戏原声 BGM（opus，536 首）在线试听">音乐库</button><button onclick="location.href='backgrounds.html'" title="场景/界面背景图 1897 张，带配置表来的中文命名">背景库</button></div></div>
+  <div class="ctl"><label>背景</label><div class="opt"><button id="clearBg" title="取消站用背景图，回到水面背景（等于在背景库里取消选中的那张）">去掉背景图</button></div></div>
   <div class="hint" id="count"></div>
   <div class="hint" id="modehint"></div>
 </header>
@@ -537,6 +521,7 @@ main{position:relative;z-index:1}
 </div>
 
 <script src="./favorites.js"></script>
+<script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
 <script src="./index.js"></script>
 <script src="./vendor/spine/spine-all.js"></script>
 <script>
@@ -582,6 +567,15 @@ function saveOpt(){ try{ localStorage.setItem(OPT_KEY, JSON.stringify(OPT)); }ca
 function paintOpt(){ document.querySelectorAll('#gOpt button')
   .forEach(b=>b.classList.toggle('on', !!OPT[b.dataset.k])); }
 
+/* 「去掉背景图」：一键取消站用背景（=背景库选中的那张），回到水面。
+   没设背景时**置灰**：按钮点了没反应比按钮不存在更让人困惑。
+   状态只有两个来源：本页点它、或从背景库/立绘页改了背景 ⇒ 统一听 sitebgchange。 */
+function paintClearBg(){ const b=document.getElementById('clearBg'); if(!b) return;
+  const on=!!(window.SiteBg&&SiteBg.get()); b.disabled=!on; b.classList.toggle('on',on); }
+{ const b=document.getElementById('clearBg');
+  if(b) b.onclick=()=>{ if(window.SiteBg&&SiteBg.get()) SiteBg.clear(); }; }
+document.addEventListener('sitebgchange',()=>paintClearBg());
+
 /* ---------- 昼 / 夜主题 与 筛选栏折叠（各自持久化） ----------
    主题在 <head> 里已先落 data-theme 防闪烁，这里只负责切换与同步按钮文字。
    配色过渡靠临时挂 .theming（见 CSS），不挂时 hover 的弹性曲线才不会被拖慢。 */
@@ -592,9 +586,11 @@ function setTheme(t){
   const apply=()=>{ document.documentElement.dataset.theme=t;
     try{ localStorage.setItem(THEME_KEY,t); }catch(e){} paintTheme();
     /* 三团色块是 color-mix 自 token 的，CSS 自己就跟着换了；但**水面参数**
-       （泡沫色 / 斜率增益 / 起沫阈值）是 JS 一次性读进 BG.P 的，必须在这里重取一次，
-       否则夜里还在用白天那套泡沫色。bgColors 是函数声明，提升得到，放前面也能调。 */
-    if(typeof bgColors==='function') bgColors(); };
+       （泡沫色 / 斜率增益 / 起沫阈值）是 JS 一次性读进 BG.P 的，必须重取一次，
+       否则夜里还在用白天那套泡沫色。⚠️ 2026-10-15 起水面搬进 `water_bg.js`，
+       那个模块**自己**用 MutationObserver 盯 data-theme ⇒ 这里不必再手动调；
+       保留这一句只是兜底（模块没起来时它是空操作，不会报错）。 */
+    if(window.WaterBg&&WaterBg.colors) WaterBg.colors(); };
   /* 渐变类背景（body 的 linear-gradient、选中胶囊的渐变、查看器底纹）在 CSS 里
      **根本不可过渡**，只给 background-color 加 transition 就会一半在淡、一半瞬切 ——
      这就是"不够自然"的来源。View Transition 是对整页做快照再交叉溶解，
@@ -1850,7 +1846,7 @@ async function renderLive2D(s, sk){
     /* Cubism 的 id 在有些版本里是 {string} 对象、有些是裸字符串；取名一律走这个（面板与暂停存档共用） */
     const idName=id=>(id&&id.string)||(typeof id==='string'?id:(id&&id.toString())||'?');
     const bar=document.getElementById('l2bar');
-    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Pause" class="tg">暂停</button><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2PauseInfo" style="display:none"></span><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>空格</b>暂停并存档当前帧 / <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Pause" class="tg">暂停</button><label class="spd"><span>倍速</span><input type="range" id="l2Speed" min="0.1" max="2" step="0.1" value="1"><b id="l2SpeedVal">1.0×</b></label><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2PauseInfo" style="display:none"></span><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>空格</b>暂停/继续 · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     const fillSel=()=>{ const cur=sel.value;
       sel.innerHTML=groups.map(g=>`<option value="${g}">${g}${voice[g]?'（语音）':''}</option>`).join('');
@@ -1870,70 +1866,49 @@ async function renderLive2D(s, sk){
     document.getElementById('l2Replay').onclick=()=>{ play(sel.value); };
     document.getElementById('l2Fit').onclick=resetFraming;
     document.getElementById('l2Full').onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen(); else viewEl.requestFullscreen().catch(()=>{}); };
-    /* ---------- 暂停：把姿态冻在「当前这一帧」，顺手把这一帧交出来 ----------
+    /* ---------- 倍速播放（滑杆 0.1×–2×） ----------
+       ⚠️ **只缩放 dt 是无效的**（2026-10-16 实测：拖到 2× 量出来仍是 1.02×）。库的调用链是
+         `onTickerUpdate` 累 `deltaTime`/`elapsedTime` → `_render` 调
+         `internalModel.update(deltaTime, elapsedTime)`，而**动作时钟吃的是第二个参数**
+         （`motionManager.update(coreModel, elapsedTime/1000)`，模型自己累出来的绝对时间），
+         dt 只喂物理/眨眼那几条 ⇒ 缩放 dt 动不了动作。
+       ⇒ 正确做法是自建一条**虚拟时钟**：按倍速累加 dt，把「缩放后的 dt + 虚拟绝对时间」一起喂回去。
+         暂停（autoUpdate=false）时 update 根本不被调用 ⇒ 虚拟钟也不走，恢复后不会跳。
+       ⚠️ 页面自己的三层外挂（环境层 amb / 残留复位 rest / 开关钉住 snapHold）按 performance.now()
+         计时，**不随倍速变化**：环境层在源包里本来就是另一条独立 loop（不属于动作时钟），
+         rest/snapHold 是固定时长的过渡，倍速下它们的绝对时长不变——这是有意为之，不是漏改。 */
+    let l2Speed=1, l2VEl=0;
+    const origIMUpdate=im.update.bind(im);
+    im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origIMUpdate(d, l2VEl); };
+    /* 倍速调试钩子：`vEl` 是喂给内部模型的虚拟绝对时间（秒），`real` 是墙钟秒。
+       两者斜率之比**就是**倍速的实现侧读数——探针先证这条，再去量动作速率，
+       否则"滑杆拖了但动作没变"会被误判成"库里不吃这个参数"（2026-10-16 踩过）。 */
+    window.__speedDbg=()=>({ speed:l2Speed, vEl:+(l2VEl/1000).toFixed(3),
+      real:+(performance.now()/1000).toFixed(3), patch:/l2VEl/.test(String(im.update)) });
+    (()=>{ const spd=document.getElementById('l2Speed'), val=document.getElementById('l2SpeedVal');
+      const setSpeed=(v)=>{ l2Speed=Math.min(2,Math.max(0.1,+v||1));
+        if(val) val.textContent=l2Speed.toFixed(1)+'×'; if(spd) spd.value=String(l2Speed); };
+      if(spd){ spd.oninput=()=>setSpeed(spd.value); setSpeed(spd.value); } })();
+    /* ---------- 暂停：把姿态冻在「当前这一帧」 ----------
        机制取 mdl.autoUpdate：库把它挂在 PIXI.Ticker.shared 上（onTickerUpdate 累 deltaTime），
        而 _render 的守卫是 `this.deltaTime && internalModel.update(...)` ⇒ 关掉后 motion、物理、
        coreModel.update 整条都不跑，pose 真冻住；app.ticker 不受影响，缩放/平移/判定区照常画。
        ⚠️ 三层外挂是按 performance.now() 取时间的（残留复位 rest、环境层 ambT0、开关钉住 snapHold）：
          暂停期间后两层根本不触发，但 rest 挂在 app.ticker 上会继续爬，恢复瞬间参数会跳 ⇒
          restTick 里按 l2Paused 直接不动作，恢复时把三层的 t0 一起平移「暂停掉的毫秒数」。
-       存档只是「把坏帧交给我」的通道：完整参数向量 + 每个上屏美术的包围盒（塌成一个点的正是手不见了的
-       形状）落到 .diag/l2d_freeze/，文件名回填到条上。暂停本身不依赖服务器 —— POST 失败照样冻得住。 */
-    let l2TinG=0, l2PreVec=null;
-    /* ⚠️ 存档必须抓「渲染那一拍真正用过的」参数向量。库的顺序是：
-         motionManager.update → emit afterMotionUpdate → coreModel.saveParameters()
-         → 表情/眨眼/focus/自然摆动/物理/pose **改缓冲** → emit beforeModelUpdate → coreModel.update()（出画面）
-         → coreModel.loadParameters() **把缓冲还原成 save 时的值**。
-       所以在帧外读 `parameters.values` 拿到的是"物理之前"的那份 ⇒ 照它回放会少掉眨眼/物理/focus 的贡献
-       （实测：414 片亮 vs 现场 460 片，46 片的显隐摆不回来，一批停放件的包围盒差 7~28 单位）。
-       正确取法就是在 beforeModelUpdate 这一钩子上抓快照——那一刻的缓冲正是下一帧渲染要用的。 */
-    im.on('beforeModelUpdate',()=>{ const V=cm._model&&cm._model.parameters&&cm._model.parameters.values;
-      if(V&&V.length) l2PreVec=Array.from(V); });
-    const l2FreezeDump=()=>{ const M=cm._model||{}, P=M.parameters||{}, D=M.drawables||{}, PA=M.parts||{};
-      const pars=[], parts=[], art=[]; let lit=0, collapsed=0;
-      const PV=l2PreVec||P.values;              // 优先用渲染那一拍的快照
-      for(let i=0;i<(P.count|0);i++) pars.push([idName(P.ids[i]), +(PV[i]).toFixed(4)]);
-      for(let i=0;i<(PA.count|0);i++) parts.push([idName(PA.ids[i]), +(PA.opacities[i]).toFixed(3)]);
-      const V=D.vertexPositions||[];
-      for(let i=0;i<(D.count|0);i++){ const op=D.opacities[i]; if(!(op>0.01)) continue; lit++;
-        const p=V[i]; const nm=idName(D.ids[i]);
-        if(!p||!p.length){ collapsed++; art.push([nm, +op.toFixed(3), 0, 0, 0, 0]); continue; }
-        let x0=1e9, y0=1e9, x1=-1e9, y1=-1e9;
-        for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k];
-          if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
-        const w=x1-x0, h=y1-y0; if(w<0.02||h<0.02) collapsed++;
-        art.push([nm, +op.toFixed(3), +w.toFixed(2), +h.toFixed(2), +x0.toFixed(2), +y0.toFixed(2)]); }
-      const st=mm.state||{}, g=st.currentGroup||sel.value||'na';
-      l2TinG=(l2Now()-l2GroupT0)/1000;
-      return { kind:'l2d-freeze', tag:sk.live2dBase+'-'+g, skin:sk.key, model:model, base:sk.live2dBase,
-        paramSrc:l2PreVec?'preUpdate':'live',
-        group:st.currentGroup||null, sel:sel.value, tInGroup:+l2TinG.toFixed(3), heldMs:Math.round(l2HeldMs),
-        state:{currentGroup:st.currentGroup, currentIndex:st.currentIndex, currentPriority:st.currentPriority,
-               reservePriority:st.reservePriority, tag:st.tag},
-        view:{w:wrap.clientWidth, h:wrap.clientHeight, z:+z.toFixed(4), baseK:+baseK.toFixed(4),
-              ox:+ox.toFixed(1), oy:+oy.toFixed(1), mx:+mdl.x.toFixed(1), my:+mdl.y.toFixed(1),
-              scale:+mdl.scale.x.toFixed(4)},
-        flags:{ noRest:!!window.__noRest, ambOff:!!window.__ambOff, ambMask:!!window.__ambMask,
-                snapOff:!!window.__snapOff, phase:(cm.__phaseSet?cm.__phaseSet.size:0) },
-        counts:{params:pars.length, parts:parts.length, drawables:(D.count|0), lit:lit, collapsed:collapsed},
-        parameters:pars, parts:parts, art:art }; };
-    const l2SetPaused=async(on)=>{ if(!!on===l2Paused) return;
+       ⚠️ 2026-10-15 起**不再存档**：原先这里会把整帧参数向量 + 逐片包围盒 + 画布 PNG POST 到
+         `/l2d_freeze`，那是「手不见了」取证期的交接通道；手部问题闭环后按用户要求摘掉，
+         条上也不再弹「已冻结…存档 <文件名>」提示（服务端端点保留，`l2d_pause_e2e` 等探针仍会打它）。 */
+    /* （原 `l2FreezeDump()` 与 `beforeModelUpdate` 快照钩子在此删除：那是把当前帧
+       参数向量 + 逐片包围盒 + 画布 PNG 交给 `/l2d_freeze` 的取证通道，2026-10-15 按用户要求下线。
+       需要复现旧存档时看 `git log -p gallery_src/index.html` 或 `docs/HANDOFF_6.37_手不见了_2026-10-12.md`。） */
+    const l2SetPaused=(on)=>{ if(!!on===l2Paused) return;
       const btn=document.getElementById('l2Pause'), info=document.getElementById('l2PauseInfo');
       l2Paused=!!on; mdl.autoUpdate=!l2Paused;
       btn.classList.toggle('on',l2Paused); btn.textContent=l2Paused?'继续':'暂停';
       if(l2Paused){ l2PauseT0=performance.now();
-        info.style.display=''; info.textContent='已冻结 · 正在存档…';
-        let j=null; try{ j=l2FreezeDump(); }catch(e){ info.textContent='已冻结 · 姿态读取失败：'+(e.message||e); return; }
-        /* 把**画布本身**一起交出去。姿态向量与逐片包围盒只能证明"我算出来这一帧有什么"，
-           而这张图证明"产品真的画出了什么"——2026-10-12 就是靠这条区分开"仪器没变形那批手片"
-           和"产品没手"。toDataURL 前必须同步 render 一次：WebGL 默认不保留绘制缓冲。 */
-        try{ app.render(); j.png=app.view.toDataURL('image/png'); }
-        catch(e){ j.pngErr=''+(e.message||e); }
-        const head='已冻结 '+j.group+' 第 '+j.tInGroup+'s';
-        try{ const r=await fetch('/l2d_freeze',{method:'POST',
-            headers:{'Content-Type':'application/json'}, body:JSON.stringify(j)});
-          info.textContent = r.ok ? (head+' · 存档 '+(await r.text())) : (head+' · 存档失败 HTTP '+r.status);
-        }catch(e){ info.textContent=head+' · 服务器没接住（需 启动资产浏览器.bat 起的服务器）'; }
+        const g=(mm.state&&mm.state.currentGroup)||sel.value||'';
+        info.style.display=''; info.textContent='已暂停 · '+g+' 第 '+((l2Now()-l2GroupT0)/1000).toFixed(2)+'s';
         return; }
       const held=performance.now()-l2PauseT0; l2PauseT0=0; l2HeldMs+=held;
       if(amb) ambT0+=held; if(rest) rest.t0+=held; if(snapHold) snapHold.t0+=held;
@@ -2682,6 +2657,7 @@ async function startSpine(s, sk){
 (function initOpt(){
   paintOpt();
 paintTheme();
+paintClearBg();
   document.querySelectorAll('#gOpt button').forEach(b=>{
     const k=b.dataset.k;
     b.onclick=()=>{
@@ -2694,240 +2670,11 @@ paintTheme();
   loadVoiceMap(); loadWords();   // 预热两张表：首开皮肤时不必等两次 fetch
 })();
 
-/* ---------- 背景：静止的水面，划过才起浪 ----------
-   实现分两半，各挑了各自最省事的那条路：
-     · 波动**模拟**在 CPU 上跑：一张 240×N 的 Float32 高度场 + 经典水高场递推
-       `next = (四邻之和/2 - prev) * 阻尼`。三缓冲轮换，一次遍历约三万次加减，
-       比搭 ping-pong FBO 省一半代码，也不依赖浮点纹理的可滤波性。
-     · **着色**交给 WebGL：高度场当 R8 纹理上传（LINEAR 滤波），片元里按邻域差
-       求法线 → 高光，按梯度模长 + 波峰位置 → 白沫。
-   ⚠️ 着色器里**没有 noise / fbm / curl 任何一个**——上一版那层"蓝色绸缎"肌理
-   就是从这几个函数里长出来的，这版在结构上不存在它们：画面上的每一道纹
-   都是用户自己划出来的，静止时场是平的，画布是全透明的。
-   循环是"有浪才跑"：能量掉到阈值下就清一次画布、不排下一帧 ⇒ 静止时逐像素完全相同。
-   ⚠️ 这段仍放在脚本末尾：它引用 mask / RM，写在它们前面会踩到 const 的暂时性死区。 */
-const BG = { mode:'none', err:'', cv:null, gl:null, prog:null, u:{}, tex:null, pack:null,
-             raf:0, lastT:0, last:null, t0:0, w:0, h:0, sw:0, sh:0, cur:null, prv:null, buf:null,
-             energy:0, peak:0, frames:0, strokes:0, rs:0.72, HS:620, P:null, texN:0 };
-function bgHex(h){ h=(h||'').trim();
-  if(h[0]!=='#'||(h.length!==7&&h.length!==4)) return [1,1,1];
-  let s=h.slice(1); if(s.length===3) s=s.split('').map(c=>c+c).join('');
-  return [parseInt(s.slice(0,2),16)/255, parseInt(s.slice(2,4),16)/255, parseInt(s.slice(4,6),16)/255]; }
-function bgColors(){
-  /* 颜色全部从 token 读 ⇒ 切主题只要重取一次，着色器不写死任何字面色。 */
-  const cs=getComputedStyle(document.documentElement);
-  BG.P = { foam:bgHex(cs.getPropertyValue('--w-foam')), glint:bgHex(cs.getPropertyValue('--w-glint')),
-           deep:bgHex(cs.getPropertyValue('--w-deep')),
-           gain:+(cs.getPropertyValue('--w-gain')||8), foamT:+(cs.getPropertyValue('--w-foamth')||0.010),
-           alpha:+(cs.getPropertyValue('--w-alpha')||0.95) };
-}
-function bgResize(){
-  if(!BG.cv) return;
-  BG.w=innerWidth; BG.h=innerHeight;
-  /* ⚠️ dpr 上限取 1，不是 1.5（2026-10-14 改，理由见 docs/TROUBLESHOOTING.md §143）：
-     画布是 0.72× CSS 分辨率再被 CSS 拉满视口的软水，**dpr 提高买不到任何观感**，
-     而填充率按像素数走 —— dpr=2 的屏上原式给到 1.08× CSS（1080p 视口 = 2.42Mpx，比 dpr=1 多 2.2 倍）。
-     水面的实测帧时增量只有 0.8ms，但那是 dpr=1 的量；这条是把 HiDPI 那 2.2 倍提前掐掉。 */
-  const k=Math.min(1, window.devicePixelRatio||1)*BG.rs;
-  BG.cv.width=Math.max(2,Math.floor(BG.w*k)); BG.cv.height=Math.max(2,Math.floor(BG.h*k));
-  /* 场按视口长宽比取格子：短边固定 240 格，够细到看不出方块、又少到 CPU 扛得住。 */
-  BG.sw=240; BG.sh=Math.max(60, Math.round(240*BG.h/Math.max(1,BG.w)));
-  const n=BG.sw*BG.sh;
-  BG.cur=new Float32Array(n); BG.prv=new Float32Array(n); BG.buf=new Float32Array(n);
-  BG.pack=new Uint8Array(n); BG.t0=0; BG.texN=0;   /* texN=0 ⇒ 下一帧重新分配纹理存储 */
-  BG.last=null; BG.energy=0; BG.peak=0;
-  if(BG.gl){ BG.gl.viewport(0,0,BG.cv.width,BG.cv.height); bgClear(); }
-}
-function bgClear(){ if(BG.gl){ const g=BG.gl; g.clearColor(0,0,0,0); g.clear(g.COLOR_BUFFER_BIT); } }
-/* 帽形脉冲：比 exp 便宜得多，一圈内二次衰减，划出来的波源足够圆 */
-function bgStamp(sx, sy, amt, rad){
-  const sw=BG.sw, sh=BG.sh, cur=BG.cur, r2=rad*rad;
-  const x0=Math.max(1,Math.floor(sx-rad)), x1=Math.min(sw-1,Math.ceil(sx+rad));
-  const y0=Math.max(1,Math.floor(sy-rad)), y1=Math.min(sh-1,Math.ceil(sy+rad));
-  for(let y=y0;y<y1;y++){ const row=y*sw, dy=y-sy;
-    for(let x=x0;x<x1;x++){ const dx=x-sx, d2=dx*dx+dy*dy;
-      if(d2<r2) cur[row+x]+=amt*(1-d2/r2); } }
-}
-/* ⚠️ 阻尼必须按**秒**算，不能按帧：写成"每帧乘 0.964"的话，浪多久平完全取决于帧率——
-   60fps 下 2.4 秒平，挂上毛玻璃后无头只有十几帧，实测 20 秒还剩 0.015 不平（本轮撞到）。
-   真机上低端设备同样会被判成"背景永远在动"，所以这不是探针的问题，是实现的问题。
-   0.11 这个数是换算来的：0.964^60 ≈ 0.111，即"一秒衰减到 11%"，与原设计等价。 */
-function bgStep(dt){
-  const sw=BG.sw, sh=BG.sh, cur=BG.cur, prv=BG.prv, buf=BG.buf,
-        damp=Math.pow(0.11, Math.min(0.1, Math.max(0.001, dt)));
-  let e=0, pk=0;
-  for(let y=1;y<sh-1;y++){ const row=y*sw;
-    for(let x=1;x<sw-1;x++){ const i=row+x;
-      const v=((cur[i-1]+cur[i+1]+cur[i-sw]+cur[i+sw])*0.5 - prv[i])*damp;
-      buf[i]=v; e+=v*v; const a=v<0?-v:v; if(a>pk) pk=a; } }
-  /* 边界留一圈静水（吸收而非反射），否则浪回到池边会反弹回来把整个池子搅浑。 */
-  for(let x=0;x<sw;x++){ buf[x]=0; buf[(sh-1)*sw+x]=0; }
-  for(let y=0;y<sh;y++){ buf[y*sw]=0; buf[y*sw+sw-1]=0; }
-  BG.prv=cur; BG.cur=buf; BG.buf=prv;
-  BG.energy=e/(sw*sh); BG.peak=pk;
-}
-function bgUpload(){
-  const g=BG.gl, cur=BG.cur, pk=BG.pack, HS=BG.HS;
-  for(let i=0;i<pk.length;i++){ let v=128+cur[i]*HS; pk[i]=v<0?0:(v>255?255:v|0); }
-  g.bindTexture(g.TEXTURE_2D, BG.tex);
-  /* ⚠️ 首帧 texImage2D 分配、之后一律 texSubImage2D 覆写（2026-10-14 改，§143）：
-     原来每帧都调 texImage2D，等于**每帧重新分配整张纹理存储**。
-     ⚠️ **别以为这条省了多少**：交替配对实测（A/B 各 3 轮）上传段中位 **+0.000ms/帧、三轮不同号**
-     ⇒ CPU 侧**量不出差**。曾一度在这里写"上传 0.13→0.05、合计 −34%"，那是顺序 A/B 吃机器漂移
-     造出来的假收益，已作废（§143 补）。保留理由是 **API 语义**——不再每帧重新分配存储，
-     这是驱动层的已知隐患、本仪器的 CPU 侧读不到，**量不出来不等于不存在，但也不许说它省了多少**。
-     判据：分配与否按像素数记（BG.texN），bgResize() 换尺寸时清 0 强制重分配。 */
-  if(BG.texN !== pk.length){
-    g.texImage2D(g.TEXTURE_2D,0,g.R8,BG.sw,BG.sh,0,g.RED,g.UNSIGNED_BYTE,pk);
-    BG.texN = pk.length;
-  } else {
-    g.texSubImage2D(g.TEXTURE_2D,0,0,0,BG.sw,BG.sh,g.RED,g.UNSIGNED_BYTE,pk);
-  }
-}
-const BG_VS = '#version 300 es\nin vec2 a_pos; out vec2 vUv;\nvoid main(){ vUv = a_pos*0.5+0.5; gl_Position = vec4(a_pos,0.0,1.0); }';
-const BG_FS = [
-'#version 300 es',
-'precision mediump float;',
-'in vec2 vUv;',
-'uniform sampler2D u_h;',
-'uniform vec2 u_tx;',
-'uniform vec3 u_foam, u_glint, u_deep;',
-'uniform float u_gain, u_foamT, u_alpha;',
-'out vec4 frag;',
-'void main(){',
-'  float h = texture(u_h, vUv).r;',
-'  float re= texture(u_h, vUv+vec2(u_tx.x,0.0)).r;',
-'  float le= texture(u_h, vUv-vec2(u_tx.x,0.0)).r;',
-'  float up= texture(u_h, vUv+vec2(0.0,u_tx.y)).r;',
-'  float dn= texture(u_h, vUv-vec2(0.0,u_tx.y)).r;',
-'  vec2 gr = vec2(re-le, up-dn);',
-'  float gm = length(gr);',
-'  vec3 nz = normalize(vec3(-gr.x*u_gain, -gr.y*u_gain, 1.0));',
-'  vec3 L  = normalize(vec3(-0.42, 0.55, 0.72));',
-'  float sp = pow(max(dot(reflect(-L,nz), vec3(0.0,0.0,1.0)),0.0), 28.0);',
-'  float crest = smoothstep(0.545, 0.70, h);',
-'  /* 两条来路取大：陡（梯度大）起沫 + 到了波顶也起沫。',
-'     只留前一条的话缓坡那一大片根本不白，看着就是"水变蓝了"而不是"起了浪花"。 */',
-'  float foam  = max(smoothstep(u_foamT, u_foamT*2.2, gm) * (0.30 + 0.70*crest), crest);',
-'  float body  = abs(h-0.5)*2.0;',
-'  float a = clamp(foam + sp*0.9 + body*0.06, 0.0, 1.0) * u_alpha;',
-'  vec3 col = (u_foam*foam + u_glint*sp*0.9 + u_deep*body*0.06) / max(a, 1e-3);',
-'  frag = vec4(clamp(col,0.0,1.0), a);',
-'}'].join('\n');
-function bgShader(ty, src){
-  const g=BG.gl, s=g.createShader(ty); g.shaderSource(s,src); g.compileShader(s);
-  if(!g.getShaderParameter(s,g.COMPILE_STATUS)){ BG.err=g.getShaderInfoLog(s)||'compile'; return null; }
-  return s;
-}
-function bgInit(){
-  const g=BG.gl=BG.cv.getContext('webgl2',{alpha:true, premultipliedAlpha:false, powerPreference:'low-power'});
-  if(!g){ BG.mode='css'; BG.err='no webgl2'; return; }
-  const vs=bgShader(g.VERTEX_SHADER,BG_VS), fs=bgShader(g.FRAGMENT_SHADER,BG_FS);
-  if(!vs||!fs){ BG.mode='css'; return; }
-  const pr=g.createProgram(); g.attachShader(pr,vs); g.attachShader(pr,fs); g.linkProgram(pr);
-  if(!g.getProgramParameter(pr,g.LINK_STATUS)){ BG.mode='css'; BG.err=g.getProgramInfoLog(pr)||'link'; return; }
-  BG.prog=pr; BG.mode='gl'; g.useProgram(pr);
-  const vao=g.createVertexArray(); g.bindVertexArray(vao);
-  const b=g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER,b);
-  g.bufferData(g.ARRAY_BUFFER,new Float32Array([-1,-1, 3,-1, -1,3]),g.STATIC_DRAW);
-  const loc=g.getAttribLocation(pr,'a_pos'); g.enableVertexAttribArray(loc);
-  g.vertexAttribPointer(loc,2,g.FLOAT,false,0,0);
-  ('u_h u_tx u_foam u_glint u_deep u_gain u_foamT u_alpha').split(' ')
-    .forEach(n=>{ BG.u[n]=g.getUniformLocation(pr,n); });
-  BG.tex=g.createTexture(); g.bindTexture(g.TEXTURE_2D,BG.tex);
-  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_MIN_FILTER,g.LINEAR);
-  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_MAG_FILTER,g.LINEAR);
-  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_WRAP_S,g.CLAMP_TO_EDGE);
-  g.texParameteri(g.TEXTURE_2D,g.TEXTURE_WRAP_T,g.CLAMP_TO_EDGE);
-  g.disable(g.DEPTH_TEST); g.enable(g.BLEND);
-  g.blendFunc(g.SRC_ALPHA,g.ONE_MINUS_SRC_ALPHA);
-}
-function bgRender(){
-  const g=BG.gl, P=BG.P;
-  g.useProgram(BG.prog); g.activeTexture(g.TEXTURE0); g.bindTexture(g.TEXTURE_2D,BG.tex);
-  g.uniform1i(BG.u.u_h,0);
-  g.uniform2f(BG.u.u_tx, 1/BG.sw, 1/BG.sh);
-  g.uniform3fv(BG.u.u_foam,P.foam); g.uniform3fv(BG.u.u_glint,P.glint); g.uniform3fv(BG.u.u_deep,P.deep);
-  g.uniform1f(BG.u.u_gain,P.gain); g.uniform1f(BG.u.u_foamT,P.foamT); g.uniform1f(BG.u.u_alpha,P.alpha);
-  g.drawArrays(g.TRIANGLES,0,3);
-}
-/* 收摊阈值定在**峰值高度**而不是平均能量：平均会被一大片微弱余波摊薄，
-   而肉眼看到的从来只是最高的那道浪。
-   ⚠️ 这个数**不能贴着衰减尾端定**：实测划满两笔后 peak 从 0.18 一路衰减，
-   到第 5.7 秒是 0.00446 —— 而旧阈值正好是 0.0045，于是"能不能收到摊"
-   取决于最后一帧的运气，探针 10 秒轮询直接读成"水永远不平"（本轮真实撞到）。
-   现在按可见性反推：HS=620 ⇒ v=0.012 对应纹理里 58/255 的偏离，
-   着色器里 body = |h-0.5|*2 = 0.116、alpha 上限 0.116×0.06 ≈ 0.007 —— 仍然不可见，
-   但离衰减尾端有 2.7 倍余量。 */
-const BG_EPS = 0.012;
-function bgDraw(ts){
-  if(RM.matches || mask.classList.contains('on')){ BG.raf=0; bgClear(); return; }
-  const dt=BG.t0 ? Math.min(0.1,(ts-BG.t0)/1000) : 1/60; BG.t0=ts;
-  bgStep(dt); bgUpload(); bgRender(); BG.frames++;
-  if(BG.peak > BG_EPS){ BG.raf=requestAnimationFrame(bgDraw); }
-  else { BG.raf=0; bgClear(); }          // 收摊：清成全透明，回到"逐像素静止"
-}
-function bgStart(){ if(!BG.raf && BG.mode==='gl') { BG.raf=requestAnimationFrame(bgDraw); } }
-/* 指针 → 水高场。走 window 的 pointermove：卡片自己也要收 hover，不能抢事件。 */
-function bgWake(x, y, down){
-  if(RM.matches || siteBgOn() || BG.mode!=='gl' || mask.classList.contains('on')) return;
-  const sx=x/innerWidth*BG.sw, sy=(1-y/innerHeight)*BG.sh;      // 纹理 y 轴翻转对齐 gl_FragCoord
-  let lx=sx, ly=sy, dx=0, dy=0;
-  if(BG.last){ lx=BG.last[0]; ly=BG.last[1]; dx=sx-lx; dy=sy-ly; }
-  BG.last=[sx,sy]; BG.lastT=performance.now();
-  const sp=Math.hypot(dx,dy);
-  /* 指针「瞬移」不算划水：光标从窗口外进来、跨标签页回来、探针把光标一下挪到角落，
-     都会给出一个几百格的位移 —— 按速度插值就等于**沿那条直线糊一道浪**，
-     用户看到的是"我什么都没做，背景自己被划了一道"，而且这道浪正好落在底部空带里。
-     （本轮就是靠"静止两帧必须逐像素相同"这条判据抓出来的。）超过阈值只挪锚点、不起浪。 */
-  if(!down && sp>45) return;
-  if(down || sp<0.3){
-    bgStamp(sx, sy, down?0.028:0.0022, down?5.0:2.4);            // 按下 = 一颗水滴；慢速 = 微澜
-  } else {
-    const amt=Math.min(0.042, 0.009+sp*0.0040);                 // 上限必须有：不然划一下糊一屏白
-    const rad=Math.max(2.2, Math.min(7.0, 2.0+sp*0.45));
-    const steps=Math.max(1, Math.min(12, Math.round(sp/(rad*0.5))));
-    /* 偶极注入：前进方向给正、身后给负 —— 才有"船头波"那种向外摊开的浪，
-       只注正脉冲等于在原地搅水，波前是圆的不走方向。 */
-    for(let k=1;k<=steps;k++){
-      const f=k/steps, px=lx+dx*f, py=ly+dy*f;
-      bgStamp(px+dx*0.12, py+dy*0.12,  amt,        rad);
-      bgStamp(px-dx*0.16, py-dy*0.16, -amt*0.70,   rad*0.85);
-    }
-    BG.strokes++;
-  }
-  bgStart();
-}
-let bgPend=null;
-window.addEventListener('pointermove',e=>{
-  /* 节流到每帧一次：触摸板 pointermove 能到 120Hz，每次都写场就是白烧 CPU。
-     但**不能丢坐标**——丢中间点会让快速拖动在场上留下断口，所以取最新值。 */
-  if(RM.matches || siteBgOn() || BG.mode!=='gl') return;
-  if(bgPend) return;
-  bgPend=requestAnimationFrame(()=>{ bgPend=null; bgWake(e.clientX,e.clientY,false); });
-},{passive:true});
-window.addEventListener('pointerdown',e=>{ bgWake(e.clientX,e.clientY,true); },{passive:true});
-window.addEventListener('blur',()=>{ BG.last=null; });
-const siteBgOn=()=>!!(window.SiteBg&&SiteBg.get());
-function bgSync(){
-  const host=document.getElementById('bgfx'); if(!host) return;
-  /* 「减少动效」与「设了站用背景」是同一种状态：水面不是当前的背景 ⇒ 停循环 + 清屏。
-     水面 canvas 是不透明的（WebGL alpha:false），CSS 里已经把它 display:none 掉，
-     但循环不停就是每帧白烧 3.3ms 画一张看不见的海。 */
-  if(RM.matches || siteBgOn()){ if(BG.raf){ cancelAnimationFrame(BG.raf); BG.raf=0; } bgClear(); return; }
-  if(!BG.cv){
-    BG.cv=document.createElement('canvas'); host.appendChild(BG.cv);
-    bgColors(); bgInit(); bgResize();
-    window.addEventListener('resize',bgResize);
-    if(BG.mode!=='gl'){ BG.cv.remove(); BG.cv=null; return; }
-  }
-  bgStart();
-}
-RM.addEventListener('change',bgSync);
-bgSync();
-/* 设 / 取消站用背景时立刻切水面层的运行状态。不监听的话正在跑的循环会一直画到下一次
-   bgSync（只有 resize、减少动效变化才触发），用户"取消背景"之后海面就不回来了。 */
-document.addEventListener('sitebgchange',()=>bgSync());
+/* 水面背景的**实现已搬走**到 `water_bg.js`（2026-10-15：音乐库/背景库也要这一层，
+   不能三页各留一份正本）。本页只剩 `#bgfx` 宿主那一段 HTML 与上面的样式说明；
+   模块自己注入 CSS、起停循环、并跟随 data-theme 重取颜色。
+   ⚠️ 原来这里那句「这段放在脚本末尾：它引用 mask / RM」的约束随之作废——
+   模块用自己取的 matchMedia 与按需查找的 #mask，不再依赖本页的 const。 */
 
 /* 启动必须走 apply() 而不是 renderGrid()：view 的初值是 ships.slice()（索引原序），
    而排序只发生在 apply() 里，apply() 又只绑在筛选控件的 change/input 事件上。

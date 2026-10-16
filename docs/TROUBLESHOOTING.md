@@ -10431,3 +10431,53 @@ G4 四格极差 ≥5ms（仪器分得开））。G3 是这份仪器成立的前�
 > `gallery_motion_probe` 5 条红**全是过期判据**（导航栏折射边墙 §138 已退役、"选中项不许整块填色"是 §142 前口径），
 > 与 `.card` 无关；与本次相关的两条都过：`9 焦点 lift=-4px` ✓、`11 按压 matrix(0.985…)` ✓。
 > ✅ 那 5 条过期判据**已当场更新**（判据 11/12 按 §138/§142 后的口径重写，探针转绿）—— 见 WF-16 追加。
+
+---
+
+## §144. Live2D 倍速：缩放 dt 完全无效 —— 动作时钟吃的是 `update()` 的**第二个参数**（2026-10-16 前端）
+
+**需求**：Live2D 控制条加一个 0.1×–2× 倍速滑杆。
+
+**第一版修法（错）**：包住 `internalModel.update`，把第一个参数（dt）乘倍速：
+`im.update=function(dt,el){ return orig(dt*k, el); }`。
+**实测 2× 只量到 1.02×**（用 home 的 `GL1` 长坡当尺子量的），即完全没生效。
+
+**根因（读库的正本代码，不是猜）**：库的调用链是
+```
+onTickerUpdate(){ this.update(Oe.shared.deltaMS) }        // Live2DModel：只做累加
+update(t){ this.deltaTime+=t; this.elapsedTime+=t }
+_render(){ this.deltaTime && (this.internalModel.update(this.deltaTime, this.elapsedTime), this.deltaTime=0) }
+Cubism4InternalModel.update(t,e){ super.update(t,e); t/=1e3; e/=1e3;
+  this.motionManager.update(this.coreModel, e) }          // ← 动作时钟取的是 **e**
+```
+⇒ **动作时钟（motionManager）吃的是第二个参数**（模型自己累出来的绝对时间，秒），
+dt 只喂物理/眨眼那几条。缩放 dt 对动作**一点用都没有**。
+另外这张表也顺手排除了"库里有 `speed` 属性"这条路：全库 `grep -c speed` = **0**。
+
+**第二版修法（对）**：自建**虚拟时钟**，把「缩放后的 dt + 虚拟绝对时间」一起喂回去：
+```js
+let l2Speed=1, l2VEl=0;
+const origIMUpdate=im.update.bind(im);
+im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origIMUpdate(d, l2VEl); };
+```
+- 虚拟钟从 0 起算即可：动作管理器只吃**差值**（起播时记录的起点也来自同一条钟，自洽）。
+- 暂停（`autoUpdate=false`）时 `update()` 根本不被调用 ⇒ 虚拟钟也不走，**恢复后不跳**（比真时钟更对）。
+- 页面自己的三层外挂（环境层 `amb` / 残留复位 `rest` / 开关钉住 `snapHold`）按 `performance.now()` 计时，
+  **不随倍速变化**：环境层在源包里本来就是另一条独立 loop，`rest/snapHold` 是固定时长过渡 —— 有意为之，不是漏改。
+
+**⚠️ 无头环境不能读绝对速率（差点把它误判成"倍速没生效"）**：
+本页在 swiftshader 下渲染很慢，**PIXI ticker 把 `deltaMS` 钳在 100ms**（`_maxElapsedMS`），
+⇒ 模型时钟本来就只按墙钟的 ~0.6 倍推进（实测 1× 墙钟口径 **0.59**，2× 口径 **1.39**）。
+这个钳位对每条倍速一视同仁 ⇒ **比值可信、绝对值不可信**。真实浏览器 60fps 下不触发钳位。
+⇒ 判据必须写成比值：① `vEl` 斜率之比 ≈ 倍速；② `clip 跨度 / vEl 跨度 ≈ 1.00`（与倍速无关，
+1× 也过 ⇒ 同时证明"没改坏默认速度"）。
+
+**判据**：`py -3 scripts/diag/l2d_speed_check.py`（尺子 = `home` 的 `GL1`：motion3 里只有首末两个作者键
+`0.0066@0s → 0.812@18.25s`，斜率 0.04413/s 的 clip 时间 ⇒ 量"GL1 从 0.10 涨到 0.30 用掉多少墙钟/虚拟秒"
+就等于量动作速率）。实测：`clip/vEl` = 1.133(2×) / 1.007(1×) / 1.007(0.5×)，
+斜率比 = 1.83(2×) / 0.50(0.5×)。**探针自身也踩过两个坑**：① 两趟之间必须等 GL1 回落到起点
+（重播是从上一条动作淡过来的，不等就两段门槛在同一拍一起越过 → `wallMs=0`）；
+② CDP 在页面导航时会 `Execution context was destroyed`，要退避重试。
+
+**涉及文件**：`gallery_src/index.html`（滑杆 + 虚拟时钟 + `window.__speedDbg`）、
+`scripts/diag/l2d_speed_check.py`（新增，入库）。
