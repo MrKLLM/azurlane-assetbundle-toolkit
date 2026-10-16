@@ -4514,3 +4514,16 @@ py -3 scripts/deploy_gallery.py --check                # 硬链/漂移
 **涉及文件**：`scripts/extract_motions.py`、`scripts/apply_live2d_motions.py`、
 `scripts/diag/l2d_source_assets_list.py`、`scripts/diag/l2d_ref_curve_types.py`、`scripts/diag/l2d_step_origin_probe.py`、
 `scripts/diag/l2d_step_ab.py`。
+
+#### WF-44 追加（2026-10-16 夜）：全库换入（269 模型）实测出的三条
+
+- **"非期望差异"必须先定性再换入**：全库 A/B 报出差异且只来自少数模型时，**用改动前的脚本重导那几个当对照**
+  （`git show <commit>^:scripts/extract_motions.py` → 临时目录 → 同一个 A/B 工具）。若得到**同一批差异且
+  `expected_step=0`** ⇒ 与本次改动无关。真因往往一眼可见：**比产物 mtime 与源包 mtime**——产物早于源包
+  = 那批包是导出之后才同步进来的，换入属**补课**（本轮 `jinluhao_3`／`feiteliedadi_4` 就是 4 小时之差；
+  对照模型 `antu_2` 源包更旧 ⇒ 零差异）。
+- **换入命令一次只下发一次**：重复执行会让 `shutil.move` 把旧产物**嵌套**进已存在的备份目录，
+  且**嵌套那份是新内容**（照它回滚会拿错）。信号：**备份递归计数 = 换入计数 ×2**。收尾必须还原成单一布局。
+- **量产物文件数别用 `-Recurse`**：会混进同级 `_` 工作目录（本轮多出 604 个），要按 `<模型>/motion/` 逐模型非递归计。
+- **换入工具自带的闸量的是"曲线总数"，量不到"文件数"**：本轮文件数没变（8147→8147），但曲线 +14 被闸放行；
+  若换入导致文件数变化，需要**另配一条文件级判据**。

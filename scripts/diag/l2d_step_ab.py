@@ -66,15 +66,29 @@ def main():
     if len(sys.argv) > 3:
         models = sys.argv[3:]
     else:
-        models = sorted(os.path.basename(os.path.dirname(f))
-                        for f in glob.glob(os.path.join(new_root, "*", "motion", "*.motion3.json")))
+        # ⚠️ 目录结构是 <root>/<模型>/motion/<clip>.motion3.json ⇒ 模型名要取**上两级**的 basename。
+        # （2026-10-16 首版这里只取了一级 dirname 的 basename，得到 "motion"，于是 old/new 两边都读到空
+        #   ⇒ 8147 个"模型"全是 "motion"、所有计数恒 0 —— 一条**假绿灯**，靠"8147≠269"才看出来。）
+        models = sorted({os.path.basename(os.path.dirname(os.path.dirname(f)))
+                         for f in glob.glob(os.path.join(new_root, "*", "motion", "*.motion3.json"))})
+    if not models:
+        print("⛔ 没发现任何模型（检查 --new 目录结构是否 <root>/<模型>/motion/*.motion3.json）")
+        return 2
     agg = Counter()
     bad_samples = []
     rows = []
     for m in models:
         o, n = load(old_root, m), load(new_root, m)
         acc = Counter()
+        # clip 级：旧有新没有 —— 必须在**模型层**比 clip 名集合。
+        # （首版错放在 clip 循环内、拿"旧**曲线**名 vs 新**曲线**名"当 clip 名比，等于把 curve_lost
+        #   重复报一遍并贴上"clip 缺失"的标签 —— 一条误导性的指标，2026-10-16 已纠正。）
+        for clip_old_only in sorted(set(o) - set(n)):
+            acc["clip_missing"] += 1
+            if len(bad_samples) < 24:
+                bad_samples.append((m, clip_old_only, "-", "新目录里没有这个 clip（旧目录有）"))
         for clip, nv in n.items():
+            acc["clips"] += 1
             ov = o.get(clip)
             if ov is None:
                 acc["clip_gained"] += 1
@@ -86,6 +100,10 @@ def main():
             gained = set(nv) - set(ov)
             acc["curve_lost"] += len(lost)
             acc["curve_gained"] += len(gained)
+            if lost and len(bad_samples) < 24:
+                bad_samples.append((m, clip, ",".join(sorted(lost))[:70], "新目录里少了这些曲线"))
+            if gained and len(bad_samples) < 24:
+                bad_samples.append((m, clip, ",".join(sorted(gained))[:70], "新目录里多了这些曲线"))
             for cid in set(ov) & set(nv):
                 so, sn = ov[cid], nv[cid]
                 if len(so) != len(sn):
@@ -112,19 +130,30 @@ def main():
                                                   if k not in ("expected_step",))))
 
     print("=== 汇总（%d 个模型）===" % len(models))
-    for k in ("expected_step", "endpoint_diff", "type_unexpected", "segcount_diff",
-              "curve_lost", "curve_gained", "clip_gained", "clip_err"):
+    for k in ("clips", "expected_step", "endpoint_diff", "type_unexpected", "segcount_diff",
+              "curve_lost", "curve_gained", "clip_missing", "clip_gained", "clip_err"):
         print("  %-18s %d" % (k, agg[k]))
-    bad = sum(v for k, v in agg.items() if k != "expected_step")
+    if not agg["clips"]:
+        # ⚠️ 护栏：一个 clip 都没比到时，下面所有差异计数都会是 0 —— 那就是一条**假绿灯**
+        #    （2026-10-16 首版模型发现写错时正是如此）。宁可报红也不能让它静默通过。
+        print("  ⛔ 仪器空转：一个 clip 都没比到 —— 本次结果无效，不得当通过")
+        return 2
+    bad = sum(v for k, v in agg.items() if k not in ("expected_step", "clips"))
     print("  非期望差异合计 %d → %s" % (bad, "✅ 零回退（只有预期瞬切段变）" if bad == 0 else "⛔ 有非期望差异"))
     if bad_samples:
         print("\n非期望差异样例（前 12）:")
         for s in bad_samples:
             print("   %s / %s / %s : %s" % s)
-    print("\n=== 每模型 ===")
+    print("\n=== 有非期望差异的模型 ===")
     print("  %-24s %14s %14s" % ("model", "改为瞬切段", "非期望差异"))
+    dirty = 0
     for m, exp, bd in rows:
-        print("  %-24s %14d %14d" % (m, exp, bd))
+        if bd:
+            dirty += 1
+            if dirty <= 40:
+                print("  %-24s %14d %14d" % (m, exp, bd))
+    print("  有差异的模型 %d / %d（其余全是零差异，共 %d 段改为瞬切）"
+          % (dirty, len(rows), sum(r[1] for r in rows)))
     return 0 if bad == 0 else 1
 
 
