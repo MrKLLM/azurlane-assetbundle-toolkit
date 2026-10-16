@@ -1827,7 +1827,13 @@ const origStartMotion=mm.startMotion.bind(mm);
        在线性段上就是逐帧滑过去，全表钉成阶梯会让手势与高光的切换时刻/方式都和游戏对不上
        （2026-10-14 用户拿游戏实录与网页实录逐条比对后报的两条）。跨 clip 的 snapHold 是另一层，
        治的是切动作死区，不受本表影响；要扩 mid-clip 钉值范围必须先证明该参数单独造成虚影。 */
-    const snapMidGate=['Param27'];
+    /* 2026-10-16 晚扩到两个：`home` 里键集是**多状态**的只有 `Param27 {0,0.3,0.4,0.5,0.7}` 与
+       `Param25 {0,0.4,0.5,0.6}`，而源 clip 让它们**在职之间滑**（`Param25` 实测滑到 0.29/0.46/0.53
+       这些非键值）；用户录屏证明游戏侧是**瞬切**（手直接换、消失次数==切换次数 4~5 次）。
+       滑过非状态值 ⇒ 变体 A 淡出 → 中间一个都不在（"先消失"）→ 变体 B 淡入（"逐渐实体化的虚影"）。
+       ⇒ 只量化这两个选择器；`GL1~14`/`ParamCheek`/`ParamJTEyeOpen` 那批**两键长坡**继续插值
+       （2026-10-14 用户实测：全表阶梯化会让高光/手势在坡中点突跳）。 */
+    const snapMidGate=['Param25','Param27'];
     im.on('afterMotionUpdate',()=>{
       if(window.__snapOff) return;
       const st=mm.state, g=st&&st.currentGroup, raw=Number(st&&st.currentIndex);

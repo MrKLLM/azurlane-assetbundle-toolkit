@@ -115,6 +115,7 @@ JS = r"""(async(key)=>{ try{
   const trail=[];
   for(let i=0;i<6;i++){ const s=sample(); trail.push({t:Math.round(performance.now()-t0),
                                                        p27:s.p27, p25:s.p25,
+                                                       st:qSnap().stateTime,
                                                        held:heldOf().length}); await t(220); }
   out.reject.trail=trail;
   const sameEntry = out.reject.qAfter.len===before.q.len &&
@@ -122,7 +123,11 @@ JS = r"""(async(key)=>{ try{
   out.reject.reserveRejected = sameEntry;    /* 队列没重建 ⇒ 真被 reserve 拒了 */
   const noHoldAfter = out.reject.heldAfter.length===0 &&
                       trail.every(x=>x.held===0);
-  const stillAlive = trail.some(x=> x.p25!=null && Math.abs(x.p25-trail[0].p25)>1e-4);
+  /* ⚠️ 2026-10-16：「动作还在走」这条判据不能再拿 p25 变不变当标志 —— 那个会话把
+     `snapMidGate` 扩到 `['Param25','Param27']` 后，这两个**多状态选择器**会被逐帧钉到状态值上，
+     p25 在 0.44s 内可以合法地一直是 0.5（实测：本判据因此报假红灯）。
+     改用队列时钟（stateTime）推进当"活着"的证据 —— 它与任何参数钉值都无关。 */
+  const stillAlive = trail.some(x=> x.st!=null && Math.abs(x.st-trail[0].st)>1e-3);
   out.reject.pass = out.reject.reserveRejected && noHoldAfter && stillAlive;
   /* E：不同部位切换仍要真起播（回归不误伤 snap 层） */
   const alt=out;
