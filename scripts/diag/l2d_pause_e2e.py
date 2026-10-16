@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Live2D「暂停」按钮的端到端验收：点真按钮 ⇒ 画面冻住 + 姿态存档真的落盘。
+"""Live2D「暂停」按钮的端到端验收：点真按钮 ⇒ 画面冻住 + 条上给出冻结时刻，且**不再落盘**。
 
-为什么要自己起一台服务器：这条判据要 `/l2d_freeze`，而 8777 上那台可能是别的会话按旧代码起的
-（POST 只会拿到 501）⇒ 按 `_gallery_server.make_server(port, root)` 在空闲端口起一份，
+为什么自己起一台服务器：探针要一个**受控**的页面源（8777 上那台可能是别的会话按旧代码起的），
+且这条流程仍要验证"服务器在也不落盘"。按 `_gallery_server.make_server(port, root)` 在空闲端口起一份，
 不重启也不占用 8777（与 gallery_server_range_test.py 同一个理由）。
 
 六条判据（每条可单独失败，探针自己的问题用 exit 2 和产品问题分开）：
   ① 播着动作时逐拍确实有变化（runMax>0，且至少跑到 3 拍）—— 阳性对照：不先证明"会动"，
      后面"不动"就没有意义（这条是本项目反复踩过的：拿一张静止页证明"冻住了"）
   ② 点「暂停」后 mdl.autoUpdate=false、按钮变「继续」、条上 class on
-  ③ 暂停期间隔 400ms 连读两次完整参数向量**逐位相同**（drift=0），条上出现「已冻结 … 存档 <文件名>」
-  ④ 存档真的落在项目根 .diag/l2d_freeze/：文件名来自条上，字段齐、art 行数=counts.lit、
-     且 flags.noRest 必须是 false（证明这份姿态来自产品原路径，不是探针自己搭的旁路）
+  ③ 暂停期间隔 400ms 连读两次完整参数向量**逐位相同**（drift=0），条上出现「已冻结 …」
+  ④ 暂停**不落盘**：.diag/l2d_freeze/ 在整个会话里零新增文件（前置对照：该目录原本非空，
+     否则"零新增"会因目录根本不存在而恒真）；④b 条上文案**不含「存档」**（落盘取证已于 2026-10-16 夜关闭）
   ⑤ 暂停期间 afterMotionUpdate ≤1 拍（库在 _render 里读 `deltaTime && update(...)`，
      点下去那一瞬可能已攒了半拍）
   ⑥ 点「继续」后按钮回到「暂停」、autoUpdate=true、参数向量又开始动
@@ -25,7 +25,7 @@
   ⑩ 焦点停在「重播」按钮上按空格：只许暂停、不许把重播也点一次（产品里那句 blur()；
      必须用 CDP 发真键盘事件才测得到这条浏览器行为，页面里 dispatchEvent 测不到）
   ⑪ 再按一次空格放开冻结
-  ⑫ 暂停同时交出**画布本身**（同名 .png 落盘、合法、非空白、JSON 里剥掉 png）
+  ⑫ 暂停后画面**仍在**（页面内同步 render 后采样画布，颜色种数 > 2；全程不写盘）
      —— 姿态向量证明"算出来有什么"，图证明"画出了什么"，两者不能互相替代
 
 用法: py -3 scripts/diag/l2d_pause_e2e.py [皮肤key，默认 gez_2]
@@ -96,12 +96,10 @@ JS = r"""(async(key)=>{ try{
   for(let i=0;i<vA.length;i++){ const d=Math.abs(vA[i]-vB[i]); if(d>drift){ drift=d; at=i; } }
   out.frozen={drift:+drift.toFixed(6),
               driftParam:at>=0?String((core._parameterIds||[])[at]||at):null};
-  /* 存档是 await fetch 之后才写进条上的，本地一般几毫秒；轮询到出现文件名再往下走（上限 3s），
-     否则一次网络抖动就把「产品没冻住」和「探针读早了」混成同一条 FAIL。 */
-  for(let i=0;i<30 && !/存档\s+[A-Za-z0-9_.\-]+\.json/.test(info.textContent||'');i++) await t(100);
+  /* 2026-10-16 夜起暂停**不再落盘取证**（用户要求关掉落盘），所以不再轮询「存档 <文件名>」——
+     那会变成"等一个永远不会来的东西"，白耗 3s。直接读条上文案。 */
+  await t(150);
   out.pill=info.textContent||'';
-  const mSave=/存档\s+([A-Za-z0-9_.\-]+\.json)/.exec(out.pill);
-  out.archiveName=mSave?mSave[1]:null;
   await t(1200);
   marks.preResume=rel.length;
   out.pauseRelCount=marks.preResume-marks.paused;
@@ -246,6 +244,10 @@ def main():
 
     bad = []
     SKIP = []
+    # ④ 的前置对照快照：暂停**不再落盘**之后，「零新增」必须相对一个**原本非空**的目录来断言，
+    #    否则目录不存在时那条判据会恒真（本项目对"空判据/假绿灯"的教训见 docs/TROUBLESHOOTING.md）。
+    freeze_dir = os.path.join(ROOT, '.diag', 'l2d_freeze')
+    freeze_before = set(os.listdir(freeze_dir)) if os.path.isdir(freeze_dir) else set()
 
     def say(cond, msg):
         print(('  PASS  ' if cond else '  FAIL  ') + msg, flush=True)
@@ -278,28 +280,16 @@ def main():
             f"③ 暂停 400ms 里参数向量逐位相同：drift={fz.get('drift')}"
             f"（{fz.get('driftParam')}）· 条上「{o.get('pill','')[:48]}」")
 
-        # ④ 存档：条上那个文件名必须真的在项目根 .diag/l2d_freeze/ 里，且解析得出内容
-        fp = os.path.join(ROOT, '.diag', 'l2d_freeze', o.get('archiveName') or '__none__')
-        doc = None
-        if o.get('archiveName') and os.path.isfile(fp):
-            try:
-                doc = json.load(open(fp, encoding='utf-8'))
-            except Exception as e:
-                print(f'  存档解析失败：{e}')
-        need = ('tag', 'group', 'tInGroup', 'parameters', 'parts', 'art', 'counts', 'view', 'flags')
-        miss = [k for k in need if not isinstance(doc, dict) or k not in doc]
-        c = (doc or {}).get('counts') or {}
-        art_n = len((doc or {}).get('art') or [])
-        say(bool(doc) and not miss and art_n == c.get('lit'),
-            f"④ 存档落盘并可解析：{o.get('archiveName')} / 缺字段 {miss} / "
-            f"art {art_n} 行 vs counts.lit {c.get('lit')}")
-        if doc:
-            flags = doc.get('flags') or {}
-            say(c.get('params') == len(doc.get('parameters') or []) and flags.get('noRest') is False,
-                f"④b 存档自洽：参数 {c.get('params')} 条、上屏美术 {c.get('lit')} 片、"
-                f"塌成一个点的 {c.get('collapsed')} 片；取证开关 noRest={flags.get('noRest')}"
-                f"（必须是 False —— 存档要来自产品原路径）")
-            print(f"  组 {doc.get('group')} 第 {doc.get('tInGroup')}s")
+        # ④ 2026-10-16 夜起暂停**不再落盘取证**（用户要求关掉落盘）⇒ 判据反向：整个会话里
+        #    .diag/l2d_freeze/ 必须**零新增**。前置对照见上面 freeze_before 的注释。
+        after = set(os.listdir(freeze_dir)) if os.path.isdir(freeze_dir) else set()
+        newf = sorted(after - freeze_before)
+        say(bool(freeze_before) and not newf,
+            f"④ 暂停不落盘：.diag/l2d_freeze/ 会话前 {len(freeze_before)} 个 → 会后 {len(after)} 个 · "
+            f"新增 {newf[:5]}（前置对照：原本非空={bool(freeze_before)}）")
+        # ④b 条上文案：出现「已冻结」，且**不含**「存档」字样（落盘取证的唯一可见痕迹）
+        say(o.get('pill','').startswith('已冻结') and '存档' not in o.get('pill',''),
+            f"④b 条上「{o.get('pill','')[:60]}」（须含「已冻结」、不含「存档」）")
         prc = o.get('pauseRelCount')
         say(prc is not None and prc <= 1,
             f"⑤ 暂停期间 afterMotionUpdate 只走了 {prc} 拍（≤1：点暂停那一瞬可能已攒了半拍 deltaTime）")
@@ -348,39 +338,29 @@ def main():
         say(st2['on'] is False and st2['autoUpdate'] is True and st2['label'] == '暂停',
             f"⑪ 再按一次空格放开冻结：{st2}")
 
-        # ⑫ 暂停必须**同时交出画布本身**。姿态向量只能证明"我算出来这一帧有什么"，
-        #    图才能证明"产品画出了什么"——2026-10-12 就是靠这条把"回放器没变形那批手片"
-        #    和"产品没手"分开的。判三件事：png 落成同名 .png、是合法 PNG、**不是空白图**
-        #    （WebGL 不保留绘制缓冲时 toDataURL 会回一张全透明/全黑，那种图比没图更坏）。
+        # ⑫ 落盘取证关掉后，"交出画布"这条判据改成**反向**：画面必须**还在**（且不写盘）。
+        #    在页面内同步 render 一次 WebGL 画布再采样 —— 库默认不保留绘制缓冲，不先 render
+        #    就读到空帧（会得到"暂停后黑屏"的假结论）。
         ev("document.getElementById('l2Pause').click()")
         time.sleep(2.0)
-        pill = ev("document.getElementById('l2PauseInfo').textContent") or ''
-        m = re.search(r"([0-9]{8}-[0-9]{6}[A-Za-z0-9_.\-]*\.json)", pill)
-        fdir = os.path.join(ROOT, '.diag', 'l2d_freeze')
-        png_ok = png_px = blank = None
-        if m:
-            pj = os.path.join(fdir, m.group(1))
-            pp = pj[:-5] + '.png'
-            if os.path.isfile(pp):
-                raw = open(pp, 'rb').read()
-                png_ok = raw[:8] == b'\x89PNG\r\n\x1a\n'
-                try:
-                    from PIL import Image
-                    im = Image.open(io.BytesIO(raw)).convert('RGB')
-                    px = list(im.resize((64, 64)).getdata())
-                    png_px = im.size
-                    blank = len(set(px)) <= 2          # 64x64 采样里颜色种数 ≤2 ⇒ 空白
-                except Exception:
-                    blank = None
-                j2 = json.load(open(pj, encoding='utf-8'))
-                say(png_ok and blank is False and 'png' not in j2 and 'parameters' in j2,
-                    f"⑫ 暂停同时交出画布：{m.group(1)[:-5]}.png {png_px} "
-                    f"合法PNG={png_ok} 空白={blank} JSON里已剥掉png={'png' not in j2} "
-                    f"条上='{pill[:60]}'")
-            else:
-                say(False, f"⑫ 暂停没落图：条上='{pill[:70]}'，{pp} 不存在")
-        else:
-            say(False, f"⑫ 暂停后条上读不到存档名：'{pill[:70]}'")
+        sig = ev("(()=>{try{const app=l2State.app; app.render(); const v=app.view;"
+                 "if(!v) return 'no-canvas';"
+                 "const c=document.createElement('canvas'); c.width=64; c.height=64;"
+                 "const x=c.getContext('2d'); x.drawImage(v,0,0,64,64);"
+                 "const d=x.getImageData(0,0,64,64).data; const s=new Set();"
+                 "for(let i=0;i<d.length;i+=4)"
+                 " s.add((d[i]>>4)+','+(d[i+1]>>4)+','+(d[i+2]>>4)+','+(d[i+3]>>4));"
+                 "return JSON.stringify({w:v.width,h:v.height,colors:s.size});}"
+                 "catch(e){return 'ERR '+(e.message||e);}})()")
+        sg = {}
+        try:
+            if isinstance(sig, str) and sig.startswith('{'):
+                sg = json.loads(sig)
+        except Exception:
+            sg = {}
+        say(sg.get('w', 0) > 0 and sg.get('colors', 0) > 2,
+            f"⑫ 暂停后画面仍在（且不落盘）：画布 {sg.get('w')}×{sg.get('h')} · "
+            f"颜色种数 {sg.get('colors')}（>2 才算真的画出内容，不是空白帧）· 原文={str(sig)[:60]}")
         ev("document.getElementById('l2Pause').click()")   # 放开，别把现场留在冻结态
     except Exception as e:
         print(f'[ERROR 2] 探针异常：{e}')

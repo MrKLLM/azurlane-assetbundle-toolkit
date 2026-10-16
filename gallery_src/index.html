@@ -1936,64 +1936,20 @@ const origStartMotion=mm.startMotion.bind(mm);
        ⚠️ 三层外挂是按 performance.now() 取时间的（残留复位 rest、环境层 ambT0、开关钉住 snapHold）：
          暂停期间后两层根本不触发，但 rest 挂在 app.ticker 上会继续爬，恢复瞬间参数会跳 ⇒
          restTick 里按 l2Paused 直接不动作，恢复时把三层的 t0 一起平移「暂停掉的毫秒数」。
-       ⚠️ 存档通道 2026-10-15 曾被摘掉（当时判"手部问题闭环"），2026-10-16 用户复报「左手（无手环）
-         突然消失 / 右手（金手环）中途手势做错」，按用户要求**原样接回** —— 目的是先把用户眼睛看到的
-         坏帧收进磁盘再定案，别自猜第 7 版。存档失败不影响冻结本身（POST 失败照样冻得住）。 */
-    let l2TinG=0, l2PreVec=null;
-    /* ⚠️ 存档必须抓「渲染那一拍真正用过的」参数向量。库的顺序是：
-         motionManager.update → emit afterMotionUpdate → coreModel.saveParameters()
-         → 表情/眨眼/focus/自然摆动/物理/pose **改缓冲** → emit beforeModelUpdate → coreModel.update()（出画面）
-         → coreModel.loadParameters() **把缓冲还原成 save 时的值**。
-       所以在帧外读 `parameters.values` 拿到的是"物理之前"的那份 ⇒ 照它回放会少掉眨眼/物理/focus 的贡献
-       （实测：414 片亮 vs 现场 460 片，46 片的显隐摆不回来，一批停放件的包围盒差 7~28 单位）。
-       正确取法就是在 beforeModelUpdate 这一钩子上抓快照——那一刻的缓冲正是下一帧渲染要用的。 */
-    im.on('beforeModelUpdate',()=>{ const V=cm._model&&cm._model.parameters&&cm._model.parameters.values;
-      if(V&&V.length) l2PreVec=Array.from(V); });
-    const l2FreezeDump=()=>{ const M=cm._model||{}, P=M.parameters||{}, D=M.drawables||{}, PA=M.parts||{};
-      const pars=[], parts=[], art=[]; let lit=0, collapsed=0;
-      const PV=l2PreVec||P.values;              // 优先用渲染那一拍的快照
-      for(let i=0;i<(P.count|0);i++) pars.push([idName(P.ids[i]), +(PV[i]).toFixed(4)]);
-      for(let i=0;i<(PA.count|0);i++) parts.push([idName(PA.ids[i]), +(PA.opacities[i]).toFixed(3)]);
-      const V=D.vertexPositions||[];
-      for(let i=0;i<(D.count|0);i++){ const op=D.opacities[i]; if(!(op>0.01)) continue; lit++;
-        const p=V[i]; const nm=idName(D.ids[i]);
-        if(!p||!p.length){ collapsed++; art.push([nm, +op.toFixed(3), 0, 0, 0, 0]); continue; }
-        let x0=1e9, y0=1e9, x1=-1e9, y1=-1e9;
-        for(let k=0;k+1<p.length;k+=2){ if(p[k]<x0)x0=p[k]; if(p[k]>x1)x1=p[k];
-          if(p[k+1]<y0)y0=p[k+1]; if(p[k+1]>y1)y1=p[k+1]; }
-        const w=x1-x0, h=y1-y0; if(w<0.02||h<0.02) collapsed++;
-        art.push([nm, +op.toFixed(3), +w.toFixed(2), +h.toFixed(2), +x0.toFixed(2), +y0.toFixed(2)]); }
-      const st=mm.state||{}, g=st.currentGroup||sel.value||'na';
-      l2TinG=(l2Now()-l2GroupT0)/1000;   // ⚠️ 这是按墙钟算的"动作第几秒"，倍速≠1× 时与模型秒不等价
-      return { kind:'l2d-freeze', tag:sk.live2dBase+'-'+g, skin:sk.key, model:model, base:sk.live2dBase,
-        paramSrc:l2PreVec?'preUpdate':'live',
-        group:st.currentGroup||null, sel:sel.value, tInGroup:+l2TinG.toFixed(3), heldMs:Math.round(l2HeldMs),
-        state:{currentGroup:st.currentGroup, currentIndex:st.currentIndex, currentPriority:st.currentPriority,
-               reservePriority:st.reservePriority, tag:st.tag},
-        view:{w:wrap.clientWidth, h:wrap.clientHeight, z:+z.toFixed(4), baseK:+baseK.toFixed(4),
-              ox:+ox.toFixed(1), oy:+oy.toFixed(1), mx:+mdl.x.toFixed(1), my:+mdl.y.toFixed(1),
-              scale:+mdl.scale.x.toFixed(4)},
-        flags:{ noRest:!!window.__noRest, ambOff:!!window.__ambOff, ambMask:!!window.__ambMask,
-                snapOff:!!window.__snapOff, phase:(cm.__phaseSet?cm.__phaseSet.size:0) },
-        counts:{params:pars.length, parts:parts.length, drawables:(D.count|0), lit:lit, collapsed:collapsed},
-        parameters:pars, parts:parts, art:art }; };
+       ⚠️ 存档通道 2026-10-15 曾被摘掉（当时判"手部问题闭环"），2026-10-16 傍晚为收用户的坏帧
+         **原样接回**；同日夜用户完成验收后要求**再次关掉落盘取证**（"关掉落盘，暂停冻住就行"）——
+         故 2026-10-16 夜改为：**暂停只冻画面，不再读参数/包围盒、不再 POST /l2d_freeze、不再写盘**，
+         条上只留「已冻结 <组> 第 N.NNs」这一行（冻结时刻仍有信息价值，且不产生任何副作用）。
+         ⚠️ 这次改动让 `scripts/diag/l2d_pause_e2e.py` 的判据 ④/④b/⑫ 从"必须落盘"改回"不许落盘"。 */
+    let l2TinG=0;
     const l2SetPaused=async(on)=>{ if(!!on===l2Paused) return;
       const btn=document.getElementById('l2Pause'), info=document.getElementById('l2PauseInfo');
       l2Paused=!!on; mdl.autoUpdate=!l2Paused;
       btn.classList.toggle('on',l2Paused); btn.textContent=l2Paused?'继续':'暂停';
       if(l2Paused){ l2PauseT0=performance.now();
-        info.style.display=''; info.textContent='已冻结 · 正在存档…';
-        let j=null; try{ j=l2FreezeDump(); }catch(e){ info.textContent='已冻结 · 姿态读取失败：'+(e.message||e); return; }
-        /* 把**画布本身**一起交出去。姿态向量与逐片包围盒只能证明"我算出来这一帧有什么"，
-           而这张图证明"产品真的画出了什么"——2026-10-12 就是靠这条区分开"仪器没变形那批手片"
-           和"产品没手"。toDataURL 前必须同步 render 一次：WebGL 默认不保留绘制缓冲。 */
-        try{ app.render(); j.png=app.view.toDataURL('image/png'); }
-        catch(e){ j.pngErr=''+(e.message||e); }
-        const head='已冻结 '+j.group+' 第 '+j.tInGroup+'s';
-        try{ const r=await fetch('/l2d_freeze',{method:'POST',
-            headers:{'Content-Type':'application/json'}, body:JSON.stringify(j)});
-          info.textContent = r.ok ? (head+' · 存档 '+(await r.text())) : (head+' · 存档失败 HTTP '+r.status);
-        }catch(e){ info.textContent=head+' · 服务器没接住（需 启动资产浏览器.bat 起的服务器）'; }
+        const g=(mm.state&&mm.state.currentGroup)||sel.value||'na';
+        l2TinG=(l2Now()-l2GroupT0)/1000;   // ⚠️ 按墙钟算的"动作第几秒"，倍速≠1× 时与模型秒不等价
+        info.style.display=''; info.textContent='已冻结 '+g+' 第 '+l2TinG.toFixed(2)+'s';
         return; }
       const held=performance.now()-l2PauseT0; l2PauseT0=0; l2HeldMs+=held;
       if(amb) ambT0+=held; if(rest) rest.t0+=held; if(snapHold) snapHold.t0+=held;

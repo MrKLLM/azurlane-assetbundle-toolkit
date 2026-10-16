@@ -10582,3 +10582,30 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 **涉及文件**：`scripts/extract_motions.py`（改）、`scripts/diag/l2d_source_assets_list.py`（新）、
 `scripts/diag/l2d_ref_curve_types.py`（新，含 `--ours`）、`scripts/diag/l2d_step_origin_probe.py`（新）、
 `scripts/diag/l2d_step_ab.py`（新）、`scripts/apply_live2d_motions.py`（复用）、`gallery_src/index.html`（删死写入）。
+
+---
+
+## §146. 关掉一条「落盘取证」通道时：探针判据要反向，且反向判据必须带**前置阳性对照**（2026-10-16 夜）
+
+**背景**：`gezi_2` 手部收官后，用户要求把「暂停 = 冻住画面 + 落盘取证」里的**落盘那一半**关掉（保留暂停按钮）。
+改页面本身很小（删 `l2FreezeDump` 与 `POST /l2d_freeze`、删那条轮询「存档 <文件名>」的等待），
+真正要小心的是**配套探针**：`scripts/diag/l2d_pause_e2e.py` 的判据 ④/④b/⑫ 原本要求"**必须落盘**"。
+
+**判据怎么反向（照这个顺序，缺一条就变成假绿灯）**
+1. ④ **目录零新增**：会话前快照 `.diag/l2d_freeze/` 的文件集合，会话后必须**完全相同**。
+2. ⚠️ **必须先断言"会话前该目录非空"** —— 目录不存在时 `after − before = ∅`，那条"零新增"是**恒真的空判据**
+   （本项目反复栽在这类"仪器不成立却报绿"上）。
+3. ④b **条上文案反向**：须含「已冻结」、且**不含「存档」**（落盘取证的唯一可见痕迹）。
+4. ⑫ 原本要求"交出画布 PNG"，现改成**画面仍在**：页面内 `app.render()` 后把 WebGL 画布 `drawImage` 到一张
+   64×64 的 2D canvas 上数颜色种数（>2）。⚠️ **必须先同步 `render()`** —— 库默认不保留绘制缓冲，
+   不 render 就读到空帧，会得到"暂停后黑屏"的**假结论**。
+
+**踩坑**
+- **删落盘还要删"等落盘"的轮询**：页面不再写 `存档 <文件名>`，探针里那条 `for(30 × 100ms)` 就成了
+  "等一个永远不会来的东西"，白耗 3s，还可能把探针拖到导航态、被判 `Execution context was destroyed`。
+- 页面侧 `l2PreVec`（`beforeModelUpdate` 快照）**只服务这个通道**，一并删；`_gallery_server.py` 的
+  `/l2d_freeze` 端点**留着但不调用**（本次只关"落盘"，不动服务器）。
+- 跑完应仍是 **12 PASS + 1 合法 SKIP**（⑨ 在 gezi_2 上装不出残留复位渐变）。实测 ④ 打出
+  `会话前 80 个 → 会后 80 个 · 新增 []（前置对照：原本非空=True）`、⑫ 打出 `画布 942×680 · 颜色种数 277`。
+
+**涉及文件**：`gallery_src/index.html`、`scripts/diag/l2d_pause_e2e.py`。
