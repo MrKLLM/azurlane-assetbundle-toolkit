@@ -1727,7 +1727,7 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
         const r=await fetch(P+model+'/'+d.File);
         if(!r.ok) throw new Error('HTTP '+r.status);
         const j=await r.json(); if(!Array.isArray(j.Curves)) throw new Error('no-Curves');
-        const sets=Object.create(null), ids=Object.create(null);
+        const sets=Object.create(null), ids=Object.create(null), tvs=Object.create(null);
         for(const c of j.Curves){ if(!c||c.Target!=='Parameter') continue;
           const id=curveId(c); if(!id) continue;
           let idx=-1; try{ idx=cm.getParameterIndex(id); }catch(e){}
@@ -1737,11 +1737,17 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
           const finite=values.filter(Number.isFinite); if(!finite.length) continue;
           if(!sets[idx]) sets[idx]=new Set();
           finite.forEach(v=>sets[idx].add(+v)); ids[idx]=id; rec.curves++;
+          /* 2026-10-16：除「键值集合」外另存**按时间排的 (t,v) 键表** —— 中段钉值改成按时间阶梯化，
+             见写入处的注释（"贴全局最近键"会把 0.3→0.5 这段过渡钉到别处的状态 0.4）。 */
+          const tv=[[+sg[0].t0, +sg[0].v0]];
+          for(const x of sg){ const t1=+x.t1, v1=+x.v1;
+            if(Number.isFinite(t1)&&Number.isFinite(v1)&&(!tv.length||t1>tv[tv.length-1][0])) tv.push([t1,v1]); }
+          if(tv.length) tvs[idx]=tv;
         }
         const keys=Object.create(null);
         for(const ix in sets) keys[ix]=Array.from(sets[ix]).sort((a,b)=>a-b);
         rec.parameterCurves=Object.keys(keys).length;
-        snapKeyBooks[key]={keys,ids}; rec.state='ok';
+        snapKeyBooks[key]={keys,tv:tvs,ids}; rec.state='ok';
       }catch(e){ rec.state='err'; rec.error=String(e&&e.message||e); }
       return rec; })();
       return rec.promise;
@@ -1849,9 +1855,30 @@ const origStartMotion=mm.startMotion.bind(mm);
         if(!vals||!vals.length||held.has(idx)) continue;
         let before; try{ before=cm.getParameterValueByIndex(idx); }catch(e){ continue; }
         if(!Number.isFinite(before)) continue;
-        let best=vals[0], dist=Math.abs(before-best);
-        for(let q=1;q<vals.length;q++){ const d=Math.abs(before-vals[q]);
-          if(d<dist){ best=vals[q]; dist=d; } }
+        /* 2026-10-16 二次修：**不再「贴全局最近键」**。用户复测 v5 后报"消失没了，但这一帧手势做错、
+           又没换手"——那一帧在 13.256s，作者键是 12.85(v=0.3)→13.40(v=0.5)，而"最近键"把 0.448
+           钉到了 **0.4**（0.4 是 clip 别处 t=3.8~5.5 的状态，这段过渡里根本没有）⇒ 显示的是错的变体。
+           ⇒ 改成**单调阶梯**（做法与两次失败的中间尝试见下一段注释）。 */
+        /* ⚠️ 时钟只认**库自己的动作时钟**。两次失败都记在这里，别重走：
+           ① `(l2Now()-l2GroupT0)/1000`：无头里 app.ticker 的组起点可能没设上 ⇒ 变成"页面存活秒数" ⇒
+              键表被一路读到末尾（实测整段被钉成最后一个键的值 0）；
+           ② 纯按活值做单调阶梯（不读时钟）：从键序第 0 个起步，而 clip 开头是一段 0.7 的平段 ⇒
+              值低于它时一步都前进不了 ⇒ 整段被钉在 0.7。
+           正解：取队列里正在播的那条 motion 的 `_stateTimeSeconds`（库自己的动作秒）当 clip 时刻，
+           再"保住 clip 当前时刻之前最近的那个作者键"⇒ 保住上一个状态、到下一个键才瞬切。 */
+        let best=null;
+        const tv=book.tv&&book.tv[k];
+        if(tv&&tv.length){
+          let tc=null;
+          try{ const qa=(mm.queueManager&&mm.queueManager._motions)||[];
+            for(const e of qa){ const s=e&&e._stateTimeSeconds;
+              if(typeof s==='number'&&isFinite(s)&&(tc===null||s>tc)) tc=s; } }catch(e){}
+          if(tc!==null){ for(const pr of tv){ if(pr[0]<=tc+1e-3) best=pr[1]; else break; }
+            if(best===null) best=tv[0][1]; }
+        }
+        if(best===null){ best=vals[0]; let dist=Math.abs(before-best);   // 兜底：拿不到键表时退回最近值
+          for(let q=1;q<vals.length;q++){ const d=Math.abs(before-vals[q]);
+            if(d<dist){ best=vals[q]; dist=d; } } }
         try{ cm.setParameterValueByIndex(idx,best); }catch(e){ continue; }
         writes++; if(Math.abs(before-best)>1e-5){ changed++; snapKeyStats.changedIds.add(book.ids[k]); }
         if(book.ids[k]==='Param27') last={group:g,index:raw,id:'Param27',before:+before.toFixed(5),
