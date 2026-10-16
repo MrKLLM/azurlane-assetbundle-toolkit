@@ -15,9 +15,10 @@
 
 用法: py -3 scripts/diag/talk_verify.py [--shots] [--vtab 皮肤key] [静态格样本 [Spine格样本 [Live2D格样本]]]
       不传样本则按判据自动挑（三格各一条"有触摸语音且有正文"+ 一条"有声无词"的阴性对照）
-前置: 画廊服务器在 8777（双击 Output\\gallery_v2\\启动资产浏览器.bat）
+前置: 无需外部服务器（2026-10-16 起自带：空闲端口起正本 _gallery_server）
+      ⚠️ 本机 HTTP_PROXY 会劫持 127.0.0.1 ⇒ 运行前清掉代理环境变量
 """
-import sys, os, json, time, base64, argparse, subprocess, urllib.request
+import sys, os, json, time, base64, argparse, socket, subprocess, threading, urllib.request
 
 sys.stdout.reconfigure(encoding='utf-8')
 import websocket
@@ -25,10 +26,25 @@ import chrome_tree
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+sys.path.insert(0, os.path.join(ROOT, 'gallery_src'))
 import cdp_slot            # 端口 / profile 不写死：写死会让两个会话灌进同一个页面（见该模块 docstring）
+import _gallery_server as GS
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
 PORT, DEBUG_DIR = cdp_slot.slot(ROOT, 'talk')
-BASE = 'http://127.0.0.1:8777/gallery_v2/index.html'
+
+# ⚠️ 2026-10-16：**自带服务器**（原先写死 8777）。那台没在跑时页面变成浏览器错误页，
+# 所有页面函数都 undefined ⇒ 探针报「loadVoiceMap is not defined」这种**像产品坏了**的假故障。
+# 自带服务器同时保证"量的是当前正本"，不依赖 8777 上跑的是不是旧代码。
+def _free_port():
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+
+HTTP_PORT = _free_port()
+HTTPD = GS.make_server(port=HTTP_PORT, root=os.path.join(ROOT, 'Output'))
+threading.Thread(target=HTTPD.serve_forever, daemon=True).start()
+BASE = f'http://127.0.0.1:{HTTP_PORT}/gallery_v2/index.html'
 
 HOOK = r"""
 window.__AUD = [];
@@ -669,4 +685,10 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    finally:
+        try:
+            HTTPD.shutdown()
+        except Exception:
+            pass

@@ -1,20 +1,42 @@
 # -*- coding: utf-8 -*-
 """Live2D 交互回归：裸滚轮不劫持/不缩放、Ctrl+滚轮才缩放、pointercancel 解除拖拽不再漂移、
-   有判定区的模型点空白不播动作、点部位正常播。"""
-import sys, os, json, time, base64, subprocess, urllib.request
+   有判定区的模型点空白不播动作、点部位正常播。
+
+⚠️ 2026-10-16：**自带服务器**（空闲端口起正本 `_gallery_server`）。原先写死 `127.0.0.1:8777`，
+   那台服务器没在跑时页面根本加载不出来，四条皮肤全部报「GALLERY is not defined」——
+   看起来像产品坏了，其实是探针在量一个不存在的页面（本探针因此长期不可跑）。
+   自带服务器还顺带保证"量的是当前正本"，不依赖 8777 上跑的是不是旧代码。
+⚠️ 本机 HTTP_PROXY 会劫持 127.0.0.1（CDP 与页面请求都变 502）⇒ 运行前清掉代理环境变量。
+"""
+import sys, os, json, time, base64, socket, subprocess, threading, urllib.request
 sys.stdout.reconfigure(encoding='utf-8')
 import websocket
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+sys.path.insert(0, os.path.join(ROOT, 'gallery_src'))
 import cdp_slot            # 端口 / profile 不写死：写死会让两个会话灌进同一个页面（见该模块 docstring）
+import _gallery_server as GS
 CHROME = r'C:/Program Files/Google/Chrome/Application/chrome.exe'
+
+
+def _free_port():
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+
+_http_port = _free_port()
+_httpd = GS.make_server(port=_http_port, root=os.path.join(ROOT, 'Output'))
+threading.Thread(target=_httpd.serve_forever, daemon=True).start()
+
 PORT, PROFILE = cdp_slot.slot(ROOT, 'intv')
 proc = subprocess.Popen([CHROME, '--headless=new', f'--remote-debugging-port={PORT}',
   '--remote-allow-origins=*', f'--user-data-dir={PROFILE}', '--no-first-run',
   '--no-default-browser-check', '--disable-background-timer-throttling', '--enable-unsafe-swiftshader',
   '--use-angle=swiftshader', '--window-size=1280,900',
-  'http://127.0.0.1:8777/gallery_v2/index.html'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+  f'http://127.0.0.1:{_http_port}/gallery_v2/index.html?v={int(time.time())}'],
+  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 import chrome_tree; chrome_tree.install(proc)   # 异常退出也要收整棵树，见该模块 docstring
 w = None
 for _ in range(90):
@@ -146,3 +168,7 @@ print('\n总判定:', 'ALL PASS' if allok else '有未通过项')
 r = cmd('Page.captureScreenshot', {'format': 'png'})
 open(os.path.join(ROOT, '.diag', 'size_shots', 'interact_final.png'), 'wb').write(base64.b64decode(r['data']))
 ws.close(); chrome_tree.kill_tree(proc.pid)
+try:
+    _httpd.shutdown()
+except Exception:
+    pass
