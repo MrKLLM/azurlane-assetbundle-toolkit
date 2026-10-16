@@ -4471,3 +4471,46 @@ py -3 scripts/deploy_gallery.py --check                # 硬链/漂移
 
 **涉及文件**：`gallery_src/water_bg.js`（新）、`gallery_src/index.html`、`gallery_src/bgm.html`、
 `gallery_src/backgrounds.html`、`scripts/deploy_gallery.py`（`FILES`）、`scripts/diag/water_bg_check.py`（新）。
+
+---
+
+### WF-44: 改「导出语义字段」（如 motion3 段类型）——源侧信号自推 + 权威参照逐段对齐 + 零回退 A/B（2026-10-16）
+
+**适用场景**：导出产物里有一类**逐段语义**被写错/写丢（本例：源侧的 **Stepped** 段被一律写成了 Linear）。
+这类故障的特点：**键时间与键值和权威参照完全一致、所有"值级"审计全绿**，差别只在段类型 ⇒ 症状藏在
+**过渡过程中间**（本例＝状态选择器参数被线性插值滑过作者没写过的中间值 → 部件虚影/手势做错）。
+
+**步骤**
+
+1. **先判定"参照库是不是蓝本"，别急着照抄它的答案**：① 源包资产清单（本例 `l2d_source_assets_list.py`）
+   排除"有 `pose3`/`exp3` 被漏搬"这类更结构性的候选；② 对参照跑逐段类型直方图（`l2d_ref_curve_types.py`）
+   看差在哪一类段。⚠️ **照抄参照的段类型数组是被明令禁止的**（拿答案当依据＝自证清白）。
+2. **回源侧找信号**：把"这个语义能否从源字节自推"当成**必须先回答**的问题。本例的教训：**先把字段个数数对** ——
+   `m_StreamedClip` 键是 `index + 4×float`，此前只读了 value 之外的 **2** 个、漏了第 3 个，于是得出"推不出"的错误结论。
+3. **用参照逐段对齐验证判据**（不是抽样、不是总偏差）：`l2d_step_origin_probe.py` 给出"完全命中曲线数 + 总误差段数
+   + 误判/漏判方向"。**漏判必须为 0**（绝不许把真语义判丢）；少量"误判成更强语义"若方向安全可接受。
+4. **改导出脚本 → 样本重导到临时目录**（正式产物全程不动）。
+5. **零回退 A/B 必须逐段**：`l2d_step_ab.py` 断言"端点/曲线集合/段数一律不变，类型差异只允许 旧→新 这一种"。
+6. **换入**：`apply_live2d_motions.py`（`L2D_SRC_DIR` 指向**只含本次目标模型**的临时目录），旧数据整体移到
+   `Output/_OLD_bak/`，可回滚。
+
+**判据**
+
+- 源侧：逐段对齐 **0 误差** + **漏判 0 次**。
+- 改动：A/B **非期望差异 0**（端点/曲线/段数全不动）。
+- 换入后：`l2d_pause_e2e.py` 全过 + **直播细扫**能看到该语义真的生效（本例 `Param27` = 0.3 保持到 13.5s 再跳 0.5，中途无中间值）。
+
+**踩坑记录**
+
+- ⚠️ **别拿"总偏差 / 偏差>0.5 占比"当本次判据**：它被参照版还原不了的那部分（本例贝塞尔 ≈7%）主导，对段类型
+  这类改动**不敏感**（本例只 16.9%→16.1%，差点被误读成"修了没用"）。判据要落到**逐段类型对齐**与**过渡期活值轨迹**。
+- ⚠️ **运行时求值语义要读源码确认**，别按类型名字猜：vendored framework 里 `Stepped` 取 `points[0].value`（段起点）、
+  `InverseStepped` 取 `points[1].value`（段终点）——两者必须不同。
+- ⚠️ **换入前先隔离模型**：`apply_live2d_motions.py` 会把源目录下**所有**含 `motion/` 的模型一起换入
+  （同批样本 gezi_2 + antu_2 会一起进去）。
+- **顺带查页面侧有没有"静默空转"的补丁**：本轮发现前几轮的运行时补丁因一处**写到未声明变量**（`tvs is not defined`）
+  而整层死掉，表现只是"探针报键未就绪"，而用户看到的是**原始数据**——补丁静默失效会污染"修好了没有"的判断。
+
+**涉及文件**：`scripts/extract_motions.py`、`scripts/apply_live2d_motions.py`、
+`scripts/diag/l2d_source_assets_list.py`、`scripts/diag/l2d_ref_curve_types.py`、`scripts/diag/l2d_step_origin_probe.py`、
+`scripts/diag/l2d_step_ab.py`。

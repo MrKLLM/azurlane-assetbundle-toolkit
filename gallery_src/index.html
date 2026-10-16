@@ -1737,12 +1737,11 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
           const finite=values.filter(Number.isFinite); if(!finite.length) continue;
           if(!sets[idx]) sets[idx]=new Set();
           finite.forEach(v=>sets[idx].add(+v)); ids[idx]=id; rec.curves++;
-          /* 2026-10-16：除「键值集合」外另存**按时间排的 (t,v) 键表** —— 中段钉值改成按时间阶梯化，
-             见写入处的注释（"贴全局最近键"会把 0.3→0.5 这段过渡钉到别处的状态 0.4）。 */
-          const tv=[[+sg[0].t0, +sg[0].v0]];
-          for(const x of sg){ const t1=+x.t1, v1=+x.v1;
-            if(Number.isFinite(t1)&&Number.isFinite(v1)&&(!tv.length||t1>tv[tv.length-1][0])) tv.push([t1,v1]); }
-          if(tv.length) tvs[idx]=tv;
+          /* ⚠️ 这里曾有一块「另存按时间排的 (t,v) 键表」的写入（v6~v8 的时间序阶梯用），
+             v9 退回 v5 时只把 `snapKeyBooks[key]={keys,tv,ids}` 改回了 `{keys,ids}`，
+             却漏删这块写入 ⇒ `tvs` 未声明 ⇒ 每次 loadSnapKeys 都抛 ReferenceError 被 catch，
+             `rec.state='err'` ⇒ 中段钉值整层**静默死掉**（探针在 v9 后仍报"键未就绪"即此因）。
+             5c 数据层修复（motion3 已保留 Stepped 段）落地后，这一层本就冗余，故直接删除写入。 */
         }
         const keys=Object.create(null);
         for(const ix in sets) keys[ix]=Array.from(sets[ix]).sort((a,b)=>a-b);

@@ -64,6 +64,15 @@ ABSOLUTE_CP = bool(os.environ.get("L2D_MOTION_ABSOLUTE_CP"))
 # 作用：切动作时这些参数会被显式拉回该 clip 的定值，而不是停在上一个动作留下的值上。
 EMIT_CONST = bool(os.environ.get("L2D_MOTION_EMIT_CONST"))
 
+# 「瞬切」(Cubism Stepped, type=2) 判据：**段起点键的三个浮点字段 (c1, c2, c3) 同时 ≈0**。
+# 2026-10-16 取证（闭环 §26 item 4 留下的"阶跃性能否从 Unity 侧推出"）：
+#   与 l2d.su 权威参照逐段对齐，gezi_2 `home`/`idle` + antu_2 `idle`/`touch_body`
+#   共 618 条曲线、**0 误差**，且从不把真瞬切判成插值（0 次漏判）。
+#   此前只知道前两个字段（标着 inSlope/outSlope），第三个字段从未读取 ⇒ 才得出"推不出"的结论。
+# 语义：Stepped = 保持起点值到终点时刻再跳。缺了它，`Param25`/`Param27` 这类状态选择器会沿
+#   clip 插值滑过作者从未写过的中间值（进交叉淡入淡出死区），表现为"手成虚影/手势做错"。
+STEP_EPS = 1e-6
+
 PARAM_PREFIX = "Parameters/"
 PART_PREFIX = "Parts/"
 
@@ -160,12 +169,14 @@ def collect_go_name_hashes(env):
 # StreamedClip 解析（无护栏版）
 # ============================================================
 
-def parse_streamed_clip(streamed_clip):
+def parse_streamed_clip(streamed_clip, with_t3=False):
     """解 m_StreamedClip.data → 帧列表。
 
     帧格式: time(f32) + numKeys(i32) + numKeys × [index(i32) + 4×f32]
-    4 个 float 依次为 [unused, inSlope, outSlope, value]（对齐 AssetStudio 的
-    Keyframe(time, value[3], value[1], value[2])）。
+    键元组 = (curve_index, value, c1, c2)；`with_t3=True` 时追加第 3 个浮点字段 c3：
+    **(index, value, c1, c2, c3)** —— 「瞬切」判据要用到它，见 STEP_EPS 的说明。
+    现行代码把 c1/c2 标成 inSlope/outSlope（与上面这行 docstring 的字段序号说法历史不一致），
+    但两者对**取值**无影响（value=c4，已由 §23/§25 逐键对账证住）；c3 此前从未被读取。
     终止符: time = +inf。缓冲区越界即停，**不设 numKeys 上限**。
     """
     data = getattr(streamed_clip, "data", None) or []
@@ -189,7 +200,7 @@ def parse_streamed_clip(streamed_clip):
             idx = struct.unpack_from("<i", buf, pos)[0]
             c1, c2, c3, c4 = struct.unpack_from("<4f", buf, pos + 4)
             pos += 20
-            keys.append((idx, c4, c1, c2))  # (curve_index, value, inSlope, outSlope)
+            keys.append((idx, c4, c1, c2, c3) if with_t3 else (idx, c4, c1, c2))
         frames.append((t, keys))
     return frames
 
@@ -207,20 +218,21 @@ def build_motion(clip, targets, verbose=False, const_info=None):
         return None
     cdata = muscle.m_Clip.data
     streamed = getattr(cdata, "m_StreamedClip", None)
-    frames = parse_streamed_clip(streamed) if streamed else []
+    # with_t3=True：多取第 3 个浮点字段，供「瞬切」判据使用（见 STEP_EPS）
+    frames = parse_streamed_clip(streamed, with_t3=True) if streamed else []
     if not frames:
         return None
 
     base = {}     # curve idx -> 参考姿态值（帧 time=-FLT_MAX）
-    series = {}   # curve idx -> [(t, value, inSlope, outSlope), ...]
+    series = {}   # curve idx -> [(t, value, inSlope, outSlope, t3), ...]
     for t, keys in frames:
         if t < -REF_POSE_EPS:
-            for idx, v, _i, _o in keys:
+            for idx, v, _i, _o, _t3 in keys:
                 base.setdefault(idx, v)
             continue
         tt = 0.0 if abs(t) < 1e-6 else t
-        for idx, v, ins, outs in keys:
-            series.setdefault(idx, []).append((tt, v, ins, outs))
+        for idx, v, ins, outs, t3 in keys:
+            series.setdefault(idx, []).append((tt, v, ins, outs, t3))
 
     curves = []
     total_seg = total_pts = total_bezier = 0
@@ -236,17 +248,28 @@ def build_motion(clip, targets, verbose=False, const_info=None):
         # 参考姿态值作为 t=0 起点（若真实关键帧未覆盖 t=0）
         if pts[0][0] > 1e-6 and idx in base:
             v0 = base[idx]
-            pts.insert(0, (0.0, v0, pts[0][2], 0.0))
+            # 末位 t3=+inf ⇒ 这个**合成键**永不参与「瞬切」判定（它不是源侧真键，
+            # 保持既有行为；实测各 clip 首键均为 t=0.000，此分支基本不触发）
+            pts.insert(0, (0.0, v0, pts[0][2], 0.0, float("inf")))
 
         segs = []
         n_pts = 1          # 曲线首对 (time,value) 也占一个 point 槽
-        for i, (t, v, ins, outs) in enumerate(pts):
+        for i, (t, v, ins, outs, t3) in enumerate(pts):
             if i == 0:
                 segs.extend([t, v])
                 continue
-            t0, v0, _, outs0 = pts[i - 1]
+            t0, v0, ins0, outs0, t3_0 = pts[i - 1]
             dt, dv = t - t0, v - v0
             if dt <= 1e-6:
+                continue
+            # 「瞬切」段：起点键三个浮点字段同时 ≈0 ⇒ 源侧是 Stepped，写 type=2。
+            # 语义 = 保持起点值 v0 到 t 时刻再跳到 v。不这么写就会线性滑过中间值
+            # （gezi_2 `home` 的 Param25/Param27 就是这个毛病 → 手成虚影/手势做错）。
+            # 判据与实测见 STEP_EPS 注释；非瞬切段一切照旧（线性/贝塞尔由环境开关决定）。
+            if abs(ins0) <= STEP_EPS and abs(outs0) <= STEP_EPS and abs(t3_0) <= STEP_EPS:
+                segs.extend([2, t, v])
+                total_seg += 1
+                n_pts += 1
                 continue
             # dv≈0 时贝塞尔控制点会飞到天上（实测 by1=14.93），反而抖 → 退化成线性
             scale = max(1.0, abs(v0), abs(v))

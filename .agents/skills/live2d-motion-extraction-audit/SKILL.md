@@ -5,7 +5,7 @@ name_zh: Live2D 动作提取完整性与保真审计
 description: Integrity and fidelity audit for re-exporting Live2D motions from Unity AssetBundles (AnimationClip to motion3.json). Covers enumerating all three clip containers (m_StreamedClip / m_DenseClip / m_ConstantClip) with a binding-count assertion, constant-curve emission checks against moc3 defaults with audio-driven exemptions, unfalsifiable-anchor tests for key field layout, diffing against an external authoritative motion3.json baseline with ceiling-calibrated thresholds, and an env-switch plus byte-identical control-group protocol for removing legacy guardrails. Use when extracting or re-exporting Live2D motion data, when curves go missing, or when users report parts moving independently, unnatural transitions, jittering limbs, wrong easing. Trigger words include motion3.json audit, ConstantClip, genericBindings, bezier control point, tangent field layout, guardrail removal. Not for browser runtime playback (live2d-web-runtime-integration) or static painting restoration (unity-assetbundle-painting-restore).
 description_en: Integrity and fidelity audit for re-exporting Live2D motions from Unity AssetBundles (AnimationClip to motion3.json), covering three-container curve enumeration, constant-curve decisions, field-layout anchor tests, authoritative baseline diffing, and byte-identical control-group guardrail removal.
 description_zh: 从 Unity AssetBundle 重导 Live2D 动作（AnimationClip → motion3.json）时的完整性与保真审计流程。覆盖三容器曲线枚举（m_StreamedClip / m_DenseClip / m_ConstantClip，只读 streamed 会丢 60%+ 绑定）+ 绑定数求和断言、定值曲线可否补入（逐条比 moc3 默认值，音频驱动参数一律豁免）、键记录字段布局的不可钻空子锚点自证（附两个已被推翻的无效判据）、外部权威 motion3.json 基准比对与天花板校准阈值、以及拆历史护栏的 env 开关 + 逐字节对照组协议。当需要重导/校验 Live2D 动作数据、或用户反馈"部件各动各的/过渡像刚学建模的/小臂乱摆/动作太快/曲线少了/像抽一帧"时使用。触发词：Live2D 动作重导、motion3.json 审计、AnimationClip 丢曲线、ConstantClip、DenseClip、genericBindings、贝塞尔控制点、切线字段、参考版比对、拆护栏、A/B 逐字节、空壳动作。不适用：网页侧运行时播放集成（live2d-web-runtime-integration）、静态立绘/Spine 还原（unity-assetbundle-painting-restore）、通用管线安全落地方法论（safe-pipeline-fix-targeted-rerun，本技能第 5 步是它在动作数据场景的特化）。
-version: 1.0.0
+version: 1.0.1
 argument-hint: Point at the model/motion output directory and the clips to audit
 argument-hint-en: Point at the model/motion output directory and the clips to audit
 argument-hint-zh: 给出模型/动作产物目录与要审计的 clip 名
@@ -77,6 +77,24 @@ StreamedClip 的每条键记录是 `index(int32) + 4×float`。**谁是值、谁
 补充：也别把"某个字段恒为 0"当判据——零字段能被任何候选解释平凡命中，是空判据。
 
 ⚠️ **字段解释自洽 ≠ 拿它算 Hermite 就保真**。Unity 密集键的切线字段本就不该直接当 Hermite 切线用（算出的控制点会飞出段外）。切线该不该用，交第 4 步的外部基准裁决。
+
+### 补充（2026-10-16 实测）：第 3 个非值字段决定「段类型」，别只读两个切线
+
+上面"其余两个为入/出切线"少算了一个——`index(int32) + 4×float` 里除 `value` 外有**三个**非值字段，
+历史上只读了两条。**判据**（来自源侧字节本身，不是照抄参照给的答案）：
+
+> 段 i（键 i → 键 i+1）是 **Stepped**（motion3 `type=2`）⟺ 键 i 的 **(c1, c2, c3) 三个非值字段同时 ≈ 0**。
+
+等价性实测（与第 4 步的外部参照**逐段**对齐，不是抽样）：4 个 clip / **618 条曲线 0 误差**，且**漏判 0 次**
+（只有少量"贝塞尔被误判成步进"，方向上安全）。
+
+**为什么必须查这条**：缺了 Stepped，状态选择器参数（多状态值如 `{0,0.3,0.4,0.5,0.7}`）会被线性插值
+滑过作者从没写过的中间值，落进变体的交叉淡入淡出带 ⇒ 部件"虚影/半透明/手势做错"。这类故障的
+**键时间与参照完全一致、第 1/2/3 步的审计全绿**，第 4 步的"偏差>0.5 占比"也被贝塞尔天花板主导而
+**对它不敏感** ⇒ **判定必须落到「逐段类型对齐」**，不能只看关键帧值或总偏差。
+
+⚠️ 旧结论更正：曾有"阶跃性未必能从 Unity 侧推出"的判定（本项目 §26 item 4）。它被**多读一个字段**推翻，
+本技能第 3 步的"只读两个切线"就是那条误判的来源——**字段数本身要先数对**。
 
 ## 第 4 步：外部权威基准——找、比、按天花板校准阈值
 

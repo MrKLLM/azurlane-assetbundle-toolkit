@@ -135,6 +135,24 @@ segs += [1, c1[0], c1[1], c2[0], c2[1], t1, v1]
 
 ⚠️ 规范写法是**必要非充分**：密集键的切线字段当 Hermite 切线用会算出飞出的曲线。是否启用贝塞尔必须由第 4 步外部基准验收。
 
+### 段类型从源侧怎么定（别只读两个切线）
+
+`m_StreamedClip` 每条键 = `index(int32) + 4×float`；`value` 是第 4 个，**另外三个都是非值字段**
+（历史上只读了两条并当成 in/out 切线，第 3 个从未被读）。判据（2026-10-16 实测；与外部权威参照
+**逐段**对齐：4 个 clip / 618 条曲线 / **0 误差**，且**漏判 0 次**）：
+
+```python
+# 段 i（键 i → 键 i+1）由**起点键**的三个非值字段决定：
+is_stepped = abs(k[i].c1) <= 1e-6 and abs(k[i].c2) <= 1e-6 and abs(k[i].c3) <= 1e-6
+segs += [2, t1, v1] if is_stepped else [0, t1, v1]   # 2=Stepped 保持 v0 到 t1 再跳；0=Linear
+```
+
+运行时语义（vendored Cubism framework 源码实测）：`Stepped` 求值 = `points[0].value`（**段起点**值，保持到
+段末再跳）；`InverseStepped` = `points[1].value`（终点值）——两者必须不同，否则 Stepped 会退化成 InverseStepped。
+
+⚠️ **这条是"多读一个字段"推翻旧结论的产物**：此前判定"流式键只有 `(t,v,ins,outs)`、没有 constant 标记 ⇒
+阶跃推不出"，于是拿外部参照的段类型数组当答案（被明令禁止）。**先数对字段个数**（是 3 个非值 + 1 个值）。
+
 `Meta` 关键字段：`Duration`、`Fps`、`Loop`、`FadeInTime/FadeOutTime`（参考导出常**不写**，交给运行时默认：idle 2s／动作 0.5s；两侧都别硬写死）、`CurveCount`、`AreBeziersRestricted`（决定采样求值走朴素参数化还是解横向控制点）。`model3.json` 侧还常有 `Groups`（`EyeBlink`/`LipSync`）——缺了模型不眨眼、不做口型。
 
 ## 4. 字段布局锚点打分（第 3 步）

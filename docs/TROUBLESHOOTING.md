@@ -10521,3 +10521,64 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 
 **涉及文件**：`gallery_src/index.html`（滑杆 + 虚拟时钟 + `window.__speedDbg`；点倍率数字一键回 1×）、
 `scripts/diag/l2d_speed_check.py`（新增，入库）。
+
+---
+
+## §145. 手部「瞬切」的真根因：源侧的 Stepped 段被导出成了线性（2026-10-16 夜；闭环 §26 item 4）
+
+**现象**：`gezi_2 · 赤红之月的幻想` 播 `home` 时**左手虚影/消失、右手中途手势做错**。此前六版运行时补丁
+（v1~v9，见 §141 与交接 §6.37）都只能治一半，用户否掉"逐动作打补丁"这条路并问"游戏内难道没有蓝本吗"。
+
+**"蓝本"三候选裁定**（`scripts/diag/l2d_source_assets_list.py`，源包资产逐项）：
+
+| 候选 | 裁定 | 判据 |
+|---|---|---|
+| 源包有 `pose3.json`/`exp3.json` 被链路漏搬 | ❌ 否 | 源包**只有 1 个 TextAsset** = `gezi_2.physics3`；无 pose3/exp3/motion3/model3；组件里也没有 `CubismExpressionController`/`CubismPoseController`。`fix_model3.py` 删 `Pose`/`Expressions` 不丢任何东西。 |
+| 这些参数在 `m_ConstantClip` 里、不该写成曲线 | ❌ 否 | `Param25`/`Param27` 都在 `streamed` 容器（`streamed[28]`/`streamed[40]`）。 |
+| 源侧是 **Stepped**、被导成了插值 | ✅ 是 | l2d.su 权威参照 `gezi_2/home`：`Param25` = **2×27（27 段全步进）**、`Param27` = `0×1` + **`2×26`**；**键时间与源侧逐条相同**，而我们把 4317 段全写成了线性、0 个步进。 |
+
+**机制**：键时间一样，只是段类型不同。参照版在键之间**保持**上一状态值再跳（`Param27` 在 13.11s = **0.300**），
+我们线性滑过去得 **0.395** —— 正落在手部变体交叉淡入淡出的死区 ⇒ 旧变体淡出、新变体还没起 ⇒ 虚影/手势做错。
+
+**关键新知识（§26 item 4 当年写"阶跃性未必能从 Unity 侧推出"是错的）**：`m_StreamedClip` 每键在 `index`
+之后是 **4 个 float**，而 `parse_streamed_clip` 只用过其中 3 个（`value`=第 4 个 + 两个被标成 in/out 的切线），
+**第 3 个字段从未被读取**。判据一句话：
+
+> **段 i（键 i → 键 i+1）是 Stepped ⟺ 键 i 的 (c1, c2, c3) 三个浮点字段同时 ≈ 0。**
+
+逐段与权威参照对齐（`scripts/diag/l2d_step_origin_probe.py`）：`gezi_2 home` 203/203、`gezi_2 idle` 189/189、
+`antu_2 idle` 98/98、`antu_2 touch_body` 128/128 —— **618 条曲线 0 误差**，且**漏判 0 次**
+（只有少量"把贝塞尔误判成步进"，方向上安全：绝不会把真瞬切判成插值）。
+
+**修法**：`scripts/extract_motions.py` 新增 `STEP_EPS` + `parse_streamed_clip(with_t3=True)`；段起点三字段≈0 时
+发 `[2, t, v]`。**没有照抄参照版的段类型数组**（§26 明令禁止的"拿答案当依据"自证清白）。
+
+**验收（四道全过）**
+1. **零回退**（新工具 `scripts/diag/l2d_step_ab.py`）：gezi_2 + antu_2 共 **31,389 段改为瞬切**；
+   端点差异 0、非期望类型差异 0、丢曲线 0、段数差 0。
+2. **等同蓝本**：`gezi_2/home` 我们 **854 步进段 = 参照 854**；`Param27` 逐段与参照一致（含 3.800→3.817 那条唯一的线性段）。
+3. **偏差改善**：`antu_2/effect` 偏差中位 **3.5567 → 0.7586**、`>0.5` 占比 **100% → 60%**。
+4. **运行时语义**（读 vendored 源码，不是推测）：`function Q(t,e){return t[0].value}` = Stepped 取**段起点值**；
+   `function K(t,e){return t[1].value}` = InverseStepped 取终点值 —— 两者必须不同才叫两条类型。
+
+**换入与实时确认**：`apply_live2d_motions.py --yes`（`L2D_SRC_DIR` 指向只含 gezi_2 的临时目录）换入
+`Output/Live2D/gezi_2/motion/`，旧数据整体移到 `Output/_OLD_bak/l2d_motion_20261016_223324/gezi_2/`（57 文件，可回滚）。
+`l2d_pause_e2e.py gezi_2` **12 PASS + 1 合法 SKIP**；直播细扫 `l2d_wrist_ledger.py --sweep 12.80:13.55:0.05`
+实测 `Param27` **0.3 一路保持到 13.5s 再跳到 0.5，中途没有任何 0.39/0.43/0.47** ⇒ 淡变带消失。
+
+**⚠️ 边界（别拿错指标判本次）**：`l2d_ref_diff` 的「偏差>0.5 占比」被参照版那约 7% 我们还原不了的**贝塞尔**段
+（§26 天花板）主导 —— 本次它只从 **16.9% → 16.1%**，**这不代表修复无效**；该指标对"段类型"这类改动**不敏感**。
+本次的判据必须是上面第 1/2/4 条。
+
+**顺带修掉一个静默死掉的页面补丁（真实缺陷）**：`gallery_src/index.html` 的 `loadSnapKeys` 里有一块
+`tvs[idx]=tv` 的写入，而 `tvs` **从未声明** —— v9 退回 v5 时只把 `snapKeyBooks[key]={keys,tv:tvs,ids}` 改回
+`{keys,ids}`，**漏删这块写入** ⇒ 每次加载都抛 `ReferenceError` 被 catch、`rec.state='err'` ⇒ v5 的中段钉值
+**整层静默空转**（即 §6.37 v9 之后用户的复测看到的其实是**原始线性数据**）。已删该死写入；数据修好后这层
+本就冗余（换入后实测 `frames=0 / writes=0`，即已无任何写入）。
+
+**已排除的假设**：① 源包有 pose3/exp3 被漏搬（否 —— 源包根本没有）；② 参数属于 `m_ConstantClip`（否）；
+③ 阶跃性无法从 Unity 侧推出（**否** —— 只是此前漏读了第 3 个浮点字段）；④ 照抄参照版段类型数组（§26 明令禁止，且不必要）。
+
+**涉及文件**：`scripts/extract_motions.py`（改）、`scripts/diag/l2d_source_assets_list.py`（新）、
+`scripts/diag/l2d_ref_curve_types.py`（新，含 `--ours`）、`scripts/diag/l2d_step_origin_probe.py`（新）、
+`scripts/diag/l2d_step_ab.py`（新）、`scripts/apply_live2d_motions.py`（复用）、`gallery_src/index.html`（删死写入）。
