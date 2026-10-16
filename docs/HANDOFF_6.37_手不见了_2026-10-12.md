@@ -93,6 +93,22 @@
   不能拿「P27 vs clip 起点」当中段标志**（gezi_2 home 的 P27 有长时间 0.7 平台段，永远等不到离开）。
 - 详细记录：`docs/TROUBLESHOOTING.md` §123 追加-XXXIII；防回归探针 `scripts/diag/l2d_replay_reject_probe.py`。
 
+### v4（2026-10-16 傍晚）：取证通道接回（这不是修复，是取证据）
+
+用户实机复测 v3 后**仍报**两条，且这次给了左右手区分：**左手（无手环）突然消失 / 右手（金手环）
+中途手势做错**。⇒ 按既定口径停止自猜第 7 版（见本页 §2 与 `PROJECT_STATUS.md` 待办 5b），
+先把用户眼睛看到的坏帧交进磁盘再定案。按用户要求把 2026-10-15 摘掉的**暂停存档通道原样接回**
+（正本来自 commit `9e9e238` + 其后 `eb5736b` 补的 `beforeModelUpdate` 快照与画布 PNG；移除见 `15e8e19`）：
+
+- `gallery_src/index.html`：`l2FreezeDump()`（参数向量 532 条 + 上屏片逐片包围盒 + 画布 PNG）
+  → `POST /l2d_freeze` → `.diag/l2d_freeze/`；条上回填「已冻结 <组> 第 N.NNs · 存档 <文件名> +图」。
+- `scripts/diag/l2d_pause_e2e.py`：判据 ④/④b/⑫ 由"不许存档"改回"**必须落盘且可解析**"
+  （④ art 行数 == counts.lit、④b `flags.noRest=false`；⑫ 同名 `.png` 合法且非空白、JSON 里已剥掉 png）。
+- 验证：`l2d_pause_e2e gezi_2` **12 PASS + 1 合法 SKIP**（⑨ 该皮肤装不出残留复位渐变）；
+  `deploy_gallery.py --check` 11/11 同 inode、漂移 0。
+- ⚠️ **时间轴口径**：条上与存档里的"第几秒"是**墙钟**（`(l2Now()-l2GroupT0)/1000`），
+  倍速≠1× 时与模型秒不等价 ⇒ 交坏帧时请把倍速停在 **1×**，否则秒数对不回回放器。
+
 ### 本轮收尾边界
 
 v1 的 `__snapStairDbg() → n:0` 空转来自 definition 只有 `{File}`，该失败已在 §141 记录；v2 通过同 UI 路径加载键值并以开/关反向对照验收。本轮到此止，不扩到其它 clip、其它皮肤或独立 PartOpacity 缺口。跨环境继续验证前，仍须先部署正本并 `deploy_gallery.py --check`。
