@@ -1727,7 +1727,7 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
         const r=await fetch(P+model+'/'+d.File);
         if(!r.ok) throw new Error('HTTP '+r.status);
         const j=await r.json(); if(!Array.isArray(j.Curves)) throw new Error('no-Curves');
-        const sets=Object.create(null), ids=Object.create(null), tvs=Object.create(null);
+        const sets=Object.create(null), ids=Object.create(null);
         for(const c of j.Curves){ if(!c||c.Target!=='Parameter') continue;
           const id=curveId(c); if(!id) continue;
           let idx=-1; try{ idx=cm.getParameterIndex(id); }catch(e){}
@@ -1747,7 +1747,7 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
         const keys=Object.create(null);
         for(const ix in sets) keys[ix]=Array.from(sets[ix]).sort((a,b)=>a-b);
         rec.parameterCurves=Object.keys(keys).length;
-        snapKeyBooks[key]={keys,tv:tvs,ids}; rec.state='ok';
+        snapKeyBooks[key]={keys,ids}; rec.state='ok';
       }catch(e){ rec.state='err'; rec.error=String(e&&e.message||e); }
       return rec; })();
       return rec.promise;
@@ -1839,15 +1839,12 @@ const origStartMotion=mm.startMotion.bind(mm);
        滑过非状态值 ⇒ 变体 A 淡出 → 中间一个都不在（"先消失"）→ 变体 B 淡入（"逐渐实体化的虚影"）。
        ⇒ 只量化这两个选择器；`GL1~14`/`ParamCheek`/`ParamJTEyeOpen` 那批**两键长坡**继续插值
        （2026-10-14 用户实测：全表阶梯化会让高光/手势在坡中点突跳）。 */
+    /* ⚠️ 2026-10-16 晚**退回 v5**（v6~v8 的"时间序阶梯 / 段中点 / 时钟补偿"三版都被用户否掉：
+       抱旧手势太久、其他动作更乱）。这里只保留"逐帧贴最近作者键"，作为**过渡措施**——
+       真正的修法是去**源包**查这些状态选择器的曲线段类型（Unity 侧是不是 Stepped），
+       是的话修提取流程、让 motion3 保留 Stepped 段，Cubism Web SDK 原生就瞬切，
+       届时**整条补丁可以删掉、所有 clip 一起好**（交接 §6.37 v9 / 本项目待办 5c）。 */
     const snapMidGate=['Param25','Param27'];
-    /* 切点微调（2026-10-16 晚）：库动作秒比 clip 时刻**领先约 0.12s**（实测作者键 13.40 在 13.275
-       就切了）⇒ 默认减掉这个提前量，让瞬切落在作者键的时刻上。页面可直接 A/B，不用重部署：
-       URL 上 `?snapLead=0` 或 `?snapLead=0.2`，或在控制台 `window.__snapLead=0.2` 现改现看。 */
-    const snapLead=()=>{ try{
-        if(typeof window.__snapLead==='number'&&isFinite(window.__snapLead)) return window.__snapLead;
-        const q=new URLSearchParams(location.search).get('snapLead');
-        if(q!==null&&isFinite(+q)) return +q; }catch(e){}
-      return 0.12; };
     im.on('afterMotionUpdate',()=>{
       if(window.__snapOff) return;
       const st=mm.state, g=st&&st.currentGroup, raw=Number(st&&st.currentIndex);
@@ -1863,37 +1860,9 @@ const origStartMotion=mm.startMotion.bind(mm);
         if(!vals||!vals.length||held.has(idx)) continue;
         let before; try{ before=cm.getParameterValueByIndex(idx); }catch(e){ continue; }
         if(!Number.isFinite(before)) continue;
-        /* 2026-10-16 二次修：**不再「贴全局最近键」**。用户复测 v5 后报"消失没了，但这一帧手势做错、
-           又没换手"——那一帧在 13.256s，作者键是 12.85(v=0.3)→13.40(v=0.5)，而"最近键"把 0.448
-           钉到了 **0.4**（0.4 是 clip 别处 t=3.8~5.5 的状态，这段过渡里根本没有）⇒ 显示的是错的变体。
-           ⇒ 改成**单调阶梯**（做法与两次失败的中间尝试见下一段注释）。 */
-        /* ⚠️ 时钟只认**库自己的动作时钟**。两次失败都记在这里，别重走：
-           ① `(l2Now()-l2GroupT0)/1000`：无头里 app.ticker 的组起点可能没设上 ⇒ 变成"页面存活秒数" ⇒
-              键表被一路读到末尾（实测整段被钉成最后一个键的值 0）；
-           ② 纯按活值做单调阶梯（不读时钟）：从键序第 0 个起步，而 clip 开头是一段 0.7 的平段 ⇒
-              值低于它时一步都前进不了 ⇒ 整段被钉在 0.7。
-           正解：取队列里正在播的那条 motion 的 `_stateTimeSeconds`（库自己的动作秒）当 clip 时刻，
-           再"保住 clip 当前时刻之前最近的那个作者键"⇒ 保住上一个状态、到下一个键才瞬切。 */
-        let best=null;
-        const tv=book.tv&&book.tv[k];
-        if(tv&&tv.length){
-          let tc=null;
-          try{ const qa=(mm.queueManager&&mm.queueManager._motions)||[];
-            for(const e of qa){ const s=e&&e._stateTimeSeconds;
-              if(typeof s==='number'&&isFinite(s)&&(tc===null||s>tc)) tc=s; } }catch(e){}
-          if(tc!==null){ tc-=snapLead();          // 切点微调：见上面 snapLead 的说明
-            /* 取"这一段（时间序相邻两键）里、时间上离中点更近的那一端"的值。两次边界都验过：
-               · 只取这两端 ⇒ 不会钉到本段用不到的中间状态（`0.3→0.5` 那种坡不会再变成 `0.4`）；
-               · 到**段中点**就切 ⇒ 不会把旧手势一路"抱"到下一个作者键（v6 那版抱太久，用户直接否掉了）。 */
-            let pi=0;
-            for(let q=0;q+1<tv.length;q++){ if(tv[q][0]<=tc) pi=q; else break; }
-            if(pi+1<tv.length){ const mid=(tv[pi][0]+tv[pi+1][0])/2;
-              best = tc<mid ? tv[pi][1] : tv[pi+1][1]; }
-            else best=tv[pi][1]; }
-        }
-        if(best===null){ best=vals[0]; let dist=Math.abs(before-best);   // 兜底：拿不到键表时退回最近值
-          for(let q=1;q<vals.length;q++){ const d=Math.abs(before-vals[q]);
-            if(d<dist){ best=vals[q]; dist=d; } } }
+        let best=vals[0], dist=Math.abs(before-best);      // v5 原样：逐帧贴最近作者键
+        for(let q=1;q<vals.length;q++){ const d=Math.abs(before-vals[q]);
+          if(d<dist){ best=vals[q]; dist=d; } }
         try{ cm.setParameterValueByIndex(idx,best); }catch(e){ continue; }
         writes++; if(Math.abs(before-best)>1e-5){ changed++; snapKeyStats.changedIds.add(book.ids[k]); }
         if(book.ids[k]==='Param27') last={group:g,index:raw,id:'Param27',before:+before.toFixed(5),
