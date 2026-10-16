@@ -865,7 +865,7 @@ py -3 scripts/diag/l2d_coord_forensics.py lafeiii_3
 py -3 scripts/diag/l2d_inspector_verify.py lafeiii_3
 # 4) 交互五项（滚轮/缩放/取消拖拽/空白点击不播/点部位命中）
 py -3 scripts/diag/interact_verify.py
-# 5) 全量按部位点击（约 25 分钟，269 皮肤；基线 806/807，唯一 z46_3 框嵌框歧义）
+# 5) 全量按部位点击（269 皮肤，实测 37 分钟；判据 WIRING 必须为 0 —— 旧口径「806/807 命中」已作废，见 §27）
 py -3 scripts/diag/hit_verify.py
 # 6) 台词/字幕与两个全局开关（2026-09-27 加：改过语音条、字幕、语音页或 skin_words/skin_voice 之后必跑）
 py -3 scripts/diag/talk_verify.py --shots
@@ -965,7 +965,13 @@ py -3 scripts/diag/l2d_touchidle_probe.py antu_2 touch_idle1  # 参数残留复�
   以及**恢复跳变按"一拍对一拍"比**（无头只有 5~14 拍/秒，按固定毫秒比会把一次正常眨眼算成姿态瞬移）。
 - 坐标系偏移即视为失败（张冠李戴比「不触发」更糟）。
 - `interact_verify` 的空白点击断言：`after=null` 视为通过（=idle 看守者重取数据的间隙，不是触发动作）。
-- `hit_verify` 全量期望 **806/807**；若掉到 800 以下，说明包含判定或坐标换算被改坏。
+- `hit_verify` 全量的判据是 **`WIRING` 必须为 0**（点了没播出 / 播出候选集之外的条目）。
+  ⚠️ **旧口径「806/807 命中」已作废**（它建立在"每个模型只有 3 个判定区"上；2026-09-24 用户裁定 A3 后，
+  同一位置挂多个标记时随机出同组另一条**是设计**，`HIT` 不再是硬指标）——见 `TROUBLESHOOTING.md` §27。
+  2026-10-16 全量实测：**269 模型 / 3309 部位**，`WIRING 0`、`OUTSIDE/NOGEOM 0`、
+  `NOTCLICKABLE 66`（退化框，设计上不可点）、可点中率 **3213/3309 = 97.1%**、
+  多候选随机性抽查 **200 个模型 0 不合格**。⇒ 以后读这份全量，看 **WIRING 与随机性** 两项，
+  别再拿"命中率掉到 800 以下"当红线（那个数字和现在的分母不是一回事）。
 - 无头环境 fetch/parse 比真机慢（约 1.5s），idle 轮换间隙明显；**别把无头掉帧当成 bug**。
 - `interact_verify` 偶发 `Execution context was destroyed` 是多个无头 Chrome 实例抢 profile 的假失败，**重跑一次即可**，不要当成回归。
 
