@@ -9629,6 +9629,38 @@ Qoder 内置浏览器标签是 `visibilityState=hidden` 的隐藏表面：**`Int
 - **下一轮先修这两处再谈结论**：① 腕口坐标不要目测——用"手镯那片"的包围盒中心当锚点
   （手镯在腕上，是画面上唯一能一眼认出的腕部标记）；② 距离改成点到矩形距离，并排除框面积
   超过画面 5% 的大片。
+
+**§123 追加-XXXIII（2026-10-16 第三十三轮：「播放中连点同一部位」被 reserve 拒绝 ⇒ snapPending
+无条件置位 ⇒ snapHold 误钉正在播动作 —— 手势短暂错误 / 手消失的第二条触发路径，已修）**
+
+- 上一轮（追加-XXXI/XXXII 之后，gezi_2 交接页 v2）把 clip 内回写收窄为 `snapMidGate=['Param27']`，
+  用户实机复测仍报「还有手势短暂错误 + 手消失」。已排除"整表 nearest-key 阶梯化"（用户之前否过：
+  手势切换时刻不对、高光突跳）。
+- **本轮新根因（直接机制，已实证）**：`mm.startMotion` 包装器里**无条件 `snapPending=true`**，
+  但库的 `startMotion` 是 async —— `yield loadMotion` 之后才走 `state.start()`，内部
+  `reserve()` 对「同 group+index 正在播」直接 `return false`（见 vendored 库
+  `reserve(t,e,i){ if(t===this.currentGroup&&e===this.currentIndex) return false }`）。
+  reserve 拒绝时 `_startMotion` **根本不会执行**（队列不重建、动作原地继续播），但
+  `snapPending` 已被置位 ⇒ 下一拍 `beforeMotionUpdate` 误判 `changed=true` ⇒ `snapHold`
+  把**正在播动作**的 Param27/Param25 钉回 clip 起点 0.7/0.5，持续淡化窗口 ~2s ⇒ 用户看到的
+  「手势短暂错误 + 手消失」瞬态。这条路径 = **播放中连点同一部位**（连点重播只是它的特例）。
+- **修法（置位点从"调用前"移到"真正起播处"）**：`snapPending=true` 移进 `mm._startMotion`
+  重写里（reserve 放行、真正起播时才执行）；`mm.startMotion` 包装器只留快照键预载
+  `loadSnapKeys`。reserve 拒绝 ⇒ `_startMotion` 不执行 ⇒ snapPending 恒 false ⇒
+  beforeMotionUpdate `changed=false` ⇒ 不钉值，动作自然继续。前轮 T2 的
+  `stopAllMotions()`（重播键先清 state 再 play）是这条路径里"连点重播"的救法，但**部位连点
+  不走 stopAllMotions**，所以必须修到这里才算根除。
+- **防回归探针**：`scripts/diag/l2d_replay_reject_probe.py`（入库）。
+  - 判据全部落在可观测行为、不读内部变量：`await mm.startMotion('home',0,3)` 返回
+    `ok=false`（reserve 拒绝的直接证据）+ 队列 entry 不重建（startTime 不变）+ `__snapDbg().held`
+    在连点后保持 `[]`（修复前这里会变非空 items）+ 参数继续自然走。
+  - **踩坑（值得记）**：第一版想用「P27 离开 0.7 判定动作播到中段」——**gezi_2 的 home 曲线
+    P27 有长时间 0.7 平台段，无头环境永远等不到离开**，probe 白跑两轮还误报 FAIL。⇒
+    判据必须落在 snapHold 机制本身（held 状态/队列时钟），**不能拿"参数值 vs clip 起点"当
+    中段标志**（这就是追加-XXVII"单参数扫描台账只能提名"那条教训的第四次应验）。
+- **回归**：暂停 e2e / 重播+倍速 e2e / 手腕虚影 sweep / 连点同部位探针 全绿；WF-16 六件套
+  （跳过 37 分钟的全库点击 hit_verify，本轮没动命中逻辑与 motion 数据）全绿。
+- **待用户实机复测**：播放中连点同一部位 / 连点重播，不再出现手势短暂错误与手消失。
 ## §138 补：三页全撤 + 分组标签"有底但别像 chip"（2026-10-11 同日第二轮，用户实机追报）
 
 上一节只撤了音乐库，理由写的是"背景库栏体只有 16% 白，带子在那儿才是唯一的厚"。

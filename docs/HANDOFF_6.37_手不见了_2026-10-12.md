@@ -77,6 +77,22 @@
 
 修法：页面新增 `snapMidGate=['Param27']`，clip 内只回写它；`__snapKeyDbg()` 增报 `gate`，探针逃逸检查改成 `changedIds ⊆ gate`。验收（全 clip 370 样本）：修复态影带 0/370、`--snap-off` 反向 140/370、非 P27 参数恢复逐帧插值；暂停端到端 12 PASS+1 合法 SKIP。数据 `.diag/l2d_sweep/1014-235035` / `1015-001923`；完整记录 §141 追加二。跨 clip 的 `snapHold` 不受影响。
 
+### v3（2026-10-16）：「手势短暂错误 + 手消失」第二条触发路径已修 —— reserve 拒绝 × snapPending
+
+用户实机复测 v2 后仍报「还有手势短暂错误 + 手消失」。已排除整表 nearest-key（用户之前否过）。本轮新根因（直接机制，`await startMotion → ok=false` + held 状态实证）：
+
+- **旧实现** `mm.startMotion` 包装器**无条件 `snapPending=true`**；但库 `startMotion` 是 async ——
+  `yield loadMotion` 后才走 `state.start()`，内部 `reserve()` 对「同 group+index 正在播」直接
+  `return false`，**`_startMotion` 根本不会执行**。此时 snapPending 已被置位 ⇒ 下一拍
+  `beforeMotionUpdate` 误判 `changed` ⇒ `snapHold` 把**正在播动作**的 Param27/25 钉回
+  clip 起点 0.7/0.5（持续 ~2s）⇒ 手势短暂错误 + 手消失瞬态。触发场景 = **播放中连点同一部位**
+  （连点重播只是特例，重播键那条已在上轮用 stopAllMotions 单独救过；**部位连点不走 stopAllMotions**）。
+- **修法**：`snapPending=true` 移进 `mm._startMotion` 重写（reserve 放行、真正起播才执行）；
+  `mm.startMotion` 包装器只留 `loadSnapKeys` 预载。被拒 ⇒ `_startMotion` 不执行 ⇒ snapPending 恒 false
+  ⇒ beforeMotionUpdate `changed=false` ⇒ 不钉值。**判据落点在 snapHold 机制本身（held 空 + 队列不重建），
+  不能拿「P27 vs clip 起点」当中段标志**（gezi_2 home 的 P27 有长时间 0.7 平台段，永远等不到离开）。
+- 详细记录：`docs/TROUBLESHOOTING.md` §123 追加-XXXIII；防回归探针 `scripts/diag/l2d_replay_reject_probe.py`。
+
 ### 本轮收尾边界
 
 v1 的 `__snapStairDbg() → n:0` 空转来自 definition 只有 `{File}`，该失败已在 §141 记录；v2 通过同 UI 路径加载键值并以开/关反向对照验收。本轮到此止，不扩到其它 clip、其它皮肤或独立 PartOpacity 缺口。跨环境继续验证前，仍须先部署正本并 `deploy_gallery.py --check`。
@@ -115,6 +131,9 @@ v1 的 `__snapStairDbg() → n:0` 空转来自 definition 只有 `{File}`，该�
   没真播就整趟作废
 - `l2d_wrist_diff.py` —— `--sweep <json>` 出「相邻帧逐对 + 逐片**瞬断**序列」（`op`/面积各自找
   "掉了又回来"）；`--twice <json>` 出冷热对照，**带前置作废校验**（两遍参数轨迹不一致就不比像素）
+- `l2d_replay_speed_e2e.py` —— 重播中途打断 + 倍速标签点按回 1×（2026-10-16 新增，入库）
+- `l2d_replay_reject_probe.py` —— 播放中连点同一部位被 reserve 拒绝时 snapHold 不得误触发
+  （2026-10-16 新增，入库；判据 = `await startMotion→false` + 队列不重建 + `__snapDbg().held` 恒空）
 - `l2d_wrist_anchor.py` —— 腕口锚点改按 **ArtMesh 模型空间 vtx 包围盒**出（不再目测、不再肤色分割）；
   UV 回采样认色带**实心度/颜色序/退化片**三重对照 + 筛选漏斗自证 + 三条自证（空白 UV、阈值 ±10、
   投影式与 `index.html` 字面一致）；`--hand` 用美术自起的名字反查

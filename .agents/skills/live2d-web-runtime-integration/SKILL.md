@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
 description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳、选某个动作时手会消失、部件在任何动作里都不动、切动作时某个部件闪一下、部件消失一下但 part 组读数恒定、同参数两次读出不同的显隐、扫出来的阈值表复现不了、把 34 片并成一个开关家族可疑、部件门那类否证报「0 个异常」但其实是键名读不到、手会淡到看不见而两拍差分报全0、按颜色认片把发光点判成金饰、同一会话跑两遍对照参数恒为默认值、动作中途的暗窗与换动作的淡化死区要分清。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.7.35
+version: 1.7.36
 ---
 
 # Live2D 网页运行时集成
@@ -1080,3 +1080,34 @@ Cubism4InternalModel.update(t,e){ super.update(t,e); t/=1e3; e/=1e3;
 
 **配套**：给页面留一个 `window.__speedDbg=()=>({speed, vEl, real})` 钩子 —— 它把
 "我的钟没按倍速走"和"库不吃这个时间参数"两种完全不同的失败分开，省掉一轮盲猜。
+
+## 19. 重播 / 连点同一部位：`reserve()` 拒绝 × snapPending 误钉（2026-10-16 实测）
+
+**需求形状**：播放中连点同一部位 / 点重播键，期望"立刻从头重播"，实际动作原地不动
+（只重播语音）；或重播后出现"手势短暂错误 / 手消失一闪"。
+
+**两条独立机制，先分清再修**：
+
+1. **`reserve()` 拒绝"正在播的同一组"**：pixi-live2d-display 的 MotionManager 在
+   `reserve(t,e,i)` 里 `if(t===this.currentGroup&&e===this.currentIndex) return false`
+   （"Motion is already playing"）→ `startMotion` 直接返回 `ok=false`，**不真正起播**。
+   `startMotion` 还是 async 的（`yield loadMotion` 之后才走 `state.start()`），
+   拒绝发生在早于任何起播动作的位置。
+2. **重播键要自走 `stopAllMotions()`**：先 `mm.stopAllMotions()`（内部 `_stopAllMotions()`
+   + `state.reset()` 清掉 currentGroup/currentIndex）再 `play(sel)`，reserve 才不会拒绝。
+   只重新走 `startMotion` 会被库拦下，看起来就是"只有语音重播、动作不重播"。
+
+**核心坑：把"起播"记错的置位点**。包装器若无条件在自己开头置 `snapPending=true`（本页体系里
+"下个 beforeMotionUpdate 执行某次钉值/回贴"的标志），reserve 拒绝时实际**不会**重新起播，
+但标志已经置上 ⇒ 后续 beforeMotionUpdate 误判"动作变了" ⇒ snapHold 把**正在播的**动作的
+关键参数（如手上 Param27/25）钉回 clip 起点值约 2 秒 ⇒ 手势短暂错误 + 手消失一闪。
+**修法**：置位点必须移入对 `_startMotion` 的重写（真正走到起播才置），包装器只保留预载。
+判据：连点后 `__snapDbg().held` 必须恒空。
+
+**无头判据的落点（本页第 4 条重播类教训）**：判据必须落在**机制本身**——队列 entry 的
+`_startTimeSeconds` / `_stateTimeSeconds`（点重播后 startTime 重置＝新起播、stateTime 继续涨）、
+以及 snapHold 的 held 状态；**不能拿"参数值 ≠ clip 起点"当"动作中段"的标志**（gezi_2 的 home
+曲线 Param27 有长时间 0.7 平台段，无头永远等不到"离开起点" ⇒ 探针误报 FAIL）。
+
+**倍速键顺手规则**：倍速切换后用户想立刻回 1× 是高频动作——倍速标签本身做成可点
+（title 提示"点一下回到 1×"），点击即 `setSpeed(1)`。
