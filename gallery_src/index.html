@@ -1840,6 +1840,14 @@ const origStartMotion=mm.startMotion.bind(mm);
        ⇒ 只量化这两个选择器；`GL1~14`/`ParamCheek`/`ParamJTEyeOpen` 那批**两键长坡**继续插值
        （2026-10-14 用户实测：全表阶梯化会让高光/手势在坡中点突跳）。 */
     const snapMidGate=['Param25','Param27'];
+    /* 切点微调（2026-10-16 晚）：库动作秒比 clip 时刻**领先约 0.12s**（实测作者键 13.40 在 13.275
+       就切了）⇒ 默认减掉这个提前量，让瞬切落在作者键的时刻上。页面可直接 A/B，不用重部署：
+       URL 上 `?snapLead=0` 或 `?snapLead=0.2`，或在控制台 `window.__snapLead=0.2` 现改现看。 */
+    const snapLead=()=>{ try{
+        if(typeof window.__snapLead==='number'&&isFinite(window.__snapLead)) return window.__snapLead;
+        const q=new URLSearchParams(location.search).get('snapLead');
+        if(q!==null&&isFinite(+q)) return +q; }catch(e){}
+      return 0.12; };
     im.on('afterMotionUpdate',()=>{
       if(window.__snapOff) return;
       const st=mm.state, g=st&&st.currentGroup, raw=Number(st&&st.currentIndex);
@@ -1873,7 +1881,8 @@ const origStartMotion=mm.startMotion.bind(mm);
           try{ const qa=(mm.queueManager&&mm.queueManager._motions)||[];
             for(const e of qa){ const s=e&&e._stateTimeSeconds;
               if(typeof s==='number'&&isFinite(s)&&(tc===null||s>tc)) tc=s; } }catch(e){}
-          if(tc!==null){ for(const pr of tv){ if(pr[0]<=tc+1e-3) best=pr[1]; else break; }
+          if(tc!==null){ tc-=snapLead();        // 切点微调：见下方 snapLead 的说明
+            for(const pr of tv){ if(pr[0]<=tc+1e-3) best=pr[1]; else break; }
             if(best===null) best=tv[0][1]; }
         }
         if(best===null){ best=vals[0]; let dist=Math.abs(before-best);   // 兜底：拿不到键表时退回最近值
