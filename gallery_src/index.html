@@ -276,7 +276,8 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
 /* 倍速滑杆：0.1×–2×，值显示用等宽数字，避免拖动时右边数字宽度跳动 */
 .spine-bar .spd{display:flex;align-items:center;gap:6px;color:var(--dim);font-weight:700}
 .spine-bar .spd input[type=range]{width:104px;accent-color:var(--brand-d);cursor:pointer;margin:0}
-.spine-bar .spd b{color:var(--txt2);font-variant-numeric:tabular-nums;min-width:36px;text-align:right}
+.spine-bar .spd b{color:var(--txt2);font-variant-numeric:tabular-nums;min-width:36px;text-align:right;cursor:pointer}
+.spine-bar .spd b:hover{color:var(--brand-d)}
 /* 台词字幕条：出现时从下方弹进 */
 .talksub{position:absolute;left:50%;bottom:58px;max-width:min(760px,88%);
   background:var(--panel);border:1.5px solid var(--line);border-radius:var(--r-in);padding:9px 15px;box-shadow:var(--sh2);
@@ -1846,7 +1847,7 @@ async function renderLive2D(s, sk){
     /* Cubism 的 id 在有些版本里是 {string} 对象、有些是裸字符串；取名一律走这个（面板与暂停存档共用） */
     const idName=id=>(id&&id.string)||(typeof id==='string'?id:(id&&id.toString())||'?');
     const bar=document.getElementById('l2bar');
-    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Pause" class="tg">暂停</button><label class="spd"><span>倍速</span><input type="range" id="l2Speed" min="0.1" max="2" step="0.1" value="1"><b id="l2SpeedVal">1.0×</b></label><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2PauseInfo" style="display:none"></span><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>空格</b>暂停/继续 · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
+    bar.innerHTML=`<label>动作</label><select id="l2Motion"></select><button id="l2Replay">重播</button><button id="l2Pause" class="tg">暂停</button><label class="spd"><span>倍速</span><input type="range" id="l2Speed" min="0.1" max="2" step="0.1" value="1"><b id="l2SpeedVal" title="点一下回到 1×">1.0×</b></label><button id="l2Fit">复位</button><button id="l2Full">全屏</button><button id="l2AreasBtn" class="tg">判定区</button><button id="l2PanelBtn" class="tg">参数·部件</button><span class="pill" id="l2PauseInfo" style="display:none"></span><span class="pill" id="l2Hit">点击角色部位可触发对应动作</span><span class="pill">${groups.length} 组动作</span><span class="pill" id="l2Voice">语音加载中…</span><span class="hint">点头部/身体等部位=对应反应（同游戏） · <b>空格</b>暂停/继续 · <b>Ctrl+滚轮</b>缩放 / 拖拽平移 / 双击复位</span>`;
     const sel=document.getElementById('l2Motion');
     const fillSel=()=>{ const cur=sel.value;
       sel.innerHTML=groups.map(g=>`<option value="${g}">${g}${voice[g]?'（语音）':''}</option>`).join('');
@@ -1888,7 +1889,9 @@ async function renderLive2D(s, sk){
     (()=>{ const spd=document.getElementById('l2Speed'), val=document.getElementById('l2SpeedVal');
       const setSpeed=(v)=>{ l2Speed=Math.min(2,Math.max(0.1,+v||1));
         if(val) val.textContent=l2Speed.toFixed(1)+'×'; if(spd) spd.value=String(l2Speed); };
-      if(spd){ spd.oninput=()=>setSpeed(spd.value); setSpeed(spd.value); } })();
+      if(spd){ spd.oninput=()=>setSpeed(spd.value); setSpeed(spd.value); }
+      /* 点倍率数字 = 一键回 1×：滑杆拖远了之后不用一点点拖回来（也不依赖键盘） */
+      if(val) val.onclick=()=>setSpeed(1); })();
     /* ---------- 暂停：把姿态冻在「当前这一帧」 ----------
        机制取 mdl.autoUpdate：库把它挂在 PIXI.Ticker.shared 上（onTickerUpdate 累 deltaTime），
        而 _render 的守卫是 `this.deltaTime && internalModel.update(...)` ⇒ 关掉后 motion、物理、

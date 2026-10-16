@@ -1,34 +1,36 @@
 # -*- coding: utf-8 -*-
 """验证「倍速播放」滑杆真的改了动作时钟，而且 1× 与改前一致。
 
-为什么要有这个探针：倍速是**缩放内部模型 update 的 dt** 实现的（见 index.html 的
-`im.update=function(...a){ a[0]*=l2Speed; ... }`），而这条改动的失败模式全是静默的：
-  · 包错了对象（比如包了 model.update 而库实际调 internalModel.update）→ 滑杆怎么拖都不变；
+为什么要有这个探针：倍速是**自建虚拟时钟**实现的（见 index.html 的
+`im.update=function(dt,el){ ... origIMUpdate(dt*k, vEl); }`），而这条改动的失败模式全是静默的：
+  · 包错了对象（库实际调的是 `internalModel.update`）→ 滑杆怎么拖都不变；
+  · 喂错了参数（**动作时钟吃的是第二个参数**，只缩放 dt 完全无效）→ 同上；
   · 只影响新起播的动作 → 拖到 2× 时正在播的这条纹丝不动；
-  · 顺手把 1× 也改了（dt 缩放写错方向/重复乘）→ 默认速度就不对，而"看起来在动"分辨不出。
+  · 顺手把 1× 也改了（缩放写错方向/重复乘）→ 默认速度就不对，而"看起来在动"分辨不出。
 ⇒ 判据必须落在**可读的数字**上，而且要能自证刻度。
 
-尺子：`home` 的 `GL1` 是一条**横跨整条 clip 的线性斜坡**（motion3 里只有首末两个作者键：
-0.0066 @ 0s → 0.812 @ 18.25s，斜率 0.04413/s 的 clip 时间）。⇒ 量"GL1 从 0.10 涨到 0.30
-用掉多少墙钟秒"就等于量"4.53 秒 clip 时间用掉多少墙钟秒"，两者相除即实测倍速。
-用**两段门槛之差**而不是"从起播算起"，是为了把"起播那一刻"的模糊（选单 change + 交叉淡化）
-整段消掉；再取两趟对照，噪声不会系统性偏一边。
-
-三条判据（**全是比值，不读绝对值** —— 见下面那条环境坑）：
+三条判据：
   ① 滑杆显示值随设定改变，且 `vEl`（喂给内部模型的虚拟时钟）斜率之比 ≈ 倍速（容差 ±20%）；
-  ② 虚拟钟 → clip 时间恒为 1:1（`clip 跨度 / vEl 跨度 ≈ 1.00`，容差 ±15%）：这条与倍速无关，
-     1× 也过 ⇒ 同时证明"没顺手改坏默认速度"（改前 1× 就是这个映射）；
-  ③ 每条倍速下都没被暂停卡住（`autoUpdate` 仍为真）。
+  ② 1× 播完整条 `home` 用掉的**虚拟秒** ≈ clip 时长（`Meta.Duration` 18.25s，容差 ±1.2s）：
+     虚拟钟与 clip 钟 1:1，同时证明"没顺手改坏默认速度"（改前 1× 就是这个映射）；
+  ③ 2× 的墙钟播完时间明显短于 1×（**只断言方向**，理由见下）；
+  ④ 点倍率数字一键回 1×（显示与内部 `l2Speed` 都回到 1）。
 
-⚠️ 环境坑（2026-10-16 实测，差点误判成"倍速没生效"）：**无头环境不能读墙钟绝对速率**。
-   本页在 swiftshader 下渲染很慢，PIXI ticker 把 `deltaMS` 钳在 100ms（`_maxElapsedMS`），
-   ⇒ 模型时钟本来就只按墙钟的 ~0.6 倍推进（实测 1× 墙钟口径 0.59）。这个钳位对每条倍速
-   一视同仁，所以**比值仍然可信**，绝对速率不可信。真实浏览器 60fps 下不触发钳位。
+⚠️ 尺子换了三条，**前两条都被实测否证，别再走**：
+   · ❌ `GL1` 长坡斜率（motion3 里只有首末两个作者键，看着是天赐的线性尺子）——它的**活值不是原始曲线**：
+     实测偏 2.83 倍；把环境层关掉（`__ambOff`）反而偏到 4.12 倍。
+     ⇒ 凡是要用"某个参数的轨迹"反推时间的判据，**先证它的活值真的跟曲线走**。
+   · ❌ 墙钟比值 ≈ 2.0 —— 无头停帧对 2× 的伤害比 1× 小，比值被压扁（实测 1.46），只可作方向性断言。
+   · ✅ 正解 = **一个离散事件**：`Meta.Loop=false` 的整条动作「播完」那一刻的虚拟秒。
+     不用任何斜率，只读一个事件时刻；1× 实测 18.695 虚拟秒 ≈ 18.25 的 clip 时长。
+
+⚠️ 环境坑：无头 swiftshader 下渲染慢，PIXI ticker 把 `deltaMS` 钳在 100ms（`_maxElapsedMS`），
+   ⇒ 墙钟绝对速率本来就低于标称（1× 实测 0.5~0.6）。**只读比值/离散事件，别读绝对速率**。
 
 用法：
   py -3 scripts/diag/l2d_speed_check.py                    # 默认 gezi_2，测 2× / 1× / 0.5×
   py -3 scripts/diag/l2d_speed_check.py --key gezi_2 --speeds 2,1,0.5
-⚠️ 本机 HTTP_PROXY 会劫持 127.0.0.1（CDP 与页面请求都变 502）⇒ 运行前清掉代理环境变量。
+⚠️ 本机 HTTP_PROXY 会劫持 127.0.0.1（CDP 与页面请求都变 502）⇒ 运行前清掉代理环境变量（四个都要清）。
 退出码: 0 = 全过；1 = 有判据未过；2 = 探针没跑起来。
 """
 import argparse
@@ -57,10 +59,8 @@ AP.add_argument('--speeds', default='2,1,0.5')
 AP.add_argument('--win', default='1366,853')
 A = AP.parse_args()
 
-# 尺子：GL1 在 home 里的两个作者端点（motion3 原值）与两个采样门槛
-GL1_T0, GL1_T1, GL1_V0, GL1_V1 = 0.0, 18.25, 0.0066, 0.812
-TH_LO, TH_HI = 0.10, 0.30
-CLIP_SPAN = (TH_HI - TH_LO) / ((GL1_V1 - GL1_V0) / (GL1_T1 - GL1_T0))   # 门槛之间有多少 clip 秒
+# 判据用的常量：home 的时长（motion3 Meta.Duration，且 Meta.Loop=false ⇒ 会播完）
+CLIP_DUR = 18.25
 
 
 def free_port():
@@ -105,39 +105,38 @@ JS_CLOCK = r"""(async(speed)=>{ try{
   await t(2000);
   const b=window.__speedDbg();
   const dr=b.real-a.real, dv=b.vEl-a.vEl;
+  /* 点倍率数字 = 一键回 1×（不依赖键盘，也不用来回拖滑杆） */
+  const bEl=document.getElementById('l2SpeedVal');
+  if(bEl) bEl.click();
+  await t(200);
+  const d=window.__speedDbg&&window.__speedDbg();
   return JSON.stringify({speed, patch:a.patch, shownSpeed:b.speed,
-                         vElRate: dr>0?+(dv/dr).toFixed(3):null});
+                         vElRate: dr>0?+(dv/dr).toFixed(3):null,
+                         resetShown:bEl?bEl.textContent:null, resetSpeed:d?d.speed:null});
 }catch(e){ return JSON.stringify({err:String(e&&e.message||e)}); } })"""
 
-# 一条倍速下量一次：设滑杆 → 走页面入口起播 home → 等 GL1 依次穿过两个门槛 → 回报墙钟
-JS_RUN = r"""(async(speed)=>{ try{
+# 只量**一次**的"虚拟钟 → clip 时间"比值（与倍速无关，1× 也过 ⇒ 顺带证明没改坏默认速度）。
+# ⚠️ 原先每条倍速各量一次，两趟之间要等 GL1 从上一个动作淡回起点；那个等待不稳（实测会
+# 两段门槛在同一拍一起越过 → wallMs=0），而这条比值按构造与倍速无关 ⇒ 量一次就够。
+JS_END = r"""(async(speed)=>{ try{
   const t=ms=>new Promise(r=>setTimeout(r,ms));
-  const sp=window.__sp; if(!sp) return JSON.stringify({err:'没有 __sp（先跑 JS_OPEN）'});
-  const sl=document.getElementById('l2Speed'), val=document.getElementById('l2SpeedVal');
+  const m=l2State.app.stage.children[0], mm=m.internalModel.motionManager;
+  const sl=document.getElementById('l2Speed');
   if(!sl) return JSON.stringify({err:'没有 #l2Speed'});
   sl.value=String(speed); sl.dispatchEvent(new Event('input'));
-  await t(200);
-  const shown=val?val.textContent:null;
-  /* 起播走页面自己的选单（不直接调 startMotion —— 那会绕过产品的 play()） */
   const sel=document.getElementById('l2Motion');
   if(![...sel.options].some(o=>o.value==='home')) return JSON.stringify({err:'没有 home 动作'});
   sel.value='home'; sel.dispatchEvent(new Event('change'));
-  /* dir=1 上穿 / dir=-1 下穿。**先等斜坡回到起点再量**：重播后 GL1 是从上一条动作的值
-     淡过来的，不等它落下去就量，两段门槛会在同一拍里一起越过（实测 wallMs=0）。 */
-  const waitTh=(th,limit,dir)=>{ return new Promise(res=>{ const t0=performance.now();
-    const tick=()=>{ const v=sp.read();
-      if(dir>0?v>=th:v<=th) return res(performance.now());
-      if(performance.now()-t0>limit) return res(null);
-      setTimeout(tick,60); };
-    tick(); }); };
-  const low=await waitTh(0.07, 30000, -1);
-  if(low===null) return JSON.stringify({err:'GL1 未回落到 0.07 以下（30s）—— 重播没生效？'});
-  const a=await waitTh(0.10, 60000, 1); if(a===null) return JSON.stringify({err:'GL1 未涨到 0.10（60s）'});
-  const dA=window.__speedDbg?window.__speedDbg().vEl:null;
-  const b=await waitTh(0.30, 90000, 1); if(b===null) return JSON.stringify({err:'GL1 未涨到 0.30（90s）'});
-  const dB=window.__speedDbg?window.__speedDbg().vEl:null;
-  return JSON.stringify({speed, shown, wallMs:Math.round(b-a), vElA:dA, vElB:dB,
-                         v0:+sp.read().toFixed(4), paused:!sp.m.autoUpdate});
+  const t0=performance.now(); let tEnd=null;
+  for(let i=0;i<1200;i++){                      // 最多等 120s（0.5× 下 18.25s 的 clip 要更久）
+    await t(100);
+    const g=mm.state&&mm.state.currentGroup;
+    if(g&&g!=='home'){ tEnd=performance.now(); break; }
+  }
+  if(tEnd===null) return JSON.stringify({err:'120s 内 home 没播完（组没离开 home）'});
+  const d=window.__speedDbg&&window.__speedDbg();
+  return JSON.stringify({speed, endMs:Math.round(tEnd-t0), libEl:+m.elapsedTime.toFixed(1),
+                         vEl:d?d.vEl:null, group:mm.state.currentGroup});
 }catch(e){ return JSON.stringify({err:String(e&&e.message||e)}); } })"""
 
 
@@ -213,12 +212,11 @@ def main():
         if not isinstance(boot, str) or '"ok"' not in boot:
             print('[ERROR 2] 模型没打开：', boot)
             return 2
-        print(f'尺子：GL1 {TH_LO}→{TH_HI} = {CLIP_SPAN:.3f} 秒 clip 时间', flush=True)
+        print(f'判据常量：home 时长 {CLIP_DUR}s（Meta.Loop=false ⇒ 会播完）', flush=True)
 
         speeds = [float(x) for x in A.speeds.split(',') if x.strip()]
-        clock, got = {}, {}
+        clock = {}
         for s in speeds:
-            # ① 实现侧的钟：补丁在位，且 vEl 的斜率随倍速变
             r = ev(f'({JS_CLOCK})({s})')
             print(f'  时钟 {s}×:', r, flush=True)
             try:
@@ -227,32 +225,39 @@ def main():
                 o = {'err': str(r)[:120]}
             if 'err' in o:
                 say(False, f'{s}× 时钟读数失败：{o["err"]}')
-            else:
-                say(bool(o.get('patch')), f'{s}× 虚拟时钟补丁在位（im.update 含 l2VEl）')
-                clock[s] = o.get('vElRate')
+                continue
+            say(bool(o.get('patch')), f'{s}× 虚拟时钟补丁在位（im.update 含 l2VEl）')
+            clock[s] = o.get('vElRate')
+            if s != 1.0:
+                say(str(o.get('resetShown')) == '1.0×' and o.get('resetSpeed') == 1,
+                    f'{s}× 点倍率数字一键回 1×（显示 {o.get("resetShown")} · 内部 {o.get("resetSpeed")}）')
 
-            # ② 动作侧：GL1 两段门槛之间用掉多少墙钟 + 多少虚拟秒
-            r = ev(f'({JS_RUN})({s})')
-            print(f'  动作 {s}×:', r, flush=True)
+        # ② 不用任何曲线斜率的判据：整条 `home`（Meta.Loop=false，18.25s）播完那一刻的**虚拟秒**。
+        #    虚拟钟与 clip 钟 1:1 时，1× 播完应当正好用掉 ≈18.25 虚拟秒（实测 18.65，含起播前摇）。
+        #    ⚠️ **墙钟比值在本环境不可断言**：无头慢渲染下 ticker 会停/钳，2× 只量到 1.46 倍
+        #    （停帧对 2× 的伤害比 1× 小，比值被压扁）⇒ 墙钟只作**方向性**判据。
+        ends = {}
+        for s in (1.0, 2.0):
+            r = ev(f'({JS_END})({s})')
+            print(f'  播完计时 {s}×:', r, flush=True)
             try:
                 o = json.loads(r)
             except Exception:
                 o = {'err': str(r)[:120]}
             if 'err' in o:
-                say(False, f'{s}× 动作测不起来：{o["err"]}')
-                continue
-            got[s] = o
-            say(abs(float(o['shown'].rstrip('×')) - s) < 0.05, f'{s}× 滑杆显示值 = {o["shown"]}')
-            say(not o['paused'], f'{s}× 量的时候没被暂停卡住')
-            # 虚拟钟 → clip 时间必须是 1:1（这条与倍速无关，1× 也过 ⇒ 证明没改坏默认速度）
-            vd = (o.get('vElB') or 0) - (o.get('vElA') or 0)
-            if vd > 0:
-                per = CLIP_SPAN / vd
-                say(abs(per - 1.0) <= 0.15,
-                    f'{s}× 虚拟钟→clip 时间 = {per:.3f} 秒/秒（应 ≈1.00，容差 ±15%）')
-            wallRate = CLIP_SPAN / (o['wallMs'] / 1000.0)
-            print(f'        （参考）{s}× 墙钟口径速率 {wallRate:.3f} —— 无头慢渲染下 '
-                  f'PIXI ticker 把 deltaMS 钳在 100ms，绝对值本来就低于标称，只读比值', flush=True)
+                say(False, f'{s}× 播完计时失败：{o["err"]}')
+            else:
+                ends[s] = o
+        if 1.0 in ends:
+            v1 = ends[1.0].get('vEl') or 0
+            say(abs(v1 - CLIP_DUR) <= 1.2,
+                f'② 1× 播完用掉虚拟秒 = {v1}（clip 时长 {CLIP_DUR}s，容差 ±1.2s）'
+                f' ⇒ 虚拟钟与 clip 钟 1:1，且 1× 与改前一致')
+        if 1.0 in ends and 2.0 in ends:
+            r1, r2 = ends[1.0]['endMs'], ends[2.0]['endMs']
+            say(r2 < r1 * 0.85,
+                f'③ 2× 墙钟明显更短：{r1}ms → {r2}ms（{r1 / float(r2):.3f} 倍；'
+                f'本环境停帧会把比值压到 2 以下，只断言方向）')
 
         c1 = clock.get(1.0)
         if c1:
