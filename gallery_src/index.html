@@ -1881,9 +1881,15 @@ const origStartMotion=mm.startMotion.bind(mm);
           try{ const qa=(mm.queueManager&&mm.queueManager._motions)||[];
             for(const e of qa){ const s=e&&e._stateTimeSeconds;
               if(typeof s==='number'&&isFinite(s)&&(tc===null||s>tc)) tc=s; } }catch(e){}
-          if(tc!==null){ tc-=snapLead();        // 切点微调：见下方 snapLead 的说明
-            for(const pr of tv){ if(pr[0]<=tc+1e-3) best=pr[1]; else break; }
-            if(best===null) best=tv[0][1]; }
+          if(tc!==null){ tc-=snapLead();          // 切点微调：见上面 snapLead 的说明
+            /* 取"这一段（时间序相邻两键）里、时间上离中点更近的那一端"的值。两次边界都验过：
+               · 只取这两端 ⇒ 不会钉到本段用不到的中间状态（`0.3→0.5` 那种坡不会再变成 `0.4`）；
+               · 到**段中点**就切 ⇒ 不会把旧手势一路"抱"到下一个作者键（v6 那版抱太久，用户直接否掉了）。 */
+            let pi=0;
+            for(let q=0;q+1<tv.length;q++){ if(tv[q][0]<=tc) pi=q; else break; }
+            if(pi+1<tv.length){ const mid=(tv[pi][0]+tv[pi+1][0])/2;
+              best = tc<mid ? tv[pi][1] : tv[pi+1][1]; }
+            else best=tv[pi][1]; }
         }
         if(best===null){ best=vals[0]; let dist=Math.abs(before-best);   // 兜底：拿不到键表时退回最近值
           for(let q=1;q<vals.length;q++){ const d=Math.abs(before-vals[q]);
