@@ -4581,6 +4581,9 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
    零 glass / 两层装饰退役 / 静止 0 动画 / 细节与说明开关 / 夜读切换 / 窄屏折行 / 无 JS 异常。
 
 #### 踩坑记录
+- **步骤标题不能有第二份手抄表**：旧 `STEPNAME` 把 2/3/4 写成了「重新导出/看图对比/签字换入」，
+  与实际五步整体错位一位（第 2 步显示成第 3 步的名字）；现已改为读 `S.steps[n][0]`，
+  探针新增「步骤标题与状态表逐字一致」一条。
 - **`font` 简写里有一个未定义的 var，会把整条 font 重置成继承值**：`.ask{font:500 var(--hero-fs)/... var(--font-display)}`
   在 `--font-display` 未定义时不是"忽略这一条"，而是把 family/weight/size 全部 unset ⇒ 标题退回 13px 正文。
   见 `docs/TROUBLESHOOTING.md` §149。

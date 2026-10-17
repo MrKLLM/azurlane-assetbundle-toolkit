@@ -155,15 +155,27 @@ def main():
 
         counts = []
         asks = []
+        ebs = []
         for n in range(1, 6):
             pg.ev(f"document.querySelectorAll('.snode')[{n-1}].click()")
             time.sleep(0.35)
             counts.append(pg.ev("document.querySelectorAll('#cards .stage').length"))
             asks.append(pg.ev("document.querySelector('.ask').textContent.trim()"))
+            ebs.append(pg.ev("document.getElementById('eyebrowTx').textContent.trim()"))
         chk('每个阶段的卡片都挂在某一步下（合计 = 阶段数）',
             sum(counts) == nstage, f'{counts} 合计 {sum(counts)} / {nstage}')
         chk('五步都有各自的指令句', len(set(asks)) >= 4 and all(asks),
             ' / '.join(x[:10] for x in asks))
+        # 步骤标题必须来自状态表，不能是第二份手抄的 STEPNAME（2026-10-17 它曾整体错位一位）
+        import json as _json
+        titles = _json.loads(pg.ev(
+            "JSON.stringify(Object.values(window.__probe.state().steps||{}).map(x=>x[0]))") or '[]')
+        chk('步骤标题与状态表逐字一致',
+            len(titles) == 5 and all(t in eb for t, eb in zip(titles, ebs)),
+            ' / '.join(f'{t}↔{eb.split("·")[1].strip() if "·" in eb else eb}' for t, eb in zip(titles, ebs)))
+        # 截图回到第一步，别把测试末态（第 5 步）当成产品首屏
+        pg.ev("document.querySelectorAll('.snode')[0].click()")
+        time.sleep(0.4)
 
         print('\n── 字与色 ─────────────────────────────────────')
         fam = pg.ev("getComputedStyle(document.querySelector('.ask')).fontFamily") or ''

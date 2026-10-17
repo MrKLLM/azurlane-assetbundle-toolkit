@@ -2742,7 +2742,7 @@ function avoidRefresh(){
      正在跑 > 卡住了 > 等你签字 > 还没做 > 这一步过了
    13 个阶段各自的「写到哪儿 / 判据 / 上次结论」是**证据**，全在「细节」抽屉里；
    主屏只留决策：一句现状 + 一个动作 + 一行"点下去会发生什么"。 */
-const STEPNAME={1:'接模拟器',2:'重新导出',3:'看图对比',4:'签字换入'};
+const STEPNAME={1:'接模拟器',2:'同步配置表',3:'重新导出',4:'看图对比',5:'签字换入'};
 /* 勾选的"签字放行"必须**存在这里**，不能只存在 DOM 上：
    ① 卡片每 8 秒可能被重绘，勾就丢了；② 更要紧的是主按钮「重跑到待确认」以前
    **根本不读这些框**（只有卡片上的「单独跑」读），用户勾完按主按钮，发出去的
@@ -2751,7 +2751,10 @@ const SIGNED=new Set();
 function signedLive(){ return [...SIGNED].filter(k=>(S&&S.stages||[]).some(s=>s.key===k&&s.tier==='live')); }
 function askOf(n){
   const all=S.stages||[], list=n===0?all:stagesOf(n), stn=k=>statusOf(k);
-  const st=S.state||{}, eb='第 '+n+' 步 · '+STEPNAME[n]+' · 共 4 步';
+  const st=S.state||{};
+  const stepTitle=(S.steps&&S.steps[String(n)]&&S.steps[String(n)][0])||STEPNAME[n]||'';
+  const stepTotal=Object.keys(S.steps||{}).length||5;
+  const eb='第 '+n+' 步 · '+stepTitle+' · 共 '+stepTotal+' 步';
   const fail=list.find(s=>stn(s.key)==='fail');
   const aw=list.filter(s=>stn(s.key)==='await');
   const idle=list.filter(s=>stn(s.key)==='idle');
