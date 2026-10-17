@@ -1483,7 +1483,7 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
 .receipt{
   margin:16px 0 0!important;max-width:70ch!important;
   padding:2px 0 2px 12px!important;border-left:2px solid var(--rule)!important;
-  font:400 10px/1.75 var(--font-mono)!important;letter-spacing:.02em;
+  font:400 11px/1.75 var(--font-mono)!important;letter-spacing:.02em;
   color:var(--ink-3)!important;overflow-wrap:anywhere;
 }
 .receipt[hidden]{display:none!important}
