@@ -361,6 +361,17 @@ def main():
             pg.ev("window.__signed===1") and
             not bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
 
+        # 退路按钮：不签字只跑差异。用桩验证接线，不真的发 export 请求。
+        pg.ev("openSign({keys:['deps'],what:'测试退路',note:'不会发请求。',"
+              "onOk:()=>{},alt:{label:'只跑到待确认（不签字）',run:()=>{window.__alt=1}}})")
+        time.sleep(0.35)
+        chk('签字单的退路按钮可见', not bool(pg.ev("document.getElementById('signAlt').hidden")))
+        pg.ev("document.getElementById('signAlt').click()")
+        time.sleep(0.35)
+        chk('退路按钮执行回调并关闭窗口',
+            pg.ev("window.__alt===1") and
+            not bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
+
         pg.ev("document.getElementById('bHelp').click()")
         time.sleep(0.6)
         chk('说明抽屉能打开', bool(pg.ev("document.getElementById('help').classList.contains('on')")))
