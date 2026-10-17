@@ -10785,3 +10785,67 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 
 **教训**：**按钮标签里的步骤号必须和跳转目标来自同一次计算**。旧代码一处写 `nExport`（第 3 步）、
 一处 `step+1`、一处 `Math.min(4, …)`，三处各自漂移；用户看到的"去第 N 步"没有一次是真的。
+
+## §153 背景库「完整性对账 + 词根命名」：假缺是大小写、真缺口是导出层旧；新命名源烤在"共现行"里（2026-10-17 接手 C 任务）
+
+**任务**：用户交接两条——①「系列（词根）」下拉中英/拼音混杂、多组标「未核实」；②完整性未知。
+只读取证 9 个探针后两条都有实锤，全部修复。
+
+### 1. 完整性：34 个"缺失"里 33.5 个是假缺，真问题只有 5 个包
+
+逐源包对账（源包名 ∈ 导出 png 主名集）：`bg` 缺 1、`commonbg` 缺 32、`backyardbg` 缺 2…
+合计 36——**全是假缺**：源包名（`akibastreet_bg`）与导出名（`AkibaStreet_bg`）只差大小写，
+因为**导出名取的是 bundle 内 Texture2D 的名字**、不是包文件名（`backyardbg` 的 `bg1/bg2` → 导出 `boliguan/starlight` 同理）。
+反向核对（导出多出的）与缺失名单逐对咬合，无一张真悬空。
+**真问题**：`loadingbg` 的 `bg_10 / bg_6 / bg_build_1..3` 五个包 mtime 比导出层新（与 §115 追加的 worldcruise 同型）。
+**修法走零覆写路径**：`export_assets.py --target bg --only-dir loadingbg --only <5 包> --out .diag/...`
+先落 staging，字节比对 7 产物 → 2 同 5 异；再对 5 张做**像素级 md5**（同尺寸不同像素 = 真变化；
+`bg_6__2` 尺寸 1920×1080→1024×576 = 包内第二张画整个换掉）⇒ 换入正式区（旧图先备份）。
+判据：换入后 `office==stage` 逐张 md5 全等 + 备份在场。
+⚠️ 缩略图"存在即 skip"：换入后 `make_bg_thumbs` 全 skip、**5 张过期缩略图不会自己重做**；
+而 Recycle Bin 删除在沙箱里 fail-closed（`trash-failed`）⇒ 直接调 `make_bg_thumbs.work((key, True))` 定点重做。
+
+### 2. 命名：词根的中文名烤在"共现行"的其他字段里
+
+50 号拼音词典只覆盖 18 组，92 组无中文名。全表共现扫描（词根 token 在**任意字段**出现 + 同行有中文）找到三条
+**游戏自己写着**的路线，全部有行号可回指：
+
+| 路线 | 表.字段 | 形状 | 例 |
+|---|---|---|---|
+| memory | `memory_template.mask` + `condition` | mask=`bg/bg_<root>_N`（4,702 行全带 bg/ 路径），行 condition「开始战役「活动名·上篇」」| `bg/bg_deepecho_1` ⇒ 深度回音 |
+| re_map | `re_map_template.bg` + `name` | bg=`temp_<root>`，name=`<活动名>常驻复刻` | `temp_wuzang` ⇒ 紫绛槿岚 |
+| child2 | `child2_data.name_background` + `name` | `educate_<root>_N`，name=角色名、name2=称号 | `educate_oceana_1` ⇒ 娜比娅 |
+
+发布器 `tools/sharecfg_re/51_publish_bg_series.py`（照 49 号形状：断言不全过不写盘、二进制写、台账入 MANIFEST）：
+**26 组 / 216 张**，活动名从 condition 的「…」引号投票 + 剥 `·上篇/·下篇` 尾缀。
+`build_bg_meta.py` 权威序插一档：**pinyin > series(exact 组内传播) > table > root**，
+`cn_from` 四档、selfcheck 从 5 条断言扩到 8 条（table 逐字透传 / 发布件地板 15 组 / 双源词根归 series）。
+
+**三条踩坑**：
+- **`root_of` 对 <4 字符词根返回 `''`**：`hms` 就是 ⇒ memory 路线第一版把 94 张图聚到空词根、
+  整组误标「永夜寒光」。空词根在 build_bg_meta 本来就不进下拉（`not i['root']`），发布器必须同步跳过
+  （`not root or root not in roots`），否则发一份永远没人消费还会误导下游的词条。
+- **双源词根让位**：`daofeng` 的关卡 exact 说「起舞于天原之上」（expedition）、回忆 mask 说「碧海光纱」
+  ——两个都是游戏说的，但卡片上的逐张名字来自 exact ⇒ series 赢、table 只补 series 拿不到的词根。
+  这个让位写成了**具名断言**（`daofeng 不得落 table 档`），不靠"应该不会发生"。
+- **condition 引号里取的是活动名**，但 `xinnong` 这类词根早已在 pinyin 词典里（权威序自然压制）——
+  接新源前先看旧源覆盖，别假设"新源命中=新名字"。
+
+### 3. 判据与结果
+
+`51_publish_bg_series.py --check` 六断言全绿 → 写盘；`build_bg_meta.py --check` 全绿
+（tier 分布逐位不变：exact 284 / baked 6 / inferred 420 / none 1,199，**零回归**——本轮只补词根名，不动逐张命名）；
+词根中文名 **25 → 47 / 117**（pinyin 15 + series 10 + table 22），剩 70 组确无表内依据（如实保持词根原文，
+与 §116 的 OCR 天花板同性质：**没有权威依据就不硬凑**）。
+`bg_page_probe` 全 PASS（下拉「未核实」仍 10 项 = series 档；中文词根不带标记 = pinyin/table 档生效）。
+
+**已排除的假设**：
+- 「缺失=漏导」：否，大小写假缺（反向核对逐对咬合）；
+- 「mask 是通用底图可直接用」：否，`bg/bg_memory` 是通用默认值必须剔除；
+- 「条件文本逐行可当名字」：否，节点行 condition 无引号，只有战役首行的「开始战役「…」」有活动名 ⇒ 按词根投票。
+
+**涉及文件**：`tools/sharecfg_re/51_publish_bg_series.py`（新）、`inputs/gamecfg/bg_series_labels.json`（+MANIFEST），
+`scripts/build_bg_meta.py`（table 档 + 权威序 + 断言 8 条）、`scripts/diag/bgm_backfill_decode.py`（BGM 侧，见 §154）、
+`scripts/export_assets.py --out`（零覆写 staging 复用）、`scripts/make_bg_thumbs.py`（`work((key,True))` 定点重做）。
+相关：§115（第一条命名源与三档口径）、§116（OCR 天花板）、WF-30、§111（Raw 定性）。
+

@@ -1,4 +1,18 @@
 #!/bin/sh
+# [env-heal] shim bash 可能不带 coreutils（grep/awk/wc/cat 找不到会让闸门整个失效）。
+# 按 PortableGit 的已知安装形状把 usr/bin 补进 PATH；找不到就维持原样（闸门该红还是红）。
+if ! command -v grep >/dev/null 2>&1; then
+    for c in /c/Users/*/.workbuddy/binaries/PortableGit/*/versions/*/usr/bin \
+             /c/Users/*/AppData/Local/Programs/WorkBuddy/resources/app.asar.unpacked/cli/vendor/*/usr/bin \
+             /usr/bin /bin; do
+        if [ -e "$c/grep" ] || [ -e "$c/grep.exe" ]; then
+            PATH="$c:$PATH"
+            export PATH
+            break
+        fi
+    done
+fi
+
 # 提交闸门（三条；闸 3 排在闸 2 的绕行早退之前，所以 DOC_CHECK_SKIP 放不掉它）：
 #   闸 1  暂存区出现 Output/ 或 files/ 下的路径 -> 直接拦（这两个目录整目录 gitignore，
 #         能进暂存区只可能是 git add -f 强加；里面是 44GB 导出产物 + 2.4 万个重导出资产 json，

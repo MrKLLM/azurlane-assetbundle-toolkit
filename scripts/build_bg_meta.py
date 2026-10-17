@@ -46,6 +46,12 @@ REFS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_scene_refs.json')
 TITLES = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_tip_titles.json')
 # 词根→中文名的确定性词典（tools/sharecfg_re/50_publish_bg_roots.py 发布，可缺：缺了就退回 series）
 ROOT_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_root_labels.json')
+# 词根→系列中文名的第二条权威路（tools/sharecfg_re/51_publish_bg_series.py 发布，可缺）：
+# memory_template.mask+condition / re_map_template / child2_data 三条游戏表内路线。
+# 权威序：pinyin > series(本组 exact 传播) > table(本文件) > 词根原文 ——
+# table 排 series 之后是因为 daofeng 这类词根同时被两个活动用过（关卡 exact 说 起舞于天原之上、
+# 回忆战役 mask 说 碧海光纱），series 来自逐张 exact 引用、与卡片上的具体名字一致，优先让位给它。
+SERIES_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_series_labels.json')
 # 场景背景「画面里有没有角色」的人工逐格标注（scripts/publish_bg_char_flags.py 发布，可缺：
 # 缺了页面就没有筛选依据，会退回「全部」并显式说明——不许静默降级）
 CHARS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_char_flags.json')
@@ -308,11 +314,15 @@ def build(sample=None):
         r['n'] += 1
         if i.get('series'):
             r['series'][i['series']] += 1
-    # 词根中文名的**权威顺序**：拼音整值词典 > series 传播 > 词根原文。
+    # 词根中文名的**权威顺序**：拼音整值词典 > series 传播 > 表内路线(bg_series_labels) > 词根原文。
     # series 排第二是因为它会错：实测 `star_level`（264 张抽象底纹）被同词根的别张图
     # 传播来一个「响彻于天穹之音」—— 名字看着像、其实与这组无关。词典有值时一律压过它。
+    # table（51 号发布器）排 series 之后：它只在 series 拿不到的词根上补位（camelot=泠誓光庭 等
+    # 26 组），与逐张 exact 冲突时（daofeng）让位给 series，保证下拉与卡片名字不打架。
     RL = (json.load(open(ROOT_LABELS, encoding='utf-8'))['labels']
           if os.path.isfile(ROOT_LABELS) else {})
+    SL = (json.load(open(SERIES_LABELS, encoding='utf-8'))['labels']
+          if os.path.isfile(SERIES_LABELS) else {})
     named = {}
     for k, v in roots.items():
         if v['n'] < 2:
@@ -322,6 +332,8 @@ def build(sample=None):
             named[k] = {'n': v['n'], 'cn': d['cn'], 'cn_from': 'pinyin'}
         elif v['series']:
             named[k] = {'n': v['n'], 'cn': v['series'].most_common(1)[0][0], 'cn_from': 'series'}
+        elif k in SL:
+            named[k] = {'n': v['n'], 'cn': SL[k]['cn'], 'cn_from': 'table'}
         else:
             named[k] = {'n': v['n'], 'cn': k, 'cn_from': 'root'}
     roots = named
@@ -441,12 +453,15 @@ def main():
     # 词根表闸门：必须排在 --check 的提前 return **之前**，否则 --check 模式压根不触发它
     rl = (json.load(open(ROOT_LABELS, encoding='utf-8'))['labels']
           if os.path.isfile(ROOT_LABELS) else {})
+    sl = (json.load(open(SERIES_LABELS, encoding='utf-8'))['labels']
+          if os.path.isfile(SERIES_LABELS) else {})
     for desc, passed in [
         # 下限断言：词典文件没了 / 被清空时，上面几条会**全部空转报绿**，
         # 名字会静默退回 series —— 这条负责让它响。
         ('词典在位且有 >=15 组（缺文件不许静默退回 series）', len(rl) >= 15),
-        ('词根表非空，且来源只有 pinyin/series/root 三档',
-         bool(roots) and all(v['cn_from'] in ('pinyin', 'series', 'root') for v in roots.values())),
+        ('词根表非空，且来源只有 pinyin/series/table/root 四档',
+         bool(roots) and all(v['cn_from'] in ('pinyin', 'series', 'table', 'root')
+                             for v in roots.values())),
         ('pinyin 档逐字等于词典值（索引与页面都不许改写或自己升档）',
          all(roots[k]['cn'] == rl[k]['cn'] for k in roots
              if roots[k]['cn_from'] == 'pinyin' and k in rl)),
@@ -454,6 +469,12 @@ def main():
          all(k in roots and roots[k]['cn_from'] == 'pinyin' for k in rl if rl[k]['n'] >= 2)),
         ('series 档不可能压过词典已有的词根（star_level 那种错传播就是这么来的）',
          all(roots[k]['cn_from'] != 'series' or k not in rl for k in roots)),
+        ('table 档逐字等于发布件值（索引不许自己改写）',
+         all(roots[k]['cn'] == sl[k]['cn'] for k in roots if roots[k]['cn_from'] == 'table')),
+        ('table 发布件在位且有 >=15 组（缺文件不许静默退回 root 原文）', len(sl) >= 15),
+        ('table 与 series 双源词根归 series（权威序实测：daofeng 关卡 exact 与回忆 mask 各说一个名，'
+         '逐张 exact 赢 ⇒ 不得落 table 档）',
+         'daofeng' not in roots or roots['daofeng']['cn_from'] != 'table'),
     ]:
         print('%s %s' % ('OK ' if passed else 'FAIL', desc))
         ok &= passed

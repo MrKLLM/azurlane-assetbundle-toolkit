@@ -1,4 +1,18 @@
 #!/bin/sh
+# [env-heal] shim bash 可能不带 coreutils（grep/awk/wc/cat 找不到会让闸门整个失效）。
+# 按 PortableGit 的已知安装形状把 usr/bin 补进 PATH；找不到就维持原样（闸门该红还是红）。
+if ! command -v grep >/dev/null 2>&1; then
+    for c in /c/Users/*/.workbuddy/binaries/PortableGit/*/versions/*/usr/bin \
+             /c/Users/*/AppData/Local/Programs/WorkBuddy/resources/app.asar.unpacked/cli/vendor/*/usr/bin \
+             /usr/bin /bin; do
+        if [ -e "$c/grep" ] || [ -e "$c/grep.exe" ]; then
+            PATH="$c:$PATH"
+            export PATH
+            break
+        fi
+    done
+fi
+
 # 提交闸门 3：改代码的提交必须交代「技能沉淀判定」（AGENTS.md DoD 第 3 步）。
 #
 # 为什么单独一个 hook：pre-commit 看不到 commit message（消息文件此时还不存在），

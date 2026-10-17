@@ -2,9 +2,10 @@
 """生成画廊 BGM 页的数据 `Output/gallery_v2/bgm.json`（自包含，前端不再回头读 .diag）。
 
 三个来源，缺后两个也能跑（只是没有中文名）：
-  1. `Output/Audio/BGM*/*.ogg` —— 曲目本体（时长优先取 `transcode_bgm.py` 的台账（按 codec 分文件），缺则 ffprobe）
+  1. `Output/Audio/BGM*/*.flac` —— 曲目本体（时长优先取 `transcode_bgm.py` 的台账（按 codec 分文件），缺则 ffprobe）
   2. `.diag/sharecfg_re/lua_json/music_collect_config.json` —— 官方中文曲名（实测 54 首）
   3. `.diag/sharecfg_re/lua_json/music_album.json` —— 11 张专辑的中文名
+  4. `.diag/sharecfg_re/lua_json/beat_game_music.json` —— 音游 12 首（song01-12；11/12 有官方名）
 ⚠️ 2/3 在 `.diag/`（gitignore、可再生的解表产物），所以**名字一律烘进 bgm.json**，
    前端只读 bgm.json；这两张表读不到时打警告并降级成 slug，不静默出半截数据。
 
@@ -24,7 +25,8 @@ import paths as P
 LUA = os.path.join(P.ROOT, '.diag', 'sharecfg_re', 'lua_json')
 
 # 「出处」= 哪张配置表引用了这首曲子。标签是**按这张表在配什么**给的，不是游戏自己的曲库分类。
-# 这 12 张表来自对 774 张 lua 表的一次全量扫描（2026-10-06）；`--rescan` 会重扫并报告新出处。
+# 这 13 张表来自对 779 张 lua 表的逐字段扫描（2026-10-06 全量；2026-10-17 复扫确认
+# 名单外再无 ≥5 处的精确引用源，只有 1~4 处的散点垃圾）；`--rescan` 会重扫并报告新出处。
 SCENE_TABLES = {
     'voice_bgm': '主界面 / 通用场景',
     'activity_sp_story': '活动剧情',
@@ -38,9 +40,15 @@ SCENE_TABLES = {
     'world_expedition_data': '大世界远征',
     'login': '登录界面',
     'activity_series_enemy_story': '活动敌方剧情',
+    'beat_game_music': '音游',
 }
 # 表里若有这些字段，就把值当"这一行的中文名"带出来（宿舍房间名、剧情名…）
 LABEL_FIELDS = ('room', 'name', 'album_name', 'title', 'story_name', 'map_name')
+# 个别表的"名字字段"不走默认校验：`beat_game_music.music_name` 是官方曲名，
+# 会带拉丁字母（`無限大HearT`），默认的"不得出现连续拉丁字母"会把整列判掉 ⇒ 单独放行。
+TABLE_LABEL_OVERRIDE = {
+    'beat_game_music': (('music_name',), lambda s: bool(s and s.strip()) and len(s) <= 30),
+}
 # ⚠️ 但**不是每张表的 `name` 都是给人看的**：实测 `expedition_data_by_map` / `memory_storyline`
 #    的 `name` 装的是内部代号（`浮樱影华-下篇||CHAPTER_EX||E_X`、`EP2-1 发生于行动前的事`），
 #    搬到界面上就是噪声。所以按内容筛：要含中文、不含代码分隔符、不太长。
@@ -62,7 +70,14 @@ USAGE = [('battle', '战斗'), ('boss', 'BOSS 战'), ('story', '剧情'), ('them
          ('idol', '偶像'), ('login', '登录'), ('main', '主界面'), ('backyard', '后宅'),
          ('room', '宿舍'), ('event', '活动'), ('richang', '日常'), ('airraid', '空袭'),
          ('ninjacity', '联动'), ('nier', '联动'), ('ryza', '联动'), ('azumaster', '联动'),
-         ('masangainu', '联动'), ('se', '音效')]
+         ('masangainu', '联动'), ('se', '音效'),
+         # 2026-10-17 增补：以下词根逐一做过游戏内证据扫描（.diag/bgm_probe10_report.txt），
+         # 有表内文字佐证才收录；sk/qe/cw/tl/wavyflow/diego/echo 等查无依据 ⇒ 保持空，不硬凑。
+         ('holo', '联动'),      # memory_template 通关「集结hololive反抗军」/「异世界的来客」
+         ('idom', '联动'),      # memory_template「响彻碧海的偶像歌」+ 765 事务所主题
+         ('yumia', '联动'),     # character_voice atelier_yumia_* / activity_series_enemy_story 引用
+         ('doa', '联动'),       # memory_template「假日航线」+ DOA 联动装备文本
+         ]
 _SHIP_BASE = {}          # 由 main() 调 ship_base_names() 填（classify 要用，避免每张表都重读 meta）
 
 
@@ -79,9 +94,14 @@ def _lua(name):
 
 
 def _norm_bgm(x):
-    """表里的曲名有的带 `bgm-` 前缀有的不带（`bgm-bsm-1` vs `story-room-agir`）⇒ 两边都归一。"""
+    """表里的曲名有的带 `bgm-` 前缀有的不带（`bgm-bsm-1` vs `story-room-agir`）⇒ 两边都归一。
+    ⚠️ 要**剥到没有为止**：源文件里有一批双前缀的（`bgm-bgm-cccp`），只剥一层的话
+    表值 `bgm-cccp`（⇒`cccp`）永远追不上文件（⇒`bgm-cccp`）——2026-10-17 修复，
+    一次捞回 北境序曲/破晓冰华/极地风暴/活动剧情引用 4 首。"""
     x = str(x).strip().lower()
-    return x[4:] if x.startswith('bgm-') else x
+    while x.startswith('bgm-'):
+        x = x[4:]
+    return x
 
 
 def collect_refs(tables, stems_norm):
@@ -91,8 +111,9 @@ def collect_refs(tables, stems_norm):
        所以两边都过 `_norm_bgm`，键用归一名。"""
     refs = {}
     for t, label in tables.items():
+        fields, ok = TABLE_LABEL_OVERRIDE.get(t, (LABEL_FIELDS, label_ok))
         for r in (_lua(t + '.json') or []):
-            cn = next((str(r[k]).strip() for k in LABEL_FIELDS if label_ok(r.get(k))), '')
+            cn = next((str(r[k]).strip() for k in fields if ok(r.get(k))), '')
             for v in r.values():
                 if isinstance(v, str) and v:
                     key = _norm_bgm(v)
@@ -124,6 +145,10 @@ def classify(slug):
     """→ (用途, 关联舰/角色中文名)。允许为空，空就是真的没有，不硬凑。"""
     toks = [x for x in re.split(r'[-_]', slug.lower()) if x]
     usage = next((cn for key, cn in USAGE if key in toks), '')
+    # 音游曲：`beat_game_music` 12 行的 `bgm` 数值字段 1..12 与 `settlement_type`
+    # （song11/song12）两行确证了"第 N 行 ↔ bgm-songNN"的映射，其余 10 行只是没填名。
+    if not usage and any(re.fullmatch(r'song\d{1,2}', x) for x in toks):
+        usage = '音游曲'
     ship = ''
     for x in toks:
         if len(x) > 2 and x not in SHIP_STOP and x in _SHIP_BASE:
@@ -207,6 +232,16 @@ def main():
     oggs = sorted(f for f in os.listdir(a.dir) if f.lower().endswith('.' + ext))
     stems = {os.path.splitext(f)[0] for f in oggs}
     stems_norm = {_norm_bgm(s): s for s in stems}
+    # 归一是"剥到没有 bgm- 为止"，若两份源文件归一后同键（如 bgm-x 与 bgm-bgm-x 并存）
+    # 会静默互覆 ⇒ 闸一道。
+    if len(stems_norm) != len(stems):
+        seen = {}
+        for s in stems:
+            n = _norm_bgm(s)
+            if n in seen:
+                print(f'[FAIL] 归一冲突: {seen[n]} vs {s}（都归一成 {n}）')
+                return 2
+            seen[n] = s
     global _SHIP_BASE
     _SHIP_BASE = ship_base_names()
     if a.rescan:

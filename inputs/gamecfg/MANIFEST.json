@@ -16,9 +16,10 @@
    "tools/sharecfg_re/48_publish_meta_group_bridge.py",
    "tools/sharecfg_re/49_publish_bg_scene.py",
    "scripts/ocr_bg_tip_titles.py",
-   "scripts/publish_bg_char_flags.py"
+   "scripts/publish_bg_char_flags.py",
+   "tools/sharecfg_re/51_publish_bg_series.py"
   ],
-  "landed_at": "2026-10-07"
+  "landed_at": "2026-10-17"
  },
  "files": [
   {
@@ -58,6 +59,18 @@
    ],
    "source": ".diag/sharecfg_re/lua_json/*.json（773 张表全扫，只收背景语义字段的整值引用）",
    "coverage": "精确中文名 284/1875 png (15.1%)"
+  },
+  {
+   "path": "bg_series_labels.json",
+   "bytes": 11735,
+   "sha256": "028d4d215979c12159a1155dbb93f923df10a0b0485a96aa4c57af3d269be484",
+   "rows": 26,
+   "role": "背景图词根（Output/Raw png 的 root）→ 系列中文名，来源只有三条游戏表内路线：memory_template.mask+condition / re_map_template.bg+name / child2_data.name_background+name",
+   "consumers": [
+    "scripts/build_bg_meta.py"
+   ],
+   "source": ".diag/sharecfg_re/lua_json/{memory_template,re_map_template,child2_data}.json",
+   "coverage": "词根中文名 26 组 / 216 张 png"
   },
   {
    "path": "bg_tip_titles.json",
@@ -143,9 +156,9 @@
   },
   {
    "path": "ship_skin_words.json",
-   "bytes": 4960027,
-   "sha256": "af96c5e95886fdbcc49e4950929be4748561b6b18868c6816d16f06048f0cae9",
-   "rows": 2569,
+   "bytes": 4973454,
+   "sha256": "5db395e7b8c92c4faae245e59317780f00b83731b5a192e1955db3896c636457",
+   "rows": 2575,
    "role": "皮肤行 id → 各台词字段的中文正文（只保留非空标量字段；嵌套字段尚未装配，见 §36 B 段）",
    "consumers": [
     "scripts/build_skin_words.py"
