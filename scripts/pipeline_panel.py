@@ -1935,6 +1935,7 @@ pre .bad{color:#E08A69!important}
   margin-top:20px;padding-top:14px;border-top:1px solid var(--rule);
 }
 #signmodal .sact .ghost{border-bottom:1px solid var(--rule)!important;padding:6px 0!important}
+#signmodal .sact #signAlt{margin-right:auto!important;border-bottom-color:var(--ochre)!important;color:var(--ochre)!important}
 #signmodal .sact .pact{padding:11px 22px!important;font-size:12px!important}
 #signmodal .sact .pact:disabled{opacity:.3!important;cursor:not-allowed!important}
 
@@ -2141,6 +2142,7 @@ pre .bad{color:#E08A69!important}
       <em id="signDate"></em>
     </label>
     <div class="sact">
+      <button type="button" class="ghost" id="signAlt" hidden></button>
       <button type="button" class="ghost" data-sclose>取消</button>
       <button type="button" class="pact" id="signGo" disabled>签字放行</button>
     </div>
@@ -3083,13 +3085,15 @@ function askOf(n){
       why:detailOf(fail.key)+' 日志里有那行原因。',
       acts:[{a:'export',t:'▶ 再跑一次',k:'pact mag'},{a:'detail',t:'看日志',k:'link2'}]};
     if(idle.length===list.length) return {eb, ask:'从源包重算 '+nEm(list.length)+' 类产物',
-      why:'立绘 / Spine / Live2D 只写暂存区；依赖表、元数据、语音、CG 要你签字才动正式区。要跑一会儿。',
+      why:'立绘 / Spine / Live2D 只写暂存区；依赖表、元数据、语音、CG 要你签字才动正式区。'+
+          '点下去会先弹确认单，再决定签不签。要跑一会儿。',
       acts:[{a:'export',t:'▶ 开始重导',k:'pact mag'}]};
     if(aw.length) return {eb, ask:'重导好了 '+nEm(list.length-idle.length)+' / '+nEm(list.length)+
         ' 项，其中 '+nEm(aw.length)+' 项要你签字才写正式区',
-      why:'没签字的那几项只算了差异，正式区一个字节没碰。勾上签字再跑才会覆盖。',
-      acts:[{a:'export',t:'▶ 重跑到待确认',k:'pact mag'},
-            {a:'staged',t:'只重跑导出三件',k:'link2'}]};
+      why:'这 '+aw.length+' 项只算了差异，正式区一个字节没碰。点主按钮会先弹签字单；'+
+          '不想签就按单子左下角「只跑到待确认」。',
+      acts:[{a:'export',t:'⚑ 处理这 '+aw.length+' 项（签字）',k:'pact sign mag'},
+            {a:'staged',t:'只重跑暂存三件',k:'link2'}]};
     if(idle.length) return {eb, ask:'重导跑好了 '+nEm(list.length-idle.length)+' 项，还剩 '+nEm(idle.length)+' 项',
       why:'继续跑会把剩下的算完。',
       acts:[{a:'export',t:'▶ 跑完剩下的',k:'pact mag'}]};
@@ -3386,13 +3390,13 @@ function stepFill(){
    原生 confirm() 是浏览器画的，和纸本界面两层皮；它也放不下一张「会写哪几个阶段、
    写到哪儿、有没有备份」的清单。这里用同一套纸/墨/朱砂画一张签字单：
    范围逐条列出 → 勾选确认 → 签名 → 才放行。 */
-let SIGN_CTX=null;
+let SIGN_CTX=null, SIGN_ALT=null;
 function syncSign(){
   const name=($('#signName').value||'').trim();
   $('#signGo').disabled = !($('#signAgree').checked && name);
 }
 function openSign(o){
-  SIGN_CTX=o;
+  SIGN_CTX=o; SIGN_ALT=o.alt||null;
   $('#signWhat').textContent=o.what||'';
   $('#signList').innerHTML=(o.keys||[]).map(k=>{
     const s=(S.stages||[]).find(x=>x.key===k)||{};
@@ -3404,6 +3408,8 @@ function openSign(o){
       '<span class="tier '+T[1]+'">'+T[0]+'</span></div>';
   }).join('');
   $('#signNote').textContent=o.note||'';
+  const alt=$('#signAlt');
+  if(alt){ alt.hidden=!SIGN_ALT; alt.textContent=SIGN_ALT?(SIGN_ALT.label||'不签字，先跑只读的那一半'):''; }
   $('#signAgree').checked=false;
   $('#signName').value=localStorage.getItem('panel.signer')||'';
   $('#signDate').textContent=new Date().toLocaleString('zh-CN',{hour12:false});
@@ -3415,7 +3421,7 @@ function openSign(o){
 function closeSign(){
   $('#signmodal').classList.remove('on');
   $('#signmodal').setAttribute('aria-hidden','true');
-  SIGN_CTX=null;
+  SIGN_CTX=null; SIGN_ALT=null;
 }
 $('#signAgree').onchange=syncSign;
 $('#signName').oninput=syncSign;
@@ -3426,6 +3432,14 @@ $('#signGo').onclick=()=>{
   const cb=SIGN_CTX.onOk;
   closeSign();
   if(cb) cb(nm);
+};
+/* 「不签字，先跑只读的那一半」：这是签字单里的退路，不是取消。
+   第 3 步的重导在未签字时仍会产出暂存区与差异，只有 live 阶段不写正式区。 */
+$('#signAlt').onclick=()=>{
+  if(!SIGN_ALT) return;
+  const run=SIGN_ALT.run;
+  closeSign();
+  if(run) run();
 };
 $$('#signmodal [data-sclose]').forEach(el=>el.onclick=closeSign);
 
@@ -3476,16 +3490,24 @@ function ctaRun(a, to){
     return;
   }
   if(a==='export'){
-    const keys=actStages('export');
-    const ap=signedLive().filter(k=>keys.indexOf(k)>=0);
-    if(ap.length){
-      openSign({keys:ap, what:'第 '+stepNo('paintings',3)+' 步：重导并写正式区',
-        note:'勾了签字的阶段会直接覆盖 Output/（audio / cg 没有暂存通道）；'+
-             '其余只写暂存区，正式区一个字节不碰。',
-        onOk:()=>post({stages:keys,approve:ap,force:force},{label:'重新导出'})});
-      return;
-    }
-    return post({stages:keys,approve:[],force:force},{label:'重新导出'});
+    const keys=actStages('export'), live=liveOf(keys);
+    const runUnsigned=()=>post({stages:keys,approve:[],force:force},
+                               {label:'重新导出（不签字）'});
+    if(!live.length) return runUnsigned();
+    /* 只要这一步有 live 阶段，主按钮就先弹签字单，绝不"点了直接开跑"。
+       2026-10-17 用户点「重跑到待确认」→ 直接跑完又回到同一屏，以为坏了。
+       单子里给出两条路：签字写正式区 / 不签字只跑到待确认。 */
+    openSign({
+      keys:live,
+      what:'第 '+stepNo('paintings',3)+' 步：重新导出',
+      note:'立绘 / Spine / Live2D 只写 .diag/ 暂存区，不需要签字。'+
+           '上面这些 live 阶段在签字后会直接写正式区（audio / cg 没有暂存通道）；'+
+           '不签就按左下角「只跑到待确认」，它们只算差异，正式区一个字节不碰。',
+      onOk:()=>post({stages:keys,approve:live,force:force},
+                    {label:'重新导出（已签字）'}),
+      alt:{label:'只跑到待确认（不签字）', run:runUnsigned}
+    });
+    return;
   }
   if(a==='staged') return post({stages:['paintings','spine','live2d'],force:force},
                               {label:'只重跑导出三件'});

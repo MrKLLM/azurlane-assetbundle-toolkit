@@ -263,7 +263,36 @@ def main():
         time.sleep(0.4)
 
         print('\n── 步骤状态与签字 ─────────────────────────────')
+        # 探针不能假设"待办一定是第 2 步"：用户可能已经同步完配置表、正在第 3 步。
+        work = pg.ev("__probe.work()")
+        # 第 3 步：只要这一步有 live 阶段，主按钮必须先弹签字单，不能"点了直接开跑又回来"
+        # （2026-10-17 用户点的就是「重跑到待确认」，以为签字窗坏了）。
         pg.ev("document.querySelectorAll('.snode')[2].click()")
+        time.sleep(0.45)
+        ask3 = pg.ev("document.querySelector('.ask').textContent") or ''
+        cta3 = pg.ev("document.querySelector('#cta .pact').textContent") or ''
+        if '签字' in ask3 or '重导' in ask3:
+            chk('第 3 步主按钮写明签字或重导', ('签字' in cta3 or '重导' in cta3), cta3)
+            pg.shot('export.png')
+            pg.ev("document.querySelector('#cta .pact').click()")
+            time.sleep(0.5)
+            chk('点第 3 步主按钮先弹签字单，不直接开跑',
+                bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
+            rows3 = pg.ev(
+                "[...document.querySelectorAll('#signList .srow .k')].map(x=>x.textContent).join(',')") or ''
+            chk('第 3 步签字单列出 deps / meta / audio / cg',
+                all(k in rows3 for k in ('deps', 'meta', 'audio', 'cg')), rows3)
+            alt = pg.ev("(()=>{const b=document.getElementById('signAlt');"
+                        "return b?[b.hidden,b.textContent]:null})()")
+            chk('签字单提供「只跑到待确认」退路',
+                bool(alt) and not alt[0] and '只跑到待确认' in alt[1], str(alt))
+            pg.shot('export_sign.png')
+            pg.ev("closeSign()")
+            time.sleep(0.3)
+
+        # 查看提示：必须切到一个**非待办**步骤才成立。
+        view = 5 if work != 5 else 1
+        pg.ev(f"document.querySelectorAll('.snode')[{view-1}].click()")
         time.sleep(0.45)
         vn = pg.ev("!document.getElementById('viewnote').hidden")
         vtx = pg.ev("document.getElementById('viewnote').textContent") or ''
@@ -282,35 +311,37 @@ def main():
         time.sleep(0.4)
         chk('一键跳到待办步骤后提示消失', bool(pg.ev("document.getElementById('viewnote').hidden")))
 
-        # 第 2 步：文案与主动作都必须真的是「同步配置表」。
-        # 用户 2026-10-17 看到的第 2 步是「从源包重算 4 类产物 / 开始重导」——
-        # 文案表整体错位一位，按下去还会从 preflight 拉起整条管线。
+        # 第 2 步：文案永远是配置表；签字单只在它还没同步完时才有得测。
         pg.ev("document.querySelectorAll('.snode')[1].click()")
         time.sleep(0.45)
         ask2 = pg.ev("document.querySelector('.ask').textContent") or ''
         cta2 = pg.ev("document.querySelector('#cta .pact').textContent") or ''
         chk('第 2 步文案是配置表，不是重导', '配置表' in ask2 and '重算' not in ask2, ask2[:40])
-        chk('第 2 步主动作是同步配置表', '同步配置表' in cta2, cta2)
-        pg.shot('cfg.png')
-        pg.ev("document.querySelector('#cta .pact').click()")
-        time.sleep(0.5)
-        chk('同步配置表会开签字单（不是直接开跑）',
-            bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
-        sign_txt = pg.ev("document.getElementById('signList').textContent") or ''
-        chk('签字单列的是 cfg.publish 与写入位置',
-            'cfg.publish' in sign_txt and 'inputs/gamecfg' in sign_txt, sign_txt[:70])
-        chk('未勾选/未签名时放行按钮禁用',
-            bool(pg.ev("document.getElementById('signGo').disabled")))
-        pg.ev("document.getElementById('signAgree').checked=true;"
-              "const n=document.getElementById('signName');n.value='测试';"
-              "n.dispatchEvent(new Event('input'))")
-        time.sleep(0.2)
-        chk('勾选并签名后才可放行',
-            not bool(pg.ev("document.getElementById('signGo').disabled")))
-        pg.shot('cfg_sign.png')
-        pg.ev("closeSign()")          # 只验接线，不真的发布 inputs/gamecfg
-        time.sleep(0.3)
-        chk('取消签字不会关掉配置表这一步', '配置表' in (pg.ev("document.querySelector('.ask').textContent") or ''))
+        if '同步配置表' in cta2:
+            chk('第 2 步主动作是同步配置表', '同步配置表' in cta2, cta2)
+            pg.shot('cfg.png')
+            pg.ev("document.querySelector('#cta .pact').click()")
+            time.sleep(0.5)
+            chk('同步配置表会开签字单（不是直接开跑）',
+                bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
+            sign_txt = pg.ev("document.getElementById('signList').textContent") or ''
+            chk('签字单列的是 cfg.publish 与写入位置',
+                'cfg.publish' in sign_txt and 'inputs/gamecfg' in sign_txt, sign_txt[:70])
+            chk('未勾选/未签名时放行按钮禁用',
+                bool(pg.ev("document.getElementById('signGo').disabled")))
+            pg.ev("document.getElementById('signAgree').checked=true;"
+                  "const n=document.getElementById('signName');n.value='测试';"
+                  "n.dispatchEvent(new Event('input'))")
+            time.sleep(0.2)
+            chk('勾选并签名后才可放行',
+                not bool(pg.ev("document.getElementById('signGo').disabled")))
+            pg.shot('cfg_sign.png')
+            pg.ev("closeSign()")          # 只验接线，不真的发布 inputs/gamecfg
+            time.sleep(0.3)
+            chk('取消签字不会关掉配置表这一步',
+                '配置表' in (pg.ev("document.querySelector('.ask').textContent") or ''))
+        else:
+            print(f'  SKIP  第 2 步已同步完成（主动作「{cta2}」），跳过同步签字单')
 
         pg.ev("openSign({keys:['pull'],what:'测试签字',note:'这是一条测试说明，不会真的发请求。',"
               "onOk:()=>{window.__signed=1}})")

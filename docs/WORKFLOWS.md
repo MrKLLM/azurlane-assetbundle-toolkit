@@ -4651,3 +4651,10 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
 
 **涉及文件**: `scripts/pipeline_panel.py`、`scripts/diag/panel_paper_probe.py`、
 `docs/TROUBLESHOOTING.md` §152。
+
+**追加（2026-10-17 18:45，用户第二次反馈）**：第 3 步跑完 7/7、其中 4 项 `await` 时，
+主按钮仍叫「重跑到待确认」；点下去用同一组空 `approve` 重跑，回到同一屏 —— 看起来就像签字窗坏了。
+当时签字入口只藏在「细节」抽屉的 `.appr` 勾选框里，主按钮从不读它。现在 `export` 动作
+**无条件先开签字单**：列出 deps / meta / audio / cg 与写入位置，左下角给
+「只跑到待确认（不签字）」的退路；`await` 状态主按钮文案改为「处理这 N 项（签字）」。
+判据：`#signmodal` 必须打开、`#signList` 含四个 live key、`#signAlt` 可见且文案含「只跑到待确认」。
