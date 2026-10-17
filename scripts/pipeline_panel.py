@@ -2920,9 +2920,15 @@ function askOf(n){
 
   if(n===1){
     const pf=st.preflight, pl=st.pull;
-    if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
-      why:(pf&&fail.key==='preflight'?pf.detail:fail.key)+'：先看它为什么红。',
-      acts:[{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
+    if(fail) {
+      const stale = pf && fail.key==='preflight' && /配置表过期/.test(pf.detail||'');
+      return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
+        why:(pf&&fail.key==='preflight'?pf.detail:fail.key)+'：先看它为什么红。',
+        acts: stale
+          ? [{a:'goto2',t:'▶ 去第 2 步同步配置表',k:'pact mag'},
+             {a:'diff',t:'再查一次',k:'link2'},{a:'detail',t:'看细节',k:'link2'}]
+          : [{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
+    }
     if(pf&&!pf.ok) return {eb, red:1, ask:'权威输入缺东西，先别往下走',
       why:'inputs/azdata、inputs/gamecfg 与画廊 vendor 是重导的唯一起点，缺了跑出来的是错的。',
       acts:[{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看缺了哪些',k:'link2'}]};
@@ -3260,7 +3266,9 @@ $('#signGo').onclick=()=>{
 };
 $$('#signmodal [data-sclose]').forEach(el=>el.onclick=closeSign);
 
-function ctaRun(a){  if(a==='next') return void (step=Math.min(4,step+1), render());
+function ctaRun(a){
+  if(a==='next') return void (step=Math.min(4,step+1), render());
+  if(a==='goto2') return void (step=2, render());
   if(a==='prev') return void (step=Math.max(1,step-1), render());
   if(a==='detail') return void openDetail();
   const live4=(S.stages||[]).filter(s=>s.step===4&&s.tier==='live').map(s=>s.key);

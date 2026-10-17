@@ -200,6 +200,12 @@ def main():
         time.sleep(1.2)   # 五步点完会触发 .snode.in / .ask.swap 的入场动画，等它们跑完再判
         chk('静止时零个动画在跑', (pg.ev("document.getAnimations().length") or 0) == 0,
             f"getAnimations={pg.ev('document.getAnimations().length')}")
+        # 数据状态相关：preflight 因配置表过期判红时，主动作必须直达第 2 步，而不是让人反复"再查一次"
+        why_now = pg.ev("document.getElementById('why').textContent") or ''
+        if '配置表过期' in why_now:
+            chk('配置表过期时主动作直达第 2 步',
+                '去第 2 步' in (pg.ev("document.querySelector('#cta .pact').textContent") or ''),
+                pg.ev("document.querySelector('#cta .pact').textContent"))
         pg.shot('main.png')
         pg.ev("document.getElementById('bDetail').click()")
         time.sleep(0.9)
