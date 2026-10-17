@@ -97,9 +97,9 @@
   },
   {
    "path": "meta_group_bridge.json",
-   "bytes": 708,
-   "sha256": "92257ee3f084bf362f0ddcfbda1cff5f703034af192049cfb2f16bd04d3dfe03",
-   "rows": 1,
+   "bytes": 2,
+   "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+   "rows": 0,
    "role": "META 实体的「有船行、无皮肤行」补桥：自机立绘资源名（小写）→ 语音包组号/阵营/舰种/实体名/剧情行 id + prefab 出处（游戏本体 ship_data_group + fleet_tech_ship_class + ship_skin_template.prefab）",
    "consumers": [
     "scripts/build_ship_meta.py",
@@ -143,9 +143,9 @@
   },
   {
    "path": "ship_skin_template.json",
-   "bytes": 3436333,
-   "sha256": "064f9750744121ebf567059a1406431733ee74c1d96a171742efb49f5eb91c93",
-   "rows": 2865,
+   "bytes": 3444941,
+   "sha256": "f198e7f499aeb7173647b418e055b9612351cd3592636410a1cffc80f6f99674",
+   "rows": 2871,
    "role": "皮肤行 id → painting / name / ship_group / voice_actor 等（2865 行，与 azdata 同构，只留消费字段）",
    "consumers": [
     "scripts/skin_table.py",
