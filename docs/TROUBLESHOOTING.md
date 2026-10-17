@@ -10662,3 +10662,53 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 ⇒ 这批 motion 此后**唯一的回滚路径** = `git show cccb0e1^:scripts/extract_motions.py` 取回改动前正本 +
 按 WF-15 重导一次全量（≈30 分钟机器时间）；**备份已删，无一键回滚**。小备份
 `Output/_OLD_bak/l2d_motion_20261016_223324`（gezi_2 先换那次，57 文件）未在本次点名范围，保留。
+
+## §148 动作导出配方未固化：脚本报"成功"，产物却不是盘上那一版
+
+**症状**：用当前 `extract_motions.py` 重跑 `heitaizi_2`，`home` 只有 **118 条曲线**，盘上是 **204 条**；
+`PartOpacity` 从 43 条掉到 1 条。脚本仍打印「成功 14 / 失败 0」，退出码 0。
+
+**根因**：`USE_LINEAR` / `EMIT_CONST` 用 `bool(os.environ.get(...))`，**默认关闭**；盘上 269 个模型是当年
+带 `L2D_MOTION_LINEAR=1 L2D_MOTION_EMIT_CONST=1` 导出的。`update_pipeline.py` 的 `st_live2d` 没设这两个 env，
+所以「增量重跑」会产出与正式区不同、但同样自称成功的 motion。
+
+**修法**：两处都改。
+1. `extract_motions.py`：默认值改为**生产配方**（linear + const），要实验才显式 `=0`；每次启动打印
+   `[*] 动作配方: linear+const (生产配方)`。
+2. `update_pipeline.py`：`st_live2d` 显式钉 `ENV['L2D_MOTION_LINEAR']='1'`、`EMIT_CONST='1'` 并回读打印。
+
+**验证**：`heitaizi_2` 三步重跑后，18 个文件除 `model3.json` 外**逐字节一致**（`texture_00.png` 像素一致、
+仅 PNG 封装字节不同）；`model3.json` 的差异只是旧版遗留的 `Head/Body/Special/TapHead/...` 别名组，
+按「解析到同一个 motion 文件」判等。端到端闸门：`scripts/diag/verify_pipeline_e2e.py`。
+
+**已排除**：不是源包陈旧（源包 mtime 早于产物），也不是 `fix_model3` 漏跑。
+
+## §149 CSS `font` 简写里引用未定义变量，会把整条 font 重置为继承值
+
+**症状**：给控制台写 `.ask{font:500 var(--hero-fs)/1.16 var(--font-display)!important}`，
+`--hero-fs` 有值、`--font-display` 拼错（只定义了 `--fd`）。浏览器里主标题不是 58px 衬线，
+而是 **42px 无衬线、weight 400**；但 `getComputedStyle` 里能看到 `--hero-fs=clamp(...)`，看起来像"规则没生效"。
+
+**根因**：CSS 自定义属性在**计算值时间**替换；`font` 是简写，只要其中任意一个 var 无效，
+整条声明变成 "invalid at computed-value time"，**所有 font 长属性按 unset 处理**（继承 body），
+而不是"忽略这一条、回退到上一条 `.ask` 规则"。所以它会**覆盖**前面那条合法的 `font:300 ...`。
+
+**修法**：定义别名 `--font-display:var(--fd); --font-ui:var(--fb); --font-mono:var(--fm);`，
+或统一只用已定义的 token。判据必须看 `getComputedStyle(el).fontFamily` 与 `fontWeight`，不能只看 `fontSize`
+（媒体查询的 `font-size` 会单独生效，掩盖整条 font 已经失效）。
+
+**教训**：CSS 简写里的 `var()` 是"全有或全无"；一个拼错的变量名不会报错，只会静默退回继承值。
+
+## §150 依赖表的 `file` 字段不是本机路径
+
+**症状**：端到端闸门第一版按 `Output/dependency_manifest.json` 的 `file` 字段核对源包，
+400/400 全报不存在。
+
+**根因**：该字段是**设备侧**路径，形如 `../AssetBundles/android/emoji/xxx`；本机 `files/AssetBundles`
+下面**没有 `android/` 这一层**（拉包时已摊平）。`file` 只用于记录来源，不是可 `os.path.isfile` 的本地路径。
+
+**修法**：用依赖表的 **key**（`emoji/xxx`）拼 `files/AssetBundles`；缺失只允许命中
+`ledger/pruned.json` 里已登记的裁剪项（key 前缀 `AssetBundles/` 要先剥掉）。
+
+**顺带**：`asset_manifest.json` 是扫描快照，dorm3d 房拉取后会滞后（实测多 474 个文件）；
+跑端到端前先 `py -3 scripts/scan_assets.py`（约 49s，产物 gitignore）。

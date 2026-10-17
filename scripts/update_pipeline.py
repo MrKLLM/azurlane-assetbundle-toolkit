@@ -803,6 +803,11 @@ def st_live2d(full, approved):
     if todo is not None and not todo:
         return verdict('live2d', True, '本次增量没有 Live2D 包 ⇒ 跳过（临时区未动）')
     os.makedirs(tgt, exist_ok=True)
+    # 动作导出配方必须**显式钉住并回读打印**：默认值虽然已是生产配方（2026-10-17 改），
+    # 但这里再钉一次，防止以后有人改默认值让增量重跑悄悄产出 118 条曲线的 motion。
+    ENV['L2D_MOTION_LINEAR'] = '1'
+    ENV['L2D_MOTION_EMIT_CONST'] = '1'
+    log('  live2d 动作配方: L2D_MOTION_LINEAR=1 + L2D_MOTION_EMIT_CONST=1（与盘上 269 模型一致）')
     summ = []
     if todo is None:
         run([PY, 'scripts/reconstruct_live2d.py', '--all', '--out', tgt],

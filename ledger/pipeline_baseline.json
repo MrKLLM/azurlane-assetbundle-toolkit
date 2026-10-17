@@ -1,0 +1,94 @@
+{
+ "schema": 1,
+ "generated_at": "2026-10-17 16:56:39",
+ "recipe": {
+  "live2d": "L2D_MOTION_LINEAR=1 + L2D_MOTION_EMIT_CONST=1"
+ },
+ "counts": {
+  "ships": 976,
+  "with_cn": 944,
+  "silhouettes": 20,
+  "variants": 25,
+  "skins": 4458,
+  "spine": 234,
+  "live2d": 269,
+  "with_voice": 862,
+  "voice_skins": 4179,
+  "voice_text_skins": 44,
+  "npc": 61,
+  "with_faction": 863,
+  "ship": 864,
+  "story": 35,
+  "other": 107
+ },
+ "files": {
+  "inputs/azdata/MANIFEST.json": {
+   "bytes": 3126,
+   "sha256": "cb140e86e681cecfcc883f4f6956848bc907d295e682a67336423bf348acd892"
+  },
+  "inputs/azdata/azdata_version.json": {
+   "bytes": 745,
+   "sha256": "b2b1dd346267d7eb21ae40299a425ec91854ca1310265cffbe2136506862bed0"
+  },
+  "inputs/gamecfg/MANIFEST.json": {
+   "bytes": 7909,
+   "sha256": "49027d0c4068ad0509f7a05b1f7bd5377508b702b5a0ff2b68dd7d5d40b18d64"
+  },
+  "asset_manifest.json": {
+   "bytes": 20642953,
+   "sha256": "17d2e272fa7c8a3922f5af05693cdb628f4e4031a2295775c49a7f7de737d381"
+  },
+  "Output/dependency_manifest.json": {
+   "bytes": 15893578,
+   "sha256": "dadef89c7b9ee30e9ffb12d21bd27b096b86ca7639bff033e846e30befb1ca00"
+  },
+  "Output/ship_meta.json": {
+   "bytes": 1581150,
+   "sha256": "7c4ffcb0320a7593c3786fe6f6f8c6ecf89f84cc0c3c907d26e57e1adc1f4763"
+  },
+  "Output/gallery_v2/index.json": {
+   "bytes": 982940,
+   "sha256": "ab17d3490389113bb2d8719115c9c4e11d7e527a18392af99fa4a42596afd619"
+  },
+  "Output/gallery_v2/index.js": {
+   "bytes": 896205,
+   "sha256": "8abaf8d09d7f99cac1c383a6217651ef17724eb9101a1762432a8ebc726fc48c"
+  },
+  "Output/gallery_v2/bg_meta.json": {
+   "bytes": 838588,
+   "sha256": "0c074e136fd50e37a4c0ed2c4e5f143b1f1ab1dfeebf23f220260fbad5ca40bf"
+  },
+  "Output/gallery_v2/bgm.json": {
+   "bytes": 163248,
+   "sha256": "37e09c4287294460d7fa9502ce42b252e9ac79e0734cb2299dcbf58f811f6dc4"
+  },
+  "Output/gallery_v2/skin_words.json": {
+   "bytes": 7968360,
+   "sha256": "d580c6597a78ffe6459fea2d361f606c860f016dbb887523626615482c4f537e"
+  },
+  "Output/gallery_v2/skin_voice.json": {
+   "bytes": 20372980,
+   "sha256": "5fadf88ef796175b171366fb9cde9ce95286532f28ec15e099c96f696156f2e2"
+  },
+  "gallery_src/theme.css": {
+   "bytes": 8967,
+   "sha256": "4920a96c873e7746b2d66a72120cee842248580e4c318a2739678973f5d73178"
+  },
+  "gallery_src/index.html": {
+   "bytes": 210571,
+   "sha256": "0027f24b9d0faf9e50fd656cd24a88d6c96eaa2b8d0f2d0380e3a200ffaa0817"
+  },
+  "gallery_src/bgm.html": {
+   "bytes": 40877,
+   "sha256": "cdf52abf40e0bb9be64745e868f6264c138c7ebaa2da055bf34c3bcfa03560e8"
+  },
+  "gallery_src/backgrounds.html": {
+   "bytes": 45002,
+   "sha256": "51335206dd2e8ad5ffd6b4171e8e2405a2023f91a285786b193530a6ce189ac1"
+  }
+ },
+ "tools": {
+  "python": "3.11.9",
+  "pillow": "12.3.0"
+ }
+}

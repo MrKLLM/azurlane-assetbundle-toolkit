@@ -1,5 +1,13 @@
 # -*- coding: utf-8 -*-
-"""「资产更新控制台」界面探针：证明新仪表盘**看得懂、点得动、背景不挡正事**。
+"""「资产更新控制台」**已退役版面**的界面探针（夜航星野 + 海军蓝 + 指针光效）。
+
+⚠️ 2026-10-17：用户把控制台改判为「纸本控制台」（暖纸 / 墨 / 朱砂 / 苔绿 / 零玻璃 / 零星野），
+本文件判的星点密度、背景显影、指针光效等前提**已不存在**，保留作历史对照。
+新版面的验收命令是：
+
+    py -3 scripts/diag/panel_paper_probe.py --port 8790
+
+要强行重跑这份旧探针（例如考古），设 `PANEL_UI_LEGACY=1`。
 
 为什么不能只截图看一眼：这类"把 13 行表格改成四步主线"的改动，最容易出的不是崩，
 而是**悄悄少渲染了几个阶段**，或者**一个 hue 同时代表两件事**——前者要靠数，
@@ -322,6 +330,11 @@ def park(pg, x=6, y=6, wait=0.35):
 
 
 def main():
+    if os.environ.get('PANEL_UI_LEGACY') != '1':
+        print('[NOTICE] 本探针对应已退役的「夜航星野」版面，前提（星点/背景显影/指针光效）已不存在。')
+        print('         新版面请用: py -3 scripts/diag/panel_paper_probe.py --port 8790')
+        print('         要考古重跑旧探针: set PANEL_UI_LEGACY=1')
+        return 0
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=8791, help='控制台在跑的 HTTP 端口')
     ap.add_argument('--cdp', type=int, default=0,

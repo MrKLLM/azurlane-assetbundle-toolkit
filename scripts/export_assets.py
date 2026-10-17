@@ -609,7 +609,14 @@ def main():
                         help="把 --only 的匹配范围限定在这些子目录。跨目录同名是真实存在的"
                              "（`bg_1` 同时在 loadingbg / loadingbg_hx / newshipbg），"
                              "不限定就会顺手重写别的类目里的产物")
+    parser.add_argument("--out", metavar="目录",
+                        help="覆盖输出根（默认 Output/Raw）。端到端抽样验证用它把样本写到临时区，"
+                             "既能证明当前导出层可复现，又不会覆写已验证的正式产物")
     args = parser.parse_args()
+
+    global RAW_OUTPUT
+    if args.out:
+        RAW_OUTPUT = os.path.abspath(args.out)
 
     target = EXPORT_TARGETS[args.target]
     print(f"[*] 导出目标: {target['desc']} ({args.target})")

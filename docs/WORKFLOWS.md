@@ -4527,3 +4527,66 @@ py -3 scripts/deploy_gallery.py --check                # 硬链/漂移
 - **量产物文件数别用 `-Recurse`**：会混进同级 `_` 工作目录（本轮多出 604 个），要按 `<模型>/motion/` 逐模型非递归计。
 - **换入工具自带的闸量的是"曲线总数"，量不到"文件数"**：本轮文件数没变（8147→8147），但曲线 +14 被闸放行；
   若换入导致文件数变化，需要**另配一条文件级判据**。
+
+---
+
+### WF-45: 还原管线端到端验证（输入 → 处理 → 输出 → 基线）
+
+**日期**: 2026-10-17
+**目标**: 一条命令回答「**盘上的产物，能不能用当前脚本原样再生成一次**」，而不是只看脚本退出码。
+**命令**:
+```bash
+py -3 scripts/diag/verify_pipeline_e2e.py                  # 20 项，约 46s
+py -3 scripts/diag/verify_pipeline_e2e.py --quick          # 跳过重跑，只查输入/输出（约 23s）
+py -3 scripts/diag/verify_pipeline_e2e.py --selftest       # 证明闸门自己会红
+py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
+```
+
+#### 判据（三层，任何一层红都退非零）
+1. **输入**：`inputs/*/MANIFEST.json` 逐份字节+sha256；`asset_manifest.json` 的文件集合/字节数与 `files/AssetBundles`
+   实扫一致；依赖表的 key 在盘上存在，缺失只允许命中 `ledger/pruned.json`；vendor 19 件 sha256；
+   `check_paths.py` 与 `test_pipeline_gating.py` 都过。
+2. **处理**（只写 `.diag/verify/`）：立绘 3 张逐字节；Live2D 1 个模型跑 reconstruct→extract_motions→fix_model3，
+   除 `model3.json` 外逐字节、PNG 逐像素；`model3.json` 按「语义投影」比（别名动作组折叠、HitAreas 解析到文件）；
+   Spine 2 个逐字节；背景 2 张逐字节；BGM/台词/画廊索引重新生成后逐字段或逐字节一致；音频抽 2 首能解出非零时长。
+3. **输出**：`index.json` counts 自洽、皮肤 key 不重、image/CG/缩略图/parts.json/model3 全存在；
+   `bg_meta` 四档相加=条目数且原图/缩略图全在；`bgm` 536 首 url 全在；`deploy_gallery.py --check` 11/11 同 inode。
+
+#### 踩坑记录
+- **Live2D-only 皮肤没有静态图就没有缩略图**：6 个 `image:""` 的条目曾被误判成缺 thumb；缩略图判据必须先看有没有图。
+- **依赖表的 `file` 字段不是本机路径**：它带设备侧 `../AssetBundles/android/` 前缀，本机目录已摊平；要用 **key**
+  （`emoji/xxx`）对 `files/AssetBundles`，缺失再用 `ledger/pruned.json` 解释。
+- **背景条目名不一定是包名**：`backyardbg/boliguan` 的产物名来自包内 Texture2D，源包叫 `bg1`，`--only` 点不到；
+  抽样池先过滤「源包名 == 条目名」。
+- **`asset_manifest.json` 会滞后**：dorm3d 房拉取后多出 474 个文件，清单还是旧的 ⇒ 先 `scan_assets.py` 重扫（约 49s）。
+- **Live2D 遗留别名组是语义等价，不是差异**：盘上同一份 `touch_head` 同时登记为 `touch_head` / `Head` / `TapHead`；
+  当前管线只写 canonical 组。逐字节比会红，必须按「解析到同一个文件」判等。
+
+**涉及文件**：`scripts/diag/verify_pipeline_e2e.py`、`scripts/export_assets.py`（新增 `--out`）、
+`scripts/extract_motions.py`（生产配方固化）、`scripts/update_pipeline.py`（固定配方 env）、
+`ledger/pipeline_baseline.json`、`scripts/diag/check_inputs.py`、`scripts/diag/test_pipeline_gating.py`。
+
+---
+
+### WF-46: 控制台换「纸本」版面（覆盖层 + 旧探针退役 + 新探针）
+
+**日期**: 2026-10-17
+**目标**: 只改 `pipeline_panel.py` 的视觉层，不动按钮/阶段白名单/子进程逻辑，并留下可自动判的界面闸门。
+**做法**:
+1. 在 `PAGE` 的内联 `<style>` 末尾追加一层覆盖 CSS：暖纸底 + 工程网格；墨黑为唯一 chrome 色；
+   状态色只保留苔绿/朱砂/赭石/深青；`backdrop-filter` 全站归零；星野 `#bgfx` 与指针光效 `#fxbeam/#fxpool` 退役。
+2. 桌面用 CSS Grid 把主屏改成「左当前指令 / 右五步索引」；窄屏（≤1080px）折回底部横排。
+3. `bSea` 从「星辰开关」改为「夜读开关」，`body.night` 是暖墨 token；`SEA` 固定 false，不再起星野绘制循环。
+4. 新探针 `scripts/diag/panel_paper_probe.py` 判：5 步 / 17 阶段方块 / 卡片合计 17 / 衬线主标题 / 暖纸底 /
+   零 glass / 两层装饰退役 / 静止 0 动画 / 细节与说明开关 / 夜读切换 / 窄屏折行 / 无 JS 异常。
+
+#### 踩坑记录
+- **`font` 简写里有一个未定义的 var，会把整条 font 重置成继承值**：`.ask{font:500 var(--hero-fs)/... var(--font-display)}`
+  在 `--font-display` 未定义时不是"忽略这一条"，而是把 family/weight/size 全部 unset ⇒ 标题退回 13px 正文。
+  见 `docs/TROUBLESHOOTING.md` §149。
+- **`body.legacy` 那套紫黑规则还在文件里**：不要用 `legacy` 当夜读类名；新类名 `night`，旧类不再启用。
+- **改完必须重启 `pipeline_panel.py`**：页面是从内存里的 `PAGE` 字符串发出的，改文件不重启，浏览器拿到的还是旧 CSS/HTML。
+- **窄屏步骤条要收掉轨线**：`.steps .track` 在竖排时隐藏，横排时也别让它横穿文字；进度由每个节点的 `.sfill` 表达。
+
+**涉及文件**：`scripts/pipeline_panel.py`、`scripts/diag/panel_paper_probe.py`、
+`scripts/diag/panel_ui_probe.py`（标记退役，`PANEL_UI_LEGACY=1` 才跑）。

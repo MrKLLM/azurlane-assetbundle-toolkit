@@ -16,11 +16,17 @@ extract_motions.py - 从 Unity AnimationClip 提取真实动作数据到 motion3
        旧产物另有一版按「curve idx == moc3 参数序号（从 0 连续）」取名，实测 0/8154 clip 满足
        dense 前提 → 3117 个“非空壳”文件的曲线名**全部错位**（眼睛数据写进眉毛参数等）。
 
+**生产配方（2026-10-17 固化）**: 默认即 `L2D_MOTION_LINEAR=1` + `L2D_MOTION_EMIT_CONST=1`。
+    这不是可选项：盘上 269 个模型的 motion 全部按这套配方生成（`L2D_MOTION_LINEAR` 写入
+    Stepped/线性段，`EMIT_CONST` 补 `m_ConstantClip` 定值曲线，例如 `heitaizi_2/home`
+    204 条里 43 条 PartOpacity 就来自它）。旧版本默认关闭 ⇒ 直接重跑会得到 118 条曲线的
+    “看似成功、实际不是产物”的结果。要退回实验配方才显式设 `=0`。
+
 用法:
     py -3 scripts/extract_motions.py --test lingbo          # 单模型（打印每条 clip 结果）
     py -3 scripts/extract_motions.py --all                  # 全量（写入 Output/Live2D）
     L2D_OUT_DIR=<目录> ... --all                             # 全量写到临时目录，不动正式产物
-    L2D_MOTION_LINEAR=1 ...                                 # 强制线性插值（关闭贝塞尔）
+    L2D_MOTION_LINEAR=0 ...                                 # 实验：改回贝塞尔（非生产配方）
 
 退出码: 0 全部成功；1 存在“解出 0 条曲线”的 clip（绝不静默）。
 """
@@ -48,7 +54,20 @@ LIVE2D_DIR = P.LIVE2D_SRC
 OUTPUT_DIR = os.environ.get("L2D_OUT_DIR") or P.LIVE2D_OUT
 ERROR_LOG = P.ERRORS_LOG
 
-USE_LINEAR = bool(os.environ.get("L2D_MOTION_LINEAR"))
+def _env_flag(name, default):
+    """布尔环境开关：未设置时用 default；0/false/no/off 为假，其余为真。
+
+    以前用 `bool(os.environ.get(...))` ⇒ 未设置就是 False，只有在调用方记得 exports
+    时才是生产配方。2026-10-17 端到端验证发现 update_pipeline 没 exports ⇒ 增量重跑会
+    产出 118 条曲线的 motion（生产是 204 条），且脚本自己报“成功”。改成就地默认。
+    """
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.strip().lower() not in ("0", "false", "no", "off")
+
+
+USE_LINEAR = _env_flag("L2D_MOTION_LINEAR", True)
 # 贝塞尔控制点裁剪阈值（历史护栏，2026-09-23 定性：**它是在掩盖下面的格式错误，不是优化**）
 #   旧实现把控制点写成归一化分数，运行时按绝对(时间,值)直读 → 每个贝塞尔都失控；
 #   当时观察到"贝塞尔抖"，于是加这条 >3 拉直的护栏，误打误撞把大部分坏段降级成了线性。
@@ -59,10 +78,11 @@ BEZIER_CLIP = float(os.environ.get("L2D_MOTION_BEZIER_CLIP", "3.0"))
 # ⚠️ 格式上这才是对的写法，但**未通过权威基准验收**：安土实测它对参考版有 88/278 条曲线
 #    偏差>0.5、最甚 296 个参数单位（Unity 密集键的切线本身就不该当 Hermite 切线用）。
 #    已验收并换入的是 L2D_MOTION_LINEAR=1（关键帧+线性）。本开关仅留作后续实验。
-ABSOLUTE_CP = bool(os.environ.get("L2D_MOTION_ABSOLUTE_CP"))
+ABSOLUTE_CP = _env_flag("L2D_MOTION_ABSOLUTE_CP", False)
 # 是否把 m_ConstantClip 里的「整段定值」曲线也导出（参考版 idle 曲线数 278 = 98 动画 + 180 定值）。
 # 作用：切动作时这些参数会被显式拉回该 clip 的定值，而不是停在上一个动作留下的值上。
-EMIT_CONST = bool(os.environ.get("L2D_MOTION_EMIT_CONST"))
+# 2026-10-17 起默认开启：盘上产物就是带定值曲线的版本，端到端抽样逐字节对得上。
+EMIT_CONST = _env_flag("L2D_MOTION_EMIT_CONST", True)
 
 # 「瞬切」(Cubism Stepped, type=2) 判据：**段起点键的三个浮点字段 (c1, c2, c3) 同时 ≈0**。
 # 2026-10-16 取证（闭环 §26 item 4 留下的"阶跃性能否从 Unity 侧推出"）：
@@ -506,12 +526,12 @@ def main():
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     print(f"[*] 输出目录: {OUTPUT_DIR}" + ("  (临时)" if os.environ.get("L2D_OUT_DIR") else ""))
-    if USE_LINEAR:
-        print("[*] L2D_MOTION_LINEAR=1 → 线性插值")
+    # 配方必须**每次都打出来**：这是「产物可复现」的一部分，不能靠调用方记得设了哪些 env。
+    recipe = ("linear" if USE_LINEAR else "bezier") + ("+const" if EMIT_CONST else "")
+    print(f"[*] 动作配方: {recipe}"
+          + ("  (生产配方)" if USE_LINEAR and EMIT_CONST and not ABSOLUTE_CP else "  ⚠️ 非生产配方"))
     if ABSOLUTE_CP:
-        print("[*] L2D_MOTION_ABSOLUTE_CP=1 → 贝塞尔控制点写绝对(时间,值)【Cubism 规范】")
-    if EMIT_CONST:
-        print("[*] L2D_MOTION_EMIT_CONST=1 → 一并导出 m_ConstantClip 定值曲线")
+        print("[*] L2D_MOTION_ABSOLUTE_CP=1 → 贝塞尔控制点写绝对(时间,值)【实验，未验收】")
 
     if args.test:
         models, verbose = [args.test], True
