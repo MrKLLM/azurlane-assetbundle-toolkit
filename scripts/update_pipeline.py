@@ -331,31 +331,67 @@ def st_cfg_disk(full, approved):
 
     差分写进 `.diag/pipeline/cfg_delta.json`，供 `meta` 档的权威闸门当期望值——
     否则那条闸门的"条目集合增删必须为 0"会**天生拒绝新角色**（新自机一加行就判红）。
+
+    ⚠️ **两个模式都必须跑，它们写不同的目录，而下游各读一个**：
+      · `--all`        → `.diag/sharecfg_re/cfg_json/`（42 号发布 `ship_skin_words` 读它）
+      · `--scalar-all` → `.diag/sharecfg_re/cfg_json_scalar/`（42 号发布
+        **`ship_skin_template` 皮肤表读它** —— `scripts/skin_table.py` 的 DEV_FILE 源头）
+    2026-10-17 实测：只跑 `--all` 时 `cfg_json_scalar` 静静停在 09-25，发布出去的皮肤表
+    因此少 6 行（含 `aerjiliya_4`「严厉女仆不严厉」）⇒ 新皮肤没名字、`_3` 档语音一条都解不出来，
+    而差分拿"旧的 scalar"比"旧的已发布"得出"新增 0 行"的假绿灯。见 docs/TROUBLESHOOTING.md §155。
     """
+    t0 = time.time()
     rc, so, se = run([PY, 'tools/sharecfg_re/37_parse_sharecfgdata.py', '--all', '--yes'],
                      timeout=3600, echo=['帧覆盖', '残差', '✗', '失败'])
+    rc2, so2, se2 = run([PY, 'tools/sharecfg_re/37_parse_sharecfgdata.py', '--scalar-all', '--yes'],
+                        timeout=3600, echo=['记录', '词表', '含中文行'])
     sc = os.path.join(CFG_DIR, 'cfg_json_scalar')
     dev = os.path.join(sc, 'ship_skin_template.json')
-    if rc or not os.path.isfile(dev):
-        return verdict('cfg.disk', False, f'37 号解析失败 rc={rc} 或没产出 {os.path.basename(dev)}')
+    if rc or rc2 or not os.path.isfile(dev):
+        return verdict('cfg.disk', False,
+                       f'37 号解析失败（--all rc={rc} / --scalar-all rc={rc2}）'
+                       f'或没产出 ship_skin_template.json')
+    # 新鲜度闸：发布会读的那个文件必须是**这一轮**写的。旧文件比 t0 还早 = 没刷新，
+    # 此时若放行，发布就是把过期皮肤表重新抄一遍（症状：新皮肤无名、无语音映射）。
+    if os.path.getmtime(dev) < t0:
+        return verdict('cfg.disk', False,
+                       f'cfg_json_scalar/ship_skin_template.json 还是 '
+                       f'{time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(dev)))} 的'
+                       f'（本轮开始于 {time.strftime("%H:%M", time.localtime(t0))}）'
+                       f' ⇒ --scalar-all 没写进去，发布会拿旧表，拒')
     try:
         new_rows = json.load(open(dev, encoding='utf-8'))
     except Exception as e:
         return verdict('cfg.disk', False, f'新皮肤表读不出来：{type(e).__name__} {str(e)[:80]}')
+    # 内容健全性闸：帧模型解歪时"记录数/残差"照样好看（2026-10-17 实测 2871 条、残差 0、
+    # 含中文值 0、字段全是 ship_data 的 smoke/torpedo）⇒ 只认"像皮肤表"的结果。
+    probe = [r for r in list(new_rows.values())[:200] if isinstance(r, dict)]
+    has_painting = any('painting' in r for r in probe)
+    has_cjk = any(isinstance(v, str) and any('一' <= c <= '鿿' for c in v)
+                  for r in probe for v in r.values())
+    if not probe or not has_painting or not has_cjk:
+        return verdict('cfg.disk', False,
+                       f'解析结果不像皮肤表（{len(new_rows)} 行，painting={has_painting}，'
+                       f'中文={has_cjk}） ⇒ 容器格式可能变了，别拿它发布，先看 37 号')
     pub_p = os.path.join(ROOT, 'inputs', 'gamecfg', 'ship_skin_template.json')
     old_rows = json.load(open(pub_p, encoding='utf-8')) if os.path.isfile(pub_p) else {}
     added = sorted(set(map(str, new_rows)) - set(map(str, old_rows)))
+    lost = sorted(set(map(str, old_rows)) - set(map(str, new_rows)))
     delta = {'at': time.strftime('%Y-%m-%d %H:%M:%S'), 'rows_new': len(new_rows),
-             'rows_pub': len(old_rows), 'added': len(added),
+             'rows_pub': len(old_rows), 'added': len(added), 'lost': len(lost),
              'added_sample': added[:12]}
     os.makedirs(WORK, exist_ok=True)
     json.dump(delta, open(os.path.join(WORK, 'cfg_delta.json'), 'w', encoding='utf-8'),
               ensure_ascii=False, indent=1)
     n_tab = len([f for f in os.listdir(sc) if f.endswith('.json')]) if os.path.isdir(sc) else 0
-    return verdict('cfg.disk', n_tab >= 30,
+    ok = n_tab >= 30 and not lost
+    return verdict('cfg.disk', ok,
                    f'磁盘侧 {n_tab} 张表（期望 32）· 皮肤行 {delta["rows_pub"]} → {delta["rows_new"]}'
-                   f'，**新增 {delta["added"]} 行**{("：" + ", ".join(delta["added_sample"][:6])) if added else ""}'
-                   + ('' if added else ' ⇒ 这次更新没带新配置，meta 档不会有任何变化（别白跑）'))
+                   f'，**新增 {delta["added"]} 行**{("：" + ", ".join(added[:6])) if added else ""}'
+                   + (f'｜**丢掉 {len(lost)} 行**（{", ".join(lost[:4])}）——解析或发布漏了，拒'
+                      if lost else '')
+                   + (' ⇒ 发布后 meta 才会给这些皮肤起名、语音档位才解得出来' if added
+                      else ' ⇒ 这次更新没带新皮肤'))
 
 
 def st_cfg_publish(approved):
@@ -363,8 +399,27 @@ def st_cfg_publish(approved):
 
     未签字时只跑各脚本的 `--check`（只读断言），签字后才真写盘——`inputs/` 是整条线的
     唯一起点，写坏了下游全部跟着错，所以这一档的确认权必须留在人那里。
+
+    ⚠️ 发布前先查**解析产物的新鲜度**：42 号读的皮肤表来自
+    `.diag/sharecfg_re/cfg_json_scalar/ship_skin_template.json`，它必须比源包
+    `sharecfgdata/ship_skin_template` 新。2026-10-17 实测：只跑 `--all` 不跑 `--scalar-all`
+    时这个文件停在 09-25，发布只是把过期表重新抄一遍，`--check` 全绿也发现不了（§155）。
+    `cfg.disk` 又是 staged 档、会被"同指纹已完成"缓存跳过 ⇒ 这一道闸必须长在发布档上。
     """
     mode = 'publish' if 'cfg.publish' in approved else 'check'
+    src = os.path.join(ROOT, 'files', 'AssetBundles', 'sharecfgdata', 'ship_skin_template')
+    dev = os.path.join(CFG_DIR, 'cfg_json_scalar', 'ship_skin_template.json')
+    if not os.path.isfile(dev):
+        return verdict('cfg.publish', False,
+                       f'没有解析产物 {os.path.relpath(dev, ROOT)} ⇒ 先跑 cfg.disk，'
+                       f'否则发布的是 inputs/ 里的旧表')
+    if os.path.isfile(src) and os.path.getmtime(dev) < os.path.getmtime(src):
+        return verdict('cfg.publish', False,
+                       '皮肤表解析产物比源包旧（%s < %s） ⇒ 先重跑 cfg.disk'
+                       '（勾上「缓存：已绕过」，它现在会同时跑 --scalar-all），'
+                       '否则这一发布只是把过期表重新抄一遍'
+                       % (time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(dev))),
+                          time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(src)))))
     bad = []
     for script, what in CFG_PUBLISH:
         cmd = [PY, script] + ([] if mode == 'publish' else ['--check'])
@@ -1038,8 +1093,8 @@ STAGES = [
           'lua_json ≥700 张 · 41 号三条判据（遍历到文件末/记录数/高字节）',
           step=2, writes='.diag/sharecfg_re/lua_json', est=180),
     Stage('cfg.disk', '解析 sharecfgdata 32 张表 + 报行数差分', 'staged', lambda a, f: st_cfg_disk(f, a),
-          '32 张齐 · 皮肤行数新增数写进 cfg_delta.json 供 meta 档当期望值',
-          step=2, writes='.diag/sharecfg_re/cfg_json* + .diag/pipeline/cfg_delta.json', est=60),
+          '32 张齐 · 皮肤表必须这一轮新解且有 painting/中文 · 行数增量写进 cfg_delta.json 供 meta 当期望值',
+          step=2, writes='.diag/sharecfg_re/cfg_json* + .diag/pipeline/cfg_delta.json', est=420),
     Stage('cfg.publish', '发布 inputs/gamecfg（4 张表 + 台账）', 'live', lambda a, f: st_cfg_publish(a),
           '4 个发布脚本闸门全绿 + check_inputs gamecfg 绿',
           step=2, writes='未签字只跑 --check · 签字 inputs/gamecfg/*.json + MANIFEST.json', est=25),

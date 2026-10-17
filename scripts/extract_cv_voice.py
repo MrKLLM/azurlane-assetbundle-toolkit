@@ -472,7 +472,7 @@ def build_entry(cv, idx, src, names, rel):
              'tap': tap, 'lines': lines}, unknown)
 
 
-def process_bank(cv, acb, out_audio, skip_done=False):
+def process_bank(cv, acb, out_audio, skip_done=False, want=None):
     dst_dir = os.path.join(out_audio, 'cv-%d' % cv)
     if skip_done and os.path.isdir(dst_dir):
         have = sorted(os.path.splitext(f)[0] for f in os.listdir(dst_dir)
@@ -480,7 +480,15 @@ def process_bank(cv, acb, out_audio, skip_done=False):
         if have:
             # 增量：整包已解过就复用文件名即 cue 名这一对应关系，不再跑 vgmstream+ffmpeg。
             # 换入前仍要过 l2d_voice_diff_check 的「磁盘缺失/占位 = 0」闸门，防止半截包被当成完整。
-            return cv, have
+            # ⚠️ 但"目录非空"不等于"这一轮要的都在"：`want` 是当前皮肤表解析出来、
+            # 要求这个包产出的全部 cue 名（含每个皮肤档位）。缺一条就整包重解 ——
+            # 2026-10-17 实测：皮肤表刷新后 cv-90302 多出 `_3` 档 12 条，
+            # 旧逻辑把整个包判为"已解过"，这 12 条永远不落盘（§155）。
+            if not want or all(w in have for w in want):
+                return cv, have
+            lack = sorted(w for w in want if w not in have)
+            print('  cv-%d 复用不成立：缺 %d 条（%s …）⇒ 整包重解'
+                  % (cv, len(lack), ', '.join(lack[:4])), flush=True)
     with tempfile.TemporaryDirectory(dir=DIAG) as tmp:
         names = decode_bank(acb, tmp)
         keep = [n for n in names if not SONG.match(n)]

@@ -10849,3 +10849,53 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 `scripts/export_assets.py --out`（零覆写 staging 复用）、`scripts/make_bg_thumbs.py`（`work((key,True))` 定点重做）。
 相关：§115（第一条命名源与三档口径）、§116（OCR 天花板）、WF-30、§111（Raw 定性）。
 
+
+## §155 皮肤表「发布的是旧表」：`--all` 与 `--scalar-all` 写两个目录，而发布会读后者
+
+**症状**（用户 2026-10-17 21:00，附画廊截图）：新皮肤「皮肤4」（`aerjiliya_4`）在画廊里没有名字，
+点「语音 60」显示「该皮肤本地没有语音包（主包 cv-? 未随包导出）」；同舰其它皮肤都有 38 条。
+
+**取证链**（"是真没有还是管线没拉取到"就是这么问出来的）：
+1. **源包都在且是新的**：`painting/aerjiliya_4` 与 `cue/cv-90302.b` 都是 10-16 09:34。
+   把 `cv-90302.b` 交给 vgmstream 解出 **70 条流**，其中 `_3` 档 12 条
+   （`detail_3 / feeling5_3 / get_3 / home_3 / login_3 / main_1_3 / main_2_3 / main_3_3 /
+   task_3 / touch_1_3 / touch_2_3 / touch_head_3`）——就是皮肤 4 的。
+2. **盘上只落 58 条**：`Output/Audio/CV2/cv-90302/` 恰好少那 12 条 `_3`（70 − 12 = 58）。
+3. **权威皮肤表里没有这一行**：`inputs/gamecfg/ship_skin_template.json` 2865 行、无 `aerjiliya_4`；
+   而设备侧新解析出 **2871 行**，含
+   `903023 · painting=aerjiliya_4 · name=严厉女仆不严厉 · ship_group=90302 · voice_actor=142`。
+4. **为什么发布的是旧表**：37 号的 `--all` 写 `cfg_json/`，**`--scalar-all` 才写 `cfg_json_scalar/`**，
+   而 42 号发布皮肤表读的是 **`cfg_json_scalar`**（`scripts/skin_table.py` 的 DEV_FILE 源头）。
+   `st_cfg_disk` 只跑了 `--all --yes` ⇒ `cfg_json_scalar/ship_skin_template.json` 静静停在 **09-25**，
+   发布于是把旧表重新抄一遍。本次受影响的共 6 行：`yinggelahan_3`、`sikula_h`、`weizhang_h`、
+   `xinnong_h`、`aerjiliya_4`、`lingmin_alter`。
+5. **假绿灯是怎么来的**：`cfg.disk` 的差分拿「旧的 scalar」比「旧的已发布」⇒ 恒等于
+   「新增 0 行」，还附一句「这次更新没带新配置（别白跑）」；`cfg.publish --check` 也只校验
+   "已发布 == 源"，**源本身旧了就全绿**。
+6. **连带**：`build_ship_meta` 起不到名（显示"皮肤4"）；`extract_cv_voice.load_skin_rows()` 按
+   `ship_group` + `id%10` 派包内档位，没有行就派不出 `_3` ⇒ 12 条语音永远不落盘。
+   而且 `process_bank(skip_done=True)` 只要目录非空就整包复用，表刷新后也不会补解。
+
+**修法**：
+- `st_cfg_disk` **同时跑 `--all --yes` 与 `--scalar-all --yes`**（实测 +5m48s，est 60 → 420），
+  并加两道闸：**新鲜度**（scalar 皮肤表 mtime 不得早于本轮开始）与**内容健全性**
+  （必须有 `painting` 字段且有中文——帧模型解歪时"记录数/残差"照样好看：实测 2871 条、
+  残差 0、含中文值 0、字段全是 ship_data 的 `smoke/torpedo`）。
+- `st_cfg_publish` 开头加新鲜度闸：解析产物比源包旧就拒。`cfg.disk` 是 staged 档、会被
+  "同指纹已完成"缓存跳过 ⇒ **这道闸必须长在发布档上**。
+- 面板 `cfgsync` 恒 `force`（"同步配置表"本来就该重解），签字单写明"约 7 分钟、不用缓存"。
+- `extract_cv_voice.process_bank` 增加量判据：`want`（本轮表要求该包产出的全部 cue 名）有缺就整包重解，
+  不再"目录非空即复用"。
+- 新增 `scripts/diag/check_skin_table_drift.py`（`--json` 供验证器消费；`--no-audio` 只查表）：
+  逐行比对设备侧源与已发布表，并对受影响语音包解流点名缺哪些 cue；已接进
+  `verify_pipeline_e2e.py` 输入层「权威皮肤表新鲜度」。
+
+**判据与实测**：`py -3 scripts/update_pipeline.py --only cfg.disk --force`
+⇒ 「皮肤行 2865 → 2871，**新增 6 行** … 发布后 meta 才会给这些皮肤起名、语音档位才解得出来」
+（修复前是「新增 0 行 ⇒ 这次更新没带新配置（别白跑）」）。
+`verify_pipeline_e2e --quick` 现在 12 PASS / 1 FAIL，唯一那条红就是这个漂移，
+发布签字后转绿。另：`asset_manifest.json` 滞后 794 个文件（含本次更新的 cue 包），
+验证前先 `py -3 scripts/scan_assets.py`（约 50s）。
+
+**教训**：**"两个模式写两个目录"这类契约必须写在调用处**，否则加参数的人不知道下游读哪个；
+判绿不能只数行数/残差，要有内容探针；`--check` 只能证明"已发布 == 源"，证明不了"源是新的"。

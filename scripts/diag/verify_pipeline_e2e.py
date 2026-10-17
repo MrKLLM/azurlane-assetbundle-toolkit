@@ -210,6 +210,42 @@ def check_dependency_manifest():
          'pruned_expected': expected[:20], 'pruned_total': len(pruned)})
 
 
+def check_skin_table_freshness():
+    """权威皮肤表 vs 设备侧源：漏发布的皮肤会让新皮肤无名、语音档位解不出来（§155）。
+
+    2026-10-17 实测的假绿灯：`cfg.disk` 只跑 `--all` 没跑 `--scalar-all`，
+    发布用的是 09-25 的皮肤表 ⇒ 少 6 行，其中 `aerjiliya_4` 的 12 条 `_3` 档语音
+    在源包里有、盘上一条没落。这一条就是把那类漂移挡在端到端验证里。
+    """
+    rc, out, sec = run([PY, 'scripts/diag/check_skin_table_drift.py', '--json', '--no-audio'],
+                       timeout=1200)
+    # 检查器的人读输出走 stderr、JSON 走 stdout；run() 可能把两路合并，这里从后往前找 JSON 行
+    line = ''
+    for ln in reversed((out or '').strip().splitlines()):
+        if ln.strip().startswith('{'):
+            line = ln.strip()
+            break
+    try:
+        rep = json.loads(line)
+    except Exception:
+        add('input', '权威皮肤表新鲜度', 'FAIL', '漂移检查器没给 JSON：' + tail(out, 6))
+        return
+    only = rep.get('only_src') or []
+    lost = rep.get('only_pub') or []
+    ok = (rc == 0) and not only and not lost
+    detail = (f'设备侧 {rep.get("rows_src")} 行 / 已发布 {rep.get("rows_pub")} 行，逐行对齐'
+              if ok else
+              (('源里有 %d 行没发布：%s' % (len(only),
+                ', '.join(f'{r["id"]}:{r.get("painting")}({r.get("name")})' for r in only[:5])))
+               if only else '') +
+              (('；已发布里有 %d 行源里没有：%s' % (len(lost),
+                ', '.join(str(r.get('painting')) for r in lost[:5]))) if lost else '') +
+              ' ⇒ 新皮肤会没名字、语音档位解不出来，先跑第 2 步同步配置表（发布要签字）')
+    add('input', '权威皮肤表新鲜度', 'PASS' if ok else 'FAIL', detail,
+        {'rows_src': rep.get('rows_src'), 'rows_pub': rep.get('rows_pub'),
+         'only_src': only[:20], 'only_pub': lost[:20], 'secs': round(sec, 1)})
+
+
 def check_vendor_manifest():
     mp = os.path.join(ROOT, 'gallery_src', 'vendor', 'MANIFEST.json')
     if not os.path.isfile(mp):
@@ -873,6 +909,7 @@ def main():
     check_input_manifests()
     check_source_manifest()
     check_dependency_manifest()
+    check_skin_table_freshness()
     check_vendor_manifest()
     check_paths()
     check_gating()

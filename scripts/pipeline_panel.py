@@ -3070,8 +3070,9 @@ function askOf(n){
             {a:'detail',t:'看日志',k:'link2'}]};
     if(idleN===cfg.length) return {eb,
       ask: stale?('把配置表对齐到 '+dsrc+' 的源包'):'从源包重解配置表',
-      why:'4 个阶段：解 scripts → 导出 lua → 解析 sharecfg → 发布 inputs/gamecfg。约 6 分钟；'+
-          '前三步只写 .diag/，最后一步写正式区、要签字。修好之后第 1 步那道红会自动消。',
+      why:'4 个阶段：解 scripts → 导出 lua → 解析 sharecfg → 发布 inputs/gamecfg。约 7 分钟'+
+          '（恒为强制重解，不用缓存）；前三步只写 .diag/，最后一步写正式区、要签字。'+
+          '修好之后第 1 步那道红会自动消。',
       acts:[{a:'cfgsync',t:'⚑ 同步配置表',k:'pact sign mag'},
             {a:'detail',t:'看这 4 步写到哪儿',k:'link2'}]};
     if(idleN) return {eb, ask:'配置表还剩 '+nEm(idleN)+' 个阶段没跑',
@@ -3516,11 +3517,16 @@ function ctaRun(a, to){
   }
   if(a==='cfgsync'){
     const keys=actStages('cfgsync'), live=liveOf(keys);
-    const go=()=>post({stages:keys,approve:live,force:force},
+    /* 恒 `force`：cfg.disk 是 staged 档、会被"同指纹已完成"缓存跳过，
+       而它正是刷新 `cfg_json_scalar`（发布真正读的皮肤表）的那一步。
+       2026-10-17：缓存让 cfg.disk 跳过 ⇒ 发布把 09-25 的旧皮肤表重新抄了一遍，
+       新皮肤没名字、`_3` 档语音一条没解（§155）。同步配置表本来就该重解，不省这几分钟。 */
+    const go=()=>post({stages:keys,approve:live,force:true},
                      {label:'同步配置表', after:['preflight']});
     if(!live.length) return go();
     openSign({keys:live, what:'第 '+stepNo('cfg.publish',2)+' 步：同步配置表',
-      note:'前 3 个阶段只写 .diag/；cfg.publish 会写 inputs/gamecfg（导出用的权威元数据）。'+
+      note:'会强制重解 sharecfgdata（--scalar-all，约 7 分钟，不用缓存）。'+
+           '前 3 个阶段只写 .diag/；cfg.publish 会写 inputs/gamecfg（导出用的权威元数据）。'+
            '发布前有 4 道闸门，红了就停。跑完会自动重查第 1 步的 preflight。',
       onOk:go});
     return;

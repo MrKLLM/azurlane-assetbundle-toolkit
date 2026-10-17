@@ -4714,3 +4714,11 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
 `scripts/make_bg_thumbs.py`（`work((key, rebuild))`）、`.diag/bgm_probe*` 与 `.diag/bg_probe*`（取证探针，只读）。
 相关：**WF-30**（精确引用面那套）、**§153**（本轮全文）、§115/§116（前两条命名源与天花板）、WF-15（换入闸）。
 
+
+**追加（2026-10-17 21:30，§155）**：端到端验证的输入层新增「权威皮肤表新鲜度」一条
+（`scripts/diag/check_skin_table_drift.py --json --no-audio`）：把设备侧 `sharecfgdata` 解出的皮肤表
+与 `inputs/gamecfg/ship_skin_template.json` 逐行比对，并对受影响的语音包解流、点名缺哪些 cue。
+用户问"是真没有还是管线没拉取到"时，这条一句话就能回答（源包有、盘上没落 = 管线漏解）。
+两个容易再次踩的坑：① 37 号 `--all` 与 `--scalar-all` 写**不同目录**，发布皮肤表读的是 scalar 那个；
+② `cfg.disk` 是 staged 档、会被"同指纹已完成"缓存跳过 ⇒ 新鲜度闸必须长在 `cfg.publish` 上。
+另：`asset_manifest.json` 会滞后（实测少 794 个文件），验证前先 `py -3 scripts/scan_assets.py`（约 50s）。
