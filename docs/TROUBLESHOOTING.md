@@ -10712,3 +10712,18 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 
 **顺带**：`asset_manifest.json` 是扫描快照，dorm3d 房拉取后会滞后（实测多 474 个文件）；
 跑端到端前先 `py -3 scripts/scan_assets.py`（约 49s，产物 gitignore）。
+
+## §151 `textContent` 之前又 `esc()`：界面把 `>` 显示成 `&gt;`
+
+**症状**：preflight 判红时，主屏第二行原样显示
+`配置表过期（源 2026-10-16 &gt; 发布 2026-10-07）`，用户看到的是实体而不是大于号。
+
+**根因**：`askOf()` 里写成 `why:esc(detail+'：先看它为什么红。')`，而 `render()` 用
+`why.textContent=A.why` 落屏。`esc()` 先把 `>` 换成 `&gt;`，`textContent` 再把它当普通字符
+显示 —— **转义了两次**。`ask` 那条没出问题，是因为它走 `innerHTML`，`esc` 正好是需要的。
+
+**修法**：`textContent` 的字符串**不要**再 `esc`；只有 `innerHTML` 才 `esc`。
+判据：在浏览器里看 `getComputedStyle` 不够，要直接读 `textContent` 是否含 `&gt;`。
+
+**顺带**：`.why` 的 `max-width:48ch` 太窄，长命令 `cfg.decrypt/.../cfg.publish` 会被拆成
+三行；已放宽到 `58ch` 并加 `overflow-wrap:anywhere`。

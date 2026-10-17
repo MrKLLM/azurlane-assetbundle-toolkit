@@ -213,6 +213,46 @@ def main():
         pg.shot('detail.png')
         pg.ev("document.getElementById('bDetail').click()")
         time.sleep(0.4)
+
+        print('\n── 步骤状态与签字 ─────────────────────────────')
+        pg.ev("document.querySelectorAll('.snode')[2].click()")
+        time.sleep(0.45)
+        vn = pg.ev("!document.getElementById('viewnote').hidden")
+        vtx = pg.ev("document.getElementById('viewnote').textContent") or ''
+        chk('切到非当前步骤会出只读预览提示', vn and '只读预览' in vtx, vtx[:48])
+        chk('只读预览提示能说清实际停在哪一步', '实际进度' in vtx, vtx[:48])
+        chk('右栏有且只有一个「当前实际进度」标记',
+            (pg.ev("document.querySelectorAll('.snode.cur').length") or 0) == 1)
+        chk('右栏标题常驻显示实际进度',
+            bool(pg.ev("/^当前 \\d\\d$/.test(document.getElementById('railCur').textContent.trim())")),
+            pg.ev("document.getElementById('railCur').textContent"))
+        pg.shot('preview.png')
+        pg.ev("document.getElementById('bBackCur').click()")
+        time.sleep(0.4)
+        chk('一键回到当前步骤后提示消失', bool(pg.ev("document.getElementById('viewnote').hidden")))
+
+        pg.ev("openSign({keys:['pull'],what:'测试签字',note:'这是一条测试说明，不会真的发请求。',"
+              "onOk:()=>{window.__signed=1}})")
+        time.sleep(0.45)
+        chk('签字窗口能打开', bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
+        chk('签字窗口逐条列出阶段与写入位置',
+            (pg.ev("document.querySelectorAll('#signmodal .srow').length") or 0) > 0 and
+            bool(pg.ev("document.getElementById('signList').textContent.includes('写到')")))
+        chk('未勾选/未签名时放行按钮禁用',
+            bool(pg.ev("document.getElementById('signGo').disabled")))
+        pg.ev("document.getElementById('signAgree').checked=true;"
+              "const n=document.getElementById('signName');n.value='测试';"
+              "n.dispatchEvent(new Event('input'))")
+        time.sleep(0.2)
+        chk('勾选并签名后才可放行',
+            not bool(pg.ev("document.getElementById('signGo').disabled")))
+        pg.shot('sign.png')
+        pg.ev("document.getElementById('signGo').click()")
+        time.sleep(0.4)
+        chk('签字回调执行且窗口关闭',
+            pg.ev("window.__signed===1") and
+            not bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
+
         pg.ev("document.getElementById('bHelp').click()")
         time.sleep(0.6)
         chk('说明抽屉能打开', bool(pg.ev("document.getElementById('help').classList.contains('on')")))

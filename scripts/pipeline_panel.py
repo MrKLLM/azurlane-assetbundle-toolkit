@@ -1423,11 +1423,29 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
 }
 .eyebrow.red i{background:var(--fail)!important}
 .eyebrow.run i{background:var(--run)!important;animation:none!important}
+.stepstate{
+  margin-left:4px;padding:2px 6px;
+  font:500 8px/1.4 var(--font-mono)!important;letter-spacing:.12em;
+  border:1px solid var(--rule);color:var(--ink-3)!important;
+}
+.stepstate.cur{color:var(--accent)!important;border-color:var(--accent)!important}
+.stepstate.preview{color:var(--ochre)!important;border-color:var(--ochre)!important}
+.viewnote{
+  display:flex!important;align-items:center;gap:16px;
+  margin:0 0 18px!important;padding:9px 13px!important;
+  border:1px solid var(--ochre)!important;border-left:3px solid var(--ochre)!important;
+  background:var(--ochre-l)!important;color:var(--ochre)!important;
+  font:400 10px/1.65 var(--font-mono)!important;
+}
+.viewnote[hidden]{display:none!important}
+.viewnote b{color:var(--ink)!important;font-weight:600!important}
+.viewnote .link2{margin-left:auto!important;border-bottom-color:var(--ochre)!important;color:var(--ochre)!important;white-space:nowrap}
 .ask{
   margin:0!important;
   font:500 var(--hero-fs)/1.16 var(--font-display)!important;
   letter-spacing:var(--hero-ls)!important;
-  color:var(--ink)!important;max-width:19ch!important;
+  color:var(--ink)!important;max-width:24ch!important;
+  word-break:keep-all;overflow-wrap:anywhere;
 }
 .ask b{font-weight:600!important;color:var(--ink)!important}
 .ask em{
@@ -1435,8 +1453,9 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
   letter-spacing:-.02em;color:var(--accent)!important;
 }
 .why{
-  margin:22px 0 0!important;max-width:48ch!important;
+  margin:22px 0 0!important;max-width:58ch!important;
   font:400 13px/1.95 var(--font-ui)!important;color:var(--ink-2)!important;
+  overflow-wrap:anywhere;
 }
 .do{
   display:flex!important;align-items:center!important;gap:26px!important;
@@ -1568,6 +1587,13 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
 .snode:hover .bead{border-color:var(--ink)!important}
 .snode:hover label{color:var(--ink)!important}
 .snode.on .cnt{color:var(--accent)!important}
+/* 「当前实际进度」与「正在查看」是两件事：on=你在看这一步，cur=机器真的停在这一步。
+   只给 cur 加一颗实心点 + 强调色，避免用户点来点去后把预览当成实际进度。 */
+.snode.cur .cnt{color:var(--accent)!important}
+.snode.cur .cnt::before{
+  content:'';display:inline-block;width:5px;height:5px;margin-right:5px;
+  background:var(--accent);vertical-align:1px;
+}
 .runline{
   max-width:none!important;width:auto!important;margin:0!important;
   padding:10px var(--gutter) 14px!important;
@@ -1794,6 +1820,90 @@ pre .bad{color:#E08A69!important}
 }
 #lightbox{background:rgba(24,21,17,.92)!important}
 
+/* ── 签字窗口：和主界面同一套纸/墨/朱砂 ───────────────────────────── */
+#signmodal{position:fixed;inset:0;z-index:80;display:none}
+#signmodal.on{display:flex;align-items:center;justify-content:center}
+#signmodal .veil{position:absolute;inset:0;background:rgba(24,21,17,.58)}
+#signmodal .sheet{
+  position:relative;width:min(640px,94vw);max-height:90vh;overflow:auto;
+  background:var(--paper-3);border:1px solid var(--ink);
+  box-shadow:0 30px 70px rgba(0,0,0,.26);padding:28px 30px 24px;
+}
+#signmodal .kicker{
+  display:block;font:500 8px/1.4 var(--font-mono)!important;letter-spacing:.26em;
+  color:var(--ink-3)!important;text-transform:uppercase;
+}
+#signmodal .kicker i{font-style:normal;color:var(--accent);margin:0 6px}
+#signmodal h3{
+  margin:10px 0 4px;font:500 28px/1.25 var(--font-display)!important;
+  letter-spacing:.05em;color:var(--ink)!important;
+}
+#signmodal .shead p{
+  margin:0 0 16px;font:400 11px/1.7 var(--font-mono)!important;
+  color:var(--ink-3)!important;
+}
+#signmodal .slist{
+  border-top:1px solid var(--ink);border-bottom:1px solid var(--rule);
+  margin:0 0 14px;
+}
+#signmodal .srow{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;
+  padding:10px 0;border-bottom:1px solid var(--rule);
+}
+#signmodal .srow:last-child{border-bottom:0}
+#signmodal .srow .k{
+  font:500 11px/1.4 var(--font-mono)!important;color:var(--ink)!important;
+  letter-spacing:.02em;
+}
+#signmodal .srow .t{
+  display:block;margin-top:3px;font:400 10px/1.6 var(--font-ui)!important;
+  color:var(--ink-2)!important;
+}
+#signmodal .srow .w{
+  display:block;margin-top:4px;font:400 9px/1.6 var(--font-mono)!important;
+  color:var(--ink-3)!important;
+}
+#signmodal .srow .tier{
+  align-self:start;white-space:nowrap;font:400 8px/1.4 var(--font-mono)!important;
+  padding:2px 6px;border:1px solid var(--rule);color:var(--ink-3)!important;
+}
+#signmodal .srow .tier.l{border-color:var(--accent)!important;color:var(--accent)!important}
+#signmodal .snote{
+  margin:0 0 16px;padding:9px 12px;
+  border-left:2px solid var(--ochre);background:var(--ochre-l);
+  font:400 10px/1.75 var(--font-mono)!important;color:var(--ochre)!important;
+}
+#signmodal .scheck{
+  display:flex;gap:9px;align-items:flex-start;margin:0 0 12px;
+  font:400 11px/1.7 var(--font-ui)!important;color:var(--ink-2)!important;
+  cursor:pointer;
+}
+#signmodal .scheck input{accent-color:var(--accent);width:14px;height:14px;margin:2px 0 0;flex:none}
+#signmodal .sigline{
+  display:flex;gap:10px;align-items:baseline;
+  padding:10px 0 0;border-top:1px solid var(--rule);
+  font:400 9px/1.4 var(--font-mono)!important;color:var(--ink-3)!important;
+}
+#signmodal .sigline>span{letter-spacing:.16em;text-transform:uppercase}
+#signmodal .sigline input{
+  flex:1;min-width:0;border:0;border-bottom:1px solid var(--rule-2);
+  background:transparent;padding:2px 2px 4px;
+  font:500 14px/1.3 var(--font-display)!important;color:var(--ink)!important;
+  outline:none;
+}
+#signmodal .sigline input:focus{border-bottom-color:var(--accent)}
+#signmodal .sigline em{
+  font-style:normal;font:400 9px/1.4 var(--font-mono);color:var(--ink-3);
+  white-space:nowrap;
+}
+#signmodal .sact{
+  display:flex;justify-content:flex-end;gap:10px;align-items:center;
+  margin-top:20px;padding-top:14px;border-top:1px solid var(--rule);
+}
+#signmodal .sact .ghost{border-bottom:1px solid var(--rule)!important;padding:6px 0!important}
+#signmodal .sact .pact{padding:11px 22px!important;font-size:12px!important}
+#signmodal .sact .pact:disabled{opacity:.3!important;cursor:not-allowed!important}
+
 /* ── 窄屏：右栏折回底部横排 ─────────────────────────────────────── */
 @media (max-width:1080px){
   .app{
@@ -1862,7 +1972,11 @@ pre .bad{color:#E08A69!important}
 
 <!-- 主屏：一句话 + 一个行动。整页只回答"现在该做什么"。 -->
 <main class="now">
-  <p class="eyebrow" id="eyebrow"><i></i><span id="eyebrowTx">正在读盘…</span></p>
+  <div id="viewnote" class="viewnote" hidden>
+    <span id="viewnoteTx"></span>
+    <button id="bBackCur" type="button" class="link2">回到当前步骤</button>
+  </div>
+  <p class="eyebrow" id="eyebrow"><i></i><span id="eyebrowTx">正在读盘…</span><span id="stepState" class="stepstate"></span></p>
   <!-- 进度台：没在跑时 display:none，一个像素都不占（静止帧判据靠这个成立） -->
   <div class="gauge" id="gauge"></div>
   <h2 class="ask" id="ask">—</h2>
@@ -1885,9 +1999,9 @@ pre .bad{color:#E08A69!important}
 <p class="runline" id="runline"></p>
 <!-- 底部：一根会长过去的进度线 + 五个节点，节点上带该步全部阶段的状态方块 -->
 <nav class="steps" id="stepsbar" aria-label="五个步骤">
-  <div class="rail-hd"><span>RUNBOOK</span><b>五步</b></div>
+  <div class="rail-hd"><span>RUNBOOK</span><b id="railCur">当前 01</b></div>
   <span class="track"><i class="fill" id="stepfill"></i></span>
-  <div class="rail-ft"><span id="railCount">全部阶段</span><span>证据见「细节」</span></div>
+  <div class="rail-ft"><span id="railCount">全部阶段</span><span>点击=只读预览 · 细节=证据</span></div>
 </nav>
 </div>
 
@@ -1954,6 +2068,34 @@ pre .bad{color:#E08A69!important}
         <table class="runs"><thead><tr><th>时间</th><th>做什么</th><th></th></tr></thead>
           <tbody id="runs"></tbody></table>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 签字窗口：不用原生 confirm()。原生弹窗是浏览器画的，和纸本界面两层皮；
+     而且它只能放一句纯文本，写不清「会写哪几个阶段、写到哪儿、有没有备份」。 -->
+<div id="signmodal" aria-hidden="true">
+  <div class="veil" data-sclose></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="signTitle">
+    <div class="shead">
+      <span class="kicker">SIGN-OFF <i>·</i> 签字放行</span>
+      <h3 id="signTitle">签字放行</h3>
+      <p id="signWhat">—</p>
+    </div>
+    <div class="slist" id="signList"></div>
+    <p class="snote" id="signNote"></p>
+    <label class="scheck">
+      <input type="checkbox" id="signAgree">
+      <span>我已核对上面的范围与写入位置，确认这一步会写正式区</span>
+    </label>
+    <label class="sigline">
+      <span>签字</span>
+      <input id="signName" type="text" maxlength="24" placeholder="输入名字或缩写" autocomplete="off">
+      <em id="signDate"></em>
+    </label>
+    <div class="sact">
+      <button type="button" class="ghost" data-sclose>取消</button>
+      <button type="button" class="pact" id="signGo" disabled>签字放行</button>
     </div>
   </div>
 </div>
@@ -2422,6 +2564,8 @@ $('#bSea').onclick=()=>{
   NIGHT=!NIGHT; localStorage.setItem('panel.night',NIGHT?'1':'0');
   nightApply();
 };
+const bBackCur=$('#bBackCur');
+if(bBackCur) bBackCur.onclick=()=>{ step=currentStep(); render(); };
 
 /* ── 光效引擎：光由指针携带 ────────────────────────────────────────────
    三个动作，一套语言：
@@ -2557,6 +2701,20 @@ async function apiState(force){
   if(S.running && !curJob) tail(S.running.id);
 }
 function stagesOf(n){ return (S.stages||[]).filter(s=>(s.step||0)===n); }
+/* 「实际进度」= 第一处还没全绿的步骤；正在跑时以 running.step 为准。
+   它和 `step`（用户正在看哪一步）是两件事——2026-10-17 用户点了几下步骤就迷路了，
+   根因就是之前只有 `step`，没有「机器停在哪」这个锚。 */
+function currentStep(){
+  if(S.running && +S.running.step) return +S.running.step;
+  const order=Object.keys(S.steps||{}).map(Number).sort((a,b)=>a-b);
+  for(const n of order){
+    const list=stagesOf(n);
+    if(!list.length) continue;
+    const sts=list.map(s=>statusOf(s.key));
+    if(sts.some(x=>x==='fail'||x==='run'||x==='await'||x==='idle')) return n;
+  }
+  return order.length?order[order.length-1]:1;
+}
 let LOADED=false, LOADERR='';
 
 /* ── 进度台：只在真的在跑时出现 ─────────────────────────────────────────
@@ -2763,7 +2921,7 @@ function askOf(n){
   if(n===1){
     const pf=st.preflight, pl=st.pull;
     if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
-      why:esc((pf&&fail.key==='preflight'?pf.detail:fail.key)+'：先看它为什么红。'),
+      why:(pf&&fail.key==='preflight'?pf.detail:fail.key)+'：先看它为什么红。',
       acts:[{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
     if(pf&&!pf.ok) return {eb, red:1, ask:'权威输入缺东西，先别往下走',
       why:'inputs/azdata、inputs/gamecfg 与画廊 vendor 是重导的唯一起点，缺了跑出来的是错的。',
@@ -2863,7 +3021,10 @@ function render(){
   /* ── 底部步骤条：五个节点，节点上带该步全部阶段的状态方块 ─────────────
      判据「13 个阶段一个都不许被折叠掉」靠这里每个 dot 都在。 */
   const steps=S.steps||{}, bar=$('#stepsbar');
+  const cur=currentStep();
   const rc=$('#railCount'); if(rc) rc.textContent=all.length+' 个阶段';
+  const rcur=$('#railCur');
+  if(rcur) rcur.textContent=(S.running?'正在跑 ':'当前 ')+String(cur).padStart(2,'0');
   bar.querySelectorAll('.snode').forEach(e=>e.remove());
   Object.keys(steps).sort().forEach(k=>{
     const n=+k, list=stagesOf(n);
@@ -2872,9 +3033,10 @@ function render(){
     const doneN=list.filter(s=>statusOf(s.key)==='pass').length;
     const b=document.createElement('button');
     const fresh='s'+n, first=!mounted.has(fresh); mounted.add(fresh);
-    b.className='snode'+(n===step?' on':'')+(first?' in':'')+
+    b.className='snode'+(n===step?' on':'')+(n===cur?' cur':'')+(first?' in':'')+
       (worst==='fail'?' fail':worst==='await'?' await':worst==='run'?' run':
        doneN===list.length&&list.length?' done':'');
+    b.title = n===cur ? '当前实际进度' : '查看第 '+n+' 步（只读预览，不改实际进度）';
     if(first) b.style.animationDelay=(n*70)+'ms';
     b.dataset.step=n; b.dataset.done=doneN; b.dataset.total=list.length;
     b.innerHTML='<span class="bead"></span><label>'+esc(steps[k][0])+'</label>'+
@@ -2885,6 +3047,22 @@ function render(){
     bar.appendChild(b);
   });
   stepFill();
+  /* 「正在看」与「实际停在哪」分开显示：这是用户 2026-10-17 迷路的直接修法。
+     只读预览时给一条常驻提示 + 一键回到当前步骤，而不是拦着不让点。 */
+  const stEl=$('#stepState');
+  if(stEl){
+    stEl.textContent = step===cur ? '当前' : '只读预览';
+    stEl.className = 'stepstate ' + (step===cur ? 'cur' : 'preview');
+  }
+  const vn=$('#viewnote'), vtx=$('#viewnoteTx'), bb=$('#bBackCur');
+  if(vn){
+    vn.hidden = step===cur;
+    if(step!==cur){
+      vtx.innerHTML = '只读预览：你正在看第 '+step+' 步 · <b>'+esc((steps[String(step)]||[])[0]||'')+
+        '</b>　实际进度停在第 '+cur+' 步 · <b>'+esc((steps[String(cur)]||[])[0]||'')+'</b>';
+      if(bb) bb.textContent='回到第 '+cur+' 步';
+    }
+  }
   /* 节点是刚重建出来的 —— "哪一步在跑"这个标记必须**重建之后再打一次**，
      否则 8 秒轮询会把 gaugeTick 打上的 .run 冲掉（探针实测：进度条永远停在已完成数上）。 */
   if(G) gaugeTick();
@@ -3012,8 +3190,13 @@ function render(){
   $$('#cards [data-run]').forEach(b=>b.onclick=()=>{
     const k=b.dataset.run, s=(S.stages||[]).find(x=>x.key===k);
     const ap=s&&s.tier==='live'&&b.closest('.stage').querySelector('.appr').checked;
-    if(ap&&!confirm('签字放行 '+k+'：它会写进正式区（会先备份）。确认？')) return;
-    post({stages:[k],approve:ap?[k]:[],force:force},null); });
+    if(ap){
+      openSign({keys:[k],what:'单独跑 '+k,
+        note:'它会写进正式区（换入前先备份）。单独跑不经过「重跑到待确认」的整批清单，确认范围只有这一个阶段。',
+        onOk:()=>post({stages:[k],approve:[k],force:force})});
+      return;
+    }
+    post({stages:[k],approve:[],force:force},null); });
 }
 
 /* 进度线**长到**当前节点，不是瞬间跳过去。弹簧用高阻尼（不过冲）——
@@ -3030,8 +3213,54 @@ function stepFill(){
   if(CALM||prev===target){ fill.style.width=target+'px'; return; }
   SPRG.to('fill',target,v=>{ fill.style.width=Math.max(0,v).toFixed(1)+'px'; },150,26,prev);
 }
-function ctaRun(a){
-  if(a==='next') return void (step=Math.min(4,step+1), render());
+/* ── 签字窗口 ───────────────────────────────────────────────────────
+   原生 confirm() 是浏览器画的，和纸本界面两层皮；它也放不下一张「会写哪几个阶段、
+   写到哪儿、有没有备份」的清单。这里用同一套纸/墨/朱砂画一张签字单：
+   范围逐条列出 → 勾选确认 → 签名 → 才放行。 */
+let SIGN_CTX=null;
+function syncSign(){
+  const name=($('#signName').value||'').trim();
+  $('#signGo').disabled = !($('#signAgree').checked && name);
+}
+function openSign(o){
+  SIGN_CTX=o;
+  $('#signWhat').textContent=o.what||'';
+  $('#signList').innerHTML=(o.keys||[]).map(k=>{
+    const s=(S.stages||[]).find(x=>x.key===k)||{};
+    const T=TIER[s.tier]||['?','r'];
+    return '<div class="srow"><div>'+
+      '<div class="k">'+esc(k)+'</div>'+
+      '<span class="t">'+esc(s.title||'')+'</span>'+
+      '<span class="w">写到 '+esc(s.writes||'—')+'</span></div>'+
+      '<span class="tier '+T[1]+'">'+T[0]+'</span></div>';
+  }).join('');
+  $('#signNote').textContent=o.note||'';
+  $('#signAgree').checked=false;
+  $('#signName').value=localStorage.getItem('panel.signer')||'';
+  $('#signDate').textContent=new Date().toLocaleString('zh-CN',{hour12:false});
+  syncSign();
+  $('#signmodal').classList.add('on');
+  $('#signmodal').setAttribute('aria-hidden','false');
+  setTimeout(()=>{ ($('#signName').value?$('#signAgree'):$('#signName')).focus(); },30);
+}
+function closeSign(){
+  $('#signmodal').classList.remove('on');
+  $('#signmodal').setAttribute('aria-hidden','true');
+  SIGN_CTX=null;
+}
+$('#signAgree').onchange=syncSign;
+$('#signName').oninput=syncSign;
+$('#signGo').onclick=()=>{
+  if($('#signGo').disabled||!SIGN_CTX) return;
+  const nm=($('#signName').value||'').trim();
+  if(nm) localStorage.setItem('panel.signer',nm);
+  const cb=SIGN_CTX.onOk;
+  closeSign();
+  if(cb) cb(nm);
+};
+$$('#signmodal [data-sclose]').forEach(el=>el.onclick=closeSign);
+
+function ctaRun(a){  if(a==='next') return void (step=Math.min(4,step+1), render());
   if(a==='prev') return void (step=Math.max(1,step-1), render());
   if(a==='detail') return void openDetail();
   const live4=(S.stages||[]).filter(s=>s.step===4&&s.tier==='live').map(s=>s.key);
@@ -3042,9 +3271,14 @@ function ctaRun(a){
   if(a==='tocheck'){
     /* 主按钮以前不读勾选 ⇒ 勾了等于没勾。现在把 SIGNED 带上，并且**说清它会写哪儿**。 */
     const ap=signedLive();
-    if(ap.length && !confirm('这一轮会直接写正式区：'+ap.join('、')+
-        '\n（换入前整批备份到 Output/_OLD_bak/pipeline_<日期>/）\n\n确认？')) return;
-    return post({stages:[],approve:ap,force:force});
+    if(ap.length){
+      openSign({keys:ap,what:'重跑到待确认',
+        note:'这一轮会直接写正式区：'+ap.join('、')+
+          '。换入前整批备份到 Output/_OLD_bak/pipeline_<日期>/。',
+        onOk:()=>post({stages:[],approve:ap,force:force})});
+      return;
+    }
+    return post({stages:[],approve:[],force:force});
   }
   if(a==='staged') return post({stages:['paintings','spine','live2d'],force:force});
   if(a==='review') return post({stages:['review'],force:force});
@@ -3054,9 +3288,10 @@ function ctaRun(a){
     '要过「索引零回退闸门」和「部署 4/4 同 inode」两道检查，任一判红就停。');
 }
 function sign(keys,what,note){
-  if(!confirm('签字放行：'+what+'\n\n'+note+'\n\n确认？')) return;
-  const s4=(S.stages||[]).filter(s=>s.step===4).map(s=>s.key);
-  post({stages:keys.every(k=>s4.includes(k))?s4:keys,approve:keys,force:force});
+  openSign({keys:keys,what:what,note:note,onOk:()=>{
+    const s4=(S.stages||[]).filter(s=>s.step===4).map(s=>s.key);
+    post({stages:keys.every(k=>s4.includes(k))?s4:keys,approve:keys,force:force});
+  }});
 }
 async function post(b){
   const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -3130,8 +3365,10 @@ document.addEventListener('keydown',e=>{
   const t=e.target;
   if(t && t.matches && t.matches('input,textarea,select')) return;
   const k=(e.key||'').toLowerCase();
-  if(k==='escape'){ $('#help').classList.remove('on'); $('#lightbox').classList.remove('on');
-                    closeDetail(); return; }
+  if(k==='escape'){
+    if($('#signmodal')&&$('#signmodal').classList.contains('on')){ closeSign(); return; }
+    $('#help').classList.remove('on'); $('#lightbox').classList.remove('on');
+    closeDetail(); return; }
   if(k==='d'){ toggleDetail(); e.preventDefault(); return; }
   if(k>='1'&&k<='9'&&Object.keys((S&&S.steps)||{}).map(Number).includes(Number(k))){
     step=Number(k); render(); e.preventDefault(); return; }
