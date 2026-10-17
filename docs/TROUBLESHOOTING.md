@@ -10850,6 +10850,28 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 相关：§115（第一条命名源与三档口径）、§116（OCR 天花板）、WF-30、§111（Raw 定性）。
 
 
+## §154 音乐库「25 首未解码包」补导：cue/ 561 vs 导出 536，解码+FLAC台账+索引三处增强（2026-10-17 接手 B 任务）
+
+**任务**：用户交接"音乐库标签不全"（用途 388 / 出处 355 / 全库 536）。取证发现标签空的大头是**25 首从未解码**，且索引脚本有 join 缺陷。
+
+### 1. 补导 25 首未解码包
+- 来源：`files/AssetBundles/cue/bgm-*.b` 共 561 个，首轮只导出 536 ⇒ 25 个从未解码；其中 18+ 首被 `voice_bgm` 引用（反向对账：voice_bgm 引了但库里缺的 19 首里 18 首正在这 25 个包）。
+- 解码：`scripts/diag/bgm_backfill_decode.py`（vgmstream 解 .b，ACB 改名 .acb）→ `.diag/bgm_backfill_wav`，staging 已有则跳过。
+- 转码：`transcode_bgm.py --src staging --out Output/Audio/BGM --codec flac`，入库 `ledger/bgm_transcode_flac.json`（按 codec 分文件）。校验三条件（产物>1KB / ffprobe 时长差<0.25s / 源 md5 记台账）。
+- 删源前总闸：`--verify-only` 把每条重算（产物在/md5一致/整条解到 null）。⚠️ 本次发现**台账旧记录 dst 指向不存在的 `Output/Audio/BGM_flac/`**（历史路径，文件早已合并到 `BGM/`）⇒ verify 误报缺失 536。修正脚本 `bgm_ledger_fix.py` 在 md5 匹配前提下把 536 条 dst 纠正到 `BGM/`，verify 重跑 561/561 全 PASS。
+
+### 2. 索引脚本三处增强（`build_bgm_index.py`）
+- **双 `bgm-` 前缀 join 修复**：表内曲名（`bgm-bgm-cccp`）与文件名都带 `bgm-`，归一化时多剥一次 ⇒ 白捡 4 首出处（北境序曲/破晓冰华/极地风暴/waterwave）。
+- **`beat_game_music` 接入**：`settlement_type:"song11/12"` 正对 `bgm-song11/12`，song01-12 标"音游曲"，11/12 带官方名（無限大HearT / 盲目ラビリンス）。
+- **联动词根证据词典**：全表扫描确认 holo×14/sk×9/ryza×9/yumia×8/idom×6/qe×5/doa×N 等的引用证据，逐条带表名.字段落库；sk/qe/cw/tl/wavyflow/aoi hougeki/diego/echo 等**查无表内引用** ⇒ 保持空、不硬凑。
+
+### 3. 判据与结果
+- 重建 561 首 / 19.84h：出处 355→**383**、用途 388→**476**、官方中文名 40、专辑 10。
+- `bgm_page_probe` 全 PASS（561 行渲染、31 chip、播放/潮水/拖拽找位）。
+- **已排除**：名单外藏大曲目表（全表扫描命中全是 1~4 处垃圾）；`dorm3d_dialogue_group.bgm` 1048 行全空（死路）；`_tip` OCR、拼音多义词、无引用曲硬凑名（三条已否证路线）。
+
+**涉及文件**：`scripts/diag/bgm_backfill_decode.py`、`scripts/transcode_bgm.py`、`scripts/build_bgm_index.py`、`scripts/diag/bgm_ledger_fix.py`（一次性）、`ledger/bgm_transcode_flac.json`。相关：§112/§113（BGM 改档取证）、WF-30。
+
 ## §155 皮肤表「发布的是旧表」：`--all` 与 `--scalar-all` 写两个目录，而发布会读后者
 
 **症状**（用户 2026-10-17 21:00，附画廊截图）：新皮肤「皮肤4」（`aerjiliya_4`）在画廊里没有名字，
@@ -10899,3 +10921,11 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 
 **教训**：**"两个模式写两个目录"这类契约必须写在调用处**，否则加参数的人不知道下游读哪个；
 判绿不能只数行数/残差，要有内容探针；`--check` 只能证明"已发布 == 源"，证明不了"源是新的"。
+
+**追加（2026-10-17 21:55）**：第 2 步「配置表已对齐源包」的正文写「下一步：从源包重算产物（第 3 步）」，
+按钮却是「去第 5 步 签字换入 →」。根因：**同一件事两处各算各的** —— 正文写死 `nExport`，
+按钮走 `nextWorkStep()`；而 `nextWorkStep()` 在"后面没有未完成步骤"时兜底 `return 最后一步`，
+于是 17/17 全绿时也把人指向第 5 步。用户看到的就是"第二步让我回第五步"。
+修法：`nextWorkStep()` 无下一步返回 0；`nextStepAct(n)` 同时产出按钮与正文（含从阶段表
+当场数出来的 `stepHint`）；全绿态统一改口径为「已跑完」+「← 从第 1 步再来一轮」。
+判据：`panel_paper_probe` 新增"正文点名的第 N 步 == goto 的 data-to"逐步骤断言。

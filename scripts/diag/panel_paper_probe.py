@@ -296,20 +296,28 @@ def main():
             time.sleep(0.3)
 
         # 查看提示：必须切到一个**非待办**步骤才成立。
+        # 全绿时没有"待办"，界面改说「已跑完」——判据要同时接受两种状态，
+        # 否则一轮跑完后探针全红（2026-10-17 实测）。
         view = 5 if work != 5 else 1
+        allpass = bool(pg.ev("(()=>{const s=window.__probe.state().stages||[];"
+                             "return s.length>0 && s.every(x=>{const r=(window.__probe.state().state||{})[x.key];"
+                             "return !!r && r.ok && !/未签字|--approve/.test(r.detail||'')})})()"))
         pg.ev(f"document.querySelectorAll('.snode')[{view-1}].click()")
         time.sleep(0.45)
         vn = pg.ev("!document.getElementById('viewnote').hidden")
         vtx = pg.ev("document.getElementById('viewnote').textContent") or ''
         chk('切到非待办步骤会出查看提示', vn and '你在看第' in vtx, vtx[:48])
-        chk('查看提示能说清待办在哪一步', '待办是第' in vtx, vtx[:60])
-        chk('查看时徽标写「查看中」而不是「只读」',
-            (pg.ev("document.getElementById('stepState').textContent") or '').strip() == '查看中',
+        chk('查看提示说清待办/已跑完',
+            ('待办是第' in vtx) if not allpass else ('已全部判绿' in vtx), vtx[:60])
+        chk('徽标写「查看中」（全绿时写「已跑完」）',
+            (pg.ev("document.getElementById('stepState').textContent") or '').strip()
+            == ('查看中' if not allpass else '已跑完'),
             pg.ev("document.getElementById('stepState').textContent"))
-        chk('右栏有且只有一个「待办」标记',
+        chk('右栏有且只有一个「待办/已跑完」标记',
             (pg.ev("document.querySelectorAll('.snode.cur').length") or 0) == 1)
-        chk('右栏标题常驻显示待办',
-            bool(pg.ev("/^待办 \\d\\d$/.test(document.getElementById('railCur').textContent.trim())")),
+        chk('右栏标题常驻显示待办或已跑完',
+            bool(pg.ev("/^(待办|已跑完) \\d\\d$/"
+                       ".test(document.getElementById('railCur').textContent.trim())")),
             pg.ev("document.getElementById('railCur').textContent"))
         pg.shot('preview.png')
         pg.ev("document.getElementById('bBackCur').click()")
@@ -415,6 +423,25 @@ def main():
                 f'label={goto_btn[1]} view={pg.ev("__probe.view()")}')
             pg.ev("document.querySelectorAll('.snode')[4].click()")
             time.sleep(0.3)
+
+        # 正文点名的步骤号必须等于按钮目标：2026-10-17 用户截图里第 2 步正文写
+        # 「下一步：从源包重算产物（第 3 步）」，按钮却是「去第 5 步 签字换入 →」
+        # ——步骤 3/4 早就跑完了，按钮按"下一个还有活的步骤"算，正文写死了 nExport。
+        print('\n── 正文与按钮目标必须同源 ─────────────────────')
+        for n in range(1, 6):
+            pg.ev(f"document.querySelectorAll('.snode')[{n-1}].click()")
+            time.sleep(0.3)
+            why = pg.ev("document.getElementById('why').textContent") or ''
+            acts = _json.loads(pg.ev(
+                "JSON.stringify([...document.querySelectorAll('#cta button')]"
+                ".map(b=>[b.dataset.a,b.dataset.to||'',b.textContent.trim()]))") or '[]')
+            bad = []
+            tos = [str(x[1]) for x in acts if x[0] == 'goto']
+            mw = re.search(r'第\s*(\d+)\s*步', why)
+            if mw and tos and mw.group(1) not in tos:
+                bad.append(f'正文说第 {mw.group(1)} 步，按钮去第 {"/".join(tos)} 步')
+            chk(f'第 {n} 步正文与按钮目标同源', not bad,
+                '; '.join(bad) or (why[:46] if why else '（无正文）'))
 
         pg.ev("document.getElementById('bHelp').click()")
         time.sleep(0.6)

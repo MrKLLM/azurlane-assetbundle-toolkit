@@ -2971,12 +2971,39 @@ function stepName(n){ return (S&&S.steps&&S.steps[String(n)]&&S.steps[String(n)]
 /* 下一件该做的事在哪一步：第一个比 n 大、还有阶段没全绿的步骤。
    文案里的「去第 N 步」必须和真实跳转同一处算出来 —— 手写 nExport/nReview
    在步骤全部完成后会把用户指向一个已经做完的步骤（用户实测：第 5 步让他去第 3 步）。 */
+/* 下一个**还有活**的步骤；全都跑完了返回 0（不再兜底成最后一步 ——
+   2026-10-17 用户截图：第 2 步正文写"下一步：重算产物（第 3 步）"，按钮却把人
+   送往已经 3/3 的第 5 步"签字换入"，两边各算各的）。 */
 function nextWorkStep(n){
   const order=Object.keys((S&&S.steps)||{}).map(Number).sort((a,b)=>a-b);
   for(const k of order){
     if(k>n && stagesOf(k).some(s=>statusOf(s.key)!=='pass')) return k;
   }
-  return order.length?order[order.length-1]:n;
+  return 0;
+}
+/* 这一步会动什么，从阶段表当场算（档位数），不手抄 —— 手抄的那句在步骤
+   已经跑完之后就会说谎（"要你签字才写正式区"其实早就签完了）。 */
+function stepHint(n){
+  const list=stagesOf(n);
+  if(!list.length) return '';
+  const c=(t)=>list.filter(s=>s.tier===t).length;
+  const parts=[];
+  if(c('staged')) parts.push(c('staged')+' 个只写暂存区');
+  if(c('live')) parts.push(c('live')+' 个要签字才写正式区');
+  if(c('read')) parts.push(c('read')+' 个只读');
+  return parts.length?'（'+parts.join('，')+'）':'';
+}
+function allStagesPass(){
+  const a=(S&&S.stages)||[];
+  return a.length>0 && a.every(s=>statusOf(s.key)==='pass');
+}
+/* 「去下一步」按钮 + 配套那句正文：同一个 nw 算出来，杜绝"正文说第 3 步、按钮去第 5 步"。 */
+function nextStepAct(n){
+  const nw=nextWorkStep(n);
+  if(!nw) return {to:0, act:{a:'goto',to:1,t:'← 从第 1 步再来一轮',k:'pact mag'},
+    why:'这一轮的阶段已全部判绿。'};
+  return {to:nw, act:{a:'goto',to:nw,t:'去第 '+nw+' 步 '+stepName(nw)+' →',k:'pact mag'},
+    why:'下一步：'+stepName(nw)+'（第 '+nw+' 步）'+stepHint(nw)+'。'};
 }
 /* 全局第一个没做完的步骤号（没有则 0）。第 5 步的"还没换完"靠它决定
    该往前跳还是就在本步开跑，不能再一律写死"去第 3 步"。 */
@@ -3047,18 +3074,17 @@ function askOf(n){
               {a:'pullcheck',t:'重算差异',k:'link2'}]};
     }
     const unreach=/设备不可达/.test(pl.detail||'');
-    const nw1=nextWorkStep(1);
-    const goNext1={a:'goto',to:nw1,t:'去第 '+nw1+' 步 '+stepName(nw1)+' →',k:'pact mag'};
+    const nx1=nextStepAct(1);
     return {eb, gate,
       ask: unreach?'设备没连上，先用本地已有的包':'包已经在本地了',
       why: unreach?(pl.detail||'')+
         (stale?' 配置表也还没对齐：导出前先去第 '+nCfg+' 步。':'')
         : (stale?'但导出还开不了：配置表比源包旧，先去第 '+nCfg+' 步对齐。'
-                :'下一步：从源包重算产物，全部先进暂存区。'),
+                :nx1.why),
       acts: stale
         ? [{a:'goto',to:nCfg,t:'▶ 去第 '+nCfg+' 步同步配置表',k:'pact mag'},
            {a:'detail',t:'看这 '+list.length+' 个阶段',k:'link2'}]
-        : [goNext1,{a:'pullcheck',t:'再算一遍差异',k:'link2'}]};
+        : [nx1.act,{a:'pullcheck',t:'再算一遍差异',k:'link2'}]};
   }
 
   if(n===nCfg){
@@ -3083,11 +3109,10 @@ function askOf(n){
       why:'inputs/gamecfg 是导出的权威元数据，写正式区要签字；签了才会覆盖。',
       acts:[{a:'cfgsync',t:'⚑ 签字发布',k:'pact sign mag'},
             {a:'detail',t:'看写到哪儿',k:'link2'}]};
-    const nwCfg=nextWorkStep(nCfg);
+    const nxCfg=nextStepAct(nCfg);
     return {eb, ask:'配置表已对齐源包',
-      why:'下一步：从源包重算产物（第 '+nExport+' 步）。',
-      acts:[{a:'goto',to:nwCfg,t:'去第 '+nwCfg+' 步 '+stepName(nwCfg)+' →',k:'pact mag'},
-            {a:'detail',t:'看这 4 步写到哪儿',k:'link2'}]};
+      why:nxCfg.why,
+      acts:[nxCfg.act,{a:'detail',t:'看这 4 步写到哪儿',k:'link2'}]};
   }
 
   if(n===nExport){
@@ -3116,11 +3141,10 @@ function askOf(n){
     if(idle.length) return {eb, ask:'重导跑好了 '+nEm(list.length-idle.length)+' 项，还剩 '+nEm(idle.length)+' 项',
       why:'继续跑会把剩下的算完。',
       acts:[{a:'export',t:'▶ 跑完剩下的',k:'pact mag'}]};
-    const nwExp=nextWorkStep(nExport);
+    const nxExp=nextStepAct(nExport);
     return {eb, ask:'产物都重导好了',
-      why:'下一步：出改前 | 改后的对照表，纯读。',
-      acts:[{a:'goto',to:nwExp,t:'去第 '+nwExp+' 步 '+stepName(nwExp)+' →',k:'pact mag'},
-            {a:'detail',t:'看这 '+list.length+' 项写到哪儿',k:'link2'}]};
+      why:'这一步不写任何正式产物。'+nxExp.why,
+      acts:[nxExp.act,{a:'detail',t:'看这 '+list.length+' 项写到哪儿',k:'link2'}]};
   }
 
   if(n===nReview){
@@ -3130,11 +3154,11 @@ function askOf(n){
     if(!rv) return {eb, ask:'出一张改前 | 改后的对照表',
       why:'纯读，随时可以反复跑。图会放在「细节」里，点开能放大。',
       acts:[{a:'review',t:'▶ 出对照表',k:'pact mag'}]};
-    const nwRv=nextWorkStep(nReview);
-    return {eb, ask:'对照表好了，'+nEm((S.sheets||[]).length)+' 张，看一眼再决定换不换',
-      why:'这一步不写任何正式产物。换入是第 '+nSwap+' 步，要你签字。',
-      acts:[{a:'detail',t:'打开对照表',k:'pact mag'},
-            {a:'goto',to:nwRv,t:'去第 '+nwRv+' 步 '+stepName(nwRv)+' →',k:'link2'}]};
+    const nxRv=nextStepAct(nReview);
+    return {eb, ask:'对照表好了，'+nEm((S.sheets||[]).length)+' 张，'+
+        (allStagesPass()?'本轮已照过、也已换入':'看一眼再决定换不换'),
+      why:'这一步不写任何正式产物。'+nxRv.why,
+      acts:[{a:'detail',t:'打开对照表',k:'pact mag'},nxRv.act]};
   }
 
   const live5=list.filter(s=>s.tier==='live'), aw5=live5.filter(s=>stn(s.key)==='await');
@@ -3210,7 +3234,10 @@ function render(){
   const cur=currentStep();
   const rc=$('#railCount'); if(rc) rc.textContent=all.length+' 个阶段';
   const rcur=$('#railCur');
-  if(rcur) rcur.textContent=(S.running?'正在跑 ':'待办 ')+String(cur).padStart(2,'0');
+  /* 全判绿时右栏写「已跑完」，不再写「待办 05」——那一行在 17/17 全绿时
+     会把人骗去找一件已经做完的事（2026-10-17 用户截图就是这个状态）。 */
+  if(rcur) rcur.textContent=(S.running?'正在跑 ':(allStagesPass()?'已跑完 ':'待办 '))+
+    String(cur).padStart(2,'0');
   bar.querySelectorAll('.snode').forEach(e=>e.remove());
   Object.keys(steps).sort().forEach(k=>{
     const n=+k, list=stagesOf(n);
@@ -3222,7 +3249,8 @@ function render(){
     b.className='snode'+(n===step?' on':'')+(n===cur?' cur':'')+(first?' in':'')+
       (worst==='fail'?' fail':worst==='await'?' await':worst==='run'?' run':
        doneN===list.length&&list.length?' done':'');
-    b.title = n===cur ? '待办：这一步还有没跑完的阶段' : '查看第 '+n+' 步（不改变待办，按钮照样能按）';
+    b.title = n===cur ? (allStagesPass() ? '这一步也跑完了' : '待办：这一步还有没跑完的阶段')
+                      : '查看第 '+n+' 步（不改变待办，按钮照样能按）';
     if(first) b.style.animationDelay=(n*70)+'ms';
     b.dataset.step=n; b.dataset.done=doneN; b.dataset.total=list.length;
     b.innerHTML='<span class="bead"></span><label>'+esc(steps[k][0])+'</label>'+
@@ -3237,7 +3265,8 @@ function render(){
      那一步的按钮仍然可用，所以提示里写「查看」而不是「只读」。 */
   const stEl=$('#stepState');
   if(stEl){
-    stEl.textContent = step===cur ? '待办' : '查看中';
+    const done=allStagesPass();
+    stEl.textContent = done ? '已跑完' : (step===cur ? '待办' : '查看中');
     stEl.className = 'stepstate ' + (step===cur ? 'cur' : 'preview');
   }
   const vn=$('#viewnote'), vtx=$('#viewnoteTx'), bb=$('#bBackCur');
@@ -3247,8 +3276,10 @@ function render(){
       /* 说清"你在看哪"和"该去哪儿"。不要写"只读预览"——切到别的步骤，
          那一步的按钮仍然能按（第 1 步在配置表过期时也能拉包）。 */
       vtx.innerHTML = '你在看第 '+step+' 步 · <b>'+esc((steps[String(step)]||[])[0]||'')+
-        '</b>（按钮照样能按）　待办是第 '+cur+' 步 · <b>'+esc((steps[String(cur)]||[])[0]||'')+'</b>';
-      if(bb) bb.textContent='去第 '+cur+' 步';
+        '</b>（按钮照样能按）　'+
+        (allStagesPass() ? '这一轮的阶段已全部判绿'
+                         : ('待办是第 '+cur+' 步 · <b>'+esc((steps[String(cur)]||[])[0]||'')+'</b>'));
+      if(bb) bb.textContent = allStagesPass() ? '去第 1 步' : ('去第 '+cur+' 步');
     }
   }
   /* 节点是刚重建出来的 —— "哪一步在跑"这个标记必须**重建之后再打一次**，
@@ -3799,9 +3830,9 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                                 gate:$('#gate').hidden?'':$('#gate').textContent.trim(),
                                 receipt:$('#receipt').hidden?'':$('#receipt').textContent.trim(),
                                 acts:[...document.querySelectorAll('#cta button')]
-                                      .map(x=>x.dataset.a+'|'+x.textContent),
+                                      .map(x=>x.dataset.a+'|'+(x.dataset.to||'')+'|'+x.textContent),
                                 gateActs:[...document.querySelectorAll('#gate button')]
-                                      .map(x=>x.dataset.a+'|'+x.textContent)}; },
+                                      .map(x=>x.dataset.a+'|'+(x.dataset.to||'')+'|'+x.textContent)}; },
                 scope(a){ return actStages(a); },
                 live(a){ return liveOf(actStages(a)); },
                 work(){ return currentStep(); },
