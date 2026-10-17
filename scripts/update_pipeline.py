@@ -153,12 +153,109 @@ def count(d, pat):
     return len([p for p in glob.glob(os.path.join(d, pat))]) if os.path.isdir(d) else -1
 
 
-def fingerprint():
-    """这次更新的输入指纹：源包总数 + 依赖表哈希。用来判断"同一批输入是否已跑过"。"""
+def gamecfg_stamp():
+    """`inputs/gamecfg` 这一批权威表的指纹：逐个表的 size+mtime，按文件名排序后再哈希。
+
+    为什么必须有它（2026-10-17 23:20，§157）：原指纹只算"源包数 + 依赖表"，
+    **不含配置表**。于是 `cfg.publish` 把 `ship_skin_template` 从 2865 行刷成 2871 行之后，
+    指纹一个字没变 ⇒ 第 3 步那 7 个阶段的"同指纹已完成"缓存全部命中、全部判绿，
+    而它们的产物（`ship_meta.json` / `skin_voice.json` / `Output/Audio`）还是按旧表算的：
+    实测 `ship_meta` 与 `skin_voice` 里都没有 `aerjiliya_4`、`cv-90302` 仍是 58/70 条。
+    用户看到的是"表同步成功了，但皮肤名字和语音一点没变"。
+
+    用 size+mtime 而不是逐字节哈希：这些表有 5MB 上下，每次轮询都全读一遍太浪费；
+    真正会改它们的是 `cfg.publish`，它必然改 mtime。
+    """
+    d = os.path.join(ROOT, 'inputs', 'gamecfg')
+    parts = []
+    try:
+        for fn in sorted(os.listdir(d)):
+            if not fn.endswith('.json') or fn == 'MANIFEST.json':
+                continue
+            p = os.path.join(d, fn)
+            stt = os.stat(p)
+            parts.append(f'{fn}:{stt.st_size}:{int(stt.st_mtime)}')
+    except OSError:
+        return 'none'
+    return hashlib.md5('|'.join(parts).encode('utf-8')).hexdigest()[:10] if parts else 'none'
+
+
+def fingerprint(include_cfg=True):
+    """这次更新的输入指纹：源包总数 + 依赖表哈希（+ 配置表指纹）。用来判断"同一批输入是否已跑过"。
+
+    ⚠️ 少算一项就会造出"假绿灯"：见 `gamecfg_stamp()` 的注释（§157）。
+
+    `include_cfg=False` 专供 **产出配置表的那几个阶段**（`cfg.*`）用：
+    它们的工作**就是**改写 `inputs/gamecfg`，所以不能被"配置表变了"这条信号波及 ——
+    否则 `cfg.publish` 刚写完表，指纹当场变掉，下一次跑连它自己和前面三个
+    `cfg.*` 一起作废重跑（实测一次 12 分钟白跑）。反过来，下游阶段
+    （`deps`/`meta`/`audio`/…）必须用全指纹：表变了它们的产物就该重算。
+    """
     n = sum(len(f) for _, _, f in os.walk(AB)) if os.path.isdir(AB) else 0
     dm = os.path.join(OUT, 'dependency_manifest.json')
     h = hashlib.md5(open(dm, 'rb').read()).hexdigest()[:10] if os.path.isfile(dm) else 'none'
-    return f'bundles={n} deps={h}'
+    base = f'bundles={n} deps={h}'
+    return f'{base} cfg={gamecfg_stamp()}' if include_cfg else base
+
+
+def stage_fp(s):
+    """这个阶段该用哪条指纹判缓存命中（§157）。
+
+    `cfg.*`（产出配置表的四个阶段）用不含 `cfg=` 的那条：它们改写 `inputs/gamecfg`，
+    若把 `cfg=` 算进去，`cfg.publish` 刚写完表指纹就变 ⇒ 自己与前面三个阶段
+    下一轮全部作废（实测一次 12 分钟白跑）。其余阶段用全指纹。
+    """
+    return fingerprint(include_cfg=not getattr(s, 'produces_cfg', False))
+
+
+def stage_fp_by_key(key):
+    """按阶段 key 取该阶段的指纹；认不出来的 key 保守用全指纹。"""
+    for s in STAGES if 'STAGES' in globals() else ():
+        if s.key == key:
+            return stage_fp(s)
+    return fingerprint()
+
+
+def base_of(fp):
+    """指纹里**不含配置表**的那半（`bundles=N deps=H`）。
+
+    它是"换了一批源包"这个大事件的信号：变了就该保守地全部重判。
+    只有 `cfg=` 变（配置表刷新）时**不**整体作废 ——
+    逐阶段的指纹比较会自己判出哪些该重跑（§157）。
+    """
+    return ' '.join((fp or '').split(' ')[:2])
+
+
+def rejudge_state(st, cur_fp=None):
+    """把一份旧状态按**新指纹规则**重新过滤一遍，返回 (新状态, 保留的, 作废的)。
+
+    什么时候需要：指纹的算法本身改了（比如 2026-10-17 23:20 才发现漏了 `inputs/gamecfg`），
+    盘上已有状态是按老规则盖章的，直接整份作废会把**刚跑完的阶段也一起清掉**
+    —— 那一刻 `cfg.*` 四步刚花了 12 分钟。而它们其实完全有效：
+    产出配置表的阶段用的正是不含 `cfg=` 的那条指纹。
+
+    只清"该重跑的那些"，保留的原地不动。这是一次性迁移，
+    之后每轮都由 `stage_fp` 比较自然维持。
+    """
+    fp = cur_fp or fingerprint()
+    st = dict(st or {})
+    out, keep, drop = {}, [], []
+    for k, v in (st.get('verdict') or {}).items():
+        (keep if v.get('fingerprint') == stage_fp_by_key(k) else drop).append(k)
+        if v.get('fingerprint') == stage_fp_by_key(k):
+            out[k] = v
+    dkeep, ddrop = [], []
+    done = {}
+    for k, v in (st.get('done') or {}).items():
+        if v.get('fingerprint') == stage_fp_by_key(k):
+            done[k] = v
+            dkeep.append(k)
+        else:
+            ddrop.append(k)
+    st['fingerprint'] = fp
+    st['done'] = done
+    st['verdict'] = out
+    return st, keep + dkeep, drop + ddrop
 
 
 def scan_hardlinks(paths):
@@ -180,6 +277,10 @@ class Stage:
         self.key, self.title, self.tier, self.fn = key, title, tier, fn
         self.judge_desc, self.produces, self.needs = judge_desc, produces or [], needs or []
         self.step, self.writes = step, writes
+        # 这个阶段算缓存指纹时**要不要带上 `cfg=`**（§157）。默认带；
+        # 只有"产出配置表本身"的 `cfg.*` 阶段要置 False ——
+        # 它们的工作就是改写 inputs/gamecfg，被自己的产物判过期就成了永动机。
+        self.produces_cfg = key.startswith('cfg.')
         # 预计耗时的两种来源，**只允许填量过的数**（没量过就留 0，界面会显示"未知"）：
         #   rate/unit —— 按本次范围线性估算（秒/单位），范围越大越久的那类阶段
         #   est       —— 与范围基本无关的固定耗时（实测秒数）
@@ -1219,9 +1320,19 @@ def main():
     fp = fingerprint()
     sc = scope_stamp()      # 结论的第二枚章：范围清单的身份
     st = json.load(open(STATE, encoding='utf-8')) if os.path.isfile(STATE) else {}
-    if st.get('fingerprint') != fp:
+    if base_of(st.get('fingerprint')) != base_of(fp):
+        # 换了一批源包 ⇒ 保守地全部重判（这是"大事件"，不该只挑几个阶段）。
         log(f'输入指纹变了（{st.get("fingerprint", "无记录")} → {fp}），旧状态作废，全部重判')
         st = {'fingerprint': fp, 'done': {}}
+    else:
+        # 源包没变：逐阶段重判（可能是配置表刷新了，也可能指纹算法本身改过 ——
+        # 2026-10-17 §157 加 `cfg=` 那次，盘上状态是按老规则盖章的，
+        # 不这么过滤就会把刚跑完 12 分钟的 cfg.* 一起清掉）。
+        st, keep, drop = rejudge_state(st, fp)
+        if drop:
+            log(f'配置表刷新/指纹规则更新 ⇒ 保留 {len(keep)} 项，'
+                f'作废 {len(drop)} 项（该重跑）：{", ".join(sorted(set(drop))[:8])}'
+                f'{" …" if len(set(drop)) > 8 else ""}')
     st.setdefault('done', {})
 
     plan = [x for x in STAGES if not want or x.key in want]
@@ -1237,7 +1348,7 @@ def main():
         # "paintings 已完成"就是假的 —— 那会让这一次真的跳过 179 张不重导。
         d0 = st['done'].get(s.key, {})
         # 没盖章的旧条目一律不算这轮的：失效方向必须是"多跑一次"，不能是"少跑一次"。
-        if cacheable and d0.get('fingerprint') == fp and d0.get('scope') == sc:
+        if cacheable and d0.get('fingerprint') == stage_fp(s) and d0.get('scope') == sc:
             log(f'⏭  {s.key} 本指纹下已完成（{st["done"][s.key].get("detail", "")[:60]}），跳过；'
                 f'要重跑请加 --force')
             RESULTS[s.key] = st['done'][s.key]
@@ -1258,7 +1369,7 @@ def main():
         # ⚠️ 只缓存**判绿**的暂存阶段当"已完成"：把失败也记成已完成，下次跑到这里会被直接跳过，
         #    等于一条永远不再复查的流水线 —— 正是本项目最怕的那类静默失效。
         if RESULTS[s.key]['ok'] and s.tier == 'staged':
-            st['done'][s.key] = dict(RESULTS[s.key], fingerprint=fp, scope=sc)
+            st['done'][s.key] = dict(RESULTS[s.key], fingerprint=stage_fp(s), scope=sc)
         else:
             st['done'].pop(s.key, None)
         # verdict 是另一件事：**给界面看的"上次结论"**，13 个阶段全都记。

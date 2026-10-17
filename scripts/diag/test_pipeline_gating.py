@@ -418,6 +418,50 @@ def t_device_down():
     tmp_work(body)
 
 
+def t_fingerprint_covers_cfg():
+    """指纹必须覆盖 `inputs/gamecfg`（§157）。
+
+    少了这一项，`cfg.publish` 把皮肤表刷成新行之后指纹不变 ⇒ 第 3 步七个阶段的
+    "同指纹已完成"缓存全部命中 ⇒ 产物按旧表算却全判绿。
+    """
+    print('\n[10] 输入指纹必须覆盖配置表（发布新表后旧结论作废）')
+    cfg = os.path.join(up.ROOT, 'inputs', 'gamecfg')
+    if not os.path.isdir(cfg):
+        print('  SKIP  没有 inputs/gamecfg，跳过')
+        return
+    jsons = [f for f in sorted(os.listdir(cfg)) if f.endswith('.json') and f != 'MANIFEST.json']
+    ck('配置表目录里有表可算指纹', bool(jsons), f'{len(jsons)} 张')
+
+    real_stamp = up.gamecfg_stamp
+    s1 = up.gamecfg_stamp()
+    ck('gamecfg_stamp 返回一个非 none 的串', s1 and s1 != 'none', str(s1))
+    ck('同一份盘面两次算出来一样（幂等）', s1 == up.gamecfg_stamp(), s1)
+
+    # 模拟"发布了一张新表"：改 mtime/size 之一，指纹必须变。
+    try:
+        up.gamecfg_stamp = lambda: 'CFG_STAMP_A'
+        up.fingerprint = up.fingerprint  # noqa: 保持引用
+        fa = up.fingerprint()
+        up.gamecfg_stamp = lambda: 'CFG_STAMP_B'
+        fb = up.fingerprint()
+        ck('配置表一变 ⇒ 整条指纹跟着变', fa != fb, f'{fa} vs {fb}')
+        ck('指纹里带 cfg= 这一段', 'cfg=' in fa, fa)
+        ck('bundles_of 仍只取源包那一半（不破坏 §71 的范围清单新鲜度）',
+            up.bundles_of(fa) == up.bundles_of(fb), up.bundles_of(fa))
+        # 关键不变式：配置表变 ⇒ 盘上旧结论的指纹 != 新指纹（缓存必然失效）
+        old_on_disk = None
+        try:
+            st = json.load(open(os.path.join(up.WORK, 'pipeline_state.json'), encoding='utf-8'))
+            old_on_disk = st.get('fingerprint')
+        except Exception:
+            pass
+        if old_on_disk and 'cfg=' not in old_on_disk:
+            ck('盘上旧指纹不含 cfg=（说明它是修指纹之前写的，'
+               '下次运行会被整体作废重判）', True, old_on_disk)
+    finally:
+        up.gamecfg_stamp = real_stamp
+
+
 def main():
     t_stems()
     t_no_scope()
@@ -429,6 +473,7 @@ def main():
     t_deps_gate()
     t_freshness_key()
     t_device_down()
+    t_fingerprint_covers_cfg()
     print('\n' + ('[FAIL] ' + '；'.join(FAIL) if FAIL else '[PASS] 签字门与增量范围闸门全绿'))
     return 1 if FAIL else 0
 

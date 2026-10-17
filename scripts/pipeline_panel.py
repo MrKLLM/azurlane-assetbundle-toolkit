@@ -503,21 +503,37 @@ class H(BaseHTTPRequestHandler):
             state = {}
             try:
                 raw = json.load(open(os.path.join(WORK, 'pipeline_state.json'), encoding='utf-8'))
-                if raw.get('fingerprint') == fingerprint_safe():
+                # 外层闸只比"基础指纹"（源包数 + 依赖表）：那是"换了批输入"的大事件，
+                # 不该同批时不认任何旧结论。**不能比整条** —— 整条含 `cfg=`，
+                # 配置表一刷新就会把整块面板清空，而 `cfg.*` 四步的结论其实完全有效（§157）。
+                if base_of_fp(raw.get('fingerprint')) == base_of_fp(fingerprint_safe()):
                     # done=跳过缓存（只有暂存判绿档），verdict=上次结论（13 档全记）。
                     # 两个都要，且**指纹不同就一个都不读** —— 拿旧更新包的结论给这次的界面涂绿，
                     # 正是这条流水线最怕的那类假绿灯。
                     sc_now = scope_stamp_safe()
+                    # ⚠️ 第二道章不是"整条指纹相等"，而是**逐阶段比**（§157）：
+                    #   `cfg.*` 四个阶段用不含 `cfg=` 的指纹（它们的工作就是改写配置表，
+                    #   拿自己的产物判过期会变成永动机）；其余阶段用全指纹。
+                    #   只看整条相等会把「配置表刚刷新、下游该重跑」和「全都没变」混为一谈。
+                    def _fp_ok(k, v):
+                        want = (stage_fp_by_key_safe(k)
+                                or fingerprint_safe())
+                        return v.get('fingerprint') == want
                     # done（跳过缓存）同样要认范围章：清单换过之后那条"已完成"就是假的
                     state = {k: v for k, v in (raw.get('done') or {}).items()
-                             if v.get('scope') == sc_now}
+                             if v.get('scope') == sc_now and _fp_ok(k, v)}
                     # verdict 还要过第二道章：**范围清单的身份**。清单换过（被冲空又复原也算），
                     # 上一批跑出来的"本次增量没有立绘源包 ⇒ 跳过"就不是这轮的结论。
                     for k, v in (raw.get('verdict') or {}).items():
-                        if v.get('scope') == sc_now:
+                        if v.get('scope') == sc_now and _fp_ok(k, v):
                             state[k] = v
-            except Exception:
-                pass
+            except Exception as e:
+                # ⚠️ 以前这里是 `except Exception: pass` —— 于是任何一处小错（哪怕
+                # 一个 KeyError）都让**整块结论静默变成空**，界面显示"全都未跑"，
+                # 而用户看到的是"我的进度没了"却查不出原因（2026-10-17 23:35 实测）。
+                # 失败要**说出来**：把它挂到 error 字段上，界面会显示这一行。
+                print(f'[警告] 读阶段结论失败：{type(e).__name__}: {e}')
+                err = f'读阶段结论失败：{type(e).__name__}: {e}'
             sheets = []
             for p in sorted(glob_sheets()):
                 sheets.append({'name': os.path.basename(p),
@@ -691,7 +707,11 @@ _CACHE = {'fp': [None, 0.0], 'scope': [None, 0.0], 'means': [None, 0.0], 'units'
 
 
 def _cached(slot, ttl, fn):
-    val, at = _CACHE[slot]
+    # ⚠️ 这里原来写 `_CACHE[slot]` 直接取值，首次访问一个没见过的 slot 会 KeyError；
+    #   而 `/api/state` 整块包在 `except Exception: pass` 里 ⇒ 一次 KeyError 就让
+    #   **所有阶段结论静默变成空**（2026-10-17 23:35 实测：面板读到 0 条却毫无报错）。
+    #   失败方向必须是"少缓存一次"，不是"整块读不出来"。用 .get 并补默认值。
+    val, at = _CACHE.get(slot, (None, 0.0))
     now = time.time()
     if val is not None and now - at <= ttl:
         return val
@@ -711,6 +731,27 @@ def fingerprint_safe():
             print(f'[警告] 读输入指纹失败：{e}')
             return None
     return _cached('fp', 30.0, calc) or '(读不到：源包目录打不开？)'
+
+
+def base_of_fp(fp):
+    """指纹里不含配置表的那半（`bundles=N deps=H`）。读不懂就原样返回（保守：不匹配）。"""
+    parts = (fp or '').split(' ')
+    return ' '.join(parts[:2]) if len(parts) >= 2 else (fp or '')
+
+
+def stage_fp_by_key_safe(key):
+    """该阶段判缓存用的指纹（§157）。`cfg.*` 拿不含 `cfg=` 的那条，其余拿全的。
+
+    读不到就返回 None，让调用方退回"整条指纹"这个保守判据。
+    """
+    def calc():
+        sys.path.insert(0, HERE)
+        try:
+            import update_pipeline as up
+            return up.stage_fp_by_key(key)
+        except Exception:
+            return None
+    return _cached('stfp:' + key, 30.0, calc)
 
 
 def scope_stamp_safe():
@@ -3942,6 +3983,7 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                 scope(a){ return actStages(a); },
                 live(a){ return liveOf(actStages(a)); },
                 work(){ return currentStep(); },
+                gap(){ return firstGapStep(); },
                 detail(){ const d=$('#detail');
                   return {on:d.classList.contains('on'),
                           vis:getComputedStyle(d).display!=='none',

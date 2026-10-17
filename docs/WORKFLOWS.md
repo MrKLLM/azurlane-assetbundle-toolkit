@@ -4745,3 +4745,11 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
 并有"已自刷过还不一致 ⇒ 让人按 F5"的硬护栏。探针用 `/?asbuild=xxx` 模拟真实旧标签页。
 ⚠️ 配套判据：改页面下发路径（`page_html`/`_send`）后先 `curl` 一遍，
 确认响应里 `\"` 数量为 0 —— `_send` 只对 `bytes` 原样写出，`str` 会被 json 编码成一屏引号。
+
+**追加（2026-10-17 23:45，§157）**：指纹必须覆盖 `inputs/gamecfg`，且**分两档**——
+产出配置表的 `cfg.*` 用不含 `cfg=` 的指纹，其余阶段用全指纹
+（`Stage.produces_cfg` / `stage_fp()` / `stage_fp_by_key()` / `base_of()` /
+`rejudge_state()`）。编排器与面板两侧的"指纹相等"闸都改成逐阶段比较。
+⚠️ 两个同类静默失效已修：`_cached()` 首访 KeyError + `/api/state` 的
+`except Exception: pass` ⇒ 结论静默清空；探针首屏等 3 秒撞上 `/api/state` 的
+3 秒冷启动 ⇒ 一片假红。**判据红时先确认数据到位**再怀疑产品代码。

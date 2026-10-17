@@ -145,7 +145,15 @@ def main():
         pg.cmd('Runtime.enable')
         pg.cmd('Page.enable')
         pg.size(*win)
-        pg.go(url, 3)
+        # ⚠️ 等 6 秒而不是 3：`/api/state` 要 walk 7 万多个源包算输入指纹，实测冷启动
+        # 约 3 秒才回。3 秒正好卡在边界上，于是 `LOADED=false`、snode=0、
+        # 所有判据读到的都是占位符「—」⇒ 一片假红（2026-10-17 23:40 实测）。
+        # 判据失败时先确认 `__probe.state().stages` 有 17 条，别急着改产品代码。
+        pg.go(url, 6)
+        for _ in range(12):
+            if (pg.ev("typeof LOADED!=='undefined'&&LOADED") or False):
+                break
+            time.sleep(0.5)
 
         print('\n── 骨架与文案 ─────────────────────────────────')
         nstep = pg.ev("document.querySelectorAll('.snode').length")
@@ -443,10 +451,19 @@ def main():
         goto_btn = pg.ev("(()=>{const b=[...document.querySelectorAll('#cta button')]"
                          ".find(x=>x.dataset.a==='goto');"
                          "return b?[b.dataset.to,b.textContent.trim()]:null})()")
+        # 「缺口在本步 ⇒ 主按钮是换入」只在**第 5 步真的是缺口所在**时成立。
+        # 上游有活（第 1/3 步没跑）时，往回跳才是对的 —— 2026-10-17 §157 之后
+        # 配置表一刷新，下游全部回到"未跑"，缺口就在上游。
+        gap_step = pg.ev("__probe.gap()")
         if goto_btn:
-            chk('第 5 步缺口在本步时主按钮是换入（签字），不是往回跳',
-                any(x[0] == 'swap' for x in acts5),
-                ' / '.join(f'{x[0]}|{x[2]}' for x in acts5))
+            if gap_step == 5:
+                chk('第 5 步缺口在本步时主按钮是换入（签字），不是往回跳',
+                    any(x[0] == 'swap' for x in acts5),
+                    ' / '.join(f'{x[0]}|{x[2]}' for x in acts5))
+            else:
+                chk(f'上游第 {gap_step} 步有活时，第 5 步主按钮回跳到那一大步',
+                    any(x[0] == 'goto' and int(x[1] or 0) == int(gap_step) for x in acts5),
+                    f'缺口在第 {gap_step} 步 / ' + ' / '.join(f'{x[0]}|{x[2]}' for x in acts5))
             pg.ev("[...document.querySelectorAll('#cta button')]"
                   ".find(x=>x.dataset.a==='goto').click()")
             time.sleep(0.35)
@@ -499,13 +516,24 @@ def main():
         print('\n── 窄屏 ───────────────────────────────────────')
         pg.size(1000, 800)
         pg.go(url, 2.6)
+        for _ in range(12):
+            if (pg.ev("typeof LOADED!=='undefined'&&LOADED") or False):
+                break
+            time.sleep(0.5)
+        # 窄屏这段要看「查看中」的提示条，所以必须切到一个**非待办**步骤。
+        # 待办是哪一步随数据变（§157 修完指纹后可能是第 1 步也可能是第 5 步），
+        # 写死切第 5 步会在"待办正好是 5"时测不到提示条 ⇒ 假红。
+        work_n = pg.ev("__probe.work()") or 1
+        view_n = 5 if work_n != 5 else 1
+        pg.ev(f"document.querySelectorAll('.snode')[{view_n-1}].click()")
+        time.sleep(0.5)
         chk('右栏折成底部横排',
             pg.ev("getComputedStyle(document.querySelector('.steps')).flexDirection") == 'row')
         chk('进度线不再横穿步骤文字',
             pg.ev("getComputedStyle(document.querySelector('.steps .track')).display") == 'none')
         chk('窄屏无横向溢出',
             bool(pg.ev("document.documentElement.scrollWidth<=innerWidth")))
-        chk('窄屏首屏能看到「查看 / 待办」提示',
+        chk(f'窄屏首屏能看到「查看中」提示（当前看第 {view_n} 步，待办第 {work_n} 步）',
             bool(pg.ev("(()=>{const e=document.getElementById('viewnote');"
                        "const r=e.getBoundingClientRect();"
                        "return !e.hidden && r.top>=0 && r.bottom<=innerHeight})()")),
