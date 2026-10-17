@@ -10632,7 +10632,7 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 第二次的 `shutil.move(生产 motion, 已存在的备份/<模型>)` 退化成"搬进它里面" ⇒ 备份里多出 `<模型>/motion/`，
 **而那份装的是第一次已换入的新内容**（照它回滚会静默拿到错东西）。核对结论：生产 `Output/Live2D/*/motion` = **8147**、
 逐模型与备份**非嵌套**副本一致、且与新导出**逐段相等**（`l2d_step_ab` 报 `expected_step 0` 且各项差异 0）⇒ **生产无损坏**；
-已删掉 269 个嵌套副本，备份恢复成单一布局（`Output/_OLD_bak/l2d_motion_20261016_234428`，8147）。
+已删掉 269 个嵌套副本，备份恢复成单一布局（`Output/_OLD_bak/l2d_motion_20261016_234428`，8147）。**该备份与中转目录 `.diag/l2d_full_step` 已于 2026-10-17 删除，见 ④**。
 ⚠️ **"生产递归 8751"是统计口径假象**：多出的 604 个来自同级 `_ab/` 工作目录（`l2d_ab.py` 的旧实验产物，`_` 前缀工具一律跳过）；
 量产物要按 `<模型>/motion/` **逐模型非递归**。
 
@@ -10647,3 +10647,18 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 `antu_2 effect` 中位 **0.7586**（改前 3.5567）⇒ 盘上就是修后数据。
 
 **涉及文件**：`scripts/extract_motions.py`、`scripts/apply_live2d_motions.py`、`scripts/diag/l2d_step_ab.py`（本轮修 2 处缺陷）。
+
+**④ 备份 / 中转退场（2026-10-17，用户在画廊实见、授权后）**：`Output/_OLD_bak/l2d_motion_20261016_234428`
+（换前备份，8147）与中转目录 `.diag/l2d_full_step`（8147）已按**换入备份退场五项核对**删除，回收 **1.57 GB**
+（D 盘可用 216.74→218.31 GB）。核对全过：① 条目 269 目录 / 8147 文件 = 清单数；② 非 `.motion3.json` = **0**；
+③ 文件名集合与清单同一批；④ 生产真树 8147 / 空文件 0 / 抽 400 张 md5 全等；⑤ **真产物 8147 全 `nlink=1`**
+（备份那 302 个 `nlink=2` 的伙伴只在 `Output/Live2D/_ab/<模型>/old/motion/` 这个 A/B 实验废料里，**与真产物零共享**
+⇒ 删备份不伤生产；删后那 302 个回到 `nlink=1`，与 inode 集合求交的预判吻合）。
+⚠️ **⑤ 的判据要按「真产物」判，不能按整棵目录树**：`Output/Live2D/_ab/`（`_ab/old` ↔ 本备份、`_ab/new` ↔ `.diag/l2d_fix`）
+是硬链废料，整树 `nlink>1` 是**无害**的；要定位共享伙伴就求 **inode 集合交**（`os.stat().st_ino`），别按路径猜。
+⚠️ **「中转目录是纯副本」要证明、别默认**：`apply_live2d_motions.py:100` 用 `shutil.copytree`（**非 move**）⇒ 源目录留存；
+证明它与生产等价用**全量 `size` 逐对 + 抽样 `md5`**（8147 全 size 相符、400 抽样 0 不符），比 `l2d_step_ab` 的
+结构比对**更快也更严**（后者在两个 807 MB 树上 240 s 没跑完）。
+⇒ 这批 motion 此后**唯一的回滚路径** = `git show cccb0e1^:scripts/extract_motions.py` 取回改动前正本 +
+按 WF-15 重导一次全量（≈30 分钟机器时间）；**备份已删，无一键回滚**。小备份
+`Output/_OLD_bak/l2d_motion_20261016_223324`（gezi_2 先换那次，57 文件）未在本次点名范围，保留。
