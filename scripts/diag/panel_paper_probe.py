@@ -135,6 +135,7 @@ def main():
     ap.add_argument('--cdp', type=int, default=8891)
     ap.add_argument('--win', default='1600,1000')
     a = ap.parse_args()
+    PANEL_PORT = a.port          # 单独存一份：下面有 `for a, to, txt in acts` 会覆盖 a
     win = tuple(int(x) for x in a.win.split(','))
     os.makedirs(OUT, exist_ok=True)
     start_panel(a.port)
@@ -515,6 +516,29 @@ def main():
                        "if(!b) return false; const r=b.getBoundingClientRect();"
                        "return r.top>=0 && r.bottom<=innerHeight})()")))
         pg.shot('narrow.png')
+
+        print('\n── 版本自检（长驻旧标签页）───────────────────────')
+        # 2026-10-17 22:45：用户对着"已跑完 05 / 去第 5 步"的旧界面反复问，
+        # 因为那个标签页从服务重启前就一直开着（no-store 只管刷新，不管"没刷新"）。
+        # 这里用 `/?asbuild=...` 让服务下发一份"内联 build 是假的"的页面，走真实代码路径。
+        srv_build = pg.ev("window.__probe.state().build")
+        pg.size(1600, 1000)
+        pg.go(f'http://127.0.0.1:{PANEL_PORT}/?asbuild=deadbeef0000', wait=4.0)
+        chk('旧版本页面会自己刷到最新版',
+            pg.ev("MY_BUILD") == srv_build and srv_build,
+            f'页面 {pg.ev("MY_BUILD")} vs 服务 {srv_build}')
+        chk('自刷后回到规范 URL（不带 asbuild，否则会自己刷成死循环）',
+            (pg.ev("location.search") or '') == '',
+            pg.ev('location.href'))
+        chk('自刷后样式与骨架完好（不是裸 HTML）',
+            pg.ev("document.querySelectorAll('.snode').length") == 5 and
+            bool(pg.ev("getComputedStyle(document.body).backgroundColor")),
+            'snode=%s bg=%s' % (pg.ev("document.querySelectorAll('.snode').length"),
+                                pg.ev("getComputedStyle(document.body).backgroundColor")))
+        chk('自刷后给用户一句确认，而不是静默换脸',
+            '自动刷新' in (pg.ev("document.getElementById('warn').textContent") or ''),
+            pg.ev("document.getElementById('warn').textContent"))
+        pg.go(url, wait=2.4)
 
         chk('全程无 JS 异常', not pg.exc, '; '.join(pg.exc[:3]))
         print('\n截图: ' + os.path.relpath(OUT, ROOT))

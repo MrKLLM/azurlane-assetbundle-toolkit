@@ -21,6 +21,7 @@
 """
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
@@ -487,7 +488,10 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         if u.path in ('/', '/index.html'):
-            return self._send(200, PAGE.encode('utf-8'), 'text/html; charset=utf-8')
+            # `/?asbuild=xxx` 下发一份"内联 build 被改掉"的页面 —— 探针据此模拟
+            # 长驻旧标签页，验证它会自己刷到最新版（真实路径，不必手改内存变量）。
+            asb = q.get('asbuild')
+            return self._send(200, page_html(asb), 'text/html; charset=utf-8')
         if u.path == '/api/state':
             refresh_states()
             err = ''
@@ -529,6 +533,9 @@ class H(BaseHTTPRequestHandler):
                 # 2026-10-17 §155：发布跑在解析刷新之前 ⇒ 新皮肤无名、语音档位派不出，
                 # 而阶段结论全是绿的（缓存）——这个差就是唯一会说真话的信号。
                 'skin_gap': skin_table_gap(),
+                # 页面版本戳：旧标签页拿它和内联的 __BUILD__ 比，不等就自己 reload
+                # （no-store 治不了"页面比服务旧"——见 §156）。
+                'build': BUILD,
                 # 最近一次**已结束**的任务用了多久：进度台按契约跑完就收起（静止帧判据），
                 # 所以"这轮跑了多久 / 停在哪"要由主屏那句话带出来。
                 'last': _last_run(),
@@ -2313,10 +2320,17 @@ pre .bad{color:#E08A69!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+let MY_BUILD='__BUILD__';   // 服务端把 PAGE 的哈希内联进来；改了源码重启后旧页会自己 reload
+                           // （用 let 而非 const：注入式测试要能改写它，见 panel_paper_probe）
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 let S=null, step=1, curJob=null, off=0, follow=true, timer=null, force=false;
 let SEA = false;   // 星野背景已退役（2026-10-17 纸本控制台）；变量保留只为不拆旧调用点
 let NIGHT = localStorage.getItem('panel.night')==='1';
+let RELOADED=false;   // 同一个 build 自刷新过一次就认输，别陷入 reload 循环
+/* 刚自动刷新过：新页面读到 sessionStorage 标记就知道上一轮是"自己发现自己旧了"，
+   于是给一句确认，而不是让用户以为刚才那次诡异刷新是手滑。 */
+const AUTO_RELOADED=(()=>{ try{ const v=sessionStorage.getItem('panel.staleReload');
+  if(v){ sessionStorage.removeItem('panel.staleReload'); return 1; } }catch(e){} return 0; })();
 
 const TIER={read:['ⓘ 只读','r'],staged:['▣ 暂存','s'],live:['⚑ 写正式','l']};
 const STT={idle:'未跑',pass:'判绿',await:'等你签字',fail:'判红',run:'在跑'};
@@ -2772,6 +2786,28 @@ async function apiState(force){
   try{ j=await (await fetch('/api/state')).json(); }
   catch(e){ LOADERR=String(e); render(); setTimeout(apiState,2500); return; }
   LOADERR=''; LOADED=true; S=j; S.state=S.state||{};
+  /* 版本自检：页面拿到的 build 与内联的 MY_BUILD 不等 ⇒ 这个标签页比服务旧。
+     2026-10-17 22:45 用户对着"已跑完 05 / 去第 5 步"的旧界面问了一整晚，
+     根因就是长驻标签页不会因为服务重启而更新（no-store 只管刷新，不管"没刷新"）。 */
+  if(j.build && j.build!==MY_BUILD){
+    /* 硬护栏：本次会话已经自刷过一次还不一致 ⇒ 别再刷了（可能是代理/中间层在吐旧 HTML，
+       再刷就是死循环）。改成把原因钉在屏上，让人自己按 F5。 */
+    if(AUTO_RELOADED || RELOADED){
+      $('#warn').textContent='面板代码与服务端不一致，自动刷新没解决。'
+        +'请按 Ctrl+F5 强制刷新，或关掉标签页重新打开。';
+      $('#warn').classList.add('on');
+      return;
+    }
+    RELOADED=true;
+    try{ sessionStorage.setItem('panel.staleReload','1'); }catch(e){}
+    /* 自刷新会丢掉"正在跑"的视图，所以先把原因挂在屏上再刷；
+       用 replace 而不是 reload —— 后者会保留 `?asbuild=` 这类查询串，
+       于是"永远旧"的探针页会把自己刷成死循环（2026-10-17 22:58 实测）。 */
+    $('#warn').textContent='面板代码已更新（服务重启过），正在自动刷新…';
+    $('#warn').classList.add('on');
+    setTimeout(()=>location.replace('/'),350);
+    return;
+  }
   gaugeSet(j.gauge);
   const ns=sigOf(j);
   if(!force && RENDERED && ns===SIG){          // 内容一个字节没变 ⇒ 一个节点都不碰
@@ -3293,6 +3329,8 @@ function render(){
     $('#warn').classList.add('on'); }
   else if(S.error){ $('#warn').textContent='读阶段清单失败：'+S.error; $('#warn').classList.add('on'); }
   else if(!all.length){ $('#warn').textContent='阶段清单为空：update_pipeline 没读到。';
+    $('#warn').classList.add('on'); }
+  else if(AUTO_RELOADED){ $('#warn').textContent='面板代码已更新，本页已自动刷新到最新版。';
     $('#warn').classList.add('on'); }
   else $('#warn').classList.remove('on');
 
@@ -3912,6 +3950,28 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
 window.ST=ST; window.SPR=SPR; window.SPRG=SPRG; window.panelState=()=>S;
 </script></body></html>
 '''
+
+
+# ── 版本戳：让长驻标签页自己发现"服务已经重启过" ────────────────────────────
+# 2026-10-17 22:45 用户看到的还是修复前的旧界面（右栏写"已跑完 05"、正文点名第 3 步
+# 而按钮跳第 5 步）。响应头早就带 `Cache-Control: no-store`，所以**不是**浏览器缓存，
+# 而是那个标签页从服务重启前就一直开着，从没重新加载过。
+# ⇒ 光靠 no-store 治不了"页面比服务旧"。这里把 PAGE 的哈希同时下发（/api/state.build）
+# 并内联进页面（__BUILD__）；两者不等时页面自己 reload，用户什么都不用做。
+BUILD = hashlib.sha256(PAGE.encode('utf-8')).hexdigest()[:12]
+
+
+def page_html(as_build=None):
+    """把内联版本戳替换进页面。改 PAGE 的任何一处都会让 BUILD 变，从而触发旧页自刷新。
+
+    `as_build` 只给探针用：下发一个"页面比服务旧"的版本，走的是和真实长驻标签页
+    完全相同的代码路径。
+
+    必须返回 **bytes**：`_send` 只对 bytes 走原样写出，str 会被 `json.dumps` —— 那会把整份
+    HTML 变成一个带引号的 JSON 字符串，浏览器里只剩一堆 `\"`（2026-10-17 22:55 实测：
+    页面全裸、无样式无脚本，截图上是一屏引号）。
+    """
+    return PAGE.replace('__BUILD__', as_build or BUILD).encode('utf-8')
 
 
 def main():

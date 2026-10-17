@@ -4738,3 +4738,10 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
 第 3 步改「导出被旧皮肤表挡着」+「▶ 去第 2 步重新发布」；`currentStep()`/`nextWorkStep()`/
 `firstGapStep()`/`allStagesPass()` 全部把这条算成第 2 步的活（否则 17/17 全绿时待办会停在第 5 步）。
 判据：`panel_paper_probe` 在 `skin_gap.gap>0` 时断言第 2 步主按钮含"发布"、第 3 步不放行 `export`。
+
+**追加（2026-10-17 22:58，§156）**：面板加**版本戳自检**，让长驻标签页自己发现自己过期。
+`BUILD = sha256(PAGE)[:12]` → `page_html()` 内联进页面 + `/api/state` 下发同一值；
+前端不等就 `location.replace('/')`（不是 `reload`，否则带查询串的旧页会刷成死循环），
+并有"已自刷过还不一致 ⇒ 让人按 F5"的硬护栏。探针用 `/?asbuild=xxx` 模拟真实旧标签页。
+⚠️ 配套判据：改页面下发路径（`page_html`/`_send`）后先 `curl` 一遍，
+确认响应里 `\"` 数量为 0 —— `_send` 只对 `bytes` 原样写出，`str` 会被 json 编码成一屏引号。
