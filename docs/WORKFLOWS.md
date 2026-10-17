@@ -4584,6 +4584,8 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
    标题常驻 `当前 01`；页头给 `当前 / 只读预览` 徽标；点别的步骤时出常驻提示条
    「只读预览：你在看第 N 步 · 实际进度停在第 M 步」+ 一键「回到第 M 步」。不拦着点，只把状态说清。
    preflight 因**配置表过期**判红时，主动作直接改成「去第 2 步同步配置表」——不让人对着"再查一次"空按。
+   ⚠️ **第 5 条的具体口径已被 WF-47 取代**：待办会指向第 2 步，第 1 步保留拉包动作（卡点不顶替主按钮），
+   并且每次动作都写回执；「只读预览」也改成了「查看中」。
 6. **签字用专门窗口，不用原生 `confirm()`**：`#signmodal` 与主界面同一套纸/墨/朱砂，
    逐条列阶段、写到哪儿、备份说明；必须勾选 + 签名（名字存 `panel.signer`）才放行。
    `sign()`、`ctaRun('tocheck')`、卡片「单独跑」三处都已改走它。
@@ -4601,3 +4603,51 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
 
 **涉及文件**：`scripts/pipeline_panel.py`、`scripts/diag/panel_paper_probe.py`、
 `scripts/diag/panel_ui_probe.py`（标记退役，`PANEL_UI_LEGACY=1` 才跑）。
+
+---
+
+### WF-47: 控制台「五步动作 / 跨步卡点 / 动作回执」模型
+
+**日期**: 2026-10-17
+**目标**: 每个步骤都有可执行动作；跨步前置条件（配置表过期）不顶替本步按钮；任何动作跑完都留下可核对的回执。
+**背景**: 第 2 步「同步配置表」是后加的，前端仍按四步写 `n===1..4` 与 `step===4`，
+导致第 2 步显示重导文案、「换入」签到空清单、`next` 卡在第 4 步。用户 2026-10-17 反馈：
+点「再查一次」毫无提示，第 1 步又没有拉包入口，到了第 2 步还被一句「实际进度停在第 1 步」钉回去。
+
+**做法**:
+1. **步骤号只从阶段表反查**：`stepNo('cfg.publish',2)`、`stepNo('paintings',3)`、`stepNo('swap-in',5)`；
+   `next` 的上界用 `stepMax()`。禁止再手抄 `n===2/3/4` 或 `step===4`。
+2. `askOf(n)` 按「阶段归属」分支：连接 / 配置表 / 导出 / 对照 / 换入；动作只跑本步阶段
+   （`actStages(a)`），不再用 `stages:[]` 把整条管线从 preflight 拉起。
+3. `currentStep()` 改成「待办」而不是「第一处不绿」：preflight 若因**配置表过期**判红、
+   而第 2 步还没跑完，待办直接指向第 2 步（修复动作所在），否则会死锁在第 1 步。
+4. 卡点单独成块 `.gate`：写清「为什么这一步先别跑 / 该去哪一步修」，动作是 `goto` + `recheck` + `detail`；
+   **本步自己的主按钮保留**（第 1 步在配置表过期时仍可 `pullcheck` 看差异）。
+5. 回执：`post()` 先写「已提交，等结果…」，`pump` 收尾在 `apiState()` 之后调 `finishReceipt()`，
+   按 `S.state` 逐阶段写「判绿/判红/待签字 + 结论 + 用时」。结论没变也必须留字，
+   不能靠 `render()`（`sigOf` 没变时它一个节点都不碰）。
+6. 配置表同步成功后自动补跑 `preflight`（`post(...,{after:['preflight']})`），让第 1 步的红自己消；
+   409「已有任务在跑」时 1.5 秒后重试一次。
+7. 界面词：「待办 / 查看中」，不再说「只读预览」——切到别的步骤，按钮仍然可用。
+8. 窄屏 `.now` 用 `justify-content:flex-start`；`.rails` 三张说明在窄屏隐藏（全文仍在「怎么用」）。
+
+**判据**（`scripts/diag/panel_paper_probe.py` 全绿）:
+- 每个动作的 `__probe.scope(a)` 全部落在本步阶段；`__probe.live('swap')` 至少 2 项（防空签字单）。
+- 第 2 步文案含「配置表」且不含「重算」；主动作是「同步配置表」且开签字单。
+- 配置表过期时第 1 步仍有 `pullcheck`；卡点有 `goto` 到第 2 步；`__probe.work()===2`。
+- 点「重查」后 0.3 秒内出现「已提交」，跑完出现「重查闸门 … 秒」且不含 `⇒`。
+- 窄屏 1000×800 首屏能看到查看提示与主按钮，无横向溢出。
+
+#### 踩坑记录
+- **`--only preflight,pull` 里 preflight 一红就 break**：pull 永远跑不到，用户看到的就是"点了没反应"。
+  两个动作必须拆开：`recheck` 只跑 preflight，`pullcheck` 只跑 pull。
+- **状态签名没变 ≠ 没跑**：`apiState()` 在 `sigOf` 相同时直接 return，这是防整屏重建的正确设计；
+  但"跑过了"这件事必须由独立回执表达，不能塞进 render。
+- **preflight 归第 1 步、修复在第 2 步**：这是阶段表的既有分组，不要为了让"进度"好看把 preflight 挪走；
+  在待办解析里做一次重定向即可。
+- **`textContent` 前不要再 `esc()`**（§151）；卡点正文同理。
+- **窄屏垂直居中会吃掉顶部**：flex `center` + 内容超高时，顶部溢出到负坐标且滚不回去；
+  用 `flex-start`，并把非决策内容（`.rails`）在窄屏收起。
+
+**涉及文件**: `scripts/pipeline_panel.py`、`scripts/diag/panel_paper_probe.py`、
+`docs/TROUBLESHOOTING.md` §152。

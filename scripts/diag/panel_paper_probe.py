@@ -173,6 +173,24 @@ def main():
         chk('步骤标题与状态表逐字一致',
             len(titles) == 5 and all(t in eb for t, eb in zip(titles, ebs)),
             ' / '.join(f'{t}↔{eb.split("·")[1].strip() if "·" in eb else eb}' for t, eb in zip(titles, ebs)))
+        # 动作范围必须落在本步：第 2 步「同步配置表」是后加的，旧版手抄的 n===2/3/4
+        # 曾整体错位一位，还把「换入」签成空清单（step===4 时 swap 阶段已经搬到第 5 步）。
+        scopes = _json.loads(pg.ev(
+            "JSON.stringify({cfg:__probe.scope('cfgsync'),exp:__probe.scope('export'),"
+            "sw:__probe.scope('swap'),live:__probe.live('swap'),review:__probe.scope('review')})") or '{}')
+        smap = _json.loads(pg.ev(
+            "JSON.stringify(Object.fromEntries((__probe.state().stages||[]).map(s=>[s.key,s.step])))") or '{}')
+        chk('同步配置表动作只跑第 2 步的阶段',
+            bool(scopes.get('cfg')) and all(smap.get(k) == 2 for k in scopes['cfg']),
+            f"{scopes.get('cfg')}")
+        chk('重导动作只跑第 3 步的阶段',
+            bool(scopes.get('exp')) and all(smap.get(k) == 3 for k in scopes['exp']),
+            f"{scopes.get('exp')}")
+        chk('换入动作只跑第 5 步的阶段',
+            bool(scopes.get('sw')) and all(smap.get(k) == 5 for k in scopes['sw']),
+            f"{scopes.get('sw')}")
+        chk('换入签字单不是空清单（swap-in + derive 至少两项）',
+            len(scopes.get('live') or []) >= 2, f"{scopes.get('live')}")
         # 截图回到第一步，别把测试末态（第 5 步）当成产品首屏
         pg.ev("document.querySelectorAll('.snode')[0].click()")
         time.sleep(0.4)
@@ -200,13 +218,37 @@ def main():
         time.sleep(1.2)   # 五步点完会触发 .snode.in / .ask.swap 的入场动画，等它们跑完再判
         chk('静止时零个动画在跑', (pg.ev("document.getAnimations().length") or 0) == 0,
             f"getAnimations={pg.ev('document.getAnimations().length')}")
-        # 数据状态相关：preflight 因配置表过期判红时，主动作必须直达第 2 步，而不是让人反复"再查一次"
+        # 数据状态相关：preflight 因配置表过期判红时，第 1 步不能被锁死成只剩「重查」，
+        # 卡点要把修复动作指到第 2 步（2026-10-17 用户：点完再查一次没反应，第一步也没处按）。
         why_now = pg.ev("document.getElementById('why').textContent") or ''
         if '配置表过期' in why_now:
-            chk('配置表过期时主动作直达第 2 步',
-                '去第 2 步' in (pg.ev("document.querySelector('#cta .pact').textContent") or ''),
-                pg.ev("document.querySelector('#cta .pact').textContent"))
+            acts = pg.ev("__probe.ask().acts") or []
+            gate_acts = pg.ev("__probe.ask().gateActs") or []
+            chk('配置表过期时第 1 步仍能拉包（不把整步锁死）',
+                any(x.startswith('pullcheck|') for x in acts), ' / '.join(acts))
+            chk('卡点提供「去第 2 步同步配置表」',
+                any(x.startswith('goto|') and '同步配置表' in x for x in gate_acts),
+                ' / '.join(gate_acts))
+            chk('待办指向第 2 步（修复动作所在）',
+                pg.ev("__probe.work()") == 2, str(pg.ev("__probe.work()")))
         pg.shot('main.png')
+
+        # 回执：结论没变时也必须留下"跑过"的证据（旧版这里一声不响）
+        if '配置表过期' in why_now:
+            pg.ev("document.querySelectorAll('#gate button')[1].click()")
+            time.sleep(0.3)
+            mid = pg.ev("document.getElementById('receipt').textContent") or ''
+            chk('动作提交后立刻有回执', ('已提交' in mid or ' 秒' in mid), mid[:60])
+            rc = ''
+            for _ in range(30):
+                time.sleep(0.5)
+                rc = pg.ev("document.getElementById('receipt').textContent") or ''
+                if ' 秒' in rc:
+                    break
+            chk('重查跑完留下结论与用时', ('重查闸门' in rc and ' 秒' in rc), rc[:90])
+            chk('回执不再把「⇒ 跑 cfg…」塞进括号', '⇒' not in rc, rc[:90])
+            pg.shot('gate_receipt.png')
+
         pg.ev("document.getElementById('bDetail').click()")
         time.sleep(0.9)
         chk('细节抽屉能打开', bool(pg.ev("document.getElementById('detail').classList.contains('on')")))
@@ -225,25 +267,38 @@ def main():
         time.sleep(0.45)
         vn = pg.ev("!document.getElementById('viewnote').hidden")
         vtx = pg.ev("document.getElementById('viewnote').textContent") or ''
-        chk('切到非当前步骤会出只读预览提示', vn and '只读预览' in vtx, vtx[:48])
-        chk('只读预览提示能说清实际停在哪一步', '实际进度' in vtx, vtx[:48])
-        chk('右栏有且只有一个「当前实际进度」标记',
+        chk('切到非待办步骤会出查看提示', vn and '你在看第' in vtx, vtx[:48])
+        chk('查看提示能说清待办在哪一步', '待办是第' in vtx, vtx[:60])
+        chk('查看时徽标写「查看中」而不是「只读」',
+            (pg.ev("document.getElementById('stepState').textContent") or '').strip() == '查看中',
+            pg.ev("document.getElementById('stepState').textContent"))
+        chk('右栏有且只有一个「待办」标记',
             (pg.ev("document.querySelectorAll('.snode.cur').length") or 0) == 1)
-        chk('右栏标题常驻显示实际进度',
-            bool(pg.ev("/^当前 \\d\\d$/.test(document.getElementById('railCur').textContent.trim())")),
+        chk('右栏标题常驻显示待办',
+            bool(pg.ev("/^待办 \\d\\d$/.test(document.getElementById('railCur').textContent.trim())")),
             pg.ev("document.getElementById('railCur').textContent"))
         pg.shot('preview.png')
         pg.ev("document.getElementById('bBackCur').click()")
         time.sleep(0.4)
-        chk('一键回到当前步骤后提示消失', bool(pg.ev("document.getElementById('viewnote').hidden")))
+        chk('一键跳到待办步骤后提示消失', bool(pg.ev("document.getElementById('viewnote').hidden")))
 
-        pg.ev("openSign({keys:['pull'],what:'测试签字',note:'这是一条测试说明，不会真的发请求。',"
-              "onOk:()=>{window.__signed=1}})")
+        # 第 2 步：文案与主动作都必须真的是「同步配置表」。
+        # 用户 2026-10-17 看到的第 2 步是「从源包重算 4 类产物 / 开始重导」——
+        # 文案表整体错位一位，按下去还会从 preflight 拉起整条管线。
+        pg.ev("document.querySelectorAll('.snode')[1].click()")
         time.sleep(0.45)
-        chk('签字窗口能打开', bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
-        chk('签字窗口逐条列出阶段与写入位置',
-            (pg.ev("document.querySelectorAll('#signmodal .srow').length") or 0) > 0 and
-            bool(pg.ev("document.getElementById('signList').textContent.includes('写到')")))
+        ask2 = pg.ev("document.querySelector('.ask').textContent") or ''
+        cta2 = pg.ev("document.querySelector('#cta .pact').textContent") or ''
+        chk('第 2 步文案是配置表，不是重导', '配置表' in ask2 and '重算' not in ask2, ask2[:40])
+        chk('第 2 步主动作是同步配置表', '同步配置表' in cta2, cta2)
+        pg.shot('cfg.png')
+        pg.ev("document.querySelector('#cta .pact').click()")
+        time.sleep(0.5)
+        chk('同步配置表会开签字单（不是直接开跑）',
+            bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
+        sign_txt = pg.ev("document.getElementById('signList').textContent") or ''
+        chk('签字单列的是 cfg.publish 与写入位置',
+            'cfg.publish' in sign_txt and 'inputs/gamecfg' in sign_txt, sign_txt[:70])
         chk('未勾选/未签名时放行按钮禁用',
             bool(pg.ev("document.getElementById('signGo').disabled")))
         pg.ev("document.getElementById('signAgree').checked=true;"
@@ -252,7 +307,23 @@ def main():
         time.sleep(0.2)
         chk('勾选并签名后才可放行',
             not bool(pg.ev("document.getElementById('signGo').disabled")))
+        pg.shot('cfg_sign.png')
+        pg.ev("closeSign()")          # 只验接线，不真的发布 inputs/gamecfg
+        time.sleep(0.3)
+        chk('取消签字不会关掉配置表这一步', '配置表' in (pg.ev("document.querySelector('.ask').textContent") or ''))
+
+        pg.ev("openSign({keys:['pull'],what:'测试签字',note:'这是一条测试说明，不会真的发请求。',"
+              "onOk:()=>{window.__signed=1}})")
+        time.sleep(0.45)
+        chk('签字窗口能打开', bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
+        chk('签字窗口逐条列出阶段与写入位置',
+            (pg.ev("document.querySelectorAll('#signmodal .srow').length") or 0) > 0 and
+            bool(pg.ev("document.getElementById('signList').textContent.includes('写到')")))
         pg.shot('sign.png')
+        pg.ev("document.getElementById('signAgree').checked=true;"
+              "const m=document.getElementById('signName');m.value='测试';"
+              "m.dispatchEvent(new Event('input'))")
+        time.sleep(0.2)
         pg.ev("document.getElementById('signGo').click()")
         time.sleep(0.4)
         chk('签字回调执行且窗口关闭',
@@ -289,6 +360,16 @@ def main():
             pg.ev("getComputedStyle(document.querySelector('.steps .track')).display") == 'none')
         chk('窄屏无横向溢出',
             bool(pg.ev("document.documentElement.scrollWidth<=innerWidth")))
+        chk('窄屏首屏能看到「查看 / 待办」提示',
+            bool(pg.ev("(()=>{const e=document.getElementById('viewnote');"
+                       "const r=e.getBoundingClientRect();"
+                       "return !e.hidden && r.top>=0 && r.bottom<=innerHeight})()")),
+            pg.ev("JSON.stringify((()=>{const e=document.getElementById('viewnote');"
+                  "const r=e.getBoundingClientRect();return [e.hidden,r.top,r.bottom,innerHeight]})())"))
+        chk('窄屏首屏能看到本步主按钮（不用先滚动）',
+            bool(pg.ev("(()=>{const b=document.querySelector('#cta .pact');"
+                       "if(!b) return false; const r=b.getBoundingClientRect();"
+                       "return r.top>=0 && r.bottom<=innerHeight})()")))
         pg.shot('narrow.png')
 
         chk('全程无 JS 异常', not pg.exc, '; '.join(pg.exc[:3]))

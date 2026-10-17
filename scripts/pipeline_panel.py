@@ -1457,6 +1457,40 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
   font:400 13px/1.95 var(--font-ui)!important;color:var(--ink-2)!important;
   overflow-wrap:anywhere;
 }
+/* 卡点独立成块：红只出现在左边一条细线上，正文仍是墨色 —— 不是第二个"红字警告"，
+   而是「这一步为什么先停」的一张便笺。 */
+.gate{
+  margin:26px 0 0!important;max-width:64ch!important;
+  padding:15px 18px 14px!important;
+  background:var(--paper-3)!important;
+  border:1px solid var(--rule)!important;border-left:3px solid var(--fail)!important;
+  border-radius:0!important;
+}
+.gate[hidden]{display:none!important}
+.gate .gt{
+  display:block;font:600 10px/1.5 var(--font-mono)!important;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--fail)!important;
+}
+.gate .gb{
+  margin:8px 0 0!important;max-width:60ch;
+  font:400 12.5px/1.9 var(--font-ui)!important;color:var(--ink-2)!important;
+}
+.gate .ga{
+  display:flex!important;align-items:center!important;gap:22px!important;
+  margin:13px 0 0!important;flex-wrap:wrap!important;
+}
+.gate .ga .pact{padding:10px 18px!important;font-size:12px!important}
+.receipt{
+  margin:16px 0 0!important;max-width:70ch!important;
+  padding:2px 0 2px 12px!important;border-left:2px solid var(--rule)!important;
+  font:400 10px/1.75 var(--font-mono)!important;letter-spacing:.02em;
+  color:var(--ink-3)!important;overflow-wrap:anywhere;
+}
+.receipt[hidden]{display:none!important}
+.receipt.run{border-left-color:var(--run)!important;color:var(--run)!important}
+.receipt.good{border-left-color:var(--moss)!important;color:var(--moss)!important}
+.receipt.await{border-left-color:var(--ochre)!important;color:var(--ochre)!important}
+.receipt.bad{border-left-color:var(--fail)!important;color:var(--fail)!important}
 .do{
   display:flex!important;align-items:center!important;gap:26px!important;
   margin:36px 0 0!important;flex-wrap:wrap!important;
@@ -1913,9 +1947,16 @@ pre .bad{color:#E08A69!important}
   .rail-hd,.rail-ft{display:none!important}
   .now{
     max-width:760px!important;margin:0 auto!important;
-    padding:28px 20px 20px!important;
+    padding:24px 20px 20px!important;
     flex:1 1 auto!important;height:auto!important;min-height:0!important;overflow:auto!important;
+    /* 窄屏不能再垂直居中：加了卡点/回执之后内容会高过一屏，
+       flex 的 center 会把顶部（查看提示）挤出可视区，而且滚不回去。 */
+    justify-content:flex-start!important;
   }
+  /* 三张边界说明是"为什么敢点"的背景知识，窄屏让位给当前决策；
+     全文仍在「怎么用」里，不是删掉。 */
+  .rails{display:none!important}
+  .foot{margin-top:18px!important}
   .ask{font-size:clamp(30px,6vw,42px)!important;max-width:22ch!important}
   .rails{grid-template-columns:1fr!important}
   .rail{border-right:0!important;border-bottom:1px solid var(--rule)!important;padding:12px 0!important}
@@ -1974,14 +2015,20 @@ pre .bad{color:#E08A69!important}
 <main class="now">
   <div id="viewnote" class="viewnote" hidden>
     <span id="viewnoteTx"></span>
-    <button id="bBackCur" type="button" class="link2">回到当前步骤</button>
+    <button id="bBackCur" type="button" class="link2">去待办步骤</button>
   </div>
   <p class="eyebrow" id="eyebrow"><i></i><span id="eyebrowTx">正在读盘…</span><span id="stepState" class="stepstate"></span></p>
   <!-- 进度台：没在跑时 display:none，一个像素都不占（静止帧判据靠这个成立） -->
   <div class="gauge" id="gauge"></div>
   <h2 class="ask" id="ask">—</h2>
   <p class="why" id="why">—</p>
+  <!-- 卡点：跨步的前置条件（例：配置表过期挡住导出）。它**不顶替**本步自己的按钮，
+       只在旁边说清"为什么这一步先别跑、该去哪一步修"。 -->
+  <div class="gate" id="gate" hidden></div>
   <div class="do" id="cta"></div>
+  <!-- 回执：每个动作跑完都留一行结论（判绿/判红/待签字 + 用时）。
+       以前点了「再查一次」界面一声不响，用户只能猜它到底跑没跑。 -->
+  <p class="receipt" id="receipt" hidden></p>
   <!-- 三道硬边界：不是装饰，是这套工具**为什么敢让你点**的三条理由。
        文案与 AGENTS.md / update_pipeline 的实现一一对应；改实现时这三句要一起改。 -->
   <div class="rails" aria-label="运行边界">
@@ -2001,7 +2048,7 @@ pre .bad{color:#E08A69!important}
 <nav class="steps" id="stepsbar" aria-label="五个步骤">
   <div class="rail-hd"><span>RUNBOOK</span><b id="railCur">当前 01</b></div>
   <span class="track"><i class="fill" id="stepfill"></i></span>
-  <div class="rail-ft"><span id="railCount">全部阶段</span><span>点击=只读预览 · 细节=证据</span></div>
+  <div class="rail-ft"><span id="railCount">全部阶段</span><span>点击=查看 · 细节=证据</span></div>
 </nav>
 </div>
 
@@ -2701,12 +2748,19 @@ async function apiState(force){
   if(S.running && !curJob) tail(S.running.id);
 }
 function stagesOf(n){ return (S.stages||[]).filter(s=>(s.step||0)===n); }
-/* 「实际进度」= 第一处还没全绿的步骤；正在跑时以 running.step 为准。
+/* 「待办」= 下一步该动手的步骤；正在跑时以 running.step 为准。
    它和 `step`（用户正在看哪一步）是两件事——2026-10-17 用户点了几下步骤就迷路了，
-   根因就是之前只有 `step`，没有「机器停在哪」这个锚。 */
+   根因就是之前只有 `step`，没有「机器停在哪」这个锚。
+   另一个坑：preflight 归在第 1 步，但它的红要靠第 2 步「同步配置表」来消。
+   若照"第一处不绿"算，待办会死锁在第 1 步（第 1 步没有能修它的按钮）。
+   ⇒ 配置表过期且第 2 步还有没跑完的阶段时，待办直接指向第 2 步。 */
 function currentStep(){
   if(S.running && +S.running.step) return +S.running.step;
   const order=Object.keys(S.steps||{}).map(Number).sort((a,b)=>a-b);
+  const pf=S.state&&S.state.preflight;
+  const nCfg=stepNo('cfg.publish',2);
+  const cfgPending=stagesOf(nCfg).some(s=>statusOf(s.key)!=='pass');
+  if(pf&&!pf.ok&&/配置表过期/.test(pf.detail||'')&&cfgPending) return nCfg;
   for(const n of order){
     const list=stagesOf(n);
     if(!list.length) continue;
@@ -2888,7 +2942,7 @@ function rollNums(root){
    这是让装饰让步，不是给数据蒙一层纱 —— 蒙纱那条路实测 alpha .90 仍会被顶出 36 级差异。 */
 function avoidRefresh(){
   const a=[];
-  document.querySelectorAll('.eyebrow,.ask,.why,.do,.foot').forEach(e=>{
+  document.querySelectorAll('.eyebrow,.ask,.why,.do,.gate,.receipt,.foot').forEach(e=>{
     const r=e.getBoundingClientRect();
     if(r.width>2&&r.height>2&&r.bottom>0&&r.top<innerHeight)
       a.push([r.left-34,r.top-26,r.right+34,r.bottom+26]);});
@@ -2907,102 +2961,191 @@ const STEPNAME={1:'接模拟器',2:'同步配置表',3:'重新导出',4:'看图�
    `approve` 永远是空的 —— 2026-10-01 用户就是在这儿卡住的（"我已经点了签字放行了呀"）。 */
 const SIGNED=new Set();
 function signedLive(){ return [...SIGNED].filter(k=>(S&&S.stages||[]).some(s=>s.key===k&&s.tier==='live')); }
+function stepOfKey(k){ const s=((S&&S.stages)||[]).find(x=>x.key===k); return s?+s.step:0; }
+function stepNo(k,d){ return stepOfKey(k)||d; }
+function stepMax(){ const ks=Object.keys((S&&S.steps)||{}).map(Number);
+  return ks.length?Math.max.apply(null,ks):5; }
+function stepName(n){ return (S&&S.steps&&S.steps[String(n)]&&S.steps[String(n)][0])||STEPNAME[n]||''; }
 function askOf(n){
-  const all=S.stages||[], list=n===0?all:stagesOf(n), stn=k=>statusOf(k);
-  const st=S.state||{};
-  const stepTitle=(S.steps&&S.steps[String(n)]&&S.steps[String(n)][0])||STEPNAME[n]||'';
-  const stepTotal=Object.keys(S.steps||{}).length||5;
-  const eb='第 '+n+' 步 · '+stepTitle+' · 共 '+stepTotal+' 步';
+  const all=(S&&S.stages)||[], st=(S&&S.state)||{}, stn=statusOf;
+  const list=n===0?all:stagesOf(n);
+  /* 步骤号一律从阶段表反查，不再手抄。第 2 步「同步配置表」是后加的，
+     手抄的 n===2/3/4 曾整体错位一位（第 2 步显示的是重导的文案），
+     和 STEPNAME 那次是同一类漂移。 */
+  const nConnect=stepNo('preflight',1), nCfg=stepNo('cfg.publish',2),
+        nExport=stepNo('paintings',3), nReview=stepNo('review',4), nSwap=stepNo('swap-in',5);
+  const eb='第 '+n+' 步 · '+stepName(n)+' · 共 '+
+    ((Object.keys((S&&S.steps)||{}).length)||stepMax())+' 步';
   const fail=list.find(s=>stn(s.key)==='fail');
   const aw=list.filter(s=>stn(s.key)==='await');
   const idle=list.filter(s=>stn(s.key)==='idle');
   const nEm=v=>'<em data-n="'+v+'">'+v+'</em>';
+  const detailOf=k=>((st[k]||{}).detail||'');
+  const pf=st.preflight||null;
+  const dm=/源\s*([\d-]+)\s*>\s*发布\s*([\d-]+)/.exec((pf&&pf.detail)||'');
+  const dsrc=dm?dm[1]:'—', dpub=dm?dm[2]:'—';
+  const stale=!!(pf&&!pf.ok&&/配置表过期/.test(pf.detail||''));
+  /* 卡点只描述"跨步的前置条件"，不顶替本步的按钮。 */
+  const gate=(pf&&!pf.ok)?{
+    t: stale?'导出前置检查没过 · 配置表过期':'导出前置检查没过',
+    b: stale
+      ? ('盘上的配置源是 '+dsrc+'，inputs/gamecfg 里发布的是 '+dpub+'。'+
+         '现在导出会拿旧表算舰名、阵营和语音，产物会对不上。同步配置表之后这道红会自己消。')
+      : (detailOf('preflight')+'。它是导出的前置条件；拉包不受影响，但导出前得先修好。'),
+    acts:(stale?[{a:'goto',to:nCfg,t:'▶ 去第 '+nCfg+' 步同步配置表',k:'pact mag'}]:[])
+      .concat([{a:'recheck',t:'重查这道闸门',k:'link2'},
+               {a:'detail',t:'看检查项',k:'link2'}])
+  }:(!pf?{
+    t:'还没查过导出的前置条件',
+    b:'inputs/azdata、inputs/gamecfg 与画廊 vendor 是重导的唯一起点。先只读地查一遍，不写任何东西。',
+    acts:[{a:'recheck',t:'▶ 先查一遍',k:'pact mag'},{a:'detail',t:'看检查项',k:'link2'}]
+  }:null);
 
-  if(n===1){
-    const pf=st.preflight, pl=st.pull;
-    if(fail) {
-      const stale = pf && fail.key==='preflight' && /配置表过期/.test(pf.detail||'');
-      return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
-        why:(pf&&fail.key==='preflight'?pf.detail:fail.key)+'：先看它为什么红。',
-        acts: stale
-          ? [{a:'goto2',t:'▶ 去第 2 步同步配置表',k:'pact mag'},
-             {a:'diff',t:'再查一次',k:'link2'},{a:'detail',t:'看细节',k:'link2'}]
-          : [{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
+  if(n===nConnect){
+    const pl=st.pull||{}, ps=stn('pull');
+    if(ps==='fail') return {eb, red:1, ask:'拉包没成功',
+      why:(pl.detail||'')+' 日志里有那行原因。',
+      gate, acts:[{a:'pullcheck',t:'▶ 再试一次',k:'pact mag'},
+                  {a:'detail',t:'看日志',k:'link2'}]};
+    if(ps==='idle' && !pf) return {eb, gate,
+      ask:'先确认权威输入还在位',
+      why:'只读地查一遍 inputs/azdata、inputs/gamecfg 与画廊 vendor；不写任何东西。查完再看设备差异。',
+      acts:[{a:'recheck',t:'▶ 先查一遍',k:'pact mag'},
+            {a:'pullcheck',t:'同时看设备差异',k:'link2'}]};
+    if(ps==='idle') return {eb, gate,
+      ask: stale?'先接设备：看看多了什么':'看看模拟器上多了什么',
+      why: stale
+        ? '配置表过期只拦导出，不拦这一步：这里只读设备、算差异，不下载；确认要拉，才会签字写 files/。'
+        : '只读地列一遍设备上的包、算出新增与变更，不下载。',
+      acts:[{a:'pullcheck',t:'▶ 看设备上多了什么',k:'pact mag'},
+            {a:'detail',t:'看这 '+list.length+' 个阶段',k:'link2'}]};
+    if(ps==='await'){
+      const m=/新增 (\d+)\/变更 (\d+)/.exec(pl.detail||'');
+      return {eb, gate,
+        ask:'模拟器上有 '+nEm(+(m?m[1]:0))+' 个新包、'+nEm(+(m?m[2]:0))+' 个变更还没拉到本地',
+        why:'拉下来会写 files/AssetBundles；源包一旦被覆盖，旧版本本地就没了，所以要签字。'+
+            (stale?'配置表还没对齐，但拉包不受影响。':''),
+        acts:[{a:'pull',t:'⚑ 拉进本地',k:'pact sign mag'},
+              {a:'pullcheck',t:'重算差异',k:'link2'}]};
     }
-    if(pf&&!pf.ok) return {eb, red:1, ask:'权威输入缺东西，先别往下走',
-      why:'inputs/azdata、inputs/gamecfg 与画廊 vendor 是重导的唯一起点，缺了跑出来的是错的。',
-      acts:[{a:'diff',t:'▶ 再查一次',k:'pact mag'},{a:'detail',t:'看缺了哪些',k:'link2'}]};
-    if(!pf) return {eb, ask:'先确认权威输入还在位',
-      why:'只读地查一遍，不写任何东西。',
-      acts:[{a:'diff',t:'▶ 预检 + 看差异',k:'pact mag'}]};
-    const m=/新增 (\d+)\/变更 (\d+)/.exec((pl&&pl.detail)||'');
-    if(!pl) return {eb, ask:'看看模拟器上多了什么',
-      why:'只读地列一遍设备上的包、算出新增与变更，不下载。',
-      acts:[{a:'diff',t:'▶ 看差异',k:'pact mag'}]};
-    if(aw.length) return {eb, ask:'模拟器上有 '+nEm(+(m?m[1]:0))+' 个新包、'+nEm(+(m?m[2]:0))+
-        ' 个变更还没拉到本地',
-      why:'拉下来会写 files/AssetBundles。源包一旦被覆盖，旧版本本地就没有了——所以这一步要你签字。',
-      acts:[{a:'pull',t:'⚑ 拉进本地',k:'pact sign mag'},{a:'diff',t:'重新算一遍差异',k:'link2'}]};
-    return {eb, ask:'包已经在本地了', why:'下一步：从这些源包重算产物，全部先进暂存区。',
-      acts:[{a:'next',t:'去第 2 步 →',k:'pact mag'},{a:'diff',t:'再算一遍差异',k:'link2'}]};
+    const unreach=/设备不可达/.test(pl.detail||'');
+    return {eb, gate,
+      ask: unreach?'设备没连上，先用本地已有的包':'包已经在本地了',
+      why: unreach?(pl.detail||'')+
+        (stale?' 配置表也还没对齐：导出前先去第 '+nCfg+' 步。':'')
+        : (stale?'但导出还开不了：配置表比源包旧，先去第 '+nCfg+' 步对齐。'
+                :'下一步：从源包重算产物（第 '+nExport+' 步），全部先进暂存区。'),
+      acts: stale
+        ? [{a:'goto',to:nCfg,t:'▶ 去第 '+nCfg+' 步同步配置表',k:'pact mag'},
+           {a:'detail',t:'看这 '+list.length+' 个阶段',k:'link2'}]
+        : [{a:'next',t:'去第 '+nExport+' 步 →',k:'pact mag'},
+           {a:'pullcheck',t:'再算一遍差异',k:'link2'}]};
   }
-  if(n===2){
-    if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
-      why:'它停在这里不往下跑。日志里有那行原因。',
-      acts:[{a:'tocheck',t:'▶ 重跑到待确认',k:'pact mag'},{a:'detail',t:'看日志',k:'link2'}]};
+
+  if(n===nCfg){
+    const cfg=list, idleN=cfg.filter(s=>stn(s.key)==='idle').length;
+    const failCfg=cfg.find(s=>stn(s.key)==='fail');
+    if(failCfg) return {eb, red:1, ask:failCfg.key+' 判红，配置表没同步完',
+      why:detailOf(failCfg.key)+' 修好再重跑；它前面已经判绿的阶段不会重跑。',
+      acts:[{a:'cfgsync',t:'▶ 重跑同步',k:'pact sign mag'},
+            {a:'detail',t:'看日志',k:'link2'}]};
+    if(idleN===cfg.length) return {eb,
+      ask: stale?('把配置表对齐到 '+dsrc+' 的源包'):'从源包重解配置表',
+      why:'4 个阶段：解 scripts → 导出 lua → 解析 sharecfg → 发布 inputs/gamecfg。约 6 分钟；'+
+          '前三步只写 .diag/，最后一步写正式区、要签字。修好之后第 1 步那道红会自动消。',
+      acts:[{a:'cfgsync',t:'⚑ 同步配置表',k:'pact sign mag'},
+            {a:'detail',t:'看这 4 步写到哪儿',k:'link2'}]};
+    if(idleN) return {eb, ask:'配置表还剩 '+nEm(idleN)+' 个阶段没跑',
+      why:'继续跑会把剩下的补齐；已经判绿的（同一批输入）不会重跑。',
+      acts:[{a:'cfgsync',t:'▶ 补齐剩下的',k:'pact sign mag'},
+            {a:'detail',t:'看是哪几个',k:'link2'}]};
+    if(aw.length) return {eb, ask:'配置表解好了，发布那一步等你签字',
+      why:'inputs/gamecfg 是导出的权威元数据，写正式区要签字；签了才会覆盖。',
+      acts:[{a:'cfgsync',t:'⚑ 签字发布',k:'pact sign mag'},
+            {a:'detail',t:'看写到哪儿',k:'link2'}]};
+    return {eb, ask:'配置表已对齐源包',
+      why:'下一步：从源包重算产物（第 '+nExport+' 步）。',
+      acts:[{a:'next',t:'去第 '+nExport+' 步 →',k:'pact mag'},
+            {a:'detail',t:'看这 4 步写到哪儿',k:'link2'}]};
+  }
+
+  if(n===nExport){
+    if(pf&&!pf.ok) return {eb, red:1, gate,
+      ask: stale?'导出被配置表挡着':'导出前置检查没过',
+      why: stale?'配置表比源包旧时导出的元数据是错的，所以流水线会先停。同步完再回来，按钮就能按。'
+                :'先修好第 1 步那道检查再导出；否则算出来的元数据不可信。',
+      acts: stale
+        ? [{a:'goto',to:nCfg,t:'▶ 去第 '+nCfg+' 步同步配置表',k:'pact mag'},
+           {a:'detail',t:'看检查项',k:'link2'}]
+        : [{a:'recheck',t:'▶ 重查闸门',k:'pact mag'},
+           {a:'detail',t:'看检查项',k:'link2'}]};
+    if(fail) return {eb, red:1, ask:fail.key+' 这一步没过',
+      why:detailOf(fail.key)+' 日志里有那行原因。',
+      acts:[{a:'export',t:'▶ 再跑一次',k:'pact mag'},{a:'detail',t:'看日志',k:'link2'}]};
     if(idle.length===list.length) return {eb, ask:'从源包重算 '+nEm(list.length)+' 类产物',
       why:'立绘 / Spine / Live2D 只写暂存区；依赖表、元数据、语音、CG 要你签字才动正式区。要跑一会儿。',
-      acts:[{a:'tocheck',t:'▶ 开始重导',k:'pact mag'}]};
+      acts:[{a:'export',t:'▶ 开始重导',k:'pact mag'}]};
     if(aw.length) return {eb, ask:'重导好了 '+nEm(list.length-idle.length)+' / '+nEm(list.length)+
         ' 项，其中 '+nEm(aw.length)+' 项要你签字才写正式区',
       why:'没签字的那几项只算了差异，正式区一个字节没碰。勾上签字再跑才会覆盖。',
-      acts:[{a:'tocheck',t:'▶ 重跑到待确认',k:'pact mag'},{a:'staged',t:'只重跑导出三件',k:'link2'}]};
+      acts:[{a:'export',t:'▶ 重跑到待确认',k:'pact mag'},
+            {a:'staged',t:'只重跑导出三件',k:'link2'}]};
     if(idle.length) return {eb, ask:'重导跑好了 '+nEm(list.length-idle.length)+' 项，还剩 '+nEm(idle.length)+' 项',
       why:'继续跑会把剩下的算完。',
-      acts:[{a:'tocheck',t:'▶ 跑完剩下的',k:'pact mag'}]};
-    return {eb, ask:'产物都重导好了', why:'下一步：出改前 | 改后的对照表，纯读。',
-      acts:[{a:'next',t:'去第 3 步 →',k:'pact mag'},{a:'detail',t:'看这 7 项写到哪儿',k:'link2'}]};
+      acts:[{a:'export',t:'▶ 跑完剩下的',k:'pact mag'}]};
+    return {eb, ask:'产物都重导好了',
+      why:'下一步：出改前 | 改后的对照表（第 '+nReview+' 步），纯读。',
+      acts:[{a:'next',t:'去第 '+nReview+' 步 →',k:'pact mag'},
+            {a:'detail',t:'看这 '+list.length+' 项写到哪儿',k:'link2'}]};
   }
-  if(n===3){
+
+  if(n===nReview){
     const rv=st.review;
-    if(fail) return {eb, red:1, ask:'对照表没做出来', why:esc(rv&&rv.detail||''),
+    if(fail) return {eb, red:1, ask:'对照表没做出来', why:(rv&&rv.detail)||'',
       acts:[{a:'review',t:'▶ 再出一次',k:'pact mag'},{a:'detail',t:'看日志',k:'link2'}]};
     if(!rv) return {eb, ask:'出一张改前 | 改后的对照表',
       why:'纯读，随时可以反复跑。图会放在「细节」里，点开能放大。',
       acts:[{a:'review',t:'▶ 出对照表',k:'pact mag'}]};
     return {eb, ask:'对照表好了，'+nEm((S.sheets||[]).length)+' 张，看一眼再决定换不换',
-      why:'这一步不写任何正式产物。换入是第 4 步，要你签字。',
-      acts:[{a:'detail',t:'打开对照表',k:'pact mag'},{a:'next',t:'去第 4 步 →',k:'link2'}]};
+      why:'这一步不写任何正式产物。换入是第 '+nSwap+' 步，要你签字。',
+      acts:[{a:'detail',t:'打开对照表',k:'pact mag'},
+            {a:'next',t:'去第 '+nSwap+' 步 →',k:'link2'}]};
   }
-  const live4=list.filter(s=>s.tier==='live'), aw4=live4.filter(s=>stn(s.key)==='await');
-  /* 「换完了」这句必须看**全部 13 档**，其余几句也要带上"这轮还有哪几档没跑"。
-     2026-10-01 实测的假绿灯：用户只跑了 swap-in/derive/regress（第 4 步），
-     第 2 步的立绘 179 张一张没重导，主屏却大字写「这次更新已经换完了」。 */
-  const all13=S.stages||[], notYet=all13.filter(s=>stn(s.key)==='idle');
+
+  const live5=list.filter(s=>s.tier==='live'), aw5=live5.filter(s=>stn(s.key)==='await');
+  /* 「换完了」这句必须看**全部阶段**，其余几句也要带上"这轮还有哪几档没跑"。
+     2026-10-01 实测的假绿灯：用户只跑了 swap-in/derive/regress，第 2 步的立绘一张没重导，
+     主屏却大字写「这次更新已经换完了」。 */
+  const allSt=S.stages||[], notYet=allSt.filter(s=>stn(s.key)==='idle');
   const whereNot=notYet.map(s=>'第 '+s.step+' 步 '+s.key).join('、');
   const tail=notYet.length?(' 这轮还有 '+notYet.length+' 项没跑过：'+whereNot+'。'):'';
-  if(notYet.length && !aw4.length && !fail && !live4.some(s=>stn(s.key)==='pass'))
+  if(notYet.length && !aw5.length && !fail && !live5.some(s=>stn(s.key)==='pass'))
     return {eb, red:1, ask:'还没换完：有 '+nEm(notYet.length)+' 项这轮根本没跑',
       why:'没跑过的项不算完成。差在：'+whereNot+'。暂存区里现在这些是上一批留下的，别当成"已重导"。',
-      acts:[{a:'tocheck',t:'▶ 从头跑到待确认',k:'pact mag'},{a:'detail',t:'看是哪几项',k:'link2'}]};
-  if(fail) return {eb, red:1, ask:esc(fail.key)+' 这一步没过',
+      acts:[{a:'goto',to:nExport,t:'▶ 去第 '+nExport+' 步重导',k:'pact mag'},
+            {a:'detail',t:'看是哪几项',k:'link2'}]};
+  if(fail) return {eb, red:1, ask:fail.key+' 这一步没过',
     why:'闸门判红说明这次换入会丢东西——别绕，先查源包。'+tail,
-    acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},{a:'detail',t:'看日志',k:'link2'}]};
-  if(aw4.length) return {eb, ask:nEm(aw4.length)+' 项暂存产物等着换进正式区',
+    acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},
+          {a:'detail',t:'看日志',k:'link2'}]};
+  if(aw5.length) return {eb, ask:nEm(aw5.length)+' 项暂存产物等着换进正式区',
     why:'换入前整批备份到 Output/_OLD_bak/；索引有零回退闸门，会掉条目就直接停。'+tail,
-    acts:[{a:'swap',t:'⚑ 换入正式区',k:'pact sign mag'},{a:'regress',t:'只跑回归',k:'link2'}]};
-  if(!live4.some(s=>stn(s.key)==='pass')&&!S.running)
+    acts:[{a:'swap',t:'⚑ 换入正式区',k:'pact sign mag'},
+          {a:'regress',t:'只跑回归',k:'link2'}]};
+  if(!live5.some(s=>stn(s.key)==='pass')&&!S.running)
     return {eb, ask:'现在没有待换入的东西',
-      why:'先跑第 2 步（重导）和第 3 步（看图），暂存区里有货了这里才会亮。'+
+      why:'先跑第 '+nExport+' 步（重导）和第 '+nReview+' 步（看图），暂存区里有货了这里才会亮。'+
           (notYet.length?('没跑过的正是：'+whereNot+'。'):''),
-      acts:[{a:'prev',t:'← 回第 2 步',k:'pact mag'},{a:'detail',t:'看暂存区有什么',k:'link2'}]};
+      acts:[{a:'goto',to:nExport,t:'← 去第 '+nExport+' 步重导',k:'pact mag'},
+            {a:'detail',t:'看暂存区有什么',k:'link2'}]};
   if(notYet.length){
     const byStep={};
     notYet.forEach(s=>{ (byStep[s.step]=byStep[s.step]||[]).push(s.key); });
-    const where=Object.keys(byStep).map(n=>'第 '+n+' 步（'+byStep[n].join(' / ')+'）').join('、');
+    const where=Object.keys(byStep).map(k=>'第 '+k+' 步（'+byStep[k].join(' / ')+'）').join('、');
     return {eb, red:1, ask:'还没换完：有 '+nEm(notYet.length)+' 项这轮根本没跑',
       why:'没跑过的项不算完成。差在：'+where+'。暂存区里现在这些是上一批留下的，别当成"已重导"。',
-      acts:[{a:'tocheck',t:'▶ 从头跑到待确认',k:'pact mag'},{a:'detail',t:'看是哪几项',k:'link2'}]};
+      acts:[{a:'goto',to:nExport,t:'▶ 去第 '+nExport+' 步重导',k:'pact mag'},
+            {a:'detail',t:'看是哪几项',k:'link2'}]};
   }
   return {eb, ask:'这次更新已经换完了', why:'画廊已部署、回归跑过；要再来一轮就从第 1 步开始。',
     acts:[{a:'regress',t:'▶ 只跑回归',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
@@ -3030,7 +3173,7 @@ function render(){
   const cur=currentStep();
   const rc=$('#railCount'); if(rc) rc.textContent=all.length+' 个阶段';
   const rcur=$('#railCur');
-  if(rcur) rcur.textContent=(S.running?'正在跑 ':'当前 ')+String(cur).padStart(2,'0');
+  if(rcur) rcur.textContent=(S.running?'正在跑 ':'待办 ')+String(cur).padStart(2,'0');
   bar.querySelectorAll('.snode').forEach(e=>e.remove());
   Object.keys(steps).sort().forEach(k=>{
     const n=+k, list=stagesOf(n);
@@ -3042,7 +3185,7 @@ function render(){
     b.className='snode'+(n===step?' on':'')+(n===cur?' cur':'')+(first?' in':'')+
       (worst==='fail'?' fail':worst==='await'?' await':worst==='run'?' run':
        doneN===list.length&&list.length?' done':'');
-    b.title = n===cur ? '当前实际进度' : '查看第 '+n+' 步（只读预览，不改实际进度）';
+    b.title = n===cur ? '待办：这一步还有没跑完的阶段' : '查看第 '+n+' 步（不改变待办，按钮照样能按）';
     if(first) b.style.animationDelay=(n*70)+'ms';
     b.dataset.step=n; b.dataset.done=doneN; b.dataset.total=list.length;
     b.innerHTML='<span class="bead"></span><label>'+esc(steps[k][0])+'</label>'+
@@ -3053,20 +3196,22 @@ function render(){
     bar.appendChild(b);
   });
   stepFill();
-  /* 「正在看」与「实际停在哪」分开显示：这是用户 2026-10-17 迷路的直接修法。
-     只读预览时给一条常驻提示 + 一键回到当前步骤，而不是拦着不让点。 */
+  /* 「正在看」与「待办」分开显示：点别的步骤只换视图，不改变待办；
+     那一步的按钮仍然可用，所以提示里写「查看」而不是「只读」。 */
   const stEl=$('#stepState');
   if(stEl){
-    stEl.textContent = step===cur ? '当前' : '只读预览';
+    stEl.textContent = step===cur ? '待办' : '查看中';
     stEl.className = 'stepstate ' + (step===cur ? 'cur' : 'preview');
   }
   const vn=$('#viewnote'), vtx=$('#viewnoteTx'), bb=$('#bBackCur');
   if(vn){
     vn.hidden = step===cur;
     if(step!==cur){
-      vtx.innerHTML = '只读预览：你正在看第 '+step+' 步 · <b>'+esc((steps[String(step)]||[])[0]||'')+
-        '</b>　实际进度停在第 '+cur+' 步 · <b>'+esc((steps[String(cur)]||[])[0]||'')+'</b>';
-      if(bb) bb.textContent='回到第 '+cur+' 步';
+      /* 说清"你在看哪"和"该去哪儿"。不要写"只读预览"——切到别的步骤，
+         那一步的按钮仍然能按（第 1 步在配置表过期时也能拉包）。 */
+      vtx.innerHTML = '你在看第 '+step+' 步 · <b>'+esc((steps[String(step)]||[])[0]||'')+
+        '</b>（按钮照样能按）　待办是第 '+cur+' 步 · <b>'+esc((steps[String(cur)]||[])[0]||'')+'</b>';
+      if(bb) bb.textContent='去第 '+cur+' 步';
     }
   }
   /* 节点是刚重建出来的 —— "哪一步在跑"这个标记必须**重建之后再打一次**，
@@ -3079,11 +3224,14 @@ function render(){
      2026-10-01 用户就是在这里迷路的：regress 红着（真因是画廊服务器没起），
      大字却写「重导好了 7/7 项」，看起来像一切就绪。 */
   const redAll=(S.stages||[]).filter(s=>statusOf(s.key)==='fail');
-  const outSteps=[...new Set(redAll.map(s=>s.step))].filter(n=>n!==step);
+  /* preflight 因配置表过期判红时，它的修复动作就在第 2 步：在第 1~3 步里
+     别再补一句"另有 1 步判红（第 1 步）"，那正是当前这张卡点在说的事。 */
+  const stalePf=!!(S.state&&S.state.preflight&&!S.state.preflight.ok&&
+                   /配置表过期/.test(S.state.preflight.detail||''));
+  const outSteps=[...new Set(redAll.map(s=>s.step))]
+    .filter(n=>n!==step && !(stalePf&&n===stepNo('preflight',1)&&step<=stepNo('paintings',3)));
   if(redAll.length && outSteps.length)
     A.why += ' 另有 '+redAll.length+' 步判红（第 '+outSteps.join('、')+' 步），「细节」里能看到原因。';
-  if(!S.running && S.last && S.last.secs)
-    A.why += ' 上一轮用了 '+fmtDur(S.last.secs)+'。';
   const eb=$('#eyebrowTx'), ask=$('#ask'), why=$('#why'), foot=$('#scopeNote');
   eb.textContent = S.running ? ('正在跑 · '+S.running.label) : A.eb;
   $('#eyebrow').classList.toggle('red', !!A.red);
@@ -3093,6 +3241,20 @@ function render(){
     if(RENDERED&&!CALM){ ask.classList.remove('swap'); void ask.offsetWidth; ask.classList.add('swap'); }
   }
   why.textContent=A.why;
+  /* 卡点：跨步前置条件（配置表过期挡导出）。它有自己的动作，但不顶替本步按钮。 */
+  const gateEl=$('#gate');
+  if(gateEl){
+    if(A.gate){
+      gateEl.hidden=false;
+      gateEl.innerHTML='<span class="gt">'+esc(A.gate.t)+'</span>'+
+        '<p class="gb">'+esc(A.gate.b)+'</p>'+
+        '<div class="ga">'+A.gate.acts.map(c=>
+          '<button class="'+c.k+'" data-a="'+c.a+'"'+(c.to?' data-to="'+c.to+'"':'')+'>'+
+          c.t+'</button>').join('')+'</div>';
+    }else{
+      gateEl.hidden=true; gateEl.innerHTML='';
+    }
+  }
   foot.textContent=A.foot||'';
   foot.classList.toggle('on',!!A.foot);
   $('#cta').innerHTML=A.acts.map(c=>c.k.indexOf('link2')>=0
@@ -3180,7 +3342,8 @@ function render(){
     '<tr><td colspan="3" class="dim">还没有任务</td></tr>';
   $$('#runs tr').forEach((tr,i)=>{ const rr=(S.runs||[])[i]; if(!rr) return;
     tr.style.cursor='pointer'; tr.onclick=()=>{ tail(rr.id); openDetail(); }; });
-  $$('#cta button').forEach(b=>b.onclick=()=>ctaRun(b.dataset.a));
+  $$('#cta button, #gate button[data-a]').forEach(b=>b.onclick=()=>
+    ctaRun(b.dataset.a, b.dataset.to));
   $$('#cards .appr').forEach(cb=>cb.onchange=e=>{
     const k=e.target.dataset.k, box=e.target.closest('.signbox');
     if(e.target.checked) SIGNED.add(k); else SIGNED.delete(k);
@@ -3266,47 +3429,156 @@ $('#signGo').onclick=()=>{
 };
 $$('#signmodal [data-sclose]').forEach(el=>el.onclick=closeSign);
 
-function ctaRun(a){
-  if(a==='next') return void (step=Math.min(4,step+1), render());
-  if(a==='goto2') return void (step=2, render());
+/* 每个动作**只跑自己这一步的阶段**。跨步的前置条件（配置表过期）由卡点说明，
+   不再悄悄把整条管线从 preflight 拉起 —— 那样 preflight 一红就什么都不跑，
+   界面又只留一个「再查一次」，用户点了没反应，自然不知道发生了什么。 */
+function actStages(a){
+  const byStep=n=>stagesOf(n).map(s=>s.key);
+  switch(a){
+    case 'recheck':   return ['preflight'];
+    case 'pullcheck': return ['pull'];
+    case 'pull':      return ['pull'];
+    case 'cfgsync':   return byStep(stepNo('cfg.publish',2));
+    case 'export':    return byStep(stepNo('paintings',3));
+    case 'staged':    return ['paintings','spine','live2d'];
+    case 'review':    return ['review'];
+    case 'swap':      return byStep(stepNo('swap-in',5));
+    case 'regress':   return ['regress'];
+    default:          return [];
+  }
+}
+function liveOf(keys){
+  return keys.filter(k=>{ const s=(S.stages||[]).find(x=>x.key===k); return s&&s.tier==='live'; });
+}
+function ctaRun(a, to){
+  if(a==='next') return void (step=Math.min(stepMax(),step+1), render());
+  if(a==='goto') return void (step=Math.max(1,Math.min(stepMax(),+to||1)), render());
   if(a==='prev') return void (step=Math.max(1,step-1), render());
   if(a==='detail') return void openDetail();
-  const live4=(S.stages||[]).filter(s=>s.step===4&&s.tier==='live').map(s=>s.key);
-  if(a==='diff') return post({stages:['preflight','pull'],force:force});
-  if(a==='pull') return sign(['pull'],'第 1 步：从模拟器拉包',
-    'adb pull 写进 files/AssetBundles（只补缺的和变了的）。'+
-    '源包一旦覆盖，旧版本本地就没了 —— 所以它要你签字。');
-  if(a==='tocheck'){
-    /* 主按钮以前不读勾选 ⇒ 勾了等于没勾。现在把 SIGNED 带上，并且**说清它会写哪儿**。 */
-    const ap=signedLive();
+  if(a==='diff'||a==='recheck') return post({stages:['preflight']},{label:'重查闸门'});
+  if(a==='pullcheck') return post({stages:['pull']},{label:'看设备差异'});
+  if(a==='pull'){
+    openSign({keys:['pull'], what:'第 1 步：从模拟器拉包',
+      note:'adb pull 写进 files/AssetBundles（只补缺的和变了的）。'+
+           '源包一旦覆盖，旧版本本地就没了 —— 所以它要你签字。',
+      onOk:()=>post({stages:['pull'],approve:['pull'],force:force},{label:'拉包'})});
+    return;
+  }
+  if(a==='cfgsync'){
+    const keys=actStages('cfgsync'), live=liveOf(keys);
+    const go=()=>post({stages:keys,approve:live,force:force},
+                     {label:'同步配置表', after:['preflight']});
+    if(!live.length) return go();
+    openSign({keys:live, what:'第 '+stepNo('cfg.publish',2)+' 步：同步配置表',
+      note:'前 3 个阶段只写 .diag/；cfg.publish 会写 inputs/gamecfg（导出用的权威元数据）。'+
+           '发布前有 4 道闸门，红了就停。跑完会自动重查第 1 步的 preflight。',
+      onOk:go});
+    return;
+  }
+  if(a==='export'){
+    const keys=actStages('export');
+    const ap=signedLive().filter(k=>keys.indexOf(k)>=0);
     if(ap.length){
-      openSign({keys:ap,what:'重跑到待确认',
-        note:'这一轮会直接写正式区：'+ap.join('、')+
-          '。换入前整批备份到 Output/_OLD_bak/pipeline_<日期>/。',
-        onOk:()=>post({stages:[],approve:ap,force:force})});
+      openSign({keys:ap, what:'第 '+stepNo('paintings',3)+' 步：重导并写正式区',
+        note:'勾了签字的阶段会直接覆盖 Output/（audio / cg 没有暂存通道）；'+
+             '其余只写暂存区，正式区一个字节不碰。',
+        onOk:()=>post({stages:keys,approve:ap,force:force},{label:'重新导出'})});
       return;
     }
-    return post({stages:[],approve:[],force:force});
+    return post({stages:keys,approve:[],force:force},{label:'重新导出'});
   }
-  if(a==='staged') return post({stages:['paintings','spine','live2d'],force:force});
-  if(a==='review') return post({stages:['review'],force:force});
-  if(a==='regress') return post({stages:['regress'],force:force});
-  if(a==='swap') return sign(live4,'第 4 步：换入 '+live4.join(' + '),
-    '换入前整批备份到 Output/_OLD_bak/pipeline_<日期>/；随后重建缩略图与索引，'+
-    '要过「索引零回退闸门」和「部署 4/4 同 inode」两道检查，任一判红就停。');
+  if(a==='staged') return post({stages:['paintings','spine','live2d'],force:force},
+                              {label:'只重跑导出三件'});
+  if(a==='review') return post({stages:['review'],force:force},{label:'出对照表'});
+  if(a==='regress') return post({stages:['regress'],force:force},{label:'跑回归'});
+  if(a==='swap'){
+    const keys=actStages('swap'), live=liveOf(keys);
+    openSign({keys:live, what:'第 '+stepNo('swap-in',5)+' 步：换入 '+live.join(' + '),
+      note:'换入前整批备份到 Output/_OLD_bak/pipeline_<日期>/；随后重建缩略图与索引，'+
+           '要过「索引零回退闸门」和「部署同 inode」两道检查，任一判红就停。',
+      onOk:()=>post({stages:keys,approve:live,force:force},{label:'换入正式区'})});
+    return;
+  }
+  /* 兼容旧按钮：整条管线跑到待确认。新界面不再把整条管线挂到某一步的主按钮上。 */
+  if(a==='tocheck'){
+    const ap=signedLive();
+    return post({stages:[],approve:ap,force:force},{label:'跑到待确认'});
+  }
 }
-function sign(keys,what,note){
-  openSign({keys:keys,what:what,note:note,onOk:()=>{
-    const s4=(S.stages||[]).filter(s=>s.step===4).map(s=>s.key);
-    post({stages:keys.every(k=>s4.includes(k))?s4:keys,approve:keys,force:force});
-  }});
+
+/* ── 回执：每个动作跑完都留一行结论 ───────────────────────────────────
+   旧版点「再查一次」后，若结论没变（preflight 还是红），状态签名一字不差，
+   render 一个节点都不碰 ⇒ 界面看起来"什么都没发生"。用户没法区分
+   "没跑"和"跑了但结论没变"。回执把这两件事分开：提交时先写一行"已提交"，
+   跑完再写结果与用时，且**不随 8 秒轮询消失**。 */
+let PENDING=null;
+function clip(s,n){
+  /* 只留结论，不留"⇒ 跑 cfg.…"那半句：修复动作已经写在卡点里，
+     回执再抄一遍会套出「（配置表过期（源…）⇒ 跑…）」这种双层括号。 */
+  s=String(s||'').replace(/^\s*红[:：]\s*/,'').split('⇒')[0]
+    .replace(/\s+/g,' ').trim();
+  const m=n||76; return s.length>m ? s.slice(0,m)+'…' : s;
 }
-async function post(b){
-  const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(b)});
-  const j=await r.json();
-  if(j.error){ $('#warn').textContent=j.error; $('#warn').classList.add('on'); return; }
+function showReceipt(text,kind){
+  const el=$('#receipt'); if(!el) return;
+  el.textContent=text||''; el.hidden=!text;
+  el.className='receipt'+(kind?' '+kind:'');
+}
+function labelFor(b){
+  if(b.plan) return '只看计划';
+  const ks=b.stages||[];
+  if(!ks.length) return '整条管线';
+  return ks.length<=3 ? ('跑 '+ks.join(' + ')) : ('跑 '+ks.length+' 个阶段');
+}
+async function post(b, opt){
+  opt=opt||{};
+  const keys=(b.stages&&b.stages.length)?b.stages.slice()
+             :((S&&S.stages)||[]).map(s=>s.key);
+  PENDING={label:opt.label||labelFor(b), keys:keys, plan:!!b.plan,
+           after:opt.after||null, t0:Date.now()};
+  showReceipt(PENDING.label+'：已提交，等结果…','run');
+  let j=null;
+  try{
+    const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(b)});
+    j=await r.json();
+  }catch(e){
+    PENDING=null; showReceipt((opt.label||'任务')+' 没发出去：'+e,'bad'); return;
+  }
+  if(j.error){
+    if(opt.auto && /已经有一个任务在跑/.test(j.error)){
+      showReceipt('上一个任务还在收尾，1.5 秒后自动重试…','run');
+      setTimeout(()=>post(b,{auto:false,label:opt.label,after:opt.after}),1500);
+      return;
+    }
+    PENDING=null;
+    showReceipt((opt.label||'任务')+' 没起来：'+j.error,'bad');
+    $('#warn').textContent=j.error; $('#warn').classList.add('on'); return;
+  }
   $('#warn').classList.remove('on'); tail(j.id);
+}
+function finishReceipt(){
+  const P=PENDING; if(!P) return; PENDING=null;
+  if(P.plan){ showReceipt('只看计划：已生成，展开「细节」看日志里的阶段表','good'); return; }
+  const parts=[]; let kind='good', skipped=0;
+  P.keys.forEach(k=>{
+    const stt=statusOf(k);
+    if(stt==='idle'){ skipped++; return; }
+    const d=clip(((S.state||{})[k]||{}).detail,72);
+    if(stt==='fail') kind='bad';
+    else if(stt==='await' && kind!=='bad') kind='await';
+    parts.push(k+' '+STT[stt]+(d?' · '+d:''));
+  });
+  const secs=Math.max(0,Math.round((Date.now()-P.t0)/1000));
+  if(!parts.length){
+    showReceipt(P.label+'：跑完了，但没读到任何阶段结论 —— 展开「细节」看日志','bad');
+    return;
+  }
+  showReceipt(P.label+' · '+parts.join('；')+
+              (skipped?'（另有 '+skipped+' 项没跑到）':'')+' · '+secs+' 秒', kind);
+  if(P.after && kind!=='bad'){
+    setTimeout(()=>post({stages:P.after},{label:'同步后重查闸门',auto:true}),1200);
+  }
 }
 window.tail=async function(id){
   curJob=id; off=0; LINES=[]; $('#log').textContent=''; $('#jobinfo').textContent='任务 '+id;
@@ -3335,7 +3607,8 @@ async function pump(){
   off=j.offset;
   $('#jobstat').innerHTML=j.state==='running'?'<span style="color:var(--run)">● 运行中</span>':'空闲';
   $('#jobinfo').textContent='任务 '+curJob+(j.state?(' · '+j.state):'');
-  if(j.state!=='running'){ clearInterval(timer); timer=null; curJob=null; await apiState(); }
+  if(j.state!=='running'){ clearInterval(timer); timer=null; curJob=null;
+    await apiState(); finishReceipt(); }
 }
 $('#bFollow').onclick=e=>{ follow=!follow; e.target.textContent=follow?'跟随最新':'暂停跟随'; };
 $('#bClear').onclick=()=>{ LINES=[]; $('#log').textContent=''; };
@@ -3385,8 +3658,11 @@ document.addEventListener('keydown',e=>{
   else if(k==='m'){ CALM=!CALM; localStorage.setItem('panel.calm',CALM?'1':'0'); calmApply(); }
   else if(k==='v'){ $('#bSea').click(); }
   else if(k==='p'){ if(!S||S.running) return; post({plan:true}); }
-  else if(k==='r'){ if(!S||S.running) return; ctaRun(step===1?'diff':step===3?'review'
-                    :step===4?'swap':'tocheck'); }
+  else if(k==='r'){ if(!S||S.running) return;
+    /* R = 跑当前这一步的主动作；看图表那一步主动作是"打开对照表"，
+       所以它固定重出表（纯读，重复跑没有副作用）。 */
+    const a=step===stepNo('review',4)?'review':((askOf(step).acts||[])[0]||{}).a;
+    if(a) ctaRun(a); }
 });
 $$('#help [data-close]').forEach(el=>el.onclick=()=>$('#help').classList.remove('on'));
 
@@ -3455,8 +3731,15 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                 det(on){ on?openDetail():closeDetail(); return 1; },
                 ask(){ return {eb:$('#eyebrowTx').textContent, ask:$('#ask').textContent.trim(),
                                 why:$('#why').textContent.trim(),
+                                gate:$('#gate').hidden?'':$('#gate').textContent.trim(),
+                                receipt:$('#receipt').hidden?'':$('#receipt').textContent.trim(),
                                 acts:[...document.querySelectorAll('#cta button')]
-                                      .map(x=>x.className+'|'+x.textContent)}; },
+                                      .map(x=>x.dataset.a+'|'+x.textContent),
+                                gateActs:[...document.querySelectorAll('#gate button')]
+                                      .map(x=>x.dataset.a+'|'+x.textContent)}; },
+                scope(a){ return actStages(a); },
+                live(a){ return liveOf(actStages(a)); },
+                work(){ return currentStep(); },
                 detail(){ const d=$('#detail');
                   return {on:d.classList.contains('on'),
                           vis:getComputedStyle(d).display!=='none',
