@@ -426,3 +426,11 @@ v1 的 `__snapStairDbg() → n:0` 空转来自 definition 只有 `{File}`，该�
    只涉及 `jinluhao_3`/`feiteliedadi_4`），**不是本次引入** —— 全过程见 **§147**。备份 `Output/_OLD_bak/l2d_motion_20261016_234428`。
 
 **一句话**：这一页从 2026-10-12 写到 2026-10-16，结论是「**不是运行时能补的，是导出层把"瞬切"写成了"渐变"**」。
+
+5. ✅ **运行时旧补丁已整条删除（2026-10-17，用户验收后）**：v2/v5 那层「同 clip 中途逐帧贴回作者键」
+   （`snapMidGate` + 键表/键统计 + `loadSnapKeys` / `snapClipKey` / `__snapKeyDbg` / `__snapKeyWait`
+   + 只为它存在的 `mm.startMotion` 预载包装器）**全部拆掉** —— 数据层修好后它实测已是空转
+   （frames=0 / writes=0），留着只会让下一位误以为"页面还在打补丁"。⚠️ **`snapHold`（跨 clip 切动作死区）
+   是另一层，保留**；`gallery_src/index.html` 里留了「不要再加回来」的注释作为防复发桩。
+   删除后：`deploy_gallery --check` 11/11 同 inode、内容漂移 0；`l2d_pause_e2e gezi_2` **12 PASS + 1 合法 SKIP**。
+   唯一-1 的接口：`__snapKeyWait`/`__snapKeyDbg` 换成 `__snapReady`（等 `snapswitch.json` 表就绪，服务保留的 snapHold 层）。

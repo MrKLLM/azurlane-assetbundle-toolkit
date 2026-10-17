@@ -244,10 +244,10 @@ def main():
         print('起播 …', flush=True)
         t = start_play('第一遍')
         if not snap_off:
-            snap_loaded = ev('window.__snapKeyWait?window.__snapKeyWait():null')
-            print('  snapKey(v2) 起播确认: ', snap_loaded, flush=True)
+            snap_loaded = ev('window.__snapReady?window.__snapReady():null')
+            print('  snapswitch 表就绪确认（保留层 snapHold 用）: ', snap_loaded, flush=True)
             if not isinstance(snap_loaded, dict) or snap_loaded.get('state') != 'ok':
-                raise SystemExit(f'v2 motion3 键未就绪，拒绝把此趟当验证结果：{snap_loaded}')
+                raise SystemExit(f'snapswitch 表未就绪，拒绝把此趟当验证结果：{snap_loaded}')
         # v2 的首个有效证据是页面从 definitions[group][index].File 取到 motion3 作者键，
         # 而不是只看动作轨迹；end 处再读逐帧回贴计数，防止异步请求尚未完成时误判空转。
         print('  snapKey(v2) 起始: ', ev('JSON.stringify(window.__snapKeyDbg'
@@ -350,16 +350,17 @@ def main():
                         if 0.15 < row[4] < 0.85:
                             ghosts.append((frame['t'], row[0], row[4]))
             expected = 5 * len(frames)
-            # mid-clip 钉值白名单以页面钩子报的 gate 为准（2026-10-14 收窄为 ['Param27']）：
-            # changedIds 必须是 gate 的子集，防止又悄悄钉宽回全表。
-            allowed = set((snap_end or {}).get('gate') or [])
-            escaped = sorted(set((snap_end or {}).get('changedIds', [])) - allowed)
+            # ⚠️ 2026-10-17：mid-clip「逐帧贴回作者键」那一层**已整条删除**（数据层改成发 Stepped 段，
+            # 页面里 `__snapKeyDbg`/`__snapKeyWait` 一并拆掉）。所以这里不再检查"changedIds ⊆ gate"
+            # （那条判据随层的删除一起作废），改成**断言该层不存在**：若有人把它加回来，`__snapKeyDbg`
+            # 会重新出现，这条就报红。
+            layer_back = bool(snap_end)
             print(f'  ghost gate: 5片采样 {seen}/{expected} · 中间态 {len(ghosts)} · '
-                  f'本轮回贴参数 {len((snap_end or {}).get("changedIds", []))} · '
+                  f'mid-clip 钉值层={"仍在(应报红)" if layer_back else "已删除(预期)"} · '
                   f'模式={"off反向阳性" if snap_off else "on修复验收"}', flush=True)
             if (seen != expected or (snap_off and not ghosts) or (not snap_off and ghosts)
-                    or (not snap_off and (not allowed or escaped))):
-                print('  [FAIL] 虚影判据反向或采样不完整：', ghosts[:12], flush=True)
+                    or (not snap_off and layer_back)):
+                print('  [FAIL] 虚影判据反向、采样不完整、或 mid-clip 层被加了回来：', ghosts[:12], flush=True)
                 return 3
             print('  [PASS] ' + ('关闭态确实复现中间态' if snap_off else '启用态无中间态虚影'), flush=True)
         return 0
