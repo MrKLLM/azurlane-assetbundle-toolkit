@@ -2968,6 +2968,22 @@ function stepNo(k,d){ return stepOfKey(k)||d; }
 function stepMax(){ const ks=Object.keys((S&&S.steps)||{}).map(Number);
   return ks.length?Math.max.apply(null,ks):5; }
 function stepName(n){ return (S&&S.steps&&S.steps[String(n)]&&S.steps[String(n)][0])||STEPNAME[n]||''; }
+/* 下一件该做的事在哪一步：第一个比 n 大、还有阶段没全绿的步骤。
+   文案里的「去第 N 步」必须和真实跳转同一处算出来 —— 手写 nExport/nReview
+   在步骤全部完成后会把用户指向一个已经做完的步骤（用户实测：第 5 步让他去第 3 步）。 */
+function nextWorkStep(n){
+  const order=Object.keys((S&&S.steps)||{}).map(Number).sort((a,b)=>a-b);
+  for(const k of order){
+    if(k>n && stagesOf(k).some(s=>statusOf(s.key)!=='pass')) return k;
+  }
+  return order.length?order[order.length-1]:n;
+}
+/* 全局第一个没做完的步骤号（没有则 0）。第 5 步的"还没换完"靠它决定
+   该往前跳还是就在本步开跑，不能再一律写死"去第 3 步"。 */
+function firstGapStep(){
+  const g=((S&&S.stages)||[]).filter(s=>statusOf(s.key)!=='pass').map(s=>s.step).filter(Boolean);
+  return g.length?Math.min.apply(null,g):0;
+}
 function askOf(n){
   const all=(S&&S.stages)||[], st=(S&&S.state)||{}, stn=statusOf;
   const list=n===0?all:stagesOf(n);
@@ -3031,17 +3047,18 @@ function askOf(n){
               {a:'pullcheck',t:'重算差异',k:'link2'}]};
     }
     const unreach=/设备不可达/.test(pl.detail||'');
+    const nw1=nextWorkStep(1);
+    const goNext1={a:'goto',to:nw1,t:'去第 '+nw1+' 步 '+stepName(nw1)+' →',k:'pact mag'};
     return {eb, gate,
       ask: unreach?'设备没连上，先用本地已有的包':'包已经在本地了',
       why: unreach?(pl.detail||'')+
         (stale?' 配置表也还没对齐：导出前先去第 '+nCfg+' 步。':'')
         : (stale?'但导出还开不了：配置表比源包旧，先去第 '+nCfg+' 步对齐。'
-                :'下一步：从源包重算产物（第 '+nExport+' 步），全部先进暂存区。'),
+                :'下一步：从源包重算产物，全部先进暂存区。'),
       acts: stale
         ? [{a:'goto',to:nCfg,t:'▶ 去第 '+nCfg+' 步同步配置表',k:'pact mag'},
            {a:'detail',t:'看这 '+list.length+' 个阶段',k:'link2'}]
-        : [{a:'next',t:'去第 '+nExport+' 步 →',k:'pact mag'},
-           {a:'pullcheck',t:'再算一遍差异',k:'link2'}]};
+        : [goNext1,{a:'pullcheck',t:'再算一遍差异',k:'link2'}]};
   }
 
   if(n===nCfg){
@@ -3065,9 +3082,10 @@ function askOf(n){
       why:'inputs/gamecfg 是导出的权威元数据，写正式区要签字；签了才会覆盖。',
       acts:[{a:'cfgsync',t:'⚑ 签字发布',k:'pact sign mag'},
             {a:'detail',t:'看写到哪儿',k:'link2'}]};
+    const nwCfg=nextWorkStep(nCfg);
     return {eb, ask:'配置表已对齐源包',
       why:'下一步：从源包重算产物（第 '+nExport+' 步）。',
-      acts:[{a:'next',t:'去第 '+nExport+' 步 →',k:'pact mag'},
+      acts:[{a:'goto',to:nwCfg,t:'去第 '+nwCfg+' 步 '+stepName(nwCfg)+' →',k:'pact mag'},
             {a:'detail',t:'看这 4 步写到哪儿',k:'link2'}]};
   }
 
@@ -3097,9 +3115,10 @@ function askOf(n){
     if(idle.length) return {eb, ask:'重导跑好了 '+nEm(list.length-idle.length)+' 项，还剩 '+nEm(idle.length)+' 项',
       why:'继续跑会把剩下的算完。',
       acts:[{a:'export',t:'▶ 跑完剩下的',k:'pact mag'}]};
+    const nwExp=nextWorkStep(nExport);
     return {eb, ask:'产物都重导好了',
-      why:'下一步：出改前 | 改后的对照表（第 '+nReview+' 步），纯读。',
-      acts:[{a:'next',t:'去第 '+nReview+' 步 →',k:'pact mag'},
+      why:'下一步：出改前 | 改后的对照表，纯读。',
+      acts:[{a:'goto',to:nwExp,t:'去第 '+nwExp+' 步 '+stepName(nwExp)+' →',k:'pact mag'},
             {a:'detail',t:'看这 '+list.length+' 项写到哪儿',k:'link2'}]};
   }
 
@@ -3110,10 +3129,11 @@ function askOf(n){
     if(!rv) return {eb, ask:'出一张改前 | 改后的对照表',
       why:'纯读，随时可以反复跑。图会放在「细节」里，点开能放大。',
       acts:[{a:'review',t:'▶ 出对照表',k:'pact mag'}]};
+    const nwRv=nextWorkStep(nReview);
     return {eb, ask:'对照表好了，'+nEm((S.sheets||[]).length)+' 张，看一眼再决定换不换',
       why:'这一步不写任何正式产物。换入是第 '+nSwap+' 步，要你签字。',
       acts:[{a:'detail',t:'打开对照表',k:'pact mag'},
-            {a:'next',t:'去第 '+nSwap+' 步 →',k:'link2'}]};
+            {a:'goto',to:nwRv,t:'去第 '+nwRv+' 步 '+stepName(nwRv)+' →',k:'link2'}]};
   }
 
   const live5=list.filter(s=>s.tier==='live'), aw5=live5.filter(s=>stn(s.key)==='await');
@@ -3123,11 +3143,24 @@ function askOf(n){
   const allSt=S.stages||[], notYet=allSt.filter(s=>stn(s.key)==='idle');
   const whereNot=notYet.map(s=>'第 '+s.step+' 步 '+s.key).join('、');
   const tail=notYet.length?(' 这轮还有 '+notYet.length+' 项没跑过：'+whereNot+'。'):'';
+  /* 「还没换完」时该干什么，看**第一个缺口在哪一步**：
+     缺口在前面（例：第 4 步对照表没出）→ 跳到那一步；缺口就在本步（swap-in/derive/regress 没跑）
+     → 在本步开跑（换入要签字）。以前一律写死"去第 3 步重导"，
+     用户在第 5 步被指回已经做完的第 3 步，点了还落到第 1 步（goto 没带 data-to）。 */
+  const gap=firstGapStep();
+  /* 暂存区是不是这一轮的，决定那句警告怎么说：第 3 步全绿 ⇒ 是刚重导出来的，
+     可以放手换；否则可能是上一批的遗留，用户会拿它当"已重导"（2026-10-01 假绿灯）。 */
+  const fresh = stagesOf(nExport).length>0 && stagesOf(nExport).every(s=>stn(s.key)==='pass');
+  const staleWarn = fresh
+    ? '暂存区是这一轮刚重导出来的，可以直接换。'
+    : '暂存区里现在这些可能是上一批留下的，别当成"已重导"。';
+  const goGap = (gap && gap<n)
+    ? {a:'goto',to:gap,t:'▶ 去第 '+gap+' 步 '+stepName(gap),k:'pact mag'}
+    : {a:'swap',t:'⚑ 换入正式区',k:'pact sign mag'};
   if(notYet.length && !aw5.length && !fail && !live5.some(s=>stn(s.key)==='pass'))
     return {eb, red:1, ask:'还没换完：有 '+nEm(notYet.length)+' 项这轮根本没跑',
-      why:'没跑过的项不算完成。差在：'+whereNot+'。暂存区里现在这些是上一批留下的，别当成"已重导"。',
-      acts:[{a:'goto',to:nExport,t:'▶ 去第 '+nExport+' 步重导',k:'pact mag'},
-            {a:'detail',t:'看是哪几项',k:'link2'}]};
+      why:'没跑过的项不算完成。差在：'+whereNot+'。'+staleWarn,
+      acts:[goGap,{a:'detail',t:'看是哪几项',k:'link2'}]};
   if(fail) return {eb, red:1, ask:fail.key+' 这一步没过',
     why:'闸门判红说明这次换入会丢东西——别绕，先查源包。'+tail,
     acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},
@@ -3147,9 +3180,8 @@ function askOf(n){
     notYet.forEach(s=>{ (byStep[s.step]=byStep[s.step]||[]).push(s.key); });
     const where=Object.keys(byStep).map(k=>'第 '+k+' 步（'+byStep[k].join(' / ')+'）').join('、');
     return {eb, red:1, ask:'还没换完：有 '+nEm(notYet.length)+' 项这轮根本没跑',
-      why:'没跑过的项不算完成。差在：'+where+'。暂存区里现在这些是上一批留下的，别当成"已重导"。',
-      acts:[{a:'goto',to:nExport,t:'▶ 去第 '+nExport+' 步重导',k:'pact mag'},
-            {a:'detail',t:'看是哪几项',k:'link2'}]};
+      why:'没跑过的项不算完成。差在：'+where+'。'+staleWarn,
+      acts:[goGap,{a:'detail',t:'看是哪几项',k:'link2'}]};
   }
   return {eb, ask:'这次更新已经换完了', why:'画廊已部署、回归跑过；要再来一轮就从第 1 步开始。',
     acts:[{a:'regress',t:'▶ 只跑回归',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
@@ -3261,9 +3293,13 @@ function render(){
   }
   foot.textContent=A.foot||'';
   foot.classList.toggle('on',!!A.foot);
-  $('#cta').innerHTML=A.acts.map(c=>c.k.indexOf('link2')>=0
-      ? '<button class="link2" data-a="'+c.a+'">'+c.t+'</button>'
-      : '<button class="'+c.k+'" data-a="'+c.a+'">'+c.t+'</button>').join('');
+  /* 主按钮也必须带 `data-to`：`goto` 的目标只从 DOM 上取。漏了它，
+     点「去第 3 步」会落到第 1 步（`+undefined||1`）——2026-10-17 用户就是这样
+     在第 5 步点了「去第 3 步重导」，结果被扔回第 1 步。 */
+  $('#cta').innerHTML=A.acts.map(c=>(c.k.indexOf('link2')>=0
+      ? '<button class="link2" data-a="'+c.a+'"'
+      : '<button class="'+c.k+'" data-a="'+c.a+'"')+
+      (c.to?' data-to="'+c.to+'"':'')+'>'+c.t+'</button>').join('');
   avoidRefresh();
 
   const ungrouped=all.filter(s=>!steps[s.step||0]);
@@ -3733,6 +3769,7 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                 anims(){ return document.getAnimations().length; },
                 api(){ return apiState(); },     // 真入口：进度台判据从这里灌合成 state，不直接调 gaugeSet
                 go(n){ step=n; render(); }, state(){ return S; },
+                view(){ return step; },
                 calm(on){ CALM=!!on; localStorage.setItem('panel.calm',CALM?'1':'0');
                           calmApply(); return CALM; },
                 legacy(on){ LEGACY=!!on; localStorage.setItem('panel.legacy',LEGACY?'1':'0');

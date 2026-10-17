@@ -265,13 +265,18 @@ def main():
         print('\n── 步骤状态与签字 ─────────────────────────────')
         # 探针不能假设"待办一定是第 2 步"：用户可能已经同步完配置表、正在第 3 步。
         work = pg.ev("__probe.work()")
-        # 第 3 步：只要这一步有 live 阶段，主按钮必须先弹签字单，不能"点了直接开跑又回来"
+        # 第 3 步：只要这一步还有导出动作，主按钮必须先弹签字单，不能"点了直接开跑又回来"
         # （2026-10-17 用户点的就是「重跑到待确认」，以为签字窗坏了）。
+        # 判据按**动作类型**（data-a=export）而不是文案：这一部全部跑完之后，
+        # 主按钮会变成"去第 5 步"，那时没有签字单可弹，不能算 FAIL。
         pg.ev("document.querySelectorAll('.snode')[2].click()")
         time.sleep(0.45)
-        ask3 = pg.ev("document.querySelector('.ask').textContent") or ''
-        cta3 = pg.ev("document.querySelector('#cta .pact').textContent") or ''
-        if '签字' in ask3 or '重导' in ask3:
+        acts3 = _json.loads(pg.ev(
+            "JSON.stringify([...document.querySelectorAll('#cta button')]"
+            ".map(b=>[b.dataset.a,b.textContent.trim()]))") or '[]')
+        has_export = any(x[0] == 'export' for x in acts3)
+        if has_export:
+            cta3 = pg.ev("document.querySelector('#cta .pact').textContent") or ''
             chk('第 3 步主按钮写明签字或重导', ('签字' in cta3 or '重导' in cta3), cta3)
             pg.shot('export.png')
             pg.ev("document.querySelector('#cta .pact').click()")
@@ -371,6 +376,45 @@ def main():
         chk('退路按钮执行回调并关闭窗口',
             pg.ev("window.__alt===1") and
             not bool(pg.ev("document.getElementById('signmodal').classList.contains('on')")))
+
+        # 跳步按钮：标签写的第几步必须和真实目标一致，点下去必须真的落到那一步
+        # （2026-10-17 用户在第 5 步点「去第 3 步重导」，被扔回第 1 步——
+        #  goto 的 data-to 没渲染进主按钮，`+undefined||1` 落到了第 1 步）。
+        print('\n── 跳步按钮的标签与目标 ───────────────────────')
+        acts5 = []
+        for n in range(1, 6):
+            pg.ev(f"document.querySelectorAll('.snode')[{n-1}].click()")
+            time.sleep(0.3)
+            acts = _json.loads(pg.ev(
+                "JSON.stringify([...document.querySelectorAll('#cta button')]"
+                ".map(b=>[b.dataset.a,b.dataset.to||'',b.textContent.trim()]))") or '[]')
+            if n == 5:
+                acts5 = acts
+            bad = []
+            for a, to, txt in acts:
+                if a != 'goto':
+                    continue
+                m = re.search(r'第\s*(\d+)\s*步', txt)
+                if not m or m.group(1) != str(to):
+                    bad.append(f'{txt}→{to or "无目标"}')
+            chk(f'第 {n} 步跳转按钮的标签与目标一致', not bad, '; '.join(bad) or f'{len(acts)} 个按钮')
+        pg.ev("document.querySelectorAll('.snode')[4].click()")
+        time.sleep(0.3)
+        goto_btn = pg.ev("(()=>{const b=[...document.querySelectorAll('#cta button')]"
+                         ".find(x=>x.dataset.a==='goto');"
+                         "return b?[b.dataset.to,b.textContent.trim()]:null})()")
+        if goto_btn:
+            chk('第 5 步缺口在本步时主按钮是换入（签字），不是往回跳',
+                any(x[0] == 'swap' for x in acts5),
+                ' / '.join(f'{x[0]}|{x[2]}' for x in acts5))
+            pg.ev("[...document.querySelectorAll('#cta button')]"
+                  ".find(x=>x.dataset.a==='goto').click()")
+            time.sleep(0.35)
+            chk('点跳转按钮真的落到标签写的那一步',
+                pg.ev("__probe.view()") == int(goto_btn[0]),
+                f'label={goto_btn[1]} view={pg.ev("__probe.view()")}')
+            pg.ev("document.querySelectorAll('.snode')[4].click()")
+            time.sleep(0.3)
 
         pg.ev("document.getElementById('bHelp').click()")
         time.sleep(0.6)
