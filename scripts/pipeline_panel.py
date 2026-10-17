@@ -1850,7 +1850,7 @@ pre .bad{color:#E08A69!important}
     <div><h1>资产更新控制台</h1><p>ASSET UPDATE CONSOLE · RUNBOOK 05</p></div>
   </div>
   <div class="act">
-    <button id="bDetail" class="ghost" title="D：展开证据（13 个阶段 / 日志 / 对照表 / 指纹）">细节</button>
+    <button id="bDetail" class="ghost" title="D：展开证据（全部阶段 / 日志 / 对照表 / 指纹）">细节</button>
     <button id="bSea" class="ghost" title="S：夜读模式 开/关（暖墨底，非旧版紫黑）">夜读 · 关</button>
     <span class="kbd" title="1-5 切步骤 · R 跑当前这一步 · D 细节 · P 只看计划 · H 帮助 · Esc 关闭 · S 夜读 · M 动效从简 · V 夜读">
       <b>1-5</b> 步骤 · <b>R</b> 跑 · <b>D</b> 细节</span>
@@ -1887,7 +1887,7 @@ pre .bad{color:#E08A69!important}
 <nav class="steps" id="stepsbar" aria-label="五个步骤">
   <div class="rail-hd"><span>RUNBOOK</span><b>五步</b></div>
   <span class="track"><i class="fill" id="stepfill"></i></span>
-  <div class="rail-ft"><span>13 个阶段</span><span>证据见「细节」</span></div>
+  <div class="rail-ft"><span id="railCount">全部阶段</span><span>证据见「细节」</span></div>
 </nav>
 </div>
 
@@ -2860,6 +2860,7 @@ function render(){
   /* ── 底部步骤条：五个节点，节点上带该步全部阶段的状态方块 ─────────────
      判据「13 个阶段一个都不许被折叠掉」靠这里每个 dot 都在。 */
   const steps=S.steps||{}, bar=$('#stepsbar');
+  const rc=$('#railCount'); if(rc) rc.textContent=all.length+' 个阶段';
   bar.querySelectorAll('.snode').forEach(e=>e.remove());
   Object.keys(steps).sort().forEach(k=>{
     const n=+k, list=stagesOf(n);
