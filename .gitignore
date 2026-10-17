@@ -67,6 +67,7 @@ __pycache__/
 .venv/
 venv/
 .env
+.ruff_cache/
 
 # Editor / OS noise
 .vscode/
@@ -75,6 +76,8 @@ Thumbs.db
 
 # AI agent local state / memory directories (avoid leaking internal agent data)
 .workbuddy/
+.workbuddy-ai/
+.dumate/
 .codebuddy/
 .cline/
 .cursor/
