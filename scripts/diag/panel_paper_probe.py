@@ -299,8 +299,13 @@ def main():
         # 全绿时没有"待办"，界面改说「已跑完」——判据要同时接受两种状态，
         # 否则一轮跑完后探针全红（2026-10-17 实测）。
         view = 5 if work != 5 else 1
-        allpass = bool(pg.ev("(()=>{const s=window.__probe.state().stages||[];"
-                             "return s.length>0 && s.every(x=>{const r=(window.__probe.state().state||{})[x.key];"
+        # “真跑完”= 阶段全绿 **且** 已发布皮肤表不比源旧（后者是第 2 步的活，
+        # 2026-10-17 §155：17/17 全绿但发布早于解析刷新，面板必须仍说“待办”）。
+        allpass = bool(pg.ev("(()=>{const st=window.__probe.state();"
+                             "const s=st.stages||[];"
+                             "if(!(s.length>0)) return false;"
+                             "if((st.skin_gap||{}).gap>0) return false;"
+                             "return s.every(x=>{const r=(st.state||{})[x.key];"
                              "return !!r && r.ok && !/未签字|--approve/.test(r.detail||'')})})()"))
         pg.ev(f"document.querySelectorAll('.snode')[{view-1}].click()")
         time.sleep(0.45)
@@ -355,6 +360,32 @@ def main():
                 '配置表' in (pg.ev("document.querySelector('.ask').textContent") or ''))
         else:
             print(f'  SKIP  第 2 步已同步完成（主动作「{cta2}」），跳过同步签字单')
+
+        # 表漂移卡点（§155）：已发布皮肤表比本轮解出来的少行时，
+        # 第 2 步必须自己说出来，并把主按钮换成"重新同步并发布"，
+        # 而不是停在全绿的"配置表已对齐源包"上。
+        gap = pg.ev("((window.__probe.state().skin_gap||{}).gap)||0")
+        if gap:
+            pg.ev("document.querySelectorAll('.snode')[1].click()")
+            time.sleep(0.4)
+            cta2b = pg.ev("document.querySelector('#cta .pact').textContent") or ''
+            ask2b = pg.ev("document.querySelector('.ask').textContent") or ''
+            chk('表漂移时第 2 步主按钮是重新发布', '发布' in cta2b, cta2b)
+            chk('表漂移时第 2 步文案说清缺行', '还没发布' in ask2b, ask2b[:40])
+            acts3b = _json.loads(pg.ev(
+                "JSON.stringify([...document.querySelectorAll('#cta button')]"
+                ".map(b=>[b.dataset.a,b.dataset.to||'',b.textContent.trim()]))") or '[]')
+            pg.ev("document.querySelectorAll('.snode')[2].click()")
+            time.sleep(0.4)
+            acts3c = _json.loads(pg.ev(
+                "JSON.stringify([...document.querySelectorAll('#cta button')]"
+                ".map(b=>[b.dataset.a,b.dataset.to||'',b.textContent.trim()]))") or '[]')
+            chk('表漂移时第 3 步不放行导出（先回第 2 步）',
+                not any(x[0] == 'export' for x in acts3c) and
+                any(x[0] == 'goto' and x[1] == '2' for x in acts3c),
+                ' / '.join(f'{x[0]}|{x[2]}' for x in acts3c))
+        else:
+            print('  SKIP  皮肤表无漂移，跳过漂移卡点检查')
 
         pg.ev("openSign({keys:['pull'],what:'测试签字',note:'这是一条测试说明，不会真的发请求。',"
               "onOk:()=>{window.__signed=1}})")

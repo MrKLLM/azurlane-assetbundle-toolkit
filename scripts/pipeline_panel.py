@@ -525,6 +525,10 @@ class H(BaseHTTPRequestHandler):
                 'stages': stages, 'steps': steps, 'state': state,
                 'runs': load_runs()[-12:][::-1],
                 'running': run, 'error': err, 'sheets': sheets,
+                # 已发布皮肤表 vs 本轮解析产物：差几行（发布早于解析时会 > 0）。
+                # 2026-10-17 §155：发布跑在解析刷新之前 ⇒ 新皮肤无名、语音档位派不出，
+                # 而阶段结论全是绿的（缓存）——这个差就是唯一会说真话的信号。
+                'skin_gap': skin_table_gap(),
                 # 最近一次**已结束**的任务用了多久：进度台按契约跑完就收起（静止帧判据），
                 # 所以"这轮跑了多久 / 停在哪"要由主屏那句话带出来。
                 'last': _last_run(),
@@ -603,6 +607,34 @@ class H(BaseHTTPRequestHandler):
         if err:
             return self._send(409, {'error': err})
         return self._send(200, {'id': rid})
+
+
+def skin_table_gap():
+    """已发布皮肤表 vs 本轮解析产物，差几行（读不动返回 None，不挡主流程）。
+
+    为什么需要它：`cfg.publish` 的结论是按指纹缓存的，发布跑在解析刷新之前时
+    结论仍绿，但 `inputs/gamecfg/ship_skin_template.json` 里就是缺行
+    （2026-10-17 实测：19:46 发布用 09-25 的 scalar，21:11 才刷新 ⇒ 少 6 行）。
+    行数差是唯一不依赖缓存的真信号。
+    """
+    try:
+        pub_p = os.path.join(ROOT, 'inputs', 'gamecfg', 'ship_skin_template.json')
+        dev_p = os.path.join(ROOT, '.diag', 'sharecfg_re', 'cfg_json_scalar',
+                             'ship_skin_template.json')
+        if not os.path.isfile(pub_p) or not os.path.isfile(dev_p):
+            return None
+        pub = json.load(open(pub_p, encoding='utf-8'))
+        dev = json.load(open(dev_p, encoding='utf-8'))
+        gap = len(set(map(str, dev)) - set(map(str, pub)))
+        if gap <= 0:
+            return None
+        lost = sorted(set(map(str, pub)) - set(map(str, dev)))
+        sample = [dev[k].get('painting') for k in sorted(set(map(str, dev)) - set(map(str, pub)))
+                  if isinstance(dev.get(k), dict)][:6]
+        return {'pub': len(pub), 'dev': len(dev), 'gap': gap, 'lost': len(lost),
+                'sample': [s for s in sample if s]}
+    except Exception:
+        return None
 
 
 def newsafe():
@@ -2732,7 +2764,7 @@ let SIG='', RENDERED=false, LASTSTEP=-1;
 const mounted=new Set();
 function sigOf(j){
   try{ return JSON.stringify([j.fingerprint,j.scope,j.state,j.running,j.sheets,j.runs,
-                              j.stages,j.steps,j.error]); }
+                              j.stages,j.steps,j.error,j.skin_gap]); }
   catch(e){ return String(Math.random()); }
 }
 async function apiState(force){
@@ -2763,6 +2795,8 @@ function currentStep(){
   const nCfg=stepNo('cfg.publish',2);
   const cfgPending=stagesOf(nCfg).some(s=>statusOf(s.key)!=='pass');
   if(pf&&!pf.ok&&/配置表过期/.test(pf.detail||'')&&cfgPending) return nCfg;
+  /* 表漂移同理：修复动作（重新发布）在第 2 步，别让"待办"停在已经全绿的第 5 步。 */
+  if(skinGapPending()) return stepNo('cfg.publish',2);
   for(const n of order){
     const list=stagesOf(n);
     if(!list.length) continue;
@@ -2971,13 +3005,19 @@ function stepName(n){ return (S&&S.steps&&S.steps[String(n)]&&S.steps[String(n)]
 /* 下一件该做的事在哪一步：第一个比 n 大、还有阶段没全绿的步骤。
    文案里的「去第 N 步」必须和真实跳转同一处算出来 —— 手写 nExport/nReview
    在步骤全部完成后会把用户指向一个已经做完的步骤（用户实测：第 5 步让他去第 3 步）。 */
+/* 已发布皮肤表比本轮解出来的少行？少 = 第 2 步还有活（发布跑在解析刷新之前）。 */
+function skinGapPending(){ return !!((S&&S.skin_gap)||{}).gap; }
 /* 下一个**还有活**的步骤；全都跑完了返回 0（不再兜底成最后一步 ——
    2026-10-17 用户截图：第 2 步正文写"下一步：重算产物（第 3 步）"，按钮却把人
    送往已经 3/3 的第 5 步"签字换入"，两边各算各的）。 */
 function nextWorkStep(n){
   const order=Object.keys((S&&S.steps)||{}).map(Number).sort((a,b)=>a-b);
+  const nCfg=stepNo('cfg.publish',2);
   for(const k of order){
-    if(k>n && stagesOf(k).some(s=>statusOf(s.key)!=='pass')) return k;
+    if(k<=n) continue;
+    /* 表漂移算第 2 步的活：阶段结论全绿，但发布出去的表缺行（§155）。 */
+    if(k===nCfg && skinGapPending()) return k;
+    if(stagesOf(k).some(s=>statusOf(s.key)!=='pass')) return k;
   }
   return 0;
 }
@@ -2995,7 +3035,7 @@ function stepHint(n){
 }
 function allStagesPass(){
   const a=(S&&S.stages)||[];
-  return a.length>0 && a.every(s=>statusOf(s.key)==='pass');
+  return a.length>0 && a.every(s=>statusOf(s.key)==='pass') && !skinGapPending();
 }
 /* 「去下一步」按钮 + 配套那句正文：同一个 nw 算出来，杜绝"正文说第 3 步、按钮去第 5 步"。 */
 function nextStepAct(n){
@@ -3008,6 +3048,7 @@ function nextStepAct(n){
 /* 全局第一个没做完的步骤号（没有则 0）。第 5 步的"还没换完"靠它决定
    该往前跳还是就在本步开跑，不能再一律写死"去第 3 步"。 */
 function firstGapStep(){
+  if(skinGapPending()) return stepNo('cfg.publish',2);
   const g=((S&&S.stages)||[]).filter(s=>statusOf(s.key)!=='pass').map(s=>s.step).filter(Boolean);
   return g.length?Math.min.apply(null,g):0;
 }
@@ -3030,6 +3071,17 @@ function askOf(n){
   const dm=/源\s*([\d-]+)\s*>\s*发布\s*([\d-]+)/.exec((pf&&pf.detail)||'');
   const dsrc=dm?dm[1]:'—', dpub=dm?dm[2]:'—';
   const stale=!!(pf&&!pf.ok&&/配置表过期/.test(pf.detail||''));
+  /* 表漂移卡点：已发布的皮肤表比本轮解出来的少行（发布跑在解析刷新之前）。
+     它和 preflight 的红是两件事：preflight 绿了，这条仍可能红 —— 2026-10-17 实测
+     19:46 发布用了 09-25 的 scalar，21:11 才刷新，17/17 全绿却少 6 行。 */
+  const sg=(S&&S.skin_gap)||null;
+  const gapGate=(sg&&sg.gap>0)?{
+    t:'发布出去的表比源旧 '+sg.gap+' 行',
+    b:'已发布 '+sg.pub+' 行，本轮解出 '+sg.dev+' 行。缺的这些新皮肤现在没有名字，'+
+      '语音档位也派不出去（'+(sg.sample||[]).join('、')+' 等）。重新同步并发布即可补上。',
+    acts:[{a:'cfgsync',t:'⚑ 重新同步并发布',k:'pact sign mag'},
+          {a:'detail',t:'看差在哪',k:'link2'}]
+  }:null;
   /* 卡点只描述"跨步的前置条件"，不顶替本步的按钮。 */
   const gate=(pf&&!pf.ok)?{
     t: stale?'导出前置检查没过 · 配置表过期':'导出前置检查没过',
@@ -3094,6 +3146,14 @@ function askOf(n){
       why:detailOf(failCfg.key)+' 修好再重跑；它前面已经判绿的阶段不会重跑。',
       acts:[{a:'cfgsync',t:'▶ 重跑同步',k:'pact sign mag'},
             {a:'detail',t:'看日志',k:'link2'}]};
+    /* 阶段结论全绿、但发布出去的表还差行：这是缓存造成的假绿，
+       必须自己说出来，否则用户会停在"配置表已对齐源包"上不动（§155）。 */
+    if(gapGate) return {eb, red:1, gate:gapGate,
+      ask:'配置表解出来了，但还没发布出去',
+      why:'已发布 '+sg.pub+' 行 / 本轮解出 '+sg.dev+' 行，差 '+sg.gap+' 行。'+
+          '缺行的皮肤现在没名字，第 3 步的元数据和语音档位也会漏它们。',
+      acts:[{a:'cfgsync',t:'⚑ 重新同步并发布',k:'pact sign mag'},
+            {a:'detail',t:'看差在哪',k:'link2'}]};
     if(idleN===cfg.length) return {eb,
       ask: stale?('把配置表对齐到 '+dsrc+' 的源包'):'从源包重解配置表',
       why:'4 个阶段：解 scripts → 导出 lua → 解析 sharecfg → 发布 inputs/gamecfg。约 7 分钟'+
@@ -3125,6 +3185,14 @@ function askOf(n){
            {a:'detail',t:'看检查项',k:'link2'}]
         : [{a:'recheck',t:'▶ 重查闸门',k:'pact mag'},
            {a:'detail',t:'看检查项',k:'link2'}]};
+    /* 表漂移：preflight 绿了也不放行导出 —— 拿旧表导出的元数据/语音档位就是缺新皮肤。
+       先回第 2 步把发布补上（§155）。 */
+    if(gapGate) return {eb, red:1, gate:gapGate,
+      ask:'导出被旧皮肤表挡着',
+      why:'已发布的表比本轮解出来的少 '+sg.gap+' 行，现在导出会漏掉这些新皮肤的元数据和语音。'+
+          '先回第 2 步重新发布。',
+      acts:[{a:'goto',to:nCfg,t:'▶ 去第 '+nCfg+' 步重新发布',k:'pact mag'},
+            {a:'detail',t:'看差在哪',k:'link2'}]};
     if(fail) return {eb, red:1, ask:fail.key+' 这一步没过',
       why:detailOf(fail.key)+' 日志里有那行原因。',
       acts:[{a:'export',t:'▶ 再跑一次',k:'pact mag'},{a:'detail',t:'看日志',k:'link2'}]};

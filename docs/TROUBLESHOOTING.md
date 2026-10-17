@@ -10929,3 +10929,11 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 修法：`nextWorkStep()` 无下一步返回 0；`nextStepAct(n)` 同时产出按钮与正文（含从阶段表
 当场数出来的 `stepHint`）；全绿态统一改口径为「已跑完」+「← 从第 1 步再来一轮」。
 判据：`panel_paper_probe` 新增"正文点名的第 N 步 == goto 的 data-to"逐步骤断言。
+
+**追加（2026-10-17 22:20）**：`cfg.publish` 的结论按指纹缓存 ⇒ 发布跑在解析刷新之前时结论仍绿，
+`inputs/gamecfg/ship_skin_template.json` 里就是缺行（实测 19:46 发布用 09-25 的 scalar，
+21:11 才刷新 ⇒ 少 6 行，而 17/17 阶段全绿）。修法：面板 `/api/state` 增补 `skin_gap`
+（已发行数 vs 本轮解析行数），差 > 0 时第 2 步文案与主按钮改成"重新同步并发布"、
+第 3 步不放行导出，且待办/下一步/首缺口/全绿判定都把这条算第 2 步的活。
+教训：**阶段结论全绿 ≠ 产物是最新的**；凡是"解析→发布"两段，都要有一个不依赖缓存的
+行数/哈希差信号挂在界面上。
