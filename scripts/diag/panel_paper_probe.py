@@ -273,6 +273,41 @@ def main():
         chk('盘面判据写明「源包别删 / 产物删了画廊就缺」',
             '别删' in (pg.ev("document.querySelector('.dnote').textContent") or '') and
             '画廊' in (pg.ev("document.querySelector('.dnote').textContent") or ''))
+        # 清理中心弹窗：只验骨架与"禁止项说清了原因"，**绝不真的点清理**。
+        pg.ev("document.getElementById('bClean').click()")
+        time.sleep(0.6)
+        chk('清理中心弹窗能打开',
+            bool(pg.ev("document.getElementById('cleanmodal').classList.contains('on')")))
+        # ⚠️ "DOM 在"≠"看得见"：.veil/.sheet 的定位样式挂在 ID 选择器上，
+        # 漏了 #cleanmodal 那份就是一段不可见的 inline 文本（2026-10-18 实测翻车）。
+        chk('清理弹窗真的可见（不是不可见的 inline 文本）',
+            bool(pg.ev("(()=>{const m=document.getElementById('cleanmodal');"
+                       "if(!m.classList.contains('on')) return false;"
+                       "const s=m.querySelector('.sheet').getBoundingClientRect();"
+                       "return s.width>300 && s.top>=0 && s.height>300})()")),
+            str(pg.ev("JSON.stringify((()=>{const s=document.querySelector('#cleanmodal .sheet')"
+                      ".getBoundingClientRect();return [s.width,s.top,s.height]})())")))
+        # 账单尺寸是冷缓存慢算（实测首算 ~15s），探针轮询等它出来
+        rows = 0
+        for _ in range(30):
+            rows = pg.ev("document.querySelectorAll('#cleanList .crow').length") or 0
+            if rows >= 4:
+                break
+            time.sleep(1.5)
+        chk('清理账单列出可清理目标', rows >= 4, str(rows))
+        blocked = pg.ev("document.querySelector('#cleanmodal .blocked').textContent") or ''
+        chk('禁止区点名源包并给出理由（清单≠内容）',
+            '源包' in blocked and '清单' in blocked and '目录' in blocked and '重导' in blocked,
+            blocked[:80])
+        chk('换入备份项要求手输 DELETE 而不是一键删',
+            'DELETE' in (pg.ev("document.getElementById('cleanSub').textContent") or '') or
+            bool(pg.ev("[...document.querySelectorAll('#cleanList .crow .dim')]"
+                       ".some(x=>x.textContent.includes('DELETE'))")),
+            '看账单各行说明')
+        pg.ev("document.querySelector('#cleanmodal [data-cclose]').click()")
+        time.sleep(0.3)
+        chk('清理弹窗能关（Esc/遮罩/按钮三路）',
+            not bool(pg.ev("document.getElementById('cleanmodal').classList.contains('on')")))
         chk('日志是深色电传面（与纸面分层）',
             'rgb(18, 16, 13)' == pg.ev("getComputedStyle(document.getElementById('log')).backgroundColor"),
             pg.ev("getComputedStyle(document.getElementById('log')).backgroundColor"))

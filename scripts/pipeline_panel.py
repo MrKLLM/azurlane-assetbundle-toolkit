@@ -570,6 +570,8 @@ class H(BaseHTTPRequestHandler):
         if u.path == '/api/disk':
             # 盘面盘点：后台算、前端轮询。fresh=1 绕过 15 分钟缓存（「重新盘点」按钮用）。
             return self._send(200, disk_report(q.get('fresh') == '1'))
+        if u.path == '/api/cleanup':
+            return self._send(200, cleanup_list())
         if u.path == '/api/log':
             # 必须在这里也刷一次状态：前端追日志期间停掉了 8s 一次的 /api/state 轮询，
             # 只靠那边刷新的话，任务早就结束了面板还会一直显示「运行中」。
@@ -604,6 +606,12 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n).decode('utf-8')) if n else {}
         except Exception:
             return self._send(400, {'error': '不是合法 JSON'})
+        if u.path == '/api/cleanup/run':
+            rid, err = cleanup_run(str(body.get('target') or ''),
+                                   str(body.get('confirm') or ''))
+            if err:
+                return self._send(400, {'error': err})
+            return self._send(200, rid)
         if u.path == '/api/scan':
             # 重扫源包清单（重建 asset_manifest.json）。命令**写死在这里**，
             # 前端只发一个空 POST —— 白名单边界不因新增按钮而破。
@@ -711,6 +719,134 @@ def disk_report(fresh=False):
                          at=time.time())
     threading.Thread(target=work, daemon=True).start()
     return {'status': 'computing'}
+
+
+# ------------------------------------------------------------------ 清理中心
+# 设计铁律：**能删什么由这张表决定**（key 写死在服务端，前端只传 key）；
+# 每一项都标 safe —— unsafe 的必须 answer 原文 "DELETE" 才执行。
+# 故意**不提供**的：源包 files/AssetBundles、inputs、Output 产物、
+# .diag/sharecfg_re（cfg.publish 的解析源）、pipeline_state.json（阶段缓存）。
+_CLEAN_TARGETS = [
+    {'key': 'chrome_profiles', 'label': '浏览器调试配置',
+     'desc': 'headless Chrome 的 user-data-dir（chrome_* / fav_profile_* / hovercost_profile_*），纯临时',
+     'safe': True},
+    {'key': 'panel_paper', 'label': '控制台截图区 .diag/panel_paper',
+     'desc': '界面验收截图 + 探针浏览器配置，全部可再生', 'safe': True},
+    {'key': 'ui_shots', 'label': 'UI 截图区 .diag/ui_shots',
+     'desc': '同上（含 uishots 旧目录）', 'safe': True},
+    {'key': 'pipeline_logs', 'label': '旧运行日志 .diag/pipeline/run_*.log',
+     'desc': '保留最近 20 份，其余清掉', 'safe': True},
+    {'key': 'old_bak', 'label': '换入备份 Output/_OLD_bak',
+     'desc': '每次换入前的整批备份。⚠️ 清了就没有"一键回到换入前"；确认画廊显示正常再清。需手输 DELETE',
+     'safe': False},
+]
+_CLEAN = {'running': None, 'last': None}
+_KEEP_LOGS = 20
+
+
+def _clean_paths(key):
+    """把 target key 解析成**具体路径清单**。只认上表白名单里的 key。"""
+    root = ROOT
+    spec = next((t for t in _CLEAN_TARGETS if t['key'] == key), None)
+    if not spec:
+        return None
+    paths = []
+    if key == 'chrome_profiles':
+        pats = ('chrome_', 'fav_profile_', 'hovercost_profile_', 'prof_')
+        d = os.path.join(root, '.diag')
+        if os.path.isdir(d):
+            for e in os.scandir(d):
+                if e.is_dir() and e.name.startswith(pats):
+                    paths.append(e.path)
+    elif key == 'panel_paper':
+        paths.append(os.path.join(root, '.diag', 'panel_paper'))
+    elif key == 'ui_shots':
+        paths += [os.path.join(root, '.diag', 'ui_shots'),
+                  os.path.join(root, '.diag', 'uishots')]
+    elif key == 'pipeline_logs':
+        logs = sorted(p for p in
+                      glob.glob(os.path.join(root, '.diag', 'pipeline', 'run_*.log')))
+        paths = logs[:-_KEEP_LOGS] if len(logs) > _KEEP_LOGS else []
+    elif key == 'old_bak':
+        paths.append(os.path.join(root, 'Output', '_OLD_bak'))
+    return paths
+
+
+def _clean_size(key):
+    n = b = 0
+    for p in (_clean_paths(key) or []):
+        if os.path.isdir(p):
+            for d, _, fs in os.walk(p):
+                for f in fs:
+                    n += 1
+                    try:
+                        b += os.path.getsize(os.path.join(d, f))
+                    except OSError:
+                        pass
+        elif os.path.isfile(p):
+            n, b = 1, os.path.getsize(p)
+    return n, b
+
+
+def cleanup_list(fresh=False):
+    """清理中心账单：各目标的大小（缓存 5 分钟，walk 几万文件实测 12~16s）+ 上一次清理的结果。"""
+    now = time.time()
+    if fresh or not _CLEAN.get('sizes') or now - _CLEAN.get('sizes_at', 0) > 300:
+        out = []
+        for t in _CLEAN_TARGETS:
+            n, b = _clean_size(t['key'])
+            out.append({'key': t['key'], 'label': t['label'], 'desc': t['desc'],
+                        'safe': t['safe'], 'files': n, 'bytes': b})
+        _CLEAN['sizes'] = out
+        _CLEAN['sizes_at'] = now
+    return {'targets': _CLEAN['sizes'], 'last': _CLEAN.get('last'),
+            'running': _CLEAN.get('running')}
+
+
+def cleanup_run(key, confirm):
+    """执行一项清理。白名单 + 二次确认（unsafe 项要求 answer 原文 DELETE）。"""
+    spec = next((t for t in _CLEAN_TARGETS if t['key'] == key), None)
+    if not spec:
+        return None, '未知的清理目标（白名单拒绝）'
+    if _CLEAN.get('running'):
+        return None, '上一次清理还没跑完，等一下'
+    if not spec['safe'] and confirm != 'DELETE':
+        return None, '这一项要手动输入 DELETE 才会执行（删的是换入备份，不可恢复）'
+    paths = _clean_paths(key) or []
+    if not paths:
+        return None, '没有可删的东西（可能已经清过了）'
+
+    def work():
+        n = b = 0
+        errs = []
+        import shutil
+        for p in paths:
+            try:
+                if os.path.isdir(p):
+                    for d, _, fs in os.walk(p):
+                        for f in fs:
+                            try:
+                                b += os.path.getsize(os.path.join(d, f))
+                                n += 1
+                            except OSError:
+                                pass
+                    shutil.rmtree(p, ignore_errors=True)
+                elif os.path.isfile(p):
+                    b += os.path.getsize(p)
+                    n += 1
+                    os.remove(p)
+            except Exception as e:
+                errs.append(f'{os.path.basename(p)}: {type(e).__name__}')
+        _DISK['state'] = 'idle'          # 盘点缓存作废，下次重新算
+        _CLEAN['sizes'] = None           # 清理账单的尺寸也作废
+        _CLEAN['last'] = {'key': key, 'label': spec['label'],
+                          'files': n, 'bytes': b,
+                          'at': time.strftime('%m-%d %H:%M'),
+                          'errors': errs[:5]}
+        _CLEAN['running'] = None
+    _CLEAN['running'] = key
+    threading.Thread(target=work, daemon=True).start()
+    return {'started': key}, None
 
 
 def skin_table_gap():
@@ -1193,6 +1329,26 @@ body.legacy .pane:hover::before{opacity:1}
 .drow .bad{color:var(--fail,#a33)}
 .dnote{margin:10px 2px 0;font-size:10.5px;line-height:1.75;color:var(--dim)}
 .dnote code{font-family:var(--fm,monospace);font-size:10px}
+/* 清理中心弹窗（复用签字单的骨架样式） */
+.cleanlist{display:flex;flex-direction:column;gap:2px;margin:4px 0 14px}
+.crow{display:flex;justify-content:space-between;align-items:center;gap:12px;
+      padding:9px 2px;border-bottom:1px solid var(--line)}
+.crow:last-child{border-bottom:none}
+.crow b{font-size:12.5px;font-weight:600;display:block}
+.crow .dim{display:block;font-size:10.5px;margin-top:2px;line-height:1.6}
+.crow .v{text-align:right;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums;
+         display:flex;gap:10px;align-items:center}
+.crow .v i{font-style:normal;font-size:10.5px;color:var(--dim)}
+.cconfirm{display:flex;gap:8px;align-items:center;margin-top:8px;
+          padding:8px 10px;background:var(--card);border:1px solid var(--rule)}
+.cconfirm input{flex:1;min-width:0;background:var(--paper);color:var(--ink);
+                border:1px solid var(--rule);padding:6px 8px;font:400 12px var(--fb)}
+.blocked{margin-top:6px;padding:12px 14px;background:var(--card);
+         border:1px solid var(--rule);border-left:3px solid var(--accent)}
+.blocked .bk{font:500 11px/1 var(--fb);letter-spacing:.08em;color:var(--accent);margin-bottom:8px}
+.blocked .bi{font-size:10.5px;line-height:1.8;color:var(--ink-2);margin:6px 0;
+             padding-left:10px;border-left:2px solid var(--rule)}
+.blocked .bi b{color:var(--ink)}
 @keyframes rise{from{opacity:0;transform:translateY(7px)}}
 @keyframes pulse{50%{opacity:.25}}
 
@@ -2030,6 +2186,27 @@ pre .bad{color:#E08A69!important}
 
 /* ── 签字窗口：和主界面同一套纸/墨/朱砂 ───────────────────────────── */
 #signmodal{position:fixed;inset:0;z-index:80;display:none}
+/* 清理中心弹窗复用同一套骨架：⚠️ 类名（.veil/.sheet）不带定位，
+   定位/遮罩全在 ID 选择器上 —— 漏了这条弹窗就是一段不可见的 inline 文本
+   （2026-10-18 13:40 实测：DOM 里 rows=5、探针判据全过，屏幕上却什么都没有）。 */
+#cleanmodal{position:fixed;inset:0;z-index:80;display:none}
+#cleanmodal.on{display:flex;align-items:center;justify-content:center}
+#cleanmodal .veil{position:absolute;inset:0;background:rgba(24,21,17,.58)}
+#cleanmodal .sheet{
+  position:relative;width:min(620px,92vw);max-height:86vh;overflow:auto;
+  background:var(--card);border:1px solid var(--rule);padding:22px 24px}
+#cleanmodal .kicker{
+  display:block;font:500 8px/1.4 var(--font-mono)!important;letter-spacing:.26em;
+  color:var(--ink-3)!important;text-transform:uppercase}
+#cleanmodal .kicker i{font-style:normal;color:var(--accent);margin:0 6px}
+#cleanmodal h3{
+  margin:10px 0 4px;font:500 24px/1.25 var(--font-display)!important;
+  letter-spacing:.05em;color:var(--ink)!important}
+#cleanmodal .shead p{
+  margin:0 0 16px;font:400 11px/1.7 var(--font-mono)!important;
+  color:var(--ink-3)!important}
+#cleanmodal .sact{
+  display:flex;justify-content:flex-end;gap:14px;margin-top:18px}
 #signmodal.on{display:flex;align-items:center;justify-content:center}
 #signmodal .veil{position:absolute;inset:0;background:rgba(24,21,17,.58)}
 #signmodal .sheet{
@@ -2288,10 +2465,11 @@ pre .bad{color:#E08A69!important}
       <div class="pane">
         <div class="ph">盘面与清单
           <span style="display:flex;gap:6px;align-items:center">
+            <button id="bClean" class="mini ghost" title="打开清理中心：能删什么、不能删什么，一次说清">盘面管理</button>
             <button id="bDisk" class="mini ghost" title="重新算一遍四个目录的大小与文件数（约 1 分钟）">重新盘点</button>
             <button id="bScan" class="mini ghost" title="重扫源包并重建 asset_manifest.json（约 1 分钟；阶段缓存不受影响）">重扫清单</button></span></div>
         <div id="disk" class="diskbox"><span class="dim">打开「细节」时自动盘点一次…</span></div>
-        <p class="dnote">源包 = 旧版本唯一副本（模拟器覆盖后就没了），<b>别删</b>；产物删了画廊对应内容就缺（立绘/背景/语音/CG 全部直读 Output），要再看就得重导；.diag 临时区画廊不用，清前先跑 <code>check_diag_hygiene.py</code>；inputs 承重不可删。删了源包也不用担心清单骗人——增量判定信当场实况，不信旧清单。</p>
+        <p class="dnote">源包 = 旧版本唯一副本（模拟器覆盖后就没了），<b>别删</b>；产物删了画廊对应内容就缺（立绘/背景/语音/CG 全部直读 Output），要再看就得重导；.diag 临时区画廊不用，<b>盘面管理</b>里可以清；inputs 承重不可删。删了源包也不用担心清单骗人——增量判定信当场实况，不信旧清单。</p>
       </div>
       <div class="pane">
         <div class="ph">最近任务</div>
@@ -2304,6 +2482,35 @@ pre .bad{color:#E08A69!important}
 
 <!-- 签字窗口：不用原生 confirm()。原生弹窗是浏览器画的，和纸本界面两层皮；
      而且它只能放一句纯文本，写不清「会写哪几个阶段、写到哪儿、有没有备份」。 -->
+<!-- 清理中心：能删什么、不能删什么，一次说清。禁止项故意写在弹窗里——
+     「有了清单是不是源包就能删」这个问题已经被问过一次，别让下个人再猜。 -->
+<div id="cleanmodal" aria-hidden="true">
+  <div class="veil" data-cclose></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="cleanTitle">
+    <div class="shead">
+      <span class="kicker">DISK <i>·</i> 盘面管理</span>
+      <h3 id="cleanTitle">清理中心</h3>
+      <p id="cleanSub">只列**明确可再生**的东西；承重目录不在这张单子上，也不允许通过面板删。</p>
+    </div>
+    <div class="sbody">
+      <div id="cleanList" class="cleanlist"><span class="dim">盘点中…</span></div>
+      <div class="blocked">
+        <div class="bk"><b>⛔ 面板不允许删（写了原因，不是懒得做按钮）</b></div>
+        <div class="bi"><b>源包 files/AssetBundles</b> —— 清单只是"目录"，不是"内容"。
+          删了源包：① 旧版本永久丢失（模拟器更新已把它们覆盖，设备上也没有）；
+          ② Output 丢了无法重导；③ 增量机制清零（bundles=0 ⇒ 全部 stale），
+          下次必须重接模拟器、且只能拉到当前版本。清单让你跳过重复劳动，源包让你还能再劳动。</div>
+        <div class="bi"><b>inputs/</b> —— 权威输入，社区快照滞后、sharecfgdata 自定义加密无法本机重取（WF-15 白名单）。</div>
+        <div class="bi"><b>Output 产物</b> —— 画廊直读，删哪层缺哪层；要省空间请整目录挪冷存储，别在面板里点删。</div>
+        <div class="bi"><b>.diag/sharecfg_re 与 pipeline_state.json</b> —— 前者是 cfg.publish 的解析源，后者是你的阶段进度；删了不丢数据但全部重跑。</div>
+      </div>
+    </div>
+    <div class="sact">
+      <button type="button" class="ghost" data-cclose>关闭</button>
+    </div>
+  </div>
+</div>
+
 <div id="signmodal" aria-hidden="true">
   <div class="veil" data-sclose></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="signTitle">
@@ -4001,6 +4208,61 @@ async function loadDisk(fresh){
   }catch(e){ box.innerHTML='<span class="dim">盘点失败：'+esc(String(e))+'</span>'; }
 }
 $('#bDisk').onclick=()=>loadDisk(true);
+
+/* ── 清理中心：弹窗列可清理项 + 写明禁止项 ───────────────────────────── */
+let CLEAN_POLL=null;
+function openClean(){ $('#cleanmodal').classList.add('on');
+                      $('#cleanmodal').setAttribute('aria-hidden','false'); loadClean(); }
+function closeClean(){ $('#cleanmodal').classList.remove('on');
+                       $('#cleanmodal').setAttribute('aria-hidden','true'); }
+$('#bClean').onclick=openClean;
+$$('#cleanmodal [data-cclose]').forEach(e=>e.onclick=closeClean);
+function gb2(b){ return b>=1073741824 ? (b/1073741824).toFixed(2)+' GB' : (b/1048576).toFixed(0)+' MB'; }
+function renderClean(j){
+  const rows=(j.targets||[]).map(t=>{
+    const has=t.files>0;
+    const btn=has?`<button class="mini ghost" data-clean="${t.key}" data-safe="${t.safe?1:0}">清理</button>`
+                 :'<span class="dim">已清空</span>';
+    return `<div class="crow"><div><b>${esc(t.label)}</b><span class="dim">${esc(t.desc)}</span></div>`+
+           `<div class="v"><i>${gb2(t.bytes)} · ${t.files.toLocaleString()} 文件</i>${btn}</div></div>`;
+  }).join('');
+  const last=j.last?`<div class="crow"><div><b>上一次清理</b><span class="dim">${esc(j.last.at)} · ${esc(j.last.label)}`+
+    (j.last.errors&&j.last.errors.length?` · ⚠️ ${j.last.errors.length} 项没删掉`:'')+
+    `</span></div><div class="v"><i>${gb2(j.last.bytes)} · ${j.last.files.toLocaleString()} 文件</i></div></div>`:'';
+  $('#cleanList').innerHTML=rows+last;
+  $$('#cleanList [data-clean]').forEach(b=>b.onclick=()=>armClean(b));
+}
+function armClean(btn){
+  const key=btn.dataset.clean, safe=btn.dataset.safe==='1';
+  const row=btn.closest('.crow');
+  if(row.querySelector('.cconfirm')) return;
+  const c=document.createElement('div'); c.className='cconfirm';
+  c.innerHTML= safe
+    ? `<span class="dim">真的删（不可恢复）：</span><button class="mini" data-go>确认清理</button>`
+    : `<span class="dim">换入备份，输入 DELETE 才执行：</span><input maxlength="8" placeholder="DELETE"><button class="mini" data-go disabled>确认清理</button>`;
+  btn.after(c); btn.disabled=true;
+  const inp=c.querySelector('input');
+  if(inp) inp.oninput=()=>{ c.querySelector('[data-go]').disabled = inp.value.trim()!=='DELETE'; };
+  c.querySelector('[data-go]').onclick=async()=>{
+    c.querySelector('[data-go]').disabled=true;
+    try{
+      const r=await fetch('/api/cleanup/run',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({target:key,confirm:inp?inp.value.trim():'DELETE'})});
+      const j=await r.json();
+      if(j.error){ $('#warn').textContent=j.error; $('#warn').classList.add('on'); return; }
+      c.innerHTML='<span class="dim">清理中…（好了自动刷新两边的数字）</span>';
+      if(!CLEAN_POLL) CLEAN_POLL=setInterval(async()=>{
+        const jj=await (await fetch('/api/cleanup')).json();
+        if(!jj.running){ clearInterval(CLEAN_POLL); CLEAN_POLL=null; renderClean(jj); loadDisk(false); }
+      },1500);
+    }catch(e){ $('#warn').textContent=String(e); $('#warn').classList.add('on'); }
+  };
+}
+async function loadClean(){
+  try{ renderClean(await (await fetch('/api/cleanup')).json()); }
+  catch(e){ $('#cleanList').innerHTML='<span class="dim">读不到：'+esc(String(e))+'</span>'; }
+}
 $('#bScan').onclick=async e=>{
   e.target.disabled=true; e.target.textContent='扫描中…';
   try{
@@ -4048,6 +4310,7 @@ document.addEventListener('keydown',e=>{
   const k=(e.key||'').toLowerCase();
   if(k==='escape'){
     if($('#signmodal')&&$('#signmodal').classList.contains('on')){ closeSign(); return; }
+    if($('#cleanmodal')&&$('#cleanmodal').classList.contains('on')){ closeClean(); return; }
     $('#help').classList.remove('on'); $('#lightbox').classList.remove('on');
     closeDetail(); return; }
   if(k==='d'){ toggleDetail(); e.preventDefault(); return; }

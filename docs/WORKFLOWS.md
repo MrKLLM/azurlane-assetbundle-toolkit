@@ -4772,3 +4772,28 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
 - **踩坑**：`start_job` 的 `&&` 链被编译错误短路时 `kill` 根本不执行（`P` 为空），
   旧服务还占着 8790，新服务起不来，curl 到的是旧代码——「重启了怎么没生效」先查
   旧进程真的死了没有（`netstat -ano` + GBK 解码），别信中间那行 echo。
+
+
+**追加二（2026-10-18 13:30，用户问「怎么删？没看到按钮？有了清单源包就能删吗」）**：
+「盘面管理」升级为**清理中心弹窗**。三段式：
+- **可清理**（点「清理」→ 行内二次确认 → 后台线程删）：浏览器调试配置（chrome_*/fav_profile_*/
+  hovercost_profile_*，实测 3.35GB/30,527 文件）、控制台截图区 panel_paper、UI 截图区 ui_shots、
+  旧运行日志（保留最近 20 份）、换入备份 _OLD_bak（**要手输 DELETE**）。
+- **⛔ 面板不允许删**（写在弹窗里，不是懒得做按钮）：源包、inputs、Output 产物、
+  .diag/sharecfg_re、pipeline_state.json——每条带原因。
+- **「有了清单是不是源包就能删」→ 不能**：清单是"目录"不是"内容"。删了源包 ⇒
+  ① 旧版本永久丢失（模拟器已覆盖，设备上也没有）；② Output 丢了无法重导；
+  ③ bundles=0 ⇒ 增量机制全部 stale，下次必须重接模拟器且只能拉到当前版本。
+  清单让你**跳过重复劳动**，源包让你**还能再劳动**——两者不可互换。
+
+实现要点：目标 key 写死在服务端 `_CLEAN_TARGETS`（前端只传 key，白名单边界不破）；
+unsafe 项要求 answer 原文 `DELETE`；删除放 daemon 线程（几万个小文件 + Defender 实测
+要十几分钟，界面照常可用），完成后刷新两边数字并作废盘点缓存；尺寸账单缓存 5 分钟
+（实测首算 15.6s、命中 0.01s）。
+
+**踩坑（重要）**：在 WorkBuddy 沙箱内的后台命令里测试清理，`shutil.rmtree` 会被
+`[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]` 护栏挂起（>50 文件要确认，
+守护线程等不到 ⇒ 永远 running、last 永远 null、文件一个没少）。
+**用户双击 bat 跑的面板没有这层沙箱，不受影响**；要在此环境验证清理，面板进程须以
+禁沙箱方式启动。判据：`panel_paper_probe` 63 条 + 清理中心 2 条（账单 ≥4 行、
+禁止区写明「源包」与原因）。
