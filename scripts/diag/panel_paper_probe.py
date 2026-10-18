@@ -264,6 +264,15 @@ def main():
         chk('细节里有日志与最近任务',
             bool(pg.ev("!!document.getElementById('log')")) and
             (pg.ev("document.querySelectorAll('#runs tr').length") or 0) > 0)
+        # 盘面与清单：打开抽屉会自动触发一次盘点（后台算，前端轮询）。
+        # 只判骨架与接口接线，不判数值——数值随盘面变。
+        chk('细节里有「盘面与清单」账本（四个目录行 + 清单行）',
+            (pg.ev("document.querySelectorAll('#disk .drow').length") or 0) >= 5 or
+            '盘点' in (pg.ev("document.getElementById('disk').textContent") or ''),
+            pg.ev("document.getElementById('disk').textContent.slice(0,60)"))
+        chk('盘面判据写明「源包别删 / 产物删了画廊就缺」',
+            '别删' in (pg.ev("document.querySelector('.dnote').textContent") or '') and
+            '画廊' in (pg.ev("document.querySelector('.dnote').textContent") or ''))
         chk('日志是深色电传面（与纸面分层）',
             'rgb(18, 16, 13)' == pg.ev("getComputedStyle(document.getElementById('log')).backgroundColor"),
             pg.ev("getComputedStyle(document.getElementById('log')).backgroundColor"))

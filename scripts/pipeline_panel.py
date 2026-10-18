@@ -124,8 +124,13 @@ def running_job():
     return None
 
 
-def start_job(label, argv):
-    """起一个脱离面板的流水线子进程。重活必须串行 —— 已有在跑就拒绝。"""
+def start_job(label, argv, script=None):
+    """起一个脱离面板的流水线子进程。重活必须串行 —— 已有在跑就拒绝。
+
+    `script` 只允许**服务端代码里写死**的那几个（目前 `scripts/scan_assets.py` 一个），
+    前端传不上来 —— 「能跑什么由白名单决定」这条边界不因泛化而破。
+    """
+    target = script or PIPE
     with _lock:
         cur = running_job()
         if cur:
@@ -135,7 +140,7 @@ def start_job(label, argv):
         rid = time.strftime('%H%M%S')
         log = os.path.join(PANEL, f'run_{rid}.log')
         lf = open(log, 'w', encoding='utf-8', errors='replace')
-        p = subprocess.Popen([PY, PIPE] + argv, cwd=ROOT, stdout=lf, stderr=subprocess.STDOUT,
+        p = subprocess.Popen([PY, target] + argv, cwd=ROOT, stdout=lf, stderr=subprocess.STDOUT,
                              env=ENV, creationflags=0x00000008 if os.name == 'nt' else 0)
         runs = load_runs()
         runs.append({'id': rid, 'label': label, 'argv': argv, 'pid': p.pid, 'log': log,
@@ -562,6 +567,9 @@ class H(BaseHTTPRequestHandler):
                 'scope': scope_safe(fp),
                 'gauge': gauge_safe(run, stages, fp),
             })
+        if u.path == '/api/disk':
+            # 盘面盘点：后台算、前端轮询。fresh=1 绕过 15 分钟缓存（「重新盘点」按钮用）。
+            return self._send(200, disk_report(q.get('fresh') == '1'))
         if u.path == '/api/log':
             # 必须在这里也刷一次状态：前端追日志期间停掉了 8s 一次的 /api/state 轮询，
             # 只靠那边刷新的话，任务早就结束了面板还会一直显示「运行中」。
@@ -596,6 +604,13 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n).decode('utf-8')) if n else {}
         except Exception:
             return self._send(400, {'error': '不是合法 JSON'})
+        if u.path == '/api/scan':
+            # 重扫源包清单（重建 asset_manifest.json）。命令**写死在这里**，
+            # 前端只发一个空 POST —— 白名单边界不因新增按钮而破。
+            rid, err = start_job('重扫源包清单（scan_assets）', [], script='scripts/scan_assets.py')
+            if err:
+                return self._send(409, {'error': err})
+            return self._send(200, {'id': rid})
         if u.path != '/api/run':
             return self._send(404, {'error': 'not found'})
         valid = {s['key'] for s in stage_keys()[0]}
@@ -630,6 +645,72 @@ class H(BaseHTTPRequestHandler):
         if err:
             return self._send(409, {'error': err})
         return self._send(200, {'id': rid})
+
+
+# ------------------------------------------------------------------ 盘面与清单
+_DISK = {'state': 'idle', 'data': None, 'at': 0.0}
+_DISK_TTL = 900.0        # 15 分钟：walk 18 万个文件约 1 分钟，别让轮询反复触发
+
+
+def _disk_compute():
+    """walk 四个关键目录 + 读两份清单状态。**只读**，不删不改任何东西。"""
+    out = {}
+    for label, p in (('ab', os.path.join(ROOT, 'files', 'AssetBundles')),
+                     ('out', os.path.join(ROOT, 'Output')),
+                     ('diag', os.path.join(ROOT, '.diag')),
+                     ('inputs', os.path.join(ROOT, 'inputs'))):
+        n = b = 0
+        if os.path.isdir(p):
+            for d, _, fs in os.walk(p):
+                for f in fs:
+                    n += 1
+                    try:
+                        b += os.path.getsize(os.path.join(d, f))
+                    except OSError:
+                        pass
+        out[label] = {'files': n, 'bytes': b}
+    # 源包清单的新鲜度：清单记录的文件数 vs 当场数出来的（§157 同一哲学：信实况）
+    man = None
+    mf = os.path.join(ROOT, 'asset_manifest.json')
+    if os.path.isfile(mf):
+        try:
+            j = json.load(open(mf, encoding='utf-8'))
+            man = {'total_files': (j.get('summary') or {}).get('total_files'),
+                   'scanned': time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(mf)))}
+        except Exception as e:
+            man = {'error': f'{type(e).__name__}: {str(e)[:60]}'}
+    if man and man.get('total_files') is not None:
+        man['actual'] = out['ab']['files']
+        man['fresh'] = (man['total_files'] == out['ab']['files'])
+    st = None
+    try:
+        s = json.load(open(os.path.join(WORK, 'pipeline_state.json'), encoding='utf-8'))
+        st = {'done': len(s.get('done') or {}), 'verdict': len(s.get('verdict') or {})}
+    except Exception:
+        pass
+    return {'dirs': out, 'manifest': man, 'state': st,
+            'at': time.strftime('%m-%d %H:%M')}
+
+
+def disk_report(fresh=False):
+    """盘面盘点：慢（walk 18 万文件），放后台线程算，前端轮询取结果。"""
+    with _lock:
+        if _DISK['state'] == 'computing':
+            return {'status': 'computing'}
+        if not fresh and _DISK['state'] == 'done' and time.time() - _DISK['at'] < _DISK_TTL:
+            return {'status': 'ok', 'data': _DISK['data'],
+                    'age': int(time.time() - _DISK['at'])}
+        _DISK['state'] = 'computing'
+
+    def work():
+        try:
+            data = _disk_compute()
+            _DISK.update(state='done', data=data, at=time.time())
+        except Exception as e:
+            _DISK.update(state='error', data={'error': f'{type(e).__name__}: {str(e)[:80]}'},
+                         at=time.time())
+    threading.Thread(target=work, daemon=True).start()
+    return {'status': 'computing'}
 
 
 def skin_table_gap():
@@ -1099,6 +1180,19 @@ body.legacy .pane:hover::before{opacity:1}
 .legend .lrow{display:flex;gap:14px}
 .legend .lrow span{display:flex;align-items:center;gap:6px}
 .legend .sw{width:9px;height:9px;border-radius:3px;flex:0 0 auto}
+/* 盘面与清单（细节抽屉右栏）：行式账本，不搞卡片 */
+.diskbox{display:flex;flex-direction:column;gap:2px}
+.drow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+      padding:7px 2px;border-bottom:1px solid var(--line)}
+.drow:last-child{border-bottom:none}
+.drow b{font-size:12px;font-weight:600;display:block}
+.drow .dim{display:block;font-size:10.5px;margin-top:2px}
+.drow .v{text-align:right;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums}
+.drow .v i{display:block;font-style:normal;font-size:10.5px;color:var(--dim);margin-top:2px}
+.drow .ok{color:var(--pass,#2c7a4b)}
+.drow .bad{color:var(--fail,#a33)}
+.dnote{margin:10px 2px 0;font-size:10.5px;line-height:1.75;color:var(--dim)}
+.dnote code{font-family:var(--fm,monospace);font-size:10px}
 @keyframes rise{from{opacity:0;transform:translateY(7px)}}
 @keyframes pulse{50%{opacity:.25}}
 
@@ -2190,6 +2284,14 @@ pre .bad{color:#E08A69!important}
         <div style="display:flex;gap:8px;margin-top:9px;align-items:center">
           <button id="bForce" class="mini ghost">缓存：按指纹复用</button>
           <span class="dim" id="jobinfo" style="font-size:11.5px">—</span></div>
+      </div>
+      <div class="pane">
+        <div class="ph">盘面与清单
+          <span style="display:flex;gap:6px;align-items:center">
+            <button id="bDisk" class="mini ghost" title="重新算一遍四个目录的大小与文件数（约 1 分钟）">重新盘点</button>
+            <button id="bScan" class="mini ghost" title="重扫源包并重建 asset_manifest.json（约 1 分钟；阶段缓存不受影响）">重扫清单</button></span></div>
+        <div id="disk" class="diskbox"><span class="dim">打开「细节」时自动盘点一次…</span></div>
+        <p class="dnote">源包 = 旧版本唯一副本（模拟器覆盖后就没了），<b>别删</b>；产物删了画廊对应内容就缺（立绘/背景/语音/CG 全部直读 Output），要再看就得重导；.diag 临时区画廊不用，清前先跑 <code>check_diag_hygiene.py</code>；inputs 承重不可删。删了源包也不用担心清单骗人——增量判定信当场实况，不信旧清单。</p>
       </div>
       <div class="pane">
         <div class="ph">最近任务</div>
@@ -3853,6 +3955,61 @@ async function pump(){
     await apiState(); finishReceipt(); }
 }
 $('#bFollow').onclick=e=>{ follow=!follow; e.target.textContent=follow?'跟随最新':'暂停跟随'; };
+
+/* ── 盘面与清单：懒加载 + 轮询取后台计算结果 ───────────────────────────
+   walk 18 万个文件约 1 分钟，所以服务端放后台线程；这里每 2 秒问一次。
+   「重扫清单」跑的是写死在服务端的 scan_assets.py（固定命令，前端传不了参数），
+   它只重建 asset_manifest.json，**不动**阶段完成缓存（pipeline_state.json）——
+   缓存的有效性由指纹（当场数源包）决定，重扫不清进度。 */
+let DISK_POLL=null;
+function gb(b){ return (b/1073741824).toFixed(1)+' GB'; }
+function renderDisk(d){
+  const dir=d.dirs||{}, man=d.manifest||{}, st=d.state||{};
+  const row=(k,name,hint)=>{
+    const x=dir[k]||{files:0,bytes:0};
+    return '<div class="drow"><div><b>'+name+'</b><span class="dim">'+hint+'</span></div>'+
+      '<div class="v">'+gb(x.bytes)+'<i>'+x.files.toLocaleString()+' 文件</i></div></div>';
+  };
+  let mh='<span class="dim">没有清单（跑一次「重扫清单」就有）</span>';
+  if(man && man.total_files!=null){
+    mh = man.fresh
+      ? '<span class="ok">清单 ✅ 与盘面一致</span><span class="dim">扫于 '+man.scanned+'</span>'
+      : '<span class="bad">清单 ⚠️ 滞后：记 '+man.total_files.toLocaleString()+' / 盘上 '+man.actual.toLocaleString()+'</span><span class="dim">扫于 '+man.scanned+' · 点「重扫清单」刷新</span>';
+  }else if(man && man.error){ mh='<span class="bad">清单读不出来：'+esc(man.error)+'</span>'; }
+  $('#disk').innerHTML =
+    row('ab','源包 files/AssetBundles','旧版本唯一副本 · 别删')+
+    '<div class="drow man"><div><b>源包清单</b><span class="dim">asset_manifest.json</span></div><div class="v">'+mh+'</div></div>'+
+    row('out','产物 Output','画廊正引用 · 删了就缺')+
+    row('diag','临时区 .diag','画廊不用 · 可清')+
+    row('inputs','权威输入 inputs','承重 · 别删')+
+    '<div class="drow man"><div><b>阶段缓存</b><span class="dim">pipeline_state.json</span></div>'+
+    '<div class="v"><span class="ok">done '+ (st.done??0) +' · verdict '+ (st.verdict??0) +'</span><span class="dim">盘点于 '+ (d.at||'') +'</span></div></div>';
+}
+async function loadDisk(fresh){
+  const box=$('#disk');
+  if(fresh) box.innerHTML='<span class="dim">盘点中…（约 1 分钟，好了自动刷）</span>';
+  try{
+    const j=await (await fetch('/api/disk'+(fresh?'?fresh=1':''))).json();
+    if(j.status==='computing'){
+      if(!DISK_POLL) DISK_POLL=setInterval(()=>{ if($('#detail').classList.contains('on')) loadDisk(false);
+                                             else { clearInterval(DISK_POLL); DISK_POLL=null; } },2000);
+      return;
+    }
+    if(DISK_POLL){ clearInterval(DISK_POLL); DISK_POLL=null; }
+    if(j.status==='ok') renderDisk(j.data);
+    else box.innerHTML='<span class="dim">读不到：'+esc(String(j.error||''))+'</span>';
+  }catch(e){ box.innerHTML='<span class="dim">盘点失败：'+esc(String(e))+'</span>'; }
+}
+$('#bDisk').onclick=()=>loadDisk(true);
+$('#bScan').onclick=async e=>{
+  e.target.disabled=true; e.target.textContent='扫描中…';
+  try{
+    const r=await fetch('/api/scan',{method:'POST'});
+    const j=await r.json();
+    if(j.error) $('#warn').textContent=j.error, $('#warn').classList.add('on');
+    else { tail(j.id); loadDisk(false); }
+  }finally{ e.target.disabled=false; e.target.textContent='重扫清单'; }
+};
 $('#bClear').onclick=()=>{ LINES=[]; $('#log').textContent=''; };
 $('#chips').onclick=e=>{ const b=e.target.closest('.chip'); if(!b) return;
   FILT=b.dataset.f; $$('#chips .chip').forEach(x=>x.classList.toggle('on',x===b));
@@ -3863,6 +4020,7 @@ $('#bHelp').onclick=()=>$('#help').classList.add('on');
 /* 「细节」抽屉：弹簧推入（高阻尼、不过冲 —— 右侧抽屉过冲会在边上闪出一条缝，
    那是 bug 不是物理）。关掉时把焦点还给主屏。 */
 function openDetail(){ $('#detail').classList.add('on');
+  loadDisk(false);
   const b=$('#detail .body');
   if(CALM){ b.style.transform=''; return; }
   SPRG.to('drawer',0,v=>{ b.style.transform='translateX('+(v*100).toFixed(3)+'%)'; },170,26,1); }

@@ -4753,3 +4753,22 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
 ⚠️ 两个同类静默失效已修：`_cached()` 首访 KeyError + `/api/state` 的
 `except Exception: pass` ⇒ 结论静默清空；探针首屏等 3 秒撞上 `/api/state` 的
 3 秒冷启动 ⇒ 一片假红。**判据红时先确认数据到位**再怀疑产品代码。
+
+
+**追加（2026-10-18 12:50，用户问「产物删了怎么浏览 / 清单在控制台怎么管理」）**：
+细节抽屉新增「**盘面与清单**」账本——四个目录（源包 files/AssetBundles / 产物 Output /
+临时区 .diag / 权威 inputs）的大小与文件数、源包清单新鲜度（记录数 vs 当场实况数）、
+阶段缓存计数。设计要点：
+- **后台算 + 轮询**：walk 18 万文件约 1 分钟，`/api/disk` 放 daemon 线程立即回 `computing`，
+  前端 2 秒一问；缓存 15 分钟，「重新盘点」按钮带 `?fresh=1` 绕过。
+- **重扫清单**按钮 → `/api/scan`，命令**写死在服务端**（`start_job` 泛化出 `script` 参数，
+  前端只发空 POST）——「能跑什么由白名单决定」的边界不因泛化而破。
+  重扫只重建 `asset_manifest.json`，**不动** `pipeline_state.json`：阶段缓存的有效性
+  由指纹（当场数源包）决定，重扫不清进度。
+- 账本行内写明删/留口径：源包=唯一副本别删、产物删了画廊就缺、.diag 可清（先跑
+  `check_diag_hygiene.py`）、inputs 承重。
+- 判据：`panel_paper_probe` 63 条全绿（新增 2 条：账本 ≥5 行、口径文案含「别删/画廊」）；
+  实测 `/api/scan` 真跑一轮重扫，mtime 12:46、72,661 文件无漂移。
+- **踩坑**：`start_job` 的 `&&` 链被编译错误短路时 `kill` 根本不执行（`P` 为空），
+  旧服务还占着 8790，新服务起不来，curl 到的是旧代码——「重启了怎么没生效」先查
+  旧进程真的死了没有（`netstat -ano` + GBK 解码），别信中间那行 echo。
