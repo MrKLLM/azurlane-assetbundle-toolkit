@@ -4791,9 +4791,13 @@ unsafe 项要求 answer 原文 `DELETE`；删除放 daemon 线程（几万个小
 要十几分钟，界面照常可用），完成后刷新两边数字并作废盘点缓存；尺寸账单缓存 5 分钟
 （实测首算 15.6s、命中 0.01s）。
 
-**踩坑（重要）**：在 WorkBuddy 沙箱内的后台命令里测试清理，`shutil.rmtree` 会被
-`[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]` 护栏挂起（>50 文件要确认，
-守护线程等不到 ⇒ 永远 running、last 永远 null、文件一个没少）。
-**用户双击 bat 跑的面板没有这层沙箱，不受影响**；要在此环境验证清理，面板进程须以
-禁沙箱方式启动。判据：`panel_paper_probe` 63 条 + 清理中心 2 条（账单 ≥4 行、
-禁止区写明「源包」与原因）。
+**踩坑（重要，机理已查实）**：在本会话（WorkBuddy shell）里启动的面板测试清理时，
+`shutil.rmtree` 会被 **`sitecustomize.py`（genie-safe-delete，经 PYTHONPATH 注入本 shell
+启动的所有 python 进程）** 拦截：>50 文件的批量删除要求"轮次确认"，守护线程永远等不到
+⇒ running 永远 set、last 永远 null、文件一个没少（实测 30 分钟零进展），
+stderr 里有 `[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]`。
+**用户双击 bat 跑的面板不经 WorkBuddy shell，没有这个 shim，不受影响**（实测：
+剥掉 PYTHONPATH 后同一份代码 14 秒删完 29,597 文件 / 3,271 MB，errors=[]）。
+要在本环境验证清理，启动面板须 `PYTHONPATH= py -3 scripts/pipeline_panel.py`（禁沙箱）。
+判据：`panel_paper_probe` 75 条（含账单 ≥4 行、禁止区写明「源包/清单/目录/重导」、
+DELETE 提示、弹窗 getBoundingClientRect 可见性）。
