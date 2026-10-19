@@ -11036,3 +11036,113 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 **教训**：**"这批输入"的定义必须覆盖阶段真正读的那份文件**。
 指纹少算一项不是"少一次优化"，是整条流水线的静默假绿灯。
 判绿要问一句：这个阶段读的东西，全都在指纹里吗？
+
+## §158 音乐专辑「整盘错位」+ 8 首开服 BGM 烤在 base.apk：album_id 要连 cover 不是 order（2026-10-19）
+
+**症状**（用户 5 张截图）：画廊里「铁血、音符&誓言 / 神圣的悲喜剧 / 空相交汇点 /
+海风与夏日的无人岛 / 启航之时」五张专辑的曲目与游戏对不上；游戏里空相交汇点 7 首、
+启航之时 15 首。用户追问"铁血怎么会没有"。
+
+### 1. 根因一：album_id ↔ order 整盘错位
+
+- `music_album.json` 的键是 `#0..#9`，而 `order` 依次是 `10,9,8,7,6,1,2,3,4,5`；
+  `music_collect_config.album_id` 是 1..10，对应的是**键序号**，不是 `order`。
+- 旧代码拿 `album_id` 去对 `order` ⇒ 成对互换：铁血(`album_id=1`) 被挂到 `order=1` 的
+  启航之时、启航(`album_id=5`) 被挂到 `order=5` 的铁血。截图上看到的"两两互换"就是它。
+- **权威关联键是 `music_album.cover == "MusicCover{album_id}"`**（`#0→MusicCover10` …
+  `#9→MusicCover1`）。改用 cover join，并加**覆盖自检**：同一首被两张专辑命中就告警，
+  不许静默取第一个。
+
+### 2. 根因二：驼峰 vs 小写的隐形丢失
+
+配置里是 `bgm-theme-SeaAndSun-image` / `bgm-battle-thedevilXV-control`，盘上 FLAC
+一律小写（`seaandsun` / `thedevilxv`）⇒ 精确大小写查找挂不上，**6 首连中文名带专辑一起丢**。
+统一走 `_norm_bgm`（lowercase + 剥 `bgm-` 前缀，可重复剥）后修复；中文名 40→46 就是这一步回来的。
+
+### 3. 根因三：启航缺的 8 首不在热更包
+
+修完前两条后启航只到 7/15，缺
+`bgm-main / login / backyard / level / battle-1 / battle-2 / battle-boss-1 / battle-boss-2`。
+- 全盘 `files/` 树 **0 命中**；`files/hashes.csv` 的 **561 条**热更条目里也没有这 8 个
+  ⇒ 不是"漏解码"，是**烤在 `base.apk` 基础层**。
+- 它们在 APK 的 `assets/AssetBundles/cue/`（扩展名 `.ys`，内容头仍是 `@UTF`，
+  与热更 `.b` 同为 CRIWARE ACB）⇒ 取出来放进 `cue/` 即可走既有 vgmstream 链。
+  提取手法见 **WF-50**。
+
+### 4. 结果与一处自我更正
+
+- 重建后 **569 首 / 20.05h / 官方中文名 54 / 专辑 10 张**；启航 **15/15**；
+  出处 391、用途 483（`bgm.json.counts`）。10 张专辑**逐张与游戏一致**。
+- ⚠️ **更正**：本轮中途我曾报"铁血 4/5 缺 1 首"。那是**我自己数错**——把游戏列表下方的
+  播放器区域当成了第 5 条。放大截图后确认真机就是 4 首（灾厄之始 01:48 / 过去的观测者 02:06 /
+  背水一战 02:02 / 危机 01:05），名字、顺序、时长与库里逐条一致。
+- 特别记一笔：`memory_storyline` 里 `bsm-4 = 「铁血、音符与誓言·上」`、`bsm-9 = ·下`，
+  那是活动**回忆章节**的配乐，**不代表专辑要收 `bsm-4`**。别再拿它当"第 5 首"的证据。
+
+**已排除的假设**：
+- 不是 `music_collect_config` 少行（54 行全在，album_id 分布 4/3/7/4/15/2/1/6/4/8 与游戏逐档吻合）；
+- 不是 FLAC 缺失（除这 8 首外 54 首全部在盘）；
+- 不是热更清单里有但没下载（`hashes.csv` 逐行确认无这 8 个）；
+- `morluto/rea` 这类通用逆向框架**用不上**：它是反汇编 MCP，不含 AssetBundle/ACB 能力，
+  本题缺的是"从 APK 里取文件"，不是逆向二进制（见 WF-50）。
+
+**涉及文件**：`scripts/build_bgm_index.py`（cover join + `_norm_bgm`）、
+`scripts/rebuild_bgm_library.py`、`scripts/diag/bgm_backfill_decode.py`、`scripts/transcode_bgm.py`、
+`ledger/bgm_transcode_flac.json`。相关：§112/§113（BGM 改档）、§154（25 首补导）、WF-50。
+
+## §159 背景库 70 个英文词根：活动名正本在 `memory_group`，但桥是「拼音」（2026-10-19）
+
+**症状**：背景库一堆活动显示英文词根（`project_explorer` / `tianqiong` / `amahara` …），
+用户问"游戏资产里应该有中文活动名称表吧？"
+
+### 1. 取证：中文活动名确实有正本，但三条"看起来该有"的路都不通
+
+1. `chapter_template` 解出来是**空表**（只有 `#0` 表头）⇒ 走不通。
+2. `memory_group.title` 才是活动中文名正本（418 行，如「响彻于天穹之音」「领航员养成计划」），
+   但与词根**没有 id 直连**。
+3. `activity_sp_story.story` 存的正是**活动名拼音**：
+   `tianqiong → XIANGCHEYUTIANQIONGZHIYIN`（响彻于天穹之音）、
+   `amahara → QIWUYUTIANYUANZHISHANG`（起舞于天原之上）⇒
+   **把 `memory_group.title` 转拼音就能对上**，不需要新表。
+4. 养成三条根另有硬证据：`child2_ending.performance` 以
+   `TANSUOZHE/LINGYANGZHE/LINGHANGYUANYANGCHENGJIHUA` 开头，配图正是
+   `bg_project_explorer/oceana/tb_cg*`。
+
+### 2. 修法：发布器加两条证据路线，消费端加一档「类目」
+
+- `tools/sharecfg_re/51_publish_bg_series.py`
+  - `route_story`：`bg_<root>_*` 的根 + `activity_sp_story.story` 拼音 → `memory_group.title`；
+  - `route_perform`：`child2_ending.pic` 的根 + `performance` 拼音 → 养成计划名；
+  - 权威序 **memory > story > re_map > perform > child2**（原三档各自保留），
+    断言从"只有三档"改为五档白名单；
+  - 缺 `pypinyin` 时**优雅降级**（打警告、跳过两条路线，不中断整条链）。
+- `scripts/build_bg_meta.py` 新增 `category` 档，读 `inputs/gamecfg/bg_category_labels.json`
+  （44 条，每条带 `kind` 依据：界面/场景/拼音/舰名/联动）。权威序
+  **pinyin > series > table > category > root**，并加断言「category 不许压过任何证据档」。
+  ⚠️ 类目名是**描述性标签、不是官方资产名**，所以单列一档、页面按 `cn_from='category'` 可区分。
+
+### 3. 结果
+
+| 指标 | 修前 | 修后 |
+|---|---|---|
+| 有中文名的词根 | 26 组 / 216 张 | **54 组 / 591 张** |
+| 英文显示词根 | **70 个 / 460 张** | **9 个 / 58 张** |
+| 新增类目档 | — | 44 个 / 195 张 |
+
+分布（词根数）：table 39 / pinyin 15 / series 10 / category 44 / root 9 = 117。
+
+**踩坑**：
+- `project_*` **不是活动**而是养成结局 CG（"毕业升学之时"这类），不能当活动名；
+- `tianqiong/amahara` 在 `activity_sp_story` 里出现的是**小节名**（EP1-1 天岩户），别拿小节名当活动名；
+- `bsmre`(32) / `fujinwan`(8) / `storymap_*` / `niceship` / `zenker` / `nacorearea` / `story_faxi`
+  **全表零引用**，语义不可判 ⇒ 保留英文，不硬凑（项目纪律：不许编名）；
+- `py -3` 自带的 pypinyin 是 0.55，**不用新增运行时依赖**；但发布器仍要能降级——
+  换机器/换解释器时不至于整条链崩掉。
+
+**已排除的假设**：`chapter_template` 能供活动名（空表）｜小节名可当活动名｜
+拼音多义词可以硬匹配（多义一律不发）｜零引用词根可以人工猜名。
+
+**涉及文件**：`tools/sharecfg_re/51_publish_bg_series.py`、`scripts/build_bg_meta.py`、
+`inputs/gamecfg/bg_category_labels.json`、`inputs/gamecfg/bg_series_labels.json`、
+`inputs/gamecfg/MANIFEST.json`。相关：§153（完整性对账）、§115/§116（前两条命名源）、
+WF-30、**WF-48 追加（2026-10-19）**。

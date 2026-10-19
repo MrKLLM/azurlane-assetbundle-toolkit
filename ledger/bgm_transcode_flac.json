@@ -6172,6 +6172,94 @@
    "dst_dur": 132.857,
    "dst_md5": "b455fe530848e5146d4ab9adbdaf28a1",
    "at": "2026-10-17 21:56:54"
+  },
+  "bgm-backyard.wav": {
+   "src_md5": "a10387a5c9f0bba645203aa2102a9120",
+   "src_size": 7938044,
+   "src_dur": 45.0,
+   "codec": "flac",
+   "dst": "Output/Audio/BGM/bgm-backyard.flac",
+   "dst_size": 3107015,
+   "dst_dur": 45.0,
+   "dst_md5": "c4dd63b70956572edac3abbdb4c68d11",
+   "at": "2026-10-18 12:51:21"
+  },
+  "bgm-battle-1.wav": {
+   "src_md5": "2d3e1644ef461198d0e5284f8a137c01",
+   "src_size": 21287808,
+   "src_dur": 120.678934,
+   "codec": "flac",
+   "dst": "Output/Audio/BGM/bgm-battle-1.flac",
+   "dst_size": 11909794,
+   "dst_dur": 120.679,
+   "dst_md5": "fc4a531168e201c6dd5297b2449e2265",
+   "at": "2026-10-18 12:51:22"
+  },
+  "bgm-battle-2.wav": {
+   "src_md5": "329b5275c5730c0d8d4fed5604f8260a",
+   "src_size": 26397788,
+   "src_dur": 149.647075,
+   "codec": "flac",
+   "dst": "Output/Audio/BGM/bgm-battle-2.flac",
+   "dst_size": 18226479,
+   "dst_dur": 149.647,
+   "dst_md5": "585bde1d968f3e1e50948a5d643a1d5f",
+   "at": "2026-10-18 12:51:22"
+  },
+  "bgm-battle-boss-1.wav": {
+   "src_md5": "55930271162fe1dbed4ceb0baa507a97",
+   "src_size": 17432516,
+   "src_dur": 98.823537,
+   "codec": "flac",
+   "dst": "Output/Audio/BGM/bgm-battle-boss-1.flac",
+   "dst_size": 11811381,
+   "dst_dur": 98.824,
+   "dst_md5": "8e0ea144d81186889a936aea760f996c",
+   "at": "2026-10-18 12:51:23"
+  },
+  "bgm-battle-boss-2.wav": {
+   "src_md5": "c101197f093ff5fcf91e782813441b0c",
+   "src_size": 24336908,
+   "src_dur": 137.964082,
+   "codec": "flac",
+   "dst": "Output/Audio/BGM/bgm-battle-boss-2.flac",
+   "dst_size": 16474949,
+   "dst_dur": 137.964,
+   "dst_md5": "5b5ab0868c26942688cbf0a10507143e",
+   "at": "2026-10-18 12:51:24"
+  },
+  "bgm-level.wav": {
+   "src_md5": "efc1a5980c6a33b99544171212836453",
+   "src_size": 19192368,
+   "src_dur": 108.800023,
+   "codec": "flac",
+   "dst": "Output/Audio/BGM/bgm-level.flac",
+   "dst_size": 12106930,
+   "dst_dur": 108.8,
+   "dst_md5": "929e74e0d9cebd55dcda92921012fc38",
+   "at": "2026-10-18 12:51:24"
+  },
+  "bgm-login.wav": {
+   "src_md5": "68143e92aa4798f6db2887354fda5373",
+   "src_size": 11655048,
+   "src_dur": 66.071451,
+   "codec": "flac",
+   "dst": "Output/Audio/BGM/bgm-login.flac",
+   "dst_size": 6470567,
+   "dst_dur": 66.071,
+   "dst_md5": "2900b6d802fe735488974cb4ed105482",
+   "at": "2026-10-18 12:51:25"
+  },
+  "bgm-main.wav": {
+   "src_md5": "2202c6785357b84709d475cf8e85094a",
+   "src_size": 10004012,
+   "src_dur": 56.711837,
+   "codec": "flac",
+   "dst": "Output/Audio/BGM/bgm-main.flac",
+   "dst_size": 6388198,
+   "dst_dur": 56.712,
+   "dst_md5": "a1196fe2b79fc0ba7e7455d49ba7adb7",
+   "at": "2026-10-18 12:51:25"
   }
  }
 }

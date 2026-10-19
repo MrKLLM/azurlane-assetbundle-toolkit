@@ -4801,3 +4801,116 @@ stderr 里有 `[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]`。
 要在本环境验证清理，启动面板须 `PYTHONPATH= py -3 scripts/pipeline_panel.py`（禁沙箱）。
 判据：`panel_paper_probe` 75 条（含账单 ≥4 行、禁止区写明「源包/清单/目录/重导」、
 DELETE 提示、弹窗 getBoundingClientRect 可见性）。
+
+### WF-48 追加（2026-10-19，§159）：五条证据路线里再补两条「拼音桥」
+
+专治"中文活动名明明有正本（`memory_group.title`），但两边没有 id 直连"这一类：
+
+| 路线 | 桥的两端 | 权威序 |
+|---|---|---|
+| `story` | `bg_<root>_*` 的根 + `activity_sp_story.story`（活动名拼音）→ `memory_group.title`（中文名） | memory > **story** > re_map > perform > child2 |
+| `perform` | `child2_ending.pic` 的根 + `performance`（养成计划拼音）→ 「探索者/领洋者/领航员养成计划」 | 同上 |
+
+判据与踩坑：① 拼音必须**整串相等**（`XIANGCHEYUTIANQIONGZHIYIN`），不做前缀/模糊匹配；
+② `chapter_template` 是空表、`activity_sp_story` 里同根出现的是**小节名**，两者都不能当活动名；
+③ `project_*` 是养成**结局 CG**不是活动；④ 缺 pypinyin 必须**降级跳过两条路线**而不是崩；
+⑤ 零引用词根（`bsmre`/`fujinwan`）不硬凑。结果：26 组/216 张 → **54 组/591 张**，
+英文根 **70→9**。另加了 `category` 类目档（`bg_category_labels.json`），
+它**不是官方名**，所以单列一档且断言不许压过证据档。取证 **§159**。
+
+### WF-49: 把「更新完还要手动补几刀」的标签链编成一条命令 + 漂移报告（2026-10-19）
+
+**适用**：一条数据驱动的"标签/索引"链已经各自有脚本（背景词根、音乐专辑、缩略图…），
+但**不在**一键更新管线的编排里；每次版本更新靠人记得按序跑 N 条，而且跑完不知道
+"这次新活动有没有认出中文名、哪里还落在英文"。
+
+#### 步骤
+
+1. **先确认哪些环节本来就是数据驱动的**，别重写判断逻辑：
+   背景侧 `export_assets.py --target bg` 扫整目录、`build_bg_meta.py` 的 `disk_items()`
+   扫盘上 PNG 归词根、`51_publish_bg_series.py` 扫盘 + 走表内证据；音乐侧
+   `bgm_backfill_decode.py` 对比 cue 包与已导 FLAC、`build_bgm_index.py` 扫 FLAC + 读配置表。
+   **这五处都是扫盘/查表，不是白名单** ⇒ 新资产天然会被发现，缺的只是"串起来 + 报告"。
+2. **编排器只做两件事**：按正确顺序 `subprocess` 调子脚本；与**上次基线**比对输出漂移报告。
+   不要在这个脚本里改任何判定规则（否则它变成第二个真相源）。
+3. **不信子脚本退出码**：`export_assets.py` / `bgm_backfill_decode.py` / `transcode_bgm.py`
+   都存在"部分失败仍 exit 0"的历史问题 ⇒ 必须解析汇总行（`失败: N` / `完成 N/N` /
+   `成功 N`），读不到汇总行也算失败。
+4. **`--check` 必须真只读**：连报告 JSON 都不写、基线不动。判据：跑完 `git status` 无变化。
+5. **接进 `update_pipeline.py`**：新增阶段按"写哪里"分档——写 `Output/` 的可用 `live`，
+   写 `inputs/` 的必须挂签字；未签字一律只跑 `--check`，并在结论里写"签字请 `--approve <key>`"。
+6. **自测三连**（缺一不可）：
+   - 首次运行：只"建立基线"，不得误报新增/消失；
+   - 第二次运行：**零漂移**（新增 0 / 消失 0）；
+   - **人为从基线摘掉 3 个根**（2 个有证据 + 1 个无证据）⇒ 必须准确报出
+     "2 个自动认出、1 个需人工补名"，测完把基线原样恢复。
+
+#### 判据
+
+- `rebuild_labels.py --check` 退出 0，且只读校验全绿（背景条目/词根数/未命名数、音乐曲目/专辑）。
+- 漂移报告能**逐条回指**：自动认出的写来源档（`pinyin/series/table/category`），
+  需补名的写词根 + 张数。**未命名不阻断**（退出 0），但必须打印——按项目纪律"不许编名"。
+- 一键管线 `--plan` 里能看到新阶段，且 `--only <key>` 未签字时"不写产物"。
+
+#### 踩坑记录
+
+- **`--check` 写报告 = 假只读**：第一版把 `labels_report.json` 在 check 模式也写了，
+  与"只读闸门"的承诺矛盾；改成 check 分支完全不落盘。
+- **"同词根 <2 张不发标签"**（`51` 与 `build_bg_meta` 都有 `n>=2`）⇒ 单张的新活动
+  不会出中文名。这是有意的（避免悬空词根），但报告里要能看见它落英文。
+- **不要把"整目录扫描"的背景导出硬塞进"按皮肤名增量"的范围模型**：两者不是一套，
+  硬接会漏图。单独一个 stage、明确写"本阶段不做增量裁剪"。
+- **基线文件放 `Output/`**（已被 gitignore），只作为本机对比用；报告也是。
+  需要跨机器判断"哪些是新增"时，看的是 `inputs/gamecfg/MANIFEST.json` 里的 rows 地板值。
+
+#### 涉及文件
+
+`scripts/rebuild_labels.py`（编排 + 基线 + 报告）、`scripts/rebuild_bgm_library.py`
+（cue → FLAC → 索引）、`scripts/update_pipeline.py`（`bg` / `bgm` / `labels` 三阶段）、
+`tools/sharecfg_re/51_publish_bg_series.py`、`scripts/build_bg_meta.py`、
+`scripts/build_bgm_index.py`。相关：**WF-23**（阶段机）、WF-15（增量重跑）、§158/§159。
+
+### WF-50: 热更里找不到的资产去 `base.apk` 基础层取——设备端就地解压，别 pull 整包（2026-10-19）
+
+**适用**：某个资产（BGM / 贴图 / 配置）在 `files/AssetBundles/` 里**全盘搜不到**，
+但游戏里明明有；怀疑它烤在客户端安装包的基础层。
+
+#### 步骤
+
+1. **先在热更侧证"真的没有"**（这一步不做，后面全是猜）：
+   - 全盘按**去扩展名的主名**精确搜（`bgm-main` 这类裸名，不要搜子串，否则
+     `bgm-main-seaandsun` 会冒充命中）；
+   - 再查下载清单（本项目 `files/hashes.csv`）是否登记过。
+   **两种结论要分开**：「清单里有、盘上没有」= 没下载/没解包；「清单里也没有」= 在基础层。
+2. **连模拟器**：MuMu 的 adb 在 `nx_main\adb.exe`，端口是动态的（本项目实测 16384）。
+   每次脚本内**先 `adb connect` 再操作**——adb daemon 一重启，连接就掉。
+3. **定位安装包**：`pm path <包名>` → `base.apk`（碧蓝国服实测 **1.73 GB**）。
+4. **不要 pull 整包**：设备自带 `/system/bin/unzip`，先 `unzip -o <apk> <条目...> -d /sdcard/<tmp>`，
+   再只 pull 那几个文件（实测 8 首 BGM 共 **11.5 MB**，对比 1.73 GB）。
+5. **按内容判格式，不按后缀**：APK 里是 `assets/AssetBundles/cue/*.ys`，
+   而热更侧是 `*.b`；但文件头同为 **`@UTF`**（CRIWARE ACB）⇒ 直接喂 vgmstream 即可。
+6. 放进对应源目录（如 `files/AssetBundles/cue/`）→ 走既有导出/补导链 → 重建索引 →
+   **删掉设备上的临时目录**。
+
+#### 判据
+
+- 逐个核对**文件数与字节大小**（清单先写死期望值，不靠"看着差不多"）；
+- 魔数/头 4 字节对得上（ACB=`@UTF`），解码器能出流；
+- 重建索引后条目数、专辑数、总时长与预期对账（本轮：561→**569** 首、启航 15/15）。
+
+#### 踩坑记录
+
+- **别用通用逆向框架解决这类问题**：`morluto/rea`（REA）是反汇编 / JS·Electron / .NET 分析，
+  与 Unity AssetBundle / ACB 无关。本题缺的是"从 APK 里把文件取出来"，属解包取件。
+- **adb daemon 重启会掉连接**：一条命令查完最好放在同一个 Python 脚本里，开头统一 connect。
+- **不要把 1.73 GB 拉回本地再解压**：模拟器内解压 + 只 pull 目标文件，快两个数量级。
+- **扩展名会骗人**（`.ys` vs `.b`），必须验头。
+- 这类资产**不在自动同步范围**：`mumu_sync` 只同步热更 `files/`，换版本也不会自动出现，
+  每次大版本要单独确认一次。
+
+#### 涉及文件
+
+`files/AssetBundles/cue/`（落地目录）、`scripts/diag/bgm_backfill_decode.py`、
+`scripts/transcode_bgm.py`、`scripts/build_bgm_index.py`。
+本轮为一次性 Python 调用，未固化成独立工具；若再遇到第二次，应落成
+`scripts/diag/extract_apk_layer.py`（参数：包名 / 条目 glob / 目标目录）。相关：**§158**、§154、WF-49。

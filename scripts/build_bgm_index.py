@@ -219,13 +219,37 @@ def main():
     cn = {}
     rows = _lua('music_collect_config.json')
     if rows:
-        # 专辑表**没有 id 字段**（键是 `#0..#9` 的行号），能对上 `album_id` 的只有 `order`：
-        # 1..10 连续无重复，且 id=10 的曲目全是鸢尾主题、正对 order=10「奏响鸢尾之歌」⇒ 按 order 连。
-        albums = {str(x.get('order')): x.get('album_name') for x in (_lua('music_album.json') or [])}
+        # 专辑归属：`album_id` 连的是 **cover 序号**（`MusicCover{album_id}`），不是 `order`！
+        # 2026-10-18 修：旧版拿 album_id 去对 order，整盘错位（#0..#9 的 order 是 10,9,8,7,6,1,2,3,4,5）
+        #   ⇒ 「启航之时」的 15 首塞进「铁血、音符&誓言」、「铁血」的歌塞进「启航之时」。
+        # 实测 10 张专辑的 cover 恰好是 MusicCover1..10 且与 album_id 一一对应：
+        #   #0→Cover10(奏响) … #5→Cover5(启航) … #9→Cover1(铁血) ⇒ 直接按 cover 数字连。
+        albums = {}
+        try:
+            with open(os.path.join(LUA, 'music_album.json'), encoding='utf-8') as f:
+                _alb = json.load(f)
+            _real = {k: v for k, v in _alb.items()
+                     if isinstance(v, dict) and v.get('album_name')}
+            _n = len(_real)
+            for k, v in _real.items():
+                mm = re.search(r'(\d+)$', str(v.get('cover') or ''))
+                if mm:
+                    albums[mm.group(1)] = v['album_name']
+                else:                                  # 兜底：id = 专辑总数 − 键序号（#0→10, #9→1）
+                    albums[str(_n - int(k.lstrip('#')))] = v['album_name']
+        except (OSError, ValueError):
+            albums = {}
+        if len(albums) != len({r.get('album_id') for r in rows}):
+            print(f'! 专辑关联只覆盖 {len(albums)} 张，但 album_id 有 '
+                  f'{len({r.get("album_id") for r in rows})} 种 —— 检查 music_album.cover')
+        # ⚠️ 键必须归一：配置里的曲名是驼峰（`bgm-theme-SeaAndSun-image`、`bgm-battle-thedevilXV-control`），
+        #    而 FLAC 文件名是小写（`bgm-theme-seaandsun-image`）⇒ 精确大小写查不到，6 首会丢专辑/中文名。
+        #    统一走 `_norm_bgm`（去 bgm- 前缀 + lowercase）当键，两边才对得上。
         for r in rows:
             m = r.get('music')
             if m:
-                cn[m] = {'title_cn': r.get('name') or '', 'album': albums.get(str(r.get('album_id')), '')}
+                cn[_norm_bgm(m)] = {'title_cn': r.get('name') or '',
+                                    'album': albums.get(str(r.get('album_id')), '')}
     else:
         print('! music_collect_config.json 读不到 ⇒ 中文曲名/专辑留空（bgm.json 仍自包含）')
 
@@ -268,7 +292,7 @@ def main():
                 dur = round(float(r.stdout.strip()), 2)
             except ValueError:
                 dur = 0.0
-        info = cn.get(stem) or cn.get('bgm-' + stem) or {}
+        info = cn.get(_norm_bgm(stem)) or {}
         usage, ship = classify(stem)
         seen, scenes = set(), []
         for label, cnl in refs.get(stem, []):

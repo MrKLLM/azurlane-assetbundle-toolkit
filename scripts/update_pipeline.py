@@ -1041,6 +1041,109 @@ def st_audio(approved):
                    f'（恒 exit 0，非 0 = 它自己崩了）；l2d_voice_inventory（可信）rc={rc3}；{deg_line}')
 
 
+def st_bg_export(approved, full):
+    """源包 → Output/Raw 的背景图重导出（含新活动新增的 bg 包）。
+
+    参数表
+    ------
+    approved : set  已签字放行的阶段 key 集合
+    full     : bool 是否 --full（本阶段不区分增量：背景导出本来就是全目录扫）
+
+    为什么单独一步、且不做增量裁剪
+    ------------------------------
+    `export_assets.py --target bg` 扫的是 9 个背景子目录（bg/commonbg/loadingbg/…），
+    一个包里可能有多张同名纹理、还要做同名让位，和"按皮肤名增量"不是一套模型。
+    硬接进立绘范围会漏图，所以只在新版本或明确要刷新背景时整段跑。
+
+    ⚠️ 判据不能用退出码：`export_assets.py` 在部分失败时仍然 return 0，
+       只看 `ExportStats.summary()` 打出的「失败: N」——必须读到且为 0。
+    """
+    if 'bg' not in approved:
+        n_now = count(os.path.join(OUT, 'Raw', 'bg'), '*.png')
+        return verdict('bg', True,
+                       f'未签字 ⇒ 跳过（直接覆写 Output/Raw，无暂存通道）；'
+                       f'现有 bg/ {n_now} 张 · 签字请 --approve bg')
+    rc, so, se = run([PY, 'scripts/export_assets.py', '--target', 'bg'],
+                     timeout=10800, echo=['导出完成', '成功:', '失败:', '耗时:'])
+    txt = so + se
+    m_bad = re.search(r'失败:\s*(\d+)', txt)
+    if not m_bad:
+        return verdict('bg', False,
+                       '没读到「失败: N」汇总行 ⇒ 不能判完成（该脚本失败也 exit 0）')
+    m_ok = re.search(r'成功:\s*(\d+)', txt)
+    good, bad = (int(m_ok.group(1)) if m_ok else 0), int(m_bad.group(1))
+    return verdict('bg', rc == 0 and bad == 0 and good > 0,
+                   f'背景导出 成功{good} 失败{bad}')
+
+
+def st_labels(approved, full):
+    """重建「背景词根标签 + 音乐专辑索引」，并输出新增/未命名的漂移报告。
+
+    参数表
+    ------
+    approved : set  已签字放行的阶段 key 集合；不在集合里只跑 --check
+    full     : bool 是否 --full（本阶段与范围无关）
+
+    未签字为什么只跑 --check
+    ------------------------
+    51 发布器会写 `inputs/gamecfg/bg_series_labels.json`，属于 inputs/ 权威输入区；
+    按项目规则，写 inputs/ 必须先签字。--check 只跑断言、不写任何产物。
+    """
+    unlocked = 'labels' in approved
+    argv = [PY, 'scripts/rebuild_labels.py'] + ([] if unlocked else ['--check'])
+    rc, so, se = run(argv, timeout=3600,
+                     echo=['标签漂移报告', '新增词根', '未命名', '新增曲目', '新增专辑',
+                           '结论', '闸门：', '[WRITE]', '[FAIL]'])
+    txt = so + se
+    if rc != 0:
+        bad = [l.strip()[:100] for l in txt.splitlines()
+               if '[FAIL]' in l or '✗' in l][:2]
+        return verdict('labels', False,
+                       '重建失败：' + ('；'.join(bad) or '见日志末尾'))
+    m_un = re.search(r'当前未命名词根 (\d+) 个', txt)
+    m_tr = re.search(r'曲目 (\d+) 首', txt)
+    unnamed = m_un.group(1) if m_un else '?'
+    tracks = m_tr.group(1) if m_tr else '?'
+    if not unlocked:
+        return verdict('labels', True,
+                       f'未签字 ⇒ 只跑 --check（未写产物）：未命名词根 {unnamed} 个 / '
+                       f'曲目 {tracks} 首 · 签字请 --approve labels')
+    m_new = re.search(r'本次新增词根 (\d+) 个', txt)
+    new_n = m_new.group(1) if m_new else '0'
+    return verdict('labels', True,
+                   f'标签已重建：新增词根 {new_n} 个（未命名 {unnamed} 个）/ 曲目 {tracks} 首')
+
+
+def st_bgm(approved, full):
+    """BGM 补导：新 cue 包 → FLAC → bgm.json。
+
+    参数表
+    ------
+    approved : set  已签字放行的阶段 key 集合；不在集合里只跑 --check
+    full     : bool 是否 --full（本阶段与范围无关）
+
+    ⚠️ 覆盖边界：只处理热更 `files/AssetBundles/cue/` 里的曲目。
+       烤在 `base.apk` 基础层的曲子（如 8 首开服 BGM）不在热更清单里，
+       要单独从模拟器 `assets/AssetBundles/cue/` 提取后放进 cue/，再跑本阶段。
+    """
+    unlocked = 'bgm' in approved
+    argv = [PY, 'scripts/rebuild_bgm_library.py'] + ([] if unlocked else ['--check'])
+    rc, so, se = run(argv, timeout=7200,
+                     echo=['cue/bgm', '缺 ', '完成 ', '成功 ', '失败 ', '官方中文名',
+                           '完成：', '[FAIL]'])
+    txt = so + se
+    if rc != 0:
+        bad = [l.strip()[:100] for l in txt.splitlines() if '[FAIL]' in l][:2]
+        return verdict('bgm', False,
+                       '音乐补导失败：' + ('；'.join(bad) or '见日志末尾'))
+    m = re.search(r'(?:缺|还有)\s*(\d+)', txt)
+    n = m.group(1) if m else '?'
+    if not unlocked:
+        return verdict('bgm', True,
+                       f'未签字 ⇒ 只跑 --check（未写产物）：待解码 {n} 首 · 签字请 --approve bgm')
+    return verdict('bgm', True, f'音乐库已重建：待解码 {n} 首已处理 · bgm.json 已更新')
+
+
 def st_cg(full, approved):
     # 同上：CG 导出经画廊服务器**就地覆写 Output/CG_v2**，没有暂存区可退 ⇒ 未签字不许跑。
     if 'cg' not in approved:
@@ -1205,6 +1308,9 @@ STAGES = [
     Stage('meta', '重建 ship_meta 元数据', 'live', lambda a, f: st_meta(a),
           'ship_meta_authority_diff 绿 · ⚠️ 预览须先换入',
           step=3, writes='未签字暂存 · 签字 Output/ship_meta.json'),
+    Stage('bg', '背景图重导出（含新活动）', 'live', st_bg_export,
+          'export_assets 汇总行「失败: 0」（退出码不可信）',
+          step=3, writes='Output/Raw/{bg,commonbg,loadingbg,…}（无暂存通道）'),
     Stage('paintings', '静态立绘合成 → 临时区', 'staged', lambda a, f: st_paintings(f, a),
           '数 ✗ 行（失败仍 exit 0）',
           step=3, writes='.diag/pipeline/Paintings_v2', rate=1.25, unit='张'),
@@ -1217,6 +1323,9 @@ STAGES = [
     Stage('audio', 'CV 语音包解码 + 台词表', 'live', lambda a, f: st_audio(a),
           'l2d_voice_inventory 退出码',
           step=3, writes='Output/Audio（无暂存通道）'),
+    Stage('bgm', 'BGM 补导（cue → FLAC → 索引）', 'live', st_bgm,
+          'rebuild_bgm_library 退出码 + 缺 N 汇总行（两个子脚本失败也 exit 0）',
+          step=3, writes='Output/Audio/BGM（无暂存通道）'),
     Stage('cg', 'Spine 全屏 CG 导出', 'live', lambda a, f: st_cg(f, a),
           '必须读到「完成N 跳过N 失败N」且失败=0',
           step=3, writes='Output/CG_v2（无暂存通道）', rate=1.3, unit='张'),
@@ -1229,6 +1338,9 @@ STAGES = [
     Stage('derive', '缩略图 / 索引 / 部署', 'live', lambda a, f: st_derive(a),
           'gallery_index_diff_check 绿 + deploy --check 4/4 同 inode',
           step=5, writes='Output/gallery_v2'),
+    Stage('labels', '重建背景/音乐标签 + 漂移报告', 'live', st_labels,
+          'rebuild_labels 退出码 + 新增词根/未命名清单',
+          step=5, writes='Output/gallery_v2/{bg_meta,bgm}.json + inputs/gamecfg/bg_series_labels.json（签字后）'),
     Stage('regress', 'WF-16 回归（跳全库 hit_verify）', 'staged', lambda a, f: st_regress(a),
           '串行 runner 退出码',
           step=5, writes='不改产物', check=True),

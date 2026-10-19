@@ -37,6 +37,11 @@ import os
 import re
 import sys
 
+try:
+    from pypinyin import lazy_pinyin
+except ImportError:          # 允许缺：缺了 story/perform 两条路线自动跳过，其余照常（不静默改判）
+    lazy_pinyin = None
+
 sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 LUAJ = os.path.join(ROOT, '.diag', 'sharecfg_re', 'lua_json')
@@ -161,17 +166,125 @@ def route_child2(roots):
     return out
 
 
+def py_key(s):
+    """中文 → 哑音拼音串（纯大写字母）。缺 pypinyin 时返回 ''（调用方据此跳过该路线）。"""
+    if not lazy_pinyin or not s:
+        return ''
+    return re.sub(r'[^A-Z]', '', ''.join(lazy_pinyin(str(s))).upper())
+
+
+def titles_index():
+    """memory_group.title 的拼音 → (中文标题, id)。活动名/养成计划名都在这张表里，
+    但表内没有 story 码 —— 得靠「story 码本身就是活动名拼音」这条桥来对。"""
+    if not lazy_pinyin:
+        return {}
+    out = {}
+    for r in load_rows('memory_group'):
+        t = str(r.get('title') or '').strip()
+        if cn_ok(t):
+            k = py_key(t)
+            if len(k) >= 6:
+                out.setdefault(k, (t, r.get('id')))
+    return out
+
+
+def _code_base(code):
+    """story/performance 码去尾数字，只留纯字母（拼音）骨架；纯数字主体（如 1966001）返回 ''。"""
+    b = re.sub(r'\d+$', '', str(code or '').upper())
+    return b if re.fullmatch(r'[A-Z]{6,}', b) else ''
+
+
+def route_story(roots, idx):
+    """活动剧情：`activity_sp_story.change_background`（bg_<root>_*）+ `story` 码。
+    story 码是活动名拼音（XIANGCHEYUTIANQIONGZHIYIN）⇒ 与 memory_group.title 拼音对上。
+    ⚠️ 只认 `bg_` 打头的 change_background：`star_level_bg_546` 这类通用底纹若混进来，
+    会把 265 张 star_level 图误挂到某个活动名下（root_of 对 star_level_bg 也会给出 star_level）。"""
+    votes = collections.defaultdict(collections.Counter)
+    src = collections.defaultdict(dict)
+    for r in load_rows('activity_sp_story'):
+        bg = str(r.get('change_background') or '')
+        if not bg.startswith('bg_'):
+            continue
+        root = root_of(bg)
+        if not root or root not in roots:
+            continue
+        hit = idx.get(_code_base(r.get('story')))
+        if not hit:
+            continue
+        votes[root][hit[0]] += 1
+        src[root][hit[0]] = {'t': 'activity_sp_story', 'f': 'change_background+story',
+                             'id': r.get('id'), 'v': '%s ⇒ %s' % (bg, r.get('story'))}
+    out = {}
+    for root, c in votes.items():
+        cn = c.most_common(1)[0][0]
+        out[root] = {'cn': cn, 'route': 'story', 'src': [src[root][cn]],
+                     'detail': {'votes': dict(c.most_common(5))}}
+    return out
+
+
+def route_perform(roots, idx):
+    """养成结局：`child2_ending.performance` 是「X者养成计划」拼音，配图 `bg_project_<x>_cg*`。
+    project_oceana/explorer 走 performance；project_tb 无 performance 字段（其 pic 在 child_ending），
+    靠 `child_data.name`『领航员-TB』的代号 TB 反连到「领航员养成计划」。"""
+    out = {}
+
+    def _assign(root, title, src):
+        out[root] = {'cn': title, 'route': 'perform', 'src': [src], 'detail': {}}
+        if root + '_room' in roots:          # project_x_room 同属该养成，一并挂上
+            out[root + '_room'] = {'cn': title, 'route': 'perform',
+                                   'src': [dict(src, v=src['v'] + '（_room 变体）')], 'detail': {}}
+
+    for r in load_rows('child2_ending'):
+        pic = str(r.get('pic') or '')
+        if not pic.startswith('bg_project_'):
+            continue
+        root = root_of(pic)
+        if not root or root not in roots:
+            continue
+        hit = idx.get(_code_base(r.get('performance')))
+        if hit:
+            _assign(root, hit[0], {'t': 'child2_ending', 'f': 'pic+performance',
+                                   'id': r.get('id'), 'v': '%s ⇒ %s' % (pic, r.get('performance'))})
+
+    # project_tb / educate_tb：child_data.name = 「领航员-TB」；代号大写反查中文前缀
+    tb_titles = [t for t, _ in idx.values() if t.endswith('养成计划')]
+    code2 = {}
+    for r in load_rows('child_data'):
+        m = re.match(r'^([^\-\s]+)-([A-Za-z0-9]+)$', str(r.get('name') or ''))
+        if m:
+            code2[m.group(2).upper()] = (m.group(1), r.get('id'))
+    for r in load_rows('child_ending'):
+        root = root_of(str(r.get('pic') or ''))
+        if not root or root not in roots or root in out:
+            continue
+        code = root.split('_')[-1].upper()
+        if code not in code2:
+            continue
+        cn_prefix, cid = code2[code]
+        title = next((t for t in tb_titles if t.startswith(cn_prefix)), None)
+        if title:
+            _assign(root, title, {'t': 'child_data', 'f': 'name', 'id': cid,
+                                  'v': '%s ⇒ %s' % (cn_prefix + '-' + code, title)})
+    return out
+
+
 def build(verbose=False):
     roots = png_roots()
     if verbose:
         print('盘上词根 %d 组 / png %d 张' % (len(roots), sum(len(v) for v in roots.values())))
     cand = {}
-    for fn, route in ((route_memory, 'memory'), (route_re_map, 're_map'), (route_child2, 'child2')):
+    idx = titles_index()
+    routes = ((route_memory, 'memory'),
+              (lambda r: route_story(r, idx), 'story'),
+              (route_re_map, 're_map'),
+              (lambda r: route_perform(r, idx), 'perform'),
+              (route_child2, 'child2'))
+    for fn, route in routes:
         got = fn(roots)
         if verbose:
             print('  route %-8s: %d 组' % (route, len(got)))
         for root, ent in got.items():
-            if root in cand:                    # 优先级：memory > re_map > child2
+            if root in cand:                    # 优先级：memory > story > re_map > perform > child2
                 cand[root]['detail']['superseded_by'] = ent['route']
                 cand[root]['src'].extend(ent['src'][:1])
                 continue
@@ -191,8 +304,9 @@ def selfcheck(labels, roots):
          all(cn_ok(e['cn']) for e in labels.values())),
         ('发布的词根盘上真有图（≥2 张），不产悬空词根',
          all(r in roots and roots[r] and e['n'] >= 2 for r, e in labels.items())),
-        ('route 只有三档且与来源一致',
-         all(e['route'] in ('memory', 're_map', 'child2') for e in labels.values())),
+        ('route 只有五档且与来源一致',
+         all(e['route'] in ('memory', 'story', 're_map', 'perform', 'child2')
+             for e in labels.values())),
         ('三条路线覆盖不低于地板 %d 组（实测 2026-10-17 = %d；掉了说明表源变了）'
          % (MIN_ROOTS, len(labels)), len(labels) >= MIN_ROOTS),
         ('覆盖 png ≥ 100 张（实测 2026-10-17 ≈ 250；掉了说明 mask/temp_ 形状变了）', n_png >= 100),

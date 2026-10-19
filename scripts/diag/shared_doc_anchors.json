@@ -104,6 +104,12 @@
       "needle": "剧情黑脸剪影",
       "commit": "f22f91c",
       "note": "§88 口径纠正：_hei 是剧情黑脸剪影、非角色、无配音"
+    },
+    {
+      "file": "docs/TROUBLESHOOTING.md",
+      "needle": "假缺是大小写、真缺口是导出层旧",
+      "commit": "ddc608b",
+      "note": ""
     }
   ]
 }

@@ -19,9 +19,22 @@
    "scripts/publish_bg_char_flags.py",
    "tools/sharecfg_re/51_publish_bg_series.py"
   ],
-  "landed_at": "2026-10-17"
+  "landed_at": "2026-10-19"
  },
  "files": [
+  {
+   "path": "bg_category_labels.json",
+   "bytes": 4926,
+   "sha256": "409458c37faae5ff06bf5abfa3de43f9e21b4f72bec06f319b6e55f7d28a2a96",
+   "rows": 44,
+   "role": "背景词根 → **描述性类目名**（「装备」「加载图」「星级卡底纹」这类界面/场景归类）。⚠️ **不是游戏官方资产名**：只在五条表内证据路线（memory/story/re_map/perform/child2）都拿不到词根时才补位，消费端以 `cn_from='category'` 与证据档区分",
+   "consumers": [
+    "scripts/build_bg_meta.py"
+   ],
+   "source": "人工整理；每条带 `kind` 依据（界面/场景/拼音/舰名/联动）。仓库内无生成器——词典本身就是正本，改动须在此同步 bytes/sha256",
+   "produced_by": "手工维护（无脚本）",
+   "coverage": "44 个类目 / 195 张 png；补位后英文显示词根只剩 9 个 / 58 张（全表零引用、语义不可判，保留英文不硬凑，见 TROUBLESHOOTING §159）"
+  },
   {
    "path": "bg_char_flags.json",
    "bytes": 31701,
@@ -62,15 +75,15 @@
   },
   {
    "path": "bg_series_labels.json",
-   "bytes": 11735,
-   "sha256": "028d4d215979c12159a1155dbb93f923df10a0b0485a96aa4c57af3d269be484",
-   "rows": 26,
+   "bytes": 21169,
+   "sha256": "00f5e5d41e5c9185975594548f7b62cb0ead75ccf2f2676f50d94f0c349171d1",
+   "rows": 54,
    "role": "背景图词根（Output/Raw png 的 root）→ 系列中文名，来源只有三条游戏表内路线：memory_template.mask+condition / re_map_template.bg+name / child2_data.name_background+name",
    "consumers": [
     "scripts/build_bg_meta.py"
    ],
    "source": ".diag/sharecfg_re/lua_json/{memory_template,re_map_template,child2_data}.json",
-   "coverage": "词根中文名 26 组 / 216 张 png"
+   "coverage": "词根中文名 54 组 / 591 张 png"
   },
   {
    "path": "bg_tip_titles.json",

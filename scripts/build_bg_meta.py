@@ -52,6 +52,9 @@ ROOT_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_root_labels.json')
 # table 排 series 之后是因为 daofeng 这类词根同时被两个活动用过（关卡 exact 说 起舞于天原之上、
 # 回忆战役 mask 说 碧海光纱），series 来自逐张 exact 引用、与卡片上的具体名字一致，优先让位给它。
 SERIES_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_series_labels.json')
+# 词根→中文**类目名**（描述性标签，不是官方资产名）。可缺；只在上面三条证据路都拿不到时补位，
+# 页面以 cn_from='category' 与证据档区分开（2026-10-18 用户要求：英文类目也要有中文可读名）。
+CATEGORY_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_category_labels.json')
 # 场景背景「画面里有没有角色」的人工逐格标注（scripts/publish_bg_char_flags.py 发布，可缺：
 # 缺了页面就没有筛选依据，会退回「全部」并显式说明——不许静默降级）
 CHARS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_char_flags.json')
@@ -323,6 +326,8 @@ def build(sample=None):
           if os.path.isfile(ROOT_LABELS) else {})
     SL = (json.load(open(SERIES_LABELS, encoding='utf-8'))['labels']
           if os.path.isfile(SERIES_LABELS) else {})
+    CL = (json.load(open(CATEGORY_LABELS, encoding='utf-8'))['labels']
+          if os.path.isfile(CATEGORY_LABELS) else {})
     named = {}
     for k, v in roots.items():
         if v['n'] < 2:
@@ -334,6 +339,9 @@ def build(sample=None):
             named[k] = {'n': v['n'], 'cn': v['series'].most_common(1)[0][0], 'cn_from': 'series'}
         elif k in SL:
             named[k] = {'n': v['n'], 'cn': SL[k]['cn'], 'cn_from': 'table'}
+        elif k in CL:
+            # 类目名是描述性标签（界面/拼音/舰名/联动），不是官方资产名 ⇒ 单独一档让页面能看出区别
+            named[k] = {'n': v['n'], 'cn': CL[k]['cn'], 'cn_from': 'category'}
         else:
             named[k] = {'n': v['n'], 'cn': k, 'cn_from': 'root'}
     roots = named
@@ -455,13 +463,18 @@ def main():
           if os.path.isfile(ROOT_LABELS) else {})
     sl = (json.load(open(SERIES_LABELS, encoding='utf-8'))['labels']
           if os.path.isfile(SERIES_LABELS) else {})
+    cl = (json.load(open(CATEGORY_LABELS, encoding='utf-8'))['labels']
+          if os.path.isfile(CATEGORY_LABELS) else {})
     for desc, passed in [
         # 下限断言：词典文件没了 / 被清空时，上面几条会**全部空转报绿**，
         # 名字会静默退回 series —— 这条负责让它响。
         ('词典在位且有 >=15 组（缺文件不许静默退回 series）', len(rl) >= 15),
-        ('词根表非空，且来源只有 pinyin/series/table/root 四档',
-         bool(roots) and all(v['cn_from'] in ('pinyin', 'series', 'table', 'root')
+        ('词根表非空，且来源只有 pinyin/series/table/category/root 五档',
+         bool(roots) and all(v['cn_from'] in ('pinyin', 'series', 'table', 'category', 'root')
                              for v in roots.values())),
+        ('category 档逐字等于类目词典值，且只补位在证据档都拿不到的词根上（不许压过证据）',
+         all(roots[k]['cn'] == cl[k]['cn'] and k not in rl and k not in sl
+             for k in roots if roots[k]['cn_from'] == 'category')),
         ('pinyin 档逐字等于词典值（索引与页面都不许改写或自己升档）',
          all(roots[k]['cn'] == rl[k]['cn'] for k in roots
              if roots[k]['cn_from'] == 'pinyin' and k in rl)),
