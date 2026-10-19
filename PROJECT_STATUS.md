@@ -55,7 +55,7 @@ vgmstream/ffmpeg 钉在 `C:\Users\KLLM\AppData\Local`）⇒ **换盘符或换用
 > ✅ **2026-10-19 词根中文名补齐（§159）**：`memory_group.title` 是活动名正本，与词根靠**活动名拼音**（`activity_sp_story.story`）+ **养成计划拼音**（`child2_ending.performance`）桥接 ⇒ 发布器证据路线 3→**5 条**（memory > story > re_map > perform > child2）；消费端新增 `category` 类目档（44 条，**非官方名、单列一档**）。**有中文名 54 组 / 591 张**（原 26 组 / 216 张），**英文显示词根 70 个 / 460 张 → 9 个 / 58 张**（剩 9 个全表零引用，保留英文不硬凑）。
 
 ### 2.4 音频导出 ✅
-4,370 WAV / 0 失败 / ~14GB。`.b` 是 CRIWARE ACB，vgmstream 解码。分类 BGM 536 / CV 2,696 / Other 1,136 / SE 2。脚本 `scripts/export_cue_audio.py`。
+4,370 WAV / 0 失败 / ~14GB（首轮导出口径）。`.b` 是 CRIWARE ACB，vgmstream 解码。分类 BGM 536 / CV 2,696 / Other 1,136 / SE 2；10-19 又补 33 首 BGM（25 未解码 + 8 APK 基础层）⇒ **BGM 现 569**。脚本 `scripts/export_cue_audio.py`。
 ✅ **BGM 改档为 FLAC 无损（2026-10-06 起，10-19 补到 569 首）**：`Output/Audio/BGM/` = **569 个 `.flac` / 7.36 GB / 20.05 小时**（536 首时为 6.87 GB，比 wav 省 41.5%）；逐条 `--verify-only`（产物 md5 对台账 + 整条解到 null）全绿，裸 PCM 回环抽 7 份逐字节相同。原 wav 与 opus 版（1.06 GB）已删，**净回收 12.81 GB**。三档对照：wav 11.75 / FLAC 6.87 / opus128k 1.06 GB（536 首口径）。
 ✅ 画廊播放页 `gallery_v2/bgm.html`（潮汐进度条 + 雨后玻璃 + 三组筛选），**归属已补全**：**391** 首有出处、**483** 首有用途、**54** 首官方中文名（10 张专辑）、17 首连到舰名（569 首口径）。⚠️ 两条硬教训：换格式必须重跑播放验收（`.flac` 默认 MIME 是 `audio/x-flac`）；无损要靠裸 PCM 回环证明，不能靠格式名字。取证 **§112 / §113 / §158**。
 
