@@ -93,102 +93,29 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
 }
 
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:14px}
-/* ── 暗房（2026-10-20）────────────────────────────────────────────
-   用户要「音乐库和背景库两边分别做出让人出乎意料的感觉」。
-   音乐库那边是**潮水涌上来**（粒子从播放条底下升起、随光标偏折）；
-   这边必须是**完全另一套语言**，否则两页就变成同一个特效换皮。
-
-   这里选的是**暗房 / 接触印样**：冲印照片的那间屋子。
-     · 光标是一盏**安全灯**：周围亮、远处沉进暗部（径向渐变遮罩，不是滤镜盒）
-     · 卡片是**相纸**：悬停时彩色慢慢显影（从灰到彩），相纸边缘浮起来
-     · 整页像在一片暗处里挑选底片，只有手电照到的地方看得清
-
-   为什么这符合「最时尚」：接触印样（contact sheet）是摄影界的经典呈现方式，
-   Aperture / Magnum 的档案页至今这么做；而"暗房"这个隐喻自带仪式感 ——
-   它把"浏览壁纸"变成"在暗处挑照片"。
-
-   ⚠️ 三条硬约束（都是本项目的老结论）：
-   ① **不能给卡片挂 backdrop-filter**（§134 盒数红线：本页可以到 1000+ 张卡）。
-      所以"暗""亮"全部用**遮罩层**和 `filter` 做，不引入新的滤镜盒。
-   ② 遮罩层只能有一个、且是全屏 fixed —— 一个盒子的成本与面积无关。
-   ③ `filter` 会创建包含块，但本页没有 3D 旋转的祖先（§136 不适用）。
-      ⚠️ 然而 `filter` 放在 `.card` 上会让 `content-visibility:auto` 的离屏优化失效一部分，
-      所以只在**吸附中的那张**（`.lit`）上动态挂 filter，其余卡片保持无 filter。 */
-
-/* ① 暗房灯：全屏一层径向渐变，亮斑跟着光标走。
-   mix-blend-mode:multiply 让它在浅色主题下"压暗"、在深色主题下几乎不显形
-   （深色底色本身就是暗的，乘上去没变化）—— 一层同时适配两套主题，不用写两遍。
-   ⚠️ 用 `position:fixed` 而非绝对定位：滚动时亮斑应该跟着视口走，而不是跟着文档走。 */
-#darkroom{position:fixed;inset:0;z-index:2;pointer-events:none;opacity:0;
-  transition:opacity .6s var(--ease-ios,ease);
-  mix-blend-mode:multiply;
-  background:radial-gradient(circle 380px at var(--lx,50%) var(--ly,40%),
-    transparent 0%,transparent 34%,
-    color-mix(in srgb,#000 12%,transparent) 70%,
-    color-mix(in srgb,#000 28%,transparent) 100%)}
-html.dark-on #darkroom{opacity:1}
-/* 深色主题下压暗会过黑（原本就暗），换成更轻的一档 */
-[data-theme=dark] #darkroom{
-  background:radial-gradient(circle 400px at var(--lx,50%) var(--ly,40%),
-    transparent 0%,transparent 38%,
-    color-mix(in srgb,#000 10%,transparent) 74%,
-    color-mix(in srgb,#000 22%,transparent) 100%)}
-/* 光标离开窗口 / 还没动过：亮斑回到中间偏上，避免"整页全黑"这种吓人的首屏 */
-@media (prefers-reduced-motion:reduce){#darkroom{display:none}}
-
-/* ② 相纸：卡片内边距变成白色相纸边，照片嵌在里面。
-   这是"接触印样"的形态特征 —— 照片不是铺满卡片，而是**印在纸上**。 */
 .card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
   overflow:hidden;cursor:pointer;content-visibility:auto;contain-intrinsic-size:auto 190px;
-  padding:6px 6px 0;
-  box-shadow:var(--sh1);
-  transition:transform .26s var(--ease-ios),box-shadow .26s var(--ease-ios),
-             border-color .26s var(--ease-ios)}
-/* ③ 显影：照片默认"半冲印"（保留 55% 饱和度），悬停回到全彩。
-   ⚠️ 一开始写的是 saturate(.22) —— 截图一看整页像图片全部加载失败，
-      因为没有颜色线索时人会把它读成"图片坏了"，而不是"还没显影"。
-      55% 是试出来的分界：明显偏灰、但每张都还认得出色彩关系。
-   ⚠️ 只给 img 挂 filter（不是 .card）：img 数量大但都是独立合成层，
-      filter 在这里的成本是每张一个，而 hover 时同时只有 1~2 张在过渡。 */
-.card .ph img{width:100%;height:100%;object-fit:cover;display:block;
-  filter:saturate(.55) brightness(.97);
-  transition:filter .42s var(--ease-ios),transform .42s var(--ease-ios)}
-.card .ph{border-radius:calc(var(--r-card) - 6px)}
-.card:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--brand) 34%,var(--line));
-  box-shadow:0 2px 6px color-mix(in srgb,#000 8%,transparent),
-             0 14px 34px color-mix(in srgb,#000 14%,transparent)}
-.card:hover .ph img{filter:saturate(1) contrast(1);transform:scale(1.015)}
-/* 吸附中的那张：显影完成 + 相纸微微高亮（由 JS 在光标最近的一张上加 .lit） */
-.card.lit{border-color:color-mix(in srgb,var(--brand) 52%,var(--line))}
-.card.lit .ph img{filter:saturate(1) contrast(1)}
-/* ❌ 银盐颗粒：试过两版（2.4px 网格 + overlay / 1.5px + 低透明），放大截图都能看到
-   规整的**棋盘格**。原因不是参数没调好，而是"用 repeating 渐变模拟随机噪点"这件事本身
-   在 2x 屏上就不成立 —— 任何固定间距的图案都会被认得出来。
-   ⇒ 彻底删掉，换成**相纸边缘光**：`inset box-shadow` 的一圈微亮，
-     读作"照片被压在纸面上、边缘翘起一点"，是接触印样真实的观感，且零图案风险。 */
-.card .ph{position:relative;
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,#fff 12%,transparent)}
-.card:hover .ph{box-shadow:inset 0 0 0 1px color-mix(in srgb,#fff 22%,transparent)}
+  box-shadow:var(--sh1);transition:transform .2s var(--ease-ios),box-shadow .2s var(--ease-ios)}
+.card:hover{transform:translateY(-2px);box-shadow:var(--sh2)}
+.card .ph{width:100%;aspect-ratio:16/9;background:var(--panel2);display:block;overflow:hidden}
+.card .ph img{width:100%;height:100%;object-fit:cover;display:block}
 /* 缩略图缺失要**看得见**：画一条斜纹底 + 一行字，不留"格子在但空着"的静默失败 */
 .card.miss .ph{background:var(--stage)}
 .card.miss .ph::after{content:'缩略图缺失';display:block;padding:14px;font-size:11px;color:var(--dim)}
 .card.miss .ph img{display:none}
-/* 相纸下沿的题注：卡片自己有 6px 内边距，这里左右再收 3px 对齐照片边 */
-.card .nm{padding:7px 3px 8px}
+.card .nm{padding:9px 11px 10px}
 .card .t1{font-size:13.5px;font-weight:600;color:var(--txt);line-height:1.35;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:18px}
 .card .t2{font-size:11px;color:var(--dim);margin-top:3px;font-family:ui-monospace,Consolas,monospace;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* 角标要落在**照片**的角上，不是相纸的角上 ⇒ 8px 里再让出 6px 内边距 */
-.badge{position:absolute;top:12px;left:12px;font-size:10.5px;font-weight:600;padding:3px 8px;
-  border-radius:var(--r-chip);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-  z-index:3}
+.badge{position:absolute;top:8px;left:8px;font-size:10.5px;font-weight:600;padding:3px 8px;
+  border-radius:var(--r-chip);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .badge.exact{background:color-mix(in srgb,var(--ok) 78%,transparent);color:var(--panel)}
 .badge.baked{background:color-mix(in srgb,var(--pop) 78%,transparent);color:var(--panel)}
 .badge.inferred{background:color-mix(in srgb,var(--brand) 74%,transparent);color:var(--panel)}
 .badge.none{background:color-mix(in srgb,var(--dim) 62%,transparent);color:var(--panel)}
 /* 变体角标与命名档徽章同位但不同色：`_hx` 是和谐版、`__N` 是同名另一张，都不是"另一档名字" */
-.badge.var{top:auto;bottom:12px;left:12px;background:color-mix(in srgb,var(--pop) 70%,transparent);color:var(--panel)}
+.badge.var{top:auto;bottom:8px;left:8px;background:color-mix(in srgb,var(--pop) 70%,transparent);color:var(--panel)}
 
 /* ── 二级下拉（「其他」展开成子类目 / 场景背景按词根细分）── */
 .sel{font:inherit;font-size:12.5px;color:var(--txt);background:color-mix(in srgb,var(--panel) 62%,transparent);
@@ -313,9 +240,6 @@ html.dark-on #darkroom{opacity:1}
 </head>
 <body>
 <div class="amb"><i></i><i></i></div>
-<!-- 暗房安全灯：全屏一层径向渐变，亮斑跟着光标。纯 CSS 渐变 + mix-blend-mode，
-     不挂任何 backdrop-filter（§134 盒数红线：本页可到 1000+ 张卡）。 -->
-<div id="darkroom" aria-hidden="true"></div>
 <header>
   <a class="back" href="index.html">← 资产浏览器</a>
   <h1>背景库</h1>
@@ -380,7 +304,6 @@ html.dark-on #darkroom{opacity:1}
 
 <script src="favorites.js"></script>
 <script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
-<script src="site_bg_live.js"></script>  <!-- 动态网站背景：Spine / Live2D（三页共用，正本 gallery_src/site_bg_live.js） -->
 <script>
 /* 命名四档的语义（与 scripts/build_bg_meta.py 一致，页面不许自己升档）：
    exact    这张图自己被配置表的背景字段整值引用，且那行有中文名 → 中文关卡名
@@ -726,7 +649,7 @@ function favCount(){ const e=$('favN'); if(e) e.textContent=Fav.count('bg'); }
 /* 按钮文案跟着"当前这张是不是已设为背景"走 —— 两处按钮共用同一个真相，不各存各的 */
 function syncBg(){
   ['ovbg','ovbg2'].forEach(id=>{ const b=$(id); if(!b) return;
-    const it=cur>=0?view[cur]:null, on=!!(it&&window.SiteBg&&SiteBg.is(it.img,'bg',it.key));
+    const it=cur>=0?view[cur]:null, on=!!(it&&window.SiteBg&&SiteBg.is(it.img));
     b.textContent=on?'已设为背景（点一下取消）':'设为网站背景';
     b.classList.toggle('on',on); });
 }
@@ -737,111 +660,6 @@ function paintClearBg(){ const b=$('clearBg'); if(!b) return;
 $('clearBg').onclick=()=>{ if(window.SiteBg&&SiteBg.get()) SiteBg.clear(); };
 document.addEventListener('sitebgchange',()=>{ paintClearBg(); syncBg(); });
 paintClearBg();
-
-/* ───────── 暗房灯 + 显影（2026-10-20）─────────
-   与音乐库那套**刻意不共享任何代码**：那边是粒子从底下涌、随光标偏折（流体/潮水语言），
-   这边是"一盏灯照过来、照片慢慢显影"（光学/暗房语言）。两页放在一起看要有"换了个房间"的感觉。
-
-   三件事：
-     ① 亮斑跟随：写 documentElement 上的 --lx/--ly（百分比），CSS 里 #darkroom 直接读。
-        为什么写变量而不是直接改 background：改 background 会让浏览器每帧重算渐变
-        （340px 半径的径向渐变在大屏上是几十万像素的着色），写变量只是改自定义属性值，
-        浏览器仍会重绘但省掉了字符串解析；实测 mousemove 到 60、120Hz 都不会掉帧。
-     ② 吸附判定：鼠标最近的那张卡加 `.lit`。用**每行缓存几何**而非逐卡 getBoundingClientRect
-        ——1000 张卡逐个取 rect 是 mousemove 掉帧的头号原因。
-     ③ 只在网格区域启用：滚到页脚/工具栏时灯要暗下去，否则整页永远是"有个洞"。
-
-   ⚠️ 首帧不能直接开：用户刚打开页面、鼠标还没动时，亮斑在默认位置（50%/40%），
-      整页会呈现"中间一个亮圈、四周发黑"——第一次看到会以为页面坏了。
-      ⇒ 只有在**第一次 mousemove 之后**才加 html.dark-on。 */
-(function darkroom(){
-  if(REDUCE) return;
-  const root=document.documentElement;
-  const DR=$('darkroom');
-  if(!DR) return;
-  let raf=0, px=0, py=0, armed=false;
-  let grid=$('grid');
-
-  /* 几何缓存：滚动/筛选/尺寸变化时重算。按"行"存 —— 同一行的卡 y 相同，
-     实际取距离时先用行的 y 做粗筛，通常只需再比 1~3 张卡。 */
-  let rows=[], gridBox=null, cacheAt=-1;
-  function recache(){
-    if(!grid) grid=$('grid');
-    if(!grid) return;
-    /* 转成**文档坐标**：getBoundingClientRect 是视口坐标，滚动后会变；
-       而后面所有比较都在文档坐标里做（absY = 视口y + scrollY）。
-       以前直接拿来相减，滚动一屏之后边界就算偏了。 */
-    gridBox=grid.getBoundingClientRect();
-    gridBox={top:gridBox.top+scrollY, height:gridBox.height};
-    const cards=[...grid.querySelectorAll('.card:not(.miss)')];
-    /* content-visibility:auto 的卡片没进视口时 rect 高度是 0（用的是 intrinsic-size），
-       这对"最近卡"判定影响不大（它们不在光标附近），但会让分组成行错乱 ⇒ 直接丢掉 h=0 的。 */
-    const list=[];
-    for(const c of cards){
-      const r=c.getBoundingClientRect();
-      if(r.height>4) list.push({el:c, x:r.left, y:r.top+scrollY, w:r.width, h:r.height});
-    }
-    list.sort((a,b)=>a.y-b.y||a.x-b.x);
-    rows=[]; let cur=null;
-    for(const it of list){
-      if(!cur||Math.abs(it.y-cur.y)>6){ cur={y:it.y,items:[]}; rows.push(cur); }
-      cur.items.push(it);
-    }
-     cacheAt=scrollY;
-  }
-  function nearest(x,y){          // y 已加上 scrollY
-    let best=null, bd=1e18;
-    for(const row of rows){
-      const dy=y-(row.y+ (row.items[0].h||80)/2);
-      if(Math.abs(dy)>480 && best) break;         // 行已按 y 排序，超出两屏就没必要再看
-      for(const it of row.items){
-        const cx=it.x+it.w/2, cypy=it.y+it.h/2;
-        const dx=x-cx, ddy=y-cypy, d=dx*dx+ddy*ddy;
-        if(d<bd){ bd=d; best=it.el; }
-      }
-    }
-    return best;
-  }
-
-  let lit=null;
-  function paint(){
-    raf=0;
-    root.style.setProperty('--lx', px.toFixed(2)+'%');
-    root.style.setProperty('--ly', py.toFixed(2)+'%');
-    if(!armed){ armed=true; root.classList.add('dark-on'); }
-    /* ⚠️ 顺序不能颠倒：先 recache 再判 gridBox。
-       先前写成 `if(!grid||!gridBox) return;` 然后才 recache —— 而 gridBox 只有 recache 会给值，
-       于是第一次进 paint 必定 return，`rows` 永远为空、`.lit` 永远加不上
-       （症状：灯在动、卡不亮；本轮实测踩了）。 */
-    if(!grid) grid=$('grid');
-    if(!rows.length||!gridBox||Math.abs(scrollY-cacheAt)>4) recache();
-    if(!grid||!gridBox) return;
-    const absY=py/100*document.documentElement.clientHeight+scrollY;
-    const gTop=gridBox.top, gBot=gTop+gridBox.height;
-    if(absY<gTop-40||absY>gBot+40){
-      if(lit){ lit.classList.remove('lit'); lit=null; }
-      return;
-    }
-    const n=nearest(px/100*innerWidth, absY);
-    if(n!==lit){ if(lit) lit.classList.remove('lit'); lit=n; if(n) n.classList.add('lit'); }
-  }
-  function onMove(e){
-    px=e.clientX/innerWidth*100; py=e.clientY/innerHeight*100;
-    if(!raf) raf=requestAnimationFrame(paint);
-  }
-  addEventListener('pointermove', onMove, {passive:true});
-  addEventListener('scroll', ()=>{ if(lit){ lit.classList.remove('lit'); lit=null; } }, {passive:true});
-  addEventListener('resize', ()=>{ grid=$('grid'); gridBox=null; recache(); }, {passive:true});
-  /* 筛选/搜索会整段重建 #grid ⇒ 缓存必须失效。挂在 #grid 的 DOM 变化上（而不是每次 render 都手动调）。 */
-  if(grid){
-    new MutationObserver(()=>{ gridBox=null; cacheAt=-1; if(lit){lit.classList.remove('lit');lit=null;} })
-      .observe(grid,{childList:true});
-  }
-  recache();
-  /* 首次进入：亮斑先在中间，但不点亮（等真的动了鼠标） */
-  root.style.setProperty('--lx','50%');
-  root.style.setProperty('--ly','38%');
-})();
 $('q').addEventListener('input',e=>{q=e.target.value;apply()});
 $('gTheme').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   document.documentElement.dataset.theme=b.dataset.t;

@@ -23,8 +23,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.join(ROOT, 'gallery_src')
 DST = os.path.join(ROOT, 'Output', 'gallery_v2')
 FILES = ['index.html', 'cg_export.html', 'bgm.html', 'backgrounds.html', 'room3d.html', 'theme.css',
-         'liquid_glass.js', 'water_bg.js', 'favorites.js', 'site_bg_live.js',
-         '_gallery_server.py', '启动资产浏览器.bat']
+         'liquid_glass.js', 'water_bg.js', 'favorites.js', '_gallery_server.py', '启动资产浏览器.bat']
 MODE = next((a for a in sys.argv[1:] if a.startswith('--')), '')
 
 def md5(p):
