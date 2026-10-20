@@ -11146,3 +11146,132 @@ im.update=function(dt, el){ const k=l2Speed, d=(dt||0)*k; l2VEl+=d; return origI
 `inputs/gamecfg/bg_category_labels.json`、`inputs/gamecfg/bg_series_labels.json`、
 `inputs/gamecfg/MANIFEST.json`。相关：§153（完整性对账）、§115/§116（前两条命名源）、
 WF-30、**WF-48 追加（2026-10-19）**。
+
+---
+
+## §160 动态背景（Spine/Live2D 作网站背景）三连坑：`Network error` 掩盖 404、Spine 少三步就一帧不画、WebGL 采样取证假阴性（2026-10-20）
+
+**症状链与根因**
+
+1. **`pixi-live2d-display` 只报一句 `Error: Network error.`，不说哪个文件。**
+   同页 PIXI / CubismCore / 库本身全部加载成功，只有模型 `from()` 失败。
+   根因：模块里前缀写死成 `'./'` ⇒ 请求落到 `/gallery_v2/Live2D/x/x.model3.json`（页面在
+   `Output/gallery_v2/`，模型在**上一层** `Output/Live2D/`）→ 404。
+   **判据**：凡报 `Network error` 而其它资源都在，先打印实际 URL，别怀疑 wasm/跨域/库版本。
+   修法：前缀从 `location.href` 派生 `new URL('../', ...).href`，与首页 `const P='../'` 同源。
+   ⇒ 模块自查出口务必留一个 `stats().err`，否则这个 mistake 能吃掉半天。
+
+2. **Spine canvas 挂上了，帧计数纹丝不动（一帧不画、也不报错）。**
+   根因：绘制调用序列漏了三步，且 `camera.zoom` 方向反了。正确序列（逐字对齐首页 `frame()`）：
+   ```
+   gl.clear(gl.COLOR_BUFFER_BIT);
+   scene.camera.position.set(cx, cy, 0);
+   scene.camera.zoom = 1 / baseScale;   // ← 存的是倒数，不是缩放比
+   scene.camera.update();               // ← 漏了就画不出来
+   scene.begin();                       // ← 漏了 drawSkeleton 不落屏
+   scene.drawSkeleton(sk, true);
+   scene.end();
+   ```
+   ⚠️ 别在每帧 `catch` 里 `console.warn`：每帧一条会把控制台刷满、把真错误埋掉。
+   只在第一次 warn（`if(!loop._err) loop._err=1`）。
+
+3. **从外部 `drawImage` 采样 canvas 判断"在不在动" → 恒为同一结果（假失败）。**
+   根因：WebGL 上下文默认 `preserveDrawingBuffer:false`，合成后缓冲被丢弃，读回的是空/旧内容。
+   **假阴性会让人去改本来正确的渲染代码**。
+   修法：在模块内加 `frames` 计数器（Spine 在动画循环里 `frames++`，Live2D 用
+   `app.ticker.add(()=>frames++)`），探针读前后差值（要求 `f1 > f0 + 3`）。
+
+**已排除的假设**：库版本/wasm 路径问题（PIXI 与 CubismCore 都正常）｜跨域（同源本地服务器）｜
+`camera.zoom` 传缩放比也能画（不能，必须倒数）｜`preserveDrawingBuffer` 采样可当绘制判据（不可）。
+
+**涉及文件**：`gallery_src/site_bg_live.js`、`gallery_src/favorites.js`、
+`scripts/diag/site_live_bg_probe.py`。相关：**WF-49**。
+
+---
+
+## §161 `@property` + `conic-gradient(from var(--angle))` 光流不转：fallback 会绕过插值（2026-10-20）
+
+**症状**：给播放器按钮做 hover 旋转光流，`@property --sw { syntax:'<angle>'; inherits:false;
+initial-value:0deg }`，`::before` 背景写 `conic-gradient(from var(--sw,0deg), ...)`，
+hover 时 `--sw:360deg` + `transition:.28s`。结果 `getComputedStyle` 读元素上的 `--sw` **恒为 `0deg`**，
+光流一格都不动。
+
+**根因两条叠加**：
+- `inherits:false` 时，元素与它的 `::before` 各自持有一条独立的 `--sw`；在元素上过渡不会传到伪元素。
+- 更致命的是 `var(--sw, 0deg)` 的 **fallback**：取不到值时直接落到 `0deg`，**绕过任何插值**，
+  于是无论怎么写都不动。
+
+**修法**：别跟 `@property` 较劲，让 `::before` 自己转：
+```css
+.bar button::before{position:absolute;inset:0;border-radius:50%;pointer-events:none;
+  opacity:0;clip-path:circle(50%);          /* 裁旋转体为圆，且不裁掉外发光 */
+  background:conic-gradient(transparent 0deg, ...);
+  transition:opacity .28s var(--ease-ios)}
+.bar button:hover::before{opacity:1;animation:sweep 2.4s linear infinite}
+@keyframes sweep{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+```
+`transform` 走合成层，全浏览器一致、零重绘成本。
+
+**顺带两个约束**：
+- **`overflow:hidden` 会把按钮外发光一起裁掉** ⇒ 用 `clip-path:circle(50%)` 只裁光流；
+  `inset:0` 保证旋转体是正方形（否则转起来会摆）。
+- 取证看 `transform` 矩阵：`matrix(1,0,0,1,0,0)` → `matrix(0.069,0.997,-0.997,0.069,0,0)` 即约 86°。
+
+**已排除的假设**：`inherits:true` 能救（不能，fallback 那层仍然绕）｜在元素上用
+`background:conic-gradient(from ...)` 而非伪元素（同样不动）｜改用 `rotate(prop)` 属性（支持面太窄）。
+
+**涉及文件**：`gallery_src/bgm.html`。相关：**WF-49**。
+
+---
+
+## §162 背景库吸附层「一张都不命中」：`recache()` 被排在 `gridBox` 判空之后 ⇒ 首次必 return（2026-10-20）
+
+**症状**：背景库加"暗房灯吸附最近那张照片"的交互，实测 `.lit` 命中数**恒为 0**，
+鼠标怎么移都是 `none`，但页面本身完全正常（不报错）。
+
+**根因**：`paint()` 里的顺序写反了：
+```js
+if(!grid || !gridBox) return;   // ← gridBox 只有 recache() 会给值
+if(!rows.length) recache();     // ← 永远到不了
+```
+首次进 `paint` 时 `gridBox` 还是 `null` ⇒ 直接 return ⇒ `rows` 永远是空数组 ⇒
+后面所有"找最近"的循环都是空转。
+
+**修法**：先 `recache()` 再判空，并把"缓存为空"也纳入重算条件：
+```js
+if(!grid) grid = $('grid');
+if(!rows.length || !gridBox || Math.abs(scrollY-cacheAt) > 4) recache();
+if(!grid || !gridBox) return;
+```
+
+**第二个坑（同一处）**：`gridBox` 用 `getBoundingClientRect()` 取的是**视口坐标**，
+滚动后就失准 ⇒ recache 时转成文档坐标 `{top:r.top+scrollY, height:r.height}`，
+比较时才统一在文档坐标系里做。用 `MutationObserver` 监听网格变化使缓存失效。
+
+**已排除的假设**：CSS 层叠把 `.lit` 盖住了（不是，`paint()` 压根没产出）｜
+`pointer-events` 拦截（不是）｜行分组算错（不是，先修顺序即命中）。
+
+**涉及文件**：`gallery_src/backgrounds.html`。相关：**WF-49**。
+
+---
+
+## §163 银盐颗粒纹理必然读作「棋盘格 / 图片坏了」：固定间距图案在 2x 屏一定被认出（2026-10-20）
+
+**症状**：背景库做"暗房/接触印样"质感，用两层叠加的 `radial-gradient` 铺 2.4px 网格做银盐颗粒，
+`opacity:.5` + `mix-blend-mode:overlay` → 截图放大后读作**规整明暗斑块**（像马赛克）。
+降级到 1.5px 网格 + `opacity:.18` → 放大后**仍见网格**，只是变淡。
+
+**根因**：任何**固定间距**的合成图案（`radial-gradient` 圆点阵、`repeating-*`、
+SVG `feTurbulence` 做小尺寸平铺）在有缩放/DPR 的屏上都会与像素栅格发生拍频，
+人眼对周期性极度敏感 ⇒ 读作"坏了"而不是"质感"。
+
+**修法**：删掉。用**零图案风险**的替代项表达同一意图：
+- 相纸边缘：`.card .ph{box-shadow:inset 0 0 0 1px color-mix(in srgb,#fff 12%,transparent)}`
+- 显影感：`filter:saturate(.55) brightness(.97)`，hover 回 `saturate(1)`（**别低于 .5**，
+  低于它整页读作"图片加载失败"）
+- 暗房灯：全局径向渐变 `mix-blend-mode:multiply` 跟随 `--lx/--ly`，把注意力压到一张照片上
+
+**已排除的假设**：缩小纹理周期能藏住（不能，只是变淡）｜`overlay/blob` 之类的混合模式能融掉
+网格（不能，反而强化明暗节奏）｜降低不透明度到 0.1 以下（能藏但质感也没了，不如不做）。
+
+**涉及文件**：`gallery_src/backgrounds.html`。相关：§134/§136/§138（玻璃与纹理的同类判据）。

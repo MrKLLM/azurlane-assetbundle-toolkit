@@ -1,7 +1,7 @@
 ---
 name: spine-web-runtime-integration
-description: 在网页里集成 Spine 3.8 (spine-webgl) 运行时做动态立绘渲染与批量出图，覆盖 .skel/.json 骨架分流、atlas 多页加载、必须 setSkin（否则命名 skin 独有部件整块不显示）、**多层之间的绘制序（层名后缀启发式必翻车，只能取引擎层级；含"某一层整块看不见"如何区分是没渲染还是被盖住）**、setup pose 与动画第 0 帧是两种语义、相机视口与 fit 包围盒陷阱（含"恒不渲染的巨幕遮罩撑爆取景"与"不透明纯色黑底撑爆取景"两类，以及判据必须落在取景那一刻）、readPixels 在实时 viewer 里不可用、0 秒占位动画过滤、TDZ 变量遮蔽、无头 CDP 验收判据。当需要让 .skel/.atlas 模型在浏览器里动起来、反馈"模型缺胳膊少腿/比例怪/层加载失败/导出出来是中间一小块四周全黑/**少了个人/被另一块盖住**"、或要批量渲染 Spine 立绘成 PNG 时使用。触发词：Spine 网页播放、spine-webgl、spine-all.js、SkeletonBinary、SkeletonJson、atlas 图集页、setSkin、皮肤、SceneRenderer、比例怪、缺下半身、部件不显示、setup pose、CG 导出、层失败、动态立绘渲染、骨骼动画截图、取景、包围盒、画面太小、只占中间一小块、四周全黑、fit、层序、绘制序、遮挡、少了个人、谁压谁。不适用于 AssetBundle 侧的 Spine 资源还原与页纹理补齐（那是 unity-assetbundle-painting-restore），也不适用于 Live2D 网页集成（live2d-web-runtime-integration）。
-version: 1.1.7
+description: 在网页里集成 Spine 3.8 (spine-webgl) 运行时做动态立绘渲染与批量出图，覆盖 .skel/.json 骨架分流、atlas 多页加载、必须 setSkin（否则命名 skin 独有部件整块不显示）、**多层之间的绘制序（层名后缀启发式必翻车，只能取引擎层级；含"某一层整块看不见"如何区分是没渲染还是被盖住）**、setup pose 与动画第 0 帧是两种语义、相机视口与 fit 包围盒陷阱（含"恒不渲染的巨幕遮罩撑爆取景"与"不透明纯色黑底撑爆取景"两类，以及判据必须落在取景那一刻）、readPixels 在实时 viewer 里不可用、0 秒占位动画过滤、TDZ 变量遮蔽、无头 CDP 验收判据，**以及把骨架当网站背景用（§14：七步绘制序列少一步就一帧不画、`camera.zoom` 存倒数、帧计数才是"在不在动"的唯一证据）**。当需要让 .skel/.atlas 模型在浏览器里动起来、反馈"模型缺胳膊少腿/比例怪/层加载失败/导出出来是中间一小块四周全黑/**少了个人/被另一块盖住**"、或要批量渲染 Spine 立绘成 PNG 时使用。触发词：Spine 网页播放、spine-webgl、spine-all.js、SkeletonBinary、SkeletonJson、atlas 图集页、setSkin、皮肤、SceneRenderer、比例怪、缺下半身、部件不显示、setup pose、CG 导出、层失败、动态立绘渲染、骨骼动画截图、取景、包围盒、画面太小、只占中间一小块、四周全黑、fit、层序、绘制序、遮挡、少了个人、谁压谁。不适用于 AssetBundle 侧的 Spine 资源还原与页纹理补齐（那是 unity-assetbundle-painting-restore），也不适用于 Live2D 网页集成（live2d-web-runtime-integration）。
+version: 1.1.8
 ---
 
 # Spine 网页运行时集成与批量出图
@@ -452,11 +452,52 @@ headless 里"等 16 秒"实际只推进约 2 秒动画。给页面加 `__seekAni
 并且文案不许用"已剔除"这类像删了东西的词。切换后记得把 `zoom` 复位，
 否则用户停在旧机位上，点了等于没点。
 
+## 14. 把骨架当**背景**用：轻量版渲染 + 少一步就一帧不画 + 帧计数取证（2026-10-20 实测）
+
+用途：让 Spine 动态皮肤像背景图那样"设为网站背景"。这和查看器是两件事，别复用查看器代码
+（查看器要取景修正、背景巨幕剔除、skin 覆盖度循环选举、点击命中；背景只要全身居中、动起来、别抢戏）。
+
+**绘制调用序列必须完整**（本项目逐字对齐首页 `frame()`）。少任何一步都**不报错、只是画面不动**：
+
+```js
+gl.clear(gl.COLOR_BUFFER_BIT);
+scene.camera.position.set(cx, cy, 0);
+scene.camera.zoom = 1 / baseScale;   // 存的是倒数，不是缩放比 ← 最容易写反
+scene.camera.update();               // 漏了就不出画面
+scene.begin();                       // 漏了 drawSkeleton 不落屏
+scene.drawSkeleton(sk, true);
+scene.end();
+```
+
+**判红形状**：canvas 挂上了、尺寸正常、`stats()` 里 `live:true`，但帧计数纹丝不动。
+⇒ 直接照着上面七行对，别去怀疑 atlas / setSkin / 层级。
+
+**"在不在动"只能用模块内的帧计数取证。** 从外部 `drawImage` 采样 canvas 读回的是空/旧缓冲
+（`preserveDrawingBuffer:false`），两次采样必然相同 —— 这是**假阴性**，会把本来正确的渲染代码改坏。
+做法：在动画循环里 `frames++`（背景模块暴露 `stats().frames`），探针要求 `f1 > f0 + 3`。
+
+**背景模式的三层防交互**，缺一层用户就能摸到它：
+`pointer-events:none` + `z-index:0` + 不接管任何鼠标事件。
+验法：`document.elementFromPoint(内宽/2, 内高/2)` 必须命中内容元素，**不能**是背景宿主节点。
+
+**只加载主层**：背景不需要分层全部 parts，`parts[0]` 即可；`pickSkin()` 只测 setup pose
+（不跑"每动画 × 多个时间点"的覆盖度循环，那是查看器的活）。取景用「contain 到高度 94%、底部对齐」，
+脚要踩在视口下沿，否则下半身被裁。
+
+**资源前缀**：页在 `Output/gallery_v2/`，骨架在上一层 `Output/Spine_v2/` ⇒ 前缀必须由
+`location.href` 派生 `../`，写死 `./` 必 404。
+
+**别在每帧 `catch` 里 `console.warn`**：每帧一条会把控制台刷满、把真错误埋掉，只在第一次 warn。
+
+涉及：`gallery_src/site_bg_live.js`、验收 `scripts/diag/site_live_bg_probe.py`、
+判据 `docs/WORKFLOWS.md` WF-49、根因 `docs/TROUBLESHOOTING.md` §160。
+
 ## 涉及文件与延伸
 
 本项目实现与取证（技能正文只留方法，细节回文档，避免双份维护）：
 
 - 前端渲染与皮肤下拉：`gallery_src/index.html`（与 `Output/gallery_v2/index.html` 同 inode 硬链，**只原地编辑**）
+- 动态背景模块（三页共用）：`gallery_src/site_bg_live.js` + `scripts/diag/site_live_bg_probe.py`（§14）
 - 批量出图页：`gallery_src/cg_export.html`（`ANIM_FRAME` 开关）
 - 出图驱动：`scripts/diag/run_cg_export.py`（`--only` / `--size` / `--extra 'animFrame=1'` / `--redo`）
 - skin 影响面扫描：`scripts/diag/spine_skin_scan.py`（每 part 一行 JSON + `SUMMARY` 行；>8 分钟走 `run_detached.py`）

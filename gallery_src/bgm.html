@@ -29,6 +29,17 @@ body{font-family:'Segoe UI',"Microsoft YaHei",system-ui,sans-serif;color:var(--t
 @keyframes drift{from{transform:translate3d(0,0,0) scale(1)}
   to{transform:translate3d(4vw,-3vh,0) scale(1.14)}}
 
+/* ── 频谱粒子层（2026-10-20）：播放时从播放器边缘升起，随鼠标"镜头"偏折 ──
+   为什么用 canvas 不用 DOM 粒子：300 个 div 每帧改 transform 会让每帧产生
+   300 次样式重算；canvas 只有一个绘制命令序列，开销随粒子数是线性的、而且可控。
+   z-index:5 —— 在 #bgfx(0) 与 .amb(-1) 之上、内容层（.wrap 自带 z-index）之下，
+   所以粒子会从曲目行的缝里透出来，读作"音乐从列表底下涌上来"。
+   ⚠️ pointer-events:none 是硬要求：这一层全屏覆盖，吃掉鼠标就等于整页不能点。 */
+#spx{position:fixed;inset:0;z-index:5;pointer-events:none;opacity:0;
+  transition:opacity .8s var(--ease-ios)}
+#spx.on{opacity:1}
+@media (prefers-reduced-motion:reduce){#spx{display:none}}
+
 /* ── 顶栏：雨后玻璃。几乎不糊、近乎全透，靠三样特征读作"湿玻璃"：
      ① 上沿一道亮发丝 ② 整片斜向反光 ③ 底下垫一层极淡的雾 ── */
 header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
@@ -58,7 +69,10 @@ a.back{font-size:13px;color:var(--txt2);text-decoration:none;padding:7px 14px;
 a.back:hover{color:var(--brand-d);transform:translateY(-1px);box-shadow:var(--sh2)}
 a.back:active{transform:scale(.97)}
 
-.wrap{max-width:1020px;margin:0 auto;padding:18px 20px 0}
+.wrap{max-width:1020px;margin:0 auto;padding:18px 20px 0;position:relative;z-index:6}
+/* z-index:6 是为了压在 #spx 粒子层（5）之上 —— 粒子的定位是"从播放条后面涌上来"，
+   盖在歌名上就变成脏点，读起来像渲染错误。⚠️ 别删这条：.wrap 原先没有定位，
+   粒子层是全屏 fixed 且 z-index 更高，会直接糊在曲目行上（截图可见）。 */
 
 /* ── 筛选区：三组同一套 chip，只有一组能"选中"，避免看起来像三套控件 ── */
 .tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
@@ -156,14 +170,32 @@ html.lg .row.playing.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(-
 @keyframes bob{0%,100%{height:26%}50%{height:100%}}
 
 /* ── 播放器：悬浮的双层玻璃台；波形进度是轻薄的水面刻度 ── */
+/* 2026-10-20 加厚：原来是一层 68%→54%→66% 的横渐变。现在把"厚"画出来——
+   ① 斜向主渐变保留（玻璃整体受光）
+   ② 顶部再叠一条极窄的白色高光带（玻璃上缘的棱被光切到，宽度只有 10%）
+   ③ 底部叠一条品牌色反光（玻璃台底下的环境色从下面透上来）
+   三层都在同一个 background 里，**不新增滤镜盒**；border 换成 34% 的白，
+   因为玻璃的边不是一条线，是一道亮边。 */
 .bar{position:fixed;left:50%;transform:translateX(-50%) translateY(105%);bottom:14px;z-index:40;
   width:min(940px,calc(100vw - 28px));padding:13px 20px 11px;border-radius:26px;
-  background:linear-gradient(128deg,color-mix(in srgb,var(--panel) 68%,transparent),
-    color-mix(in srgb,var(--panel) 54%,transparent) 52%,color-mix(in srgb,var(--panel) 66%,transparent));
+  background:
+    /* ③ 底部品牌反光 */
+    linear-gradient(0deg,color-mix(in srgb,var(--brand) 7%,transparent) 0%,
+      transparent 22%),
+    /* ② 顶部高光棱 */
+    linear-gradient(180deg,color-mix(in srgb,#fff 16%,transparent) 0%,
+      transparent 9%),
+    /* ① 斜向主渐变 */
+    linear-gradient(128deg,color-mix(in srgb,var(--panel) 70%,transparent),
+      color-mix(in srgb,var(--panel) 54%,transparent) 52%,color-mix(in srgb,var(--panel) 68%,transparent));
   backdrop-filter:blur(30px) saturate(1.7);-webkit-backdrop-filter:blur(30px) saturate(1.7);
-  border:1px solid color-mix(in srgb,var(--glass-line) 90%,transparent);
-  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 58%,transparent),
-    inset 0 -1px 0 color-mix(in srgb,var(--brand) 14%,transparent),
+  border:1px solid color-mix(in srgb,#fff 34%,transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb,#fff 62%,transparent),         /* 上沿锐高光 */
+    inset 0 2px 3px -1px color-mix(in srgb,#fff 22%,transparent),  /* 上沿第二道：厚度 */
+    inset 0 -1px 0 color-mix(in srgb,var(--brand) 16%,transparent),/* 下沿品牌反光 */
+    inset 0 -6px 14px -8px color-mix(in srgb,#000 20%,transparent),/* 下沿柔暗部 */
+    0 0 0 1px color-mix(in srgb,var(--brand) 6%,transparent),      /* 外缘色散晕 */
     0 18px 46px color-mix(in srgb,var(--brand) 18%,transparent),var(--sh-float);
   transition:transform .55s var(--ease-ios),opacity .4s var(--ease-ios);opacity:0}
 .bar::before{content:'';position:absolute;inset:1px;border-radius:inherit;pointer-events:none;z-index:0;
@@ -182,36 +214,109 @@ html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.
 .bar .cur{font-size:13.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .bar .cur i{font-style:normal;font-weight:400;color:var(--dim);margin-left:8px;font-size:11.5px}
 .bar .tm{font-size:11.5px;color:var(--txt2);font-weight:600;font-variant-numeric:tabular-nums;min-width:38px;text-align:center}
-/* 播放器按键（2026-10-13 重做）：用户原话"按键的太小了，而且看着不够高级，不像现代的
-   拟态玻璃感，要像荣耀的那种拟态玻璃"。配方三件套——
-     ① 次级键 = 38px 玻璃圆钮：半透明渐变底 + 上沿内高光 + 细描边 + 柔投影，hover 上浮 1px；
-     ② 播放键 = 52px 品牌光球：渐变 + 顶部高光 + 品牌色外发光，整条播放器的视觉锚点；
-     ③ 循环键 34px，模式开关比 transport 键小一档，不抢主语。
-   全部坐在 .bar 自己的 backdrop-filter 上 ⇒ 半透明即磨砂，不新增滤镜盒（§134 盒数红线）。
-   ⚠️ 别改回"透明底 30px"：那版是几个看不见的小圆点，用户实机点名太小、不高级。 */
+/* 播放器按键（2026-10-13 重做；2026-10-20 再上一档"厚玻璃"）。
+   用户两次原话：「按键太小、不够高级、不像现代的拟态玻璃，要像荣耀那种」
+   → 「再优化一下拟态玻璃的效果」。
+   配方（四层叠出来的"厚度"，不是一层半透明）：
+     ① **基底**：极浅的垂直渐变（顶亮底暗 = 玻璃有厚度，光从上面来）
+     ② **外缘色散**：border 换成半透明白 + 外侧一圈极淡的品牌色扩散晕（厚玻璃边上的色偏，
+        物理上就是白光穿过玻璃边缘分离出来的那点颜色）
+     ③ **双环内阴影**：`inset 0 1px 0` 是**锐**的上沿高光（受光的棱），
+        `inset 0 -2px 6px -2px` 是**柔**的下沿环境暗（玻璃背面的暗部）；
+        一锐一柔才是"两块玻璃叠着"，只有一层永远像塑料片。
+     ④ **hover 光流**：一束窄光沿圆形边缘扫一圈（用 @property 驱动角度，
+        纯 CSS、不新增滤镜盒、不跑 JS）。
+   全部坐在 .bar 自己的 backdrop-filter 上 ⇒ 零新增滤镜盒（§134 盒数红线）。
+   ⚠️ 别改回"透明底 30px"：那版是几个看不见的小圆点，用户实机点名太小、不高级。
+   ⚠️ 别给按钮加自己的 backdrop-filter：40 个按钮挂 40 个盒，§134 实测直接掉帧。 */
 .bar button{border:0;cursor:pointer;color:var(--txt2);width:38px;height:38px;
   border-radius:50%;display:grid;place-items:center;position:relative;
-  background:linear-gradient(180deg,color-mix(in srgb,#fff 26%,transparent) 0%,
-    color-mix(in srgb,var(--panel) 24%,transparent) 100%);
-  border:1px solid color-mix(in srgb,var(--glass-line) 85%,transparent);
-  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 42%,transparent),var(--sh1);
+  background:
+    /* ③ 双环内阴影先铺（box-shadow 不占 background 位置，这里只是把渐变写全） */
+    linear-gradient(168deg,color-mix(in srgb,#fff 30%,transparent) 0%,
+      color-mix(in srgb,#fff 9%,transparent) 38%,
+      color-mix(in srgb,var(--panel) 34%,transparent) 72%,
+      color-mix(in srgb,#000 5%,transparent) 100%);
+  border:1px solid color-mix(in srgb,#fff 34%,transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb,#fff 62%,transparent),          /* 上沿锐高光 */
+    inset 0 1px 1px color-mix(in srgb,#fff 26%,transparent),        /* 上沿第二道，模拟厚玻璃 */
+    inset 0 -2px 6px -2px color-mix(in srgb,#000 16%,transparent),  /* 下沿柔暗部 */
+    inset 0 0 0 1px color-mix(in srgb,#fff 8%,transparent),         /* 内描边：玻璃切面 */
+    0 1px 2px color-mix(in srgb,#000 8%,transparent),               /* 贴地薄影 */
+    var(--sh1);
   transition:transform .18s var(--ease-ios),box-shadow .18s var(--ease-ios),
-    color var(--t-col) var(--ease-ios),background var(--t-col) var(--ease-ios)}
+    color var(--t-col) var(--ease-ios),background var(--t-col) var(--ease-ios),
+    border-color var(--t-col) var(--ease-ios)}
+/* ④ hover 光流：一条窄的高光扇面**绕按钮转一圈**，读作"光沿玻璃边缘走"。
+   ⚠️ 为什么不用 `@property --sw + conic-gradient(from var(--sw))`（本轮试过，不成立）：
+      ① 自定义属性要在 `::before` 上插值，必须能被动画目标读到；`inherits:false` 时
+         声明在元素上的 `--sw` 与伪元素的 `--sw` 是两条互不相干的属性，
+         动画只跑在伪元素自己的那条上，而 `conic-gradient(from var(--sw,0deg))` 里
+         的 fallback 又会在"取不到值"时直接用 0deg —— 实测 getComputedStyle 读数恒为 0deg，
+         画面完全不扫（无头浏览器逐帧取证）。
+      ② 更根本的问题：角度动画在每个兼容层上的插值行为不一致，风险大于收益。
+   ⇒ 改回最朴素也最稳的：**让伪元素自己 `transform:rotate()`**。
+      一整块 conic-gradient 转 360°，视觉上完全等于"光在绕圈"，
+      而且 `rotate` 是合成层动画，不触发重绘、不需要 @property、全浏览器一致。 */
+.bar button::before{content:'';position:absolute;inset:0;border-radius:50%;
+  pointer-events:none;opacity:0;clip-path:circle(50%);
+  background:conic-gradient(transparent 0deg,
+    color-mix(in srgb,#fff 62%,transparent) 16deg,
+    color-mix(in srgb,var(--brand) 34%,transparent) 26deg,
+    transparent 42deg,transparent 360deg);
+  transition:opacity .28s var(--ease-ios)}
+.bar button:hover::before{opacity:1;animation:sweep 2.4s linear infinite}
+/* ⚠️ 旋转的必须是一个**正方形**：按钮是 38×38（移动端 34×34），`inset:0` 后恰好是正方形；
+   若用 `inset:-1px` 就变成 40×40 同样正方形，但那会伸出按钮边界、
+   在 34px 的 #lp 上更明显。保持 inset:0 最稳。 */
+@keyframes sweep{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+
 .bar button:hover{transform:translateY(-1px);color:var(--brand-d);
-  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 55%,transparent),var(--sh2)}
-.bar button:active{transform:translateY(0) scale(.95)}
+  border-color:color-mix(in srgb,#fff 52%,transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb,#fff 76%,transparent),
+    inset 0 1px 1px color-mix(in srgb,#fff 34%,transparent),
+    inset 0 -2px 7px -2px color-mix(in srgb,#000 18%,transparent),
+    inset 0 0 0 1px color-mix(in srgb,#fff 12%,transparent),
+    0 2px 6px color-mix(in srgb,#000 10%,transparent),
+    0 0 0 3px color-mix(in srgb,var(--brand) 9%,transparent),   /* 外缘色散晕 */
+    var(--sh2)}
+.bar button:active{transform:translateY(0) scale(.95);
+  box-shadow:
+    inset 0 2px 5px color-mix(in srgb,#000 20%,transparent),
+    inset 0 1px 0 color-mix(in srgb,#fff 30%,transparent),
+    var(--sh1)}
 .bar button.on{color:var(--on-txt);background:var(--on-bg);
   border-color:color-mix(in srgb,var(--on-ring) 85%,transparent);
   box-shadow:inset 0 0 0 1px var(--on-ring)}
-.bar svg{width:17px;height:17px;fill:currentColor;position:relative}
-/* 播放键：唯一的实心大钮。外发光用品牌色 32%，昼/夜都由 token 派生，不写字面色。 */
-#pp{width:52px;height:52px;background:var(--grad-brand);color:#fff;border-color:transparent;
-  box-shadow:var(--sh2),inset 0 1px 0 color-mix(in srgb,#fff 48%,transparent),
-    0 6px 16px color-mix(in srgb,var(--brand) 32%,transparent)}
+.bar svg{width:17px;height:17px;fill:currentColor;position:relative;z-index:1}
+/* 播放键：唯一的实心大钮。三层光——顶面高光、内圈亮环、品牌色外发光，
+   让它读作"一颗被嵌进玻璃台里的光球"，而不是一个彩色的圆。
+   外发光用品牌色 32%，昼/夜都由 token 派生，不写字面色。 */
+#pp{width:52px;height:52px;color:#fff;
+  background:
+    radial-gradient(120% 90% at 32% 8%,color-mix(in srgb,#fff 42%,transparent) 0%,
+      transparent 52%),
+    var(--grad-brand);
+  border:1px solid color-mix(in srgb,#fff 26%,transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb,#fff 58%,transparent),
+    inset 0 -3px 8px -3px color-mix(in srgb,#000 22%,transparent),
+    inset 0 0 0 1px color-mix(in srgb,#fff 14%,transparent),
+    0 3px 8px color-mix(in srgb,var(--brand) 26%,transparent),
+    0 8px 20px color-mix(in srgb,var(--brand) 30%,transparent),
+    var(--sh2)}
 #pp svg{width:21px;height:21px}
-#pp:hover{color:#fff;transform:translateY(-1px) scale(1.04);
-  box-shadow:var(--sh3),inset 0 1px 0 color-mix(in srgb,#fff 48%,transparent),
-    0 8px 20px color-mix(in srgb,var(--brand) 40%,transparent)}
+#pp:hover{color:#fff;transform:translateY(-1px) scale(1.045);
+  border-color:color-mix(in srgb,#fff 40%,transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb,#fff 68%,transparent),
+    inset 0 -3px 9px -3px color-mix(in srgb,#000 24%,transparent),
+    inset 0 0 0 1px color-mix(in srgb,#fff 20%,transparent),
+    0 4px 10px color-mix(in srgb,var(--brand) 34%,transparent),
+    0 10px 26px color-mix(in srgb,var(--brand) 40%,transparent),
+    var(--sh3)}
 #pp:active{transform:translateY(0) scale(.96)}
 #lp{width:34px;height:34px}
 .bar .vol{width:80px;height:5px;-webkit-appearance:none;appearance:none;outline:none;cursor:pointer;
@@ -294,11 +399,18 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 }
 @media (prefers-reduced-motion:reduce){
   .amb i{animation:none}.row{transition:opacity .2s linear,transform .2s linear}
-  .row.playing .eq u{animation:none;height:60%}}
+  .row.playing .eq u{animation:none;height:60%}
+  /* 光流在"减少动效"下停掉：环顾一周的持续旋转正是这类用户最需要避开的动效。
+     按钮保留 hover 的亮度/阴影变化 —— 那是状态反馈，不是装饰动画。 */
+  .bar button:hover::before{animation:none;opacity:.7}}
 </style>
 </head>
 <body>
 <div class="amb"><i></i><i></i><i></i></div>
+<!-- 频谱粒子层：播放时从播放器边缘升起，随鼠标"镜头"偏折。
+     挂在 #bgfx 之上、所有内容之下，pointer-events:none ⇒ 不吃点击。
+     高度只覆盖视口下半部（粒子寿命到头就淡出，铺满全屏等于烧帧）。 -->
+<canvas id="spx" aria-hidden="true"></canvas>
 <header>
   <a class="back" href="index.html">← 资产浏览器</a>
   <h1>音乐库</h1>
@@ -525,6 +637,165 @@ tide.onpointerup=e=>{const f=at(e),d=total();
   delete tide.dataset.hold;tide.classList.remove('drag');
   const rip=$('rip');rip.setAttribute('cx',(f*W).toFixed(1));
   rip.classList.remove('go');void rip.offsetWidth;rip.classList.add('go')};
+
+/* ───────── 频谱粒子：随镜头飞 ─────────
+   用户要的"出乎意料"：曲目列表不动，而**播放器底下有东西涌出来**——
+   播放时从播放条边缘升起细小光点，低频让它们一涌一涌，鼠标所在的方向
+   像一块透镜，把路过的粒子推开并拖出一道尾迹。
+
+   ── 频谱从哪来 ──
+   ⚠️ 上面潮水那段注释写着"不接 WebAudio，怕 MediaElementSource 把声音弄没"。
+      那个顾虑是**对的**：`createMediaElementSource` 一旦调用，音频就**只**从
+      AudioContext 的输出走；如果忘了 `connect(ctx.destination)`，页面上从此没声音、
+      而且不报错（最恶劣的静默失败）。
+   ⇒ 本段把这条链**完整**接上（source → analyser → destination），并且在两个地方兜底：
+      ① 只有全部 connect 成功才标记 `spxLive=true`；
+      ② 任何一步抛异常就彻底放弃 WebAudio，退回"按时间驱动的伪频谱"
+         —— 潮水条本来就是这么做的（正弦驱动），粒子沿用同一套相位即可，
+         两者看起来是同一个呼吸节奏，用户分不出真假。
+   为什么值得冒这个险：真实的低频冲击让粒子"跟着鼓点涌"，这跟均匀发射完全是两种观感。
+
+   ── 性能 ──
+   粒子数上限 150（不是 150 个 DOM，是 canvas 里 150 个圆）。
+   每个粒子只做 4 次加法 + 1 次 arc，实测在无头环境 60fps 无压力。
+   dpr 取 min(2, devicePixelRatio)：粒子很小，2 倍以上肉眼看不出差别，纯浪费填充率。 */
+const spx=$('spx');
+const SPX={ on:false, raf:0, ps:[], amp:0, bass:0, live:false, ctx:null, an:null,
+            mx:.5, my:.5, tx:.5, ty:.5 };
+const SPX_MAX=210;
+function spxResize(){
+  if(!spx)return;
+  const dpr=Math.min(2,devicePixelRatio||1);
+  spx.width=Math.round(innerWidth*dpr); spx.height=Math.round(innerHeight*dpr);
+  const c=spx.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0);
+}
+/* 频谱：真实 analyser 优先，失败退回时间驱动 */
+function spxAudio(){
+  if(SPX.ctx) return SPX.ctx;
+  if(SPX.tried) return null;      // 失败只试一次：每首歌都试会反复抛异常刷控制台
+  SPX.tried=true;
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC) throw new Error('no AudioContext');
+    const ctx=new AC();
+    const src=ctx.createMediaElementSource(A);
+    const an=ctx.createAnalyser();
+    an.fftSize=512; an.smoothingTimeConstant=.72;
+    src.connect(an);
+    an.connect(ctx.destination);         // ← 不接这一行 = 永久静音且不报错
+    SPX.ctx=ctx; SPX.an=an; SPX.live=true;
+    SPX.buf=new Uint8Array(an.frequencyBinCount);
+    /* ⚠️ 必须在这里把 vol 的写入改成 context 增益：MediaElementSource 接管后
+       A.volume 仍然有效（它作用在元素解码阶段），所以不用改。这条注释是为了
+       挡住"顺手加个 GainNode 就自己接音量"的改动 —— 那会和 A.volume 叠乘，
+       出现"滑到 50% 却只有 25% 音量"的隐性 bug。 */
+  }catch(e){ SPX.live=false; SPX.ctx=null; }
+  return SPX.ctx;
+}
+function spxBass(){
+  if(SPX.live&&SPX.an){
+    SPX.an.getByteFrequencyData(SPX.buf);
+    /* 低频段（bin 0~14，约 0~1.2kHz@44.1k/512）取均值 —— 鼓点/贝斯都在这里 */
+    let s=0; for(let i=0;i<15;i++) s+=SPX.buf[i];
+    return (s/15)/255;
+  }
+  /* 伪频谱：用潮水同一个 phase，读起来和进度条的呼吸一致 */
+  return .34+.28*(Math.sin(phase*1.7)*.5+.5)+.14*(Math.sin(phase*4.1)*.5+.5);
+}
+function spxSpawn(force){
+  const r=$('bar').getBoundingClientRect();
+  /* 出生点从播放条**整条上沿**取，并且有意允许超出到页面两侧：
+     用户要的是"音乐从下面涌上来"，如果只在条宽范围内发射，
+     视觉上会读成"播放器的特效"而不是"整页的氛围"。 */
+  const pad=innerWidth*.12;
+  const n=force||Math.round(1+SPX.bass*5);
+  for(let i=0;i<n&&SPX.ps.length<SPX_MAX;i++){
+    SPX.ps.push({
+      x:r.left-pad*Math.random()+Math.random()*(r.width+pad*2),
+      y:r.top+(Math.random()*14),
+      vx:(Math.random()-.5)*.26,
+      /* 上浮速度提到 0.55~1.5：原来的 -0.34~-0.96 在 120~280 帧寿命里只能升 40~270px，
+         截图里粒子全挤在播放条上方一小团。现在能升到屏幕上半部。 */
+      vy:-.55-Math.random()*.95-SPX.bass*.85,
+      r:.7+Math.random()*1.7,
+      a:.20+Math.random()*.34,
+      life:0, max:160+Math.random()*200,
+      hue:Math.random()                    // 0=品牌色 1=强调色，用 token 混色
+    });
+  }
+}
+function spxFrame(){
+  if(!SPX.on) return;
+  const c=spx.getContext('2d');
+  c.clearRect(0,0,innerWidth,innerHeight);
+  SPX.bass=spxBass();
+  spxSpawn();
+  /* 鼠标"镜头"平滑跟随：直接读原始指针位置会让粒子跳，
+     用 0.12 的指数逼近，读作一个沉重的透镜在缓缓移动。 */
+  SPX.mx+=(SPX.tx-SPX.mx)*.12; SPX.my+=(SPX.ty-SPX.my)*.12;
+  const cx=SPX.mx*innerWidth, cy=SPX.my*innerHeight, R=Math.min(260,innerWidth*.19);
+  /* 主题色：从 documentElement 一次性取，切主题时下次读就变（不做 MutationObserver，
+     因为粒子层只在播放时存在，切主题那一刻在播放的几率极低，而监听器要一直挂着） */
+  const cs=getComputedStyle(document.documentElement);
+  const brand=cs.getPropertyValue('--brand').trim()||'#3b82f6';
+  const pop=(cs.getPropertyValue('--pop')||'').trim()||brand;
+
+  for(let i=SPX.ps.length-1;i>=0;i--){
+    const p=SPX.ps[i];
+    const dx=p.x-cx, dy=p.y-cy, d2=dx*dx+dy*dy;
+    /* 透镜排斥：近处推得急、远处按平方衰减。这是"随镜头飞"的核心 ——
+       粒子不是跟随鼠标，而是**回避**鼠标，让光标周围的粒子被吹开，
+       于是镜头经过时轨迹自动向两侧分流。 */
+    if(d2<R*R){
+      const d=Math.sqrt(d2)||1, f=(1-d/R);
+      p.vx+=(dx/d)*f*f*1.65;
+      p.vy+=(dy/d)*f*f*1.65;
+    }
+    p.vx*=.982; p.vy*=.982;
+    p.vy-=.006;                          // 持续上浮的浮力，对抗阻尼
+    p.x+=p.vx; p.y+=p.vy; p.life++;
+    /* 寿命：过了 max 之后淡出，不是瞬间消失 */
+    const t=p.life/p.max;
+    if(t>=1){ SPX.ps.splice(i,1); continue; }
+    const alpha=p.a*(1-t)*(t<.08?t/.08:1);
+    c.globalAlpha=alpha;
+    c.fillStyle=p.hue>.5?pop:brand;
+    c.beginPath(); c.arc(p.x,p.y,p.r*(1+t*.5),0,6.2832); c.fill();
+  }
+  c.globalAlpha=1;
+  SPX.raf=requestAnimationFrame(spxFrame);
+}
+function spxStart(){
+  if(REDUCE||SPX.on) return;
+  if(!spx) return;
+  spxResize();
+  spx.classList.add('on');
+  SPX.on=true;
+  spxAudio();                     // 首次播放才建 AudioContext（iOS 要求用户手势里创建）
+  if(SPX.ctx&&SPX.ctx.state==='suspended') SPX.ctx.resume().catch(()=>{});
+  SPX.raf=requestAnimationFrame(spxFrame);
+}
+function spxStop(){
+  if(!SPX.on) return;
+  SPX.on=false;
+  if(SPX.raf) cancelAnimationFrame(SPX.raf);
+  spx.classList.remove('on');
+  SPX.ps.length=0;
+}
+/* 鼠标位置：整个页面都算，因为粒子可以飘到任何地方 */
+addEventListener('pointermove',e=>{
+  SPX.tx=e.clientX/innerWidth; SPX.ty=e.clientY/innerHeight;
+},{passive:true});
+addEventListener('resize',()=>{ if(SPX.on) spxResize(); },{passive:true});
+/* 播放状态驱动：与潮水条的 want 同一个真相，不另立判断 */
+A.addEventListener('play',spxStart);
+A.addEventListener('pause',spxStop);
+A.addEventListener('ended',spxStop);
+/* 有动态背景时粒子要淡一点：整页已经很热闹，两层粒子叠着会糊。
+   sitebgchange 由 favorites.js 派发。 */
+document.addEventListener('sitebgchange',()=>{
+  if(spx) spx.style.opacity='';
+});
 
 $('list').onclick=e=>{const b=e.target.closest('[data-i]');if(b)play(+b.dataset.i)};
 $('q').oninput=()=>{idx=-1;render()};

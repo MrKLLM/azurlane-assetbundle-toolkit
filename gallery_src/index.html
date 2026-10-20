@@ -230,6 +230,16 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
 .bgbtn:hover{transform:translateY(-1px);border-color:var(--brand);color:var(--brand-d)}
 .bgbtn:active{transform:scale(.97)}
 .bgbtn.on{background:var(--grad-brand);color:var(--on-txt);border-color:transparent}
+/* 「Live2D / 动态皮肤」小角标：告诉用户这一下点下去得到的是"会动的背景"还是"一张图"。
+   纯文字、极小、跟在主按钮里 —— 不新增按钮，不抢「设为背景」的主语。 */
+.bgbtn .bgtag{font-style:normal;font-size:9.5px;font-weight:700;letter-spacing:.04em;
+  margin-left:6px;padding:1px 5px;border-radius:4px;vertical-align:1px;
+  background:color-mix(in srgb,#fff 26%,transparent)}
+.bgbtn.on .bgtag{background:color-mix(in srgb,#fff 30%,transparent)}
+/* 「静态图」是次级动作：更轻的描边、更小的字，视觉上明确退到主按钮后面 */
+.bgbtn.alt{padding:4px 8px;font-size:11px;opacity:.86;
+  background:transparent;border-style:dashed}
+.bgbtn.alt:hover{opacity:1}
 .side .hd .t{font-size:22px;font-weight:800;color:var(--txt);line-height:1.15}
 .side .hd .p{font-size:11px;color:var(--dim);margin-top:2px;font-weight:600}
 .meta{padding:8px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);
@@ -525,6 +535,7 @@ main{position:relative;z-index:1}
 
 <script src="./favorites.js"></script>
 <script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
+<script src="site_bg_live.js"></script>  <!-- 动态网站背景：Spine / Live2D（三页共用，正本 gallery_src/site_bg_live.js） -->
 <script src="./index.js"></script>
 <script src="./vendor/spine/spine-all.js"></script>
 <script>
@@ -1024,17 +1035,62 @@ function buildSkinList(s){
 /* 弹窗头部动作：收藏（单位 = 这个角色）+ 把当前皮肤的立绘设成网站背景。
    ⚠️ 每次换皮肤都要重画一遍——「设为背景」的 URL 跟着当前皮肤走，
       留着上一张的就会做出"看着点的是 A、实际设的是 B"这种事。 */
+/* 当前皮肤能做哪种背景？返回 `{kind,url,key,...}` 或 null。
+   优先级 = **能动的优先**（2026-10-20 用户要求动态皮肤/Live2D 也能当背景）：
+     ① Live2D 模型 → kind:'live2d'
+     ② Spine 动态皮肤 → kind:'spine'
+     ③ 静态立绘（CG 优先于 painting）→ kind:'skin'
+   为什么这个顺序：同一个皮肤三种资源通常都在，用户点「设为背景」想要的是"最惊艳的那个"，
+   而动起来的一定比静止的惊艳。静态图仍然可达 —— 点一次设成动态，再点一次取消，
+   想用静态就……先取消再选静态？不，那就没法用了。
+   ⇒ 所以按钮改成**双动作**：主按钮设默认（动态优先），旁边一个小键"用静态图"。
+      默认动作永远是最有表现力的那个，静态图保留成显式选择。 */
+function bgTarget(){
+  const sk=curSkin; if(!sk) return null;
+  const nm=(curShip?curShip.name:'')+(sk.label?(' · '+sk.label):'');
+  const l2=(sk.live2d||'').trim();
+  if(l2) return {kind:'live2d', key:sk.key||'', label:nm, url:'',
+    model:l2, base:sk.live2dBase||sk.key||''};
+  const sp=sk.spine;
+  if(sp&&(sp.folder||sp.parts&&sp.parts.length))
+    return {kind:'spine', key:sk.key||'', label:nm, url:'',
+      folder:sp.folder||sk.key||'', parts:(sp.parts&&sp.parts.length)?sp.parts:[sp.folder||sk.key||'']};
+  const url=P+(sk.cg||sk.image||'');
+  if(!url) return null;
+  return {kind:'skin', key:sk.key||'', label:nm, url:url};
+}
+/* 静态立绘目标（"用静态图"那个小键用）—— 只认图片，不认模型 */
+function skTarget(){
+  const sk=curSkin; if(!sk) return null;
+  const url=P+(sk.cg||sk.image||''); if(!url) return null;
+  return {kind:'skin', key:sk.key||'', url:url,
+    label:(curShip?curShip.name:'')+(sk.label?(' · '+sk.label):'')};
+}
 function renderActs(){
   const el=document.getElementById('mActs'); if(!el||!window.Fav||!curShip) return;
-  const sk=curSkin, url=sk? (P+(sk.cg||sk.image||'')) : '';
+  const tg=bgTarget();
+  if(!tg){ el.innerHTML=Fav.btn('skin',curShip.id,curShip.name); return; }
+  const on=SiteBg.is(tg.url,tg.kind,tg.key);
+  const KINDNAME={live2d:'Live2D',spine:'动态皮肤',skin:'立绘'};
   el.innerHTML = Fav.btn('skin',curShip.id,curShip.name) +
-    (url? '<button class="bgbtn'+(SiteBg.is(url)?' on':'')+'" id="mSetBg" title="'+url+'">'
-        + (SiteBg.is(url)?'已设为背景':'设为网站背景')+'</button>' : '');
+    '<button class="bgbtn'+(on?' on':'')+'" id="mSetBg" data-act="set" '+
+      'data-kind="'+tg.kind+'" title="'+(on?'再点一次取消背景':'把当前皮肤的'+KINDNAME[tg.kind]+'设为整站背景')+'">'+
+      (on?'已设为背景':'设为网站背景')+
+      (tg.kind!=='skin'?'<i class="bgtag">'+KINDNAME[tg.kind]+'</i>':'')+'</button>' +
+    /* 有动态版本时，附带一个"换成静态图"的小键：显式可选，不藏起来 */
+    (tg.kind!=='skin' ? (function(){
+        const st=skTarget(); if(!st) return '';
+        const son=SiteBg.is(st.url,'skin',st.key);
+        return '<button class="bgbtn alt'+(son?' on':'')+'" id="mSetBgStatic" data-act="static" '+
+          'title="用这个皮肤的静态立绘做背景（不动，但更省电）">'+(son?'已用静态图':'静态图')+'</button>';
+      })() : '');
 }
 document.addEventListener('click',e=>{
-  const b=e.target.closest && e.target.closest('#mSetBg'); if(!b) return;
-  const url=b.title, sk=curSkin, nm=(curShip?curShip.name:'')+(sk&&sk.label?(' · '+sk.label):'');
-  SiteBg.toggle({url:url,kind:'skin',key:sk?sk.key:'',label:nm});
+  const b=e.target.closest && e.target.closest('#mSetBg,#mSetBgStatic'); if(!b) return;
+  const act=b.dataset.act;
+  const tg = act==='static' ? skTarget() : bgTarget();
+  if(!tg) return;
+  SiteBg.toggle(tg);
   renderActs();
 });
 /* 收藏变了：正开着「已收藏」这一档时立刻重筛，否则点了星却看着没反应 */

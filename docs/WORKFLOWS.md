@@ -4914,3 +4914,84 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 `scripts/transcode_bgm.py`、`scripts/build_bgm_index.py`。
 本轮为一次性 Python 调用，未固化成独立工具；若再遇到第二次，应落成
 `scripts/diag/extract_apk_layer.py`（参数：包名 / 条目 glob / 目标目录）。相关：**§158**、§154、WF-49。
+
+---
+
+## WF-49 给画廊加「会动的网站背景」：模块与查看器分离 + 三层防交互 + 帧计数取证（2026-10-20）
+
+**适用**：要让 Spine 动态皮肤 / Live2D 模型像背景图那样「设为网站背景」，但**不给它交互**
+（背景不该抢走点击和滚轮），同时在音乐库/背景库各做一套与主界面**语言不同**的鼠标交互。
+
+### 一、判据（每一条都能一条命令/一句采样验到）
+
+1. **必须复用 `SiteBg` 的存储与广播**，不要另立一套 localStorage。
+   `favorites.js` 的 `kind` 扩到四态：`'bg' | 'skin' | 'spine' | 'live2d'`；
+   `sload()` 的接纳判据必须放宽到 `if(o.url || o.kind==='spine' || o.kind==='live2d') return o;`
+   —— 动态记录**没有 url**，只查 `o.url` 的话刷新一次背景就没了（且不报错）。
+2. **动态类型绝不能写 `--site-bg`**。`sapply()` 遇 `spine/live2d` 要
+   `r.style.removeProperty('--site-bg'); r.classList.add('has-sitebg'); return;`。
+   写 `url("")` 会稳定产生一条 404，并让 `has-sitebg` 的层叠判断错乱。
+3. **判等要按类型分派**：动态用 `kind+key`，静态用 `kind+url`。`S.is(url, kind, key)` 新签名。
+4. **动态背景层三层防交互**，缺一层就能被用户摸到：
+   `pointer-events:none` + `z-index:0` + Live2D `autoInteract:false`。
+   验法：`document.elementFromPoint(内宽/2, 内高/2)` 必须命中内容元素（如 `IMG`），**不能**是 `#sitelive`。
+5. **"在不在动"只能看模块内的 `frames` 计数**，差值 `f1 > f0 + 3`。
+   见 §160 第 3 条：外部 `drawImage` 采样是假阴性。
+6. **切换必须撤干净**：从动态切到静态后，canvas 与 `has-livebg` 都要消失；
+   清除后 `stats()` 归零；刷新后能自动恢复（验第 1 条的接纳判据）。
+7. **弹窗里的动作按钮优先级 = 能动的优先**：Live2D > Spine > 静态立绘；
+   有动态版本时额外给一个虚线小键「静态图」，别把原来的能力吃掉。
+
+### 二、做法（模块边界是关键）
+
+**不要复用首页弹窗那 600 行查看器代码。** 查看器的职责是"让你看清这个模型"（取景修正、
+背景巨幕剔除、skin 覆盖度循环选举、点击命中部位），背景的职责是"全身居中、动起来、别抢戏"。
+照抄会把两个不同的东西锁进同一份代码，之后谁都不敢改。
+
+新模块 `gallery_src/site_bg_live.js`（三页共用正本，约 470 行）只做轻量版：
+- 宿主：`#sitelive{position:fixed;inset:0;z-index:0;pointer-events:none}`，
+  `::before/::after` 做上下沿柔化渐变（下沿 26% / 上沿 18%）；
+  `html.has-livebg #bgfx canvas{display:none}`（停掉水面，别两套一起烧 GPU）。
+- **Live2D**：`pixi + pixi-live2d-display`，`Live2DModel.from(url,{autoInteract:false})`；
+  取景用 `internalModel.width/height`（**不是** `mdl.width` 包围盒，会被巨型离屏 quad 撑爆）：
+  ```js
+  var k = Math.min(ch*0.94/natH, cw*1.1/natW);
+  mdl.scale.set(k);
+  mdl.x = cw/2 - (natW/2)*k;
+  mdl.y = ch - natH*k*1.02;      // 底部对齐，脚要踩在视口下沿
+  ```
+- **Spine**：只加载 `parts[0]` 主层（背景不需要分层全部图），`pickSkin()` 只测 setup pose；
+  绘制序列见 §160 第 2 条，**逐字**照抄首页 `frame()`，`camera.zoom` 传 `1/baseScale`。
+- 前缀从 `location.href` 派生 `../`，见 §160 第 1 条。三页都在 `Output/gallery_v2/`，
+  资源在上一层 `Output/`，**写死 `./` 必 404**。
+- 暴露 `window.SiteBgLive = { sync, stop, isLive, stats() }`，`stats()` 回
+  `{kind, hasCanvas, host, live, err, frames}` —— `err` 是唯一的诊断出口，别省。
+
+**两页交互要用不同的"物理"/"光学"母题**，否则两边看着是同一套东西换了个色：
+- 音乐库 = **流体/潮水**：`<canvas id="spx">` 固定层 `z-index:5; pointer-events:none`，
+  `.wrap{z-index:6}` 压在粒子之上；粒子随低频能量上升，鼠标处做**透镜排斥**
+  （`f=(1-d/R)`，`p.vx += (dx/d)*f*f*1.65`）；`SPX_MAX=210` 封顶。
+- 背景库 = **光学/暗房**：`#darkroom` 全局径向渐变 `mix-blend-mode:multiply` 跟随 `--lx/--ly`
+  （380px 半径、中心 34% 透明），卡片做成**相纸**（`padding:6px 6px 0`，照片独立圆角），
+  照片默认去色 `saturate(.55)`、hover 才**显影**成全彩。**不要**做固定间距颗粒纹理，见 §163。
+
+### 三、踩坑（详细根因见对应 §）
+
+- **`pixi-live2d-display` 报 `Network error` 不说是哪个文件** → §160-1。先打印实际 URL。
+- **Spine 挂上 canvas 但一帧不画**：漏 `camera.update()/begin()/end()`，且 `zoom` 要倒数 → §160-2。
+- **从外部采样 WebGL canvas 判断"在不在动"恒为同一结果**（假阴性）→ §160-3，改用 `frames` 计数。
+- **`@property` + `conic-gradient(from var(--angle))` 光流不转**（fallback 绕过插值）→ §161，
+  改用 `::before` 自己 `transform:rotate`。`overflow:hidden` 会裁掉外发光，用 `clip-path:circle(50%)`。
+- **吸附层一张都不命中**：`recache()` 被排在 `gridBox` 判空之后，首次必 return → §162。
+  且 `getBoundingClientRect()` 是视口坐标，要 `+scrollY` 转文档坐标。
+- **银盐颗粒读作棋盘格/图片坏了** → §163，固定间距图案在 2x 屏一定被认出，直接别做。
+- **`createMediaElementSource` 不接 `ctx.destination` 会永久静音且不报错**：接线必须是
+  `src.connect(an); an.connect(ctx.destination);`，缺第一条静音，缺第二条彻底没声。
+  验法：播放中 `ctx.state==='running'` **且** `A.currentTime` 仍在推进（只看后者会被缓存骗）。
+
+### 四、涉及文件
+
+`gallery_src/site_bg_live.js`（新建）、`gallery_src/favorites.js`（`kind` 四态 + `same()` 分派）、
+`gallery_src/index.html`（`bgTarget()/skTarget()` + `renderActs()` + `.bgtag/.bgbtn.alt`）、
+`gallery_src/bgm.html`（播放条玻璃 + `SPX` 粒子）、`gallery_src/backgrounds.html`（暗房 + 相纸 + 吸附）、
+`scripts/deploy_gallery.py`（`FILES` 加一项）。验收：`scripts/diag/site_live_bg_probe.py`（12 条）。

@@ -81,15 +81,37 @@ var SKEY='gallery.sitebg';
 var S={ v:null };
 function sload(){
   try{ var o=JSON.parse(localStorage.getItem(SKEY)||'null');
-       return (o&&o.url)?o:null; }catch(e){ return null; }
+       if(!o) return null;
+       /* 动态类型没有 url（资源靠 kind+key 定位），所以判据是「有 url **或** 是已知的活类型」。
+          只查 url 会把用户设过的动态背景在刷新后静默丢掉。 */
+       if(o.url||o.kind==='spine'||o.kind==='live2d') return o;
+       return null; }catch(e){ return null; }
 }
+/* `kind` 现在有四种：
+     'bg'     —— 壁纸图，cover 铺满
+     'skin'   —— 皮肤立绘（透明 PNG），contain + 贴底，让角色"站"在屏幕下沿
+     'spine'  —— Spine 动态皮肤（2026-10-20 新增）：**不用 background-image**，
+                由 site_bg_live.js 挂一层 canvas；这里只负责把类名/状态维护好
+     'live2d' —— Live2D 模型（同上）
+   ⚠️ 动态类型**绝不能**走 `--site-bg: url()`：S.v.url 对它们是空串，
+      设下去会得到 `url("")` —— 浏览器把它当成一次无效请求，控制台报一条 404，
+      而背景其实是"没有"，症状是"设了背景但什么都没发生"。 */
+function isLiveKind(k){ return k==='spine'||k==='live2d'; }
 function sapply(){
   var r=document.documentElement;
   if(!S.v){ r.classList.remove('has-sitebg');
             r.style.removeProperty('--site-bg'); r.style.removeProperty('--site-fit');
             r.style.removeProperty('--site-pos'); return; }
+  /* 动态类型：不碰 background-image 那一套，交给 site_bg_live.js。
+     has-sitebg 仍然要加 —— 它管的是一整套"背景前可读性"规则（卡片压底、控件玻璃化），
+     动态背景同样需要那些规则。body 的 background-image 保持原渐变（url 变量为空）。 */
+  if(isLiveKind(S.v.kind)){
+    r.style.removeProperty('--site-bg');
+    r.classList.add('has-sitebg');
+    return;
+  }
   var skin=S.v.kind==='skin';
-  r.style.setProperty('--site-bg','url("'+S.v.url.replace(/"/g,'%22')+'")');
+  r.style.setProperty('--site-bg','url("'+(S.v.url||'').replace(/"/g,'%22')+'")');
   r.style.setProperty('--site-fit', skin?'contain':'cover');
   r.style.setProperty('--site-pos', skin?'50% 100%':'50% 50%');
   r.classList.add('has-sitebg');
@@ -100,9 +122,22 @@ function fired(){ document.dispatchEvent(new CustomEvent('sitebgchange',{detail:
 S.set=function(o){ S.v=o; try{ localStorage.setItem(SKEY,JSON.stringify(o)); }catch(e){} sapply(); fired(); };
 S.clear=function(){ S.v=null; try{ localStorage.removeItem(SKEY); }catch(e){} sapply(); fired(); };
 S.get=function(){ return S.v; };
-/* 同一个东西再点一次 = 取消（比"设为背景 / 取消背景"两个按钮省地方，也不会出现两个真相） */
-S.toggle=function(o){ if(S.v&&S.v.url===o.url) S.clear(); else S.set(o); return !!S.v; };
-S.is=function(url){ return !!(S.v&&S.v.url===url); };
+/* 同一个东西再点一次 = 取消（比"设为背景 / 取消背景"两个按钮省地方，也不会出现两个真相）。
+   ⚠️ 判等键按类型分：静态图用 url（同一张图可能既是壁纸又是立绘，所以还要叠 kind），
+      动态模型用 key（url 是空的，拿 url 判等会让"再点一次取消"永远失效）。 */
+function same(a,b){
+  if(!a||!b) return false;
+  if(isLiveKind(a.kind)||isLiveKind(b.kind))
+    return a.kind===b.kind && a.key===b.key;
+  return a.kind===b.kind && a.url===b.url;
+}
+S.toggle=function(o){ if(same(S.v,o)) S.clear(); else S.set(o); return !!S.v; };
+S.is=function(url,kind,key){
+  if(!S.v) return false;
+  if(isLiveKind(S.v.kind)||isLiveKind(kind))
+    return S.v.kind===kind && S.v.key===key;
+  return S.v.url===url && (kind==null||S.v.kind===kind);
+};
 
 /* 样式由模块自己注入：漏一页就会变成"那页没背景"这种最难查的差别 */
 function css(){
