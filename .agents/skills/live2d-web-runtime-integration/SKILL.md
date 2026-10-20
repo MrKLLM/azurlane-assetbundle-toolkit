@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
-description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳、选某个动作时手会消失、部件在任何动作里都不动、切动作时某个部件闪一下、部件消失一下但 part 组读数恒定、同参数两次读出不同的显隐、扫出来的阈值表复现不了、把 34 片并成一个开关家族可疑、部件门那类否证报「0 个异常」但其实是键名读不到、手会淡到看不见而两拍差分报全0、按颜色认片把发光点判成金饰、同一会话跑两遍对照参数恒为默认值、动作中途的暗窗与换动作的淡化死区要分清。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.7.44
+description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳、选某个动作时手会消失、部件在任何动作里都不动、切动作时某个部件闪一下、部件消失一下但 part 组读数恒定、同参数两次读出不同的显隐、扫出来的阈值表复现不了、把 34 片并成一个开关家族可疑、部件门那类否证报「0 个异常」但其实是键名读不到、手会淡到看不见而两拍差分报全0、按颜色认片把发光点判成金饰、同一会话跑两遍对照参数恒为默认值、动作中途的暗窗与换动作的淡化死区要分清、Live2D 当网站背景会不会卡、背景层限帧、fps 打满但实际耗多少主线程、swiftshader 量出来的 fps 能不能信、headless 拿不到 GPU。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
+version: 1.7.45
 ---
 
 # Live2D 网页运行时集成
@@ -1165,3 +1165,65 @@ Cubism4InternalModel.update(t,e){ super.update(t,e); t/=1e3; e/=1e3;
 
 **倍速键顺手规则**：倍速切换后用户想立刻回 1× 是高频动作——倍速标签本身做成可点
 （title 提示"点一下回到 1×"），点击即 `setSpeed(1)`。
+
+## 20. 把 Live2D 当"网站背景层"：限帧与成本量法（2026-10-20 实测）
+
+**需求形状**：用户问"Live2D / Spine 能不能设为网页背景、会不会卡"。这个问题**不能用 fps 回答**，
+也不能凭"看起来流畅"下结论 —— 两处都会给出错误结论。
+
+### 20.1 限帧到 24fps（不是因为跑不动，是因为没必要）
+
+背景层是装饰，不是主角；跟浏览器合成器跑到刷新率纯属浪费电和风扇。
+
+- **Live2D（pixi）**：用 `app.ticker.maxFPS = 24`。
+  **不要自己写 `setTimeout` 节流** —— pixi 是按 `_minElapsedMS` 对齐**时间戳**的，
+  自己节流会让传进 `ticker` 的 delta 抖动 ⇒ 动作速度忽快忽慢。
+  写完用 `try{}catch(e){}` 包住（老版本 ticker 可能没有 maxFPS 属性）。
+- **Spine（rAF 裸循环）**：跳帧时**必须"提前 return 再排一帧"**：
+  ```js
+  if (ts - loop._lastDraw < 1000/24 - 1) { raf = requestAnimationFrame(loop); return; }
+  ```
+  只 `return` 不排下一帧 ⇒ 循环永久停住，症状是"模型定住不动且无报错"。
+
+### 20.2 "会不会卡"的正确量法
+
+| 指标 | 为什么不能用别的代替 |
+|---|---|
+| `Performance.getMetrics()` 的 `TaskDuration` 差分 ÷ 帧数 | **fps 是余量指标，不是成本指标**。实测打满 300fps（= 240Hz 屏的采样上限），四个场景全是 300，看不出差别 |
+| `longtask` 计数（>50ms） | 决定"会不会卡顿感"，比平均耗时更能反映用户体感 |
+| 进程 CPU% | 决定"会不会烧风扇"，fps 完全反映不出 |
+
+实测（RTX 5060 Laptop / 240Hz，背景层 24fps）：
+
+| 场景 | fps | 背景模块 | CPU | 每帧主线程 | 长任务 |
+|---|---|---|---|---|---|
+| 仅水面 | 300 | — | 3.1% | 0.10 ms | 0 |
+| Live2D 背景 | 299.5 | 23.7fps | 7.1% | 0.24 ms | 0 |
+| Spine 背景 | 299.8 | 23fps | 5.7% | 0.19 ms | 0 |
+| Live2D + 水面（最坏） | 300 | 23.7fps | 6.0% | 0.20 ms | 0 |
+
+⇒ 判据：**每帧主线程 < 0.3ms、零长任务、页面 fps 不掉**才算"不卡"。
+
+### 20.3 量具有效性必须先自检（否则整组数据作废）
+
+- **`--use-angle=swiftshader` 会毁掉整组数据**：那是纯 CPU 软渲染，实测只有 15.3fps ——
+  量到的是软件光栅化的代价，与用户机器无关。
+- **`--headless=new` 常常拿不到 GPU**：同样的坑。改成**真实窗口 + 摆到屏幕外**：
+  `--window-position=-2400,0`（不在 headless 下，但用户看不见）。
+- **必须打印显卡型号做自检**：读 `WEBGL_debug_renderer_info` 的 `UNMASKED_RENDERER_WEBGL`，
+  **看到 `SwiftShader` 就整组作废重测**；看到真实卡名（如
+  `ANGLE (NVIDIA, GeForce RTX 5060 Laptop GPU, D3D11)`）才算有效。
+- **`preserveDrawingBuffer:false` ⇒ 不能靠外部 `drawImage` 采样 canvas 判断"是否在绘制"**
+  （读到的是空缓冲）。要在模块内部挂 `frames` 计数器。
+
+### 20.4 内存记录与"刷新后恢复"
+
+动态背景的记录**本来就不带 `url`**（带 `url` 会写出 `url("")` 产生 404）。
+所以 `sload()` 这类"读回校验"的判据必须是
+`o.url || o.kind==='spine' || o.kind==='live2d'`，
+**不能写成 `if (!o.url) return null`** —— 那个 bug 的症状是"设置成功、刷新就丢"，
+而设置那一瞬间是完全正常的（本轮 12 项验收里就因为少写"刷新"这一条而漏掉）。
+
+**涉及文件**：`gallery_src/site_bg_live.js`（背景层本体）、
+`scripts/diag/perf_cost.py`（成本量法）、`scripts/diag/perf_livebg_gpu.py`（硬件后端 fps 对照）、
+`scripts/diag/site_live_bg_probe.py`（12 项功能验收）。

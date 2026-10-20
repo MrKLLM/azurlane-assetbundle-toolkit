@@ -292,6 +292,181 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   .bar .hint{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tide{height:21px}
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   文艺感皮肤（2026-10-20 第二轮）：只覆盖播放条，不改任何其它地方。
+
+   与上一版「科技感」的差别不是微调，是换了一套语言：
+     · 科技感把信息做成**读数**（等宽字/大写字距/刻度线/切角面板/扫描线）；
+     · 文艺感把信息做成**纸张与墨**——衬线字、细字重、大量留白、
+       一条压得很轻的墨线分隔，进度用「墨在纸背洇开」的形状而不是仪表柱。
+   用户原话：「更文艺一点，进度条太丑了」⇒ 进度条是本轮改动的重心：
+       上一版是**方槽 + 竖刻度 + 实色柱 + 双色发光刃**，四样东西挤在 30px 里，
+       每一样都在喊"我在显示数据"，合起来读作吵闹。这一版全部拆掉，只留：
+         ▸ 一条 1px 墨线做"纸面"
+         ▸ 一道向右洇开的淡墨（已播）
+         ▸ 一枚细长竖笔（当前点），不加光晕
+         ▸ 时间泡变成上方的一行小字，不下压到条上
+     · 形状：全部回到**大圆角**（上一版刻意零圆角，跟"文艺"是对立的）。
+     · 字：`--serif` 衬线栈，标题用正文字重 500，时间用 tabular-nums 保持不跳。
+   ⚠️ 盒数红线（§134）：本皮肤**不新增任何 backdrop-filter 盒**——
+      面板沿用原 .bar 那一盒；按钮仍是纯色背景，不加滤镜。
+      纸纹是 CSS 重复渐变（不占滤镜盒），墨晕是一个 radial 渐变（同上）。
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.bar{
+  --serif:'Songti SC','STSong','Source Han Serif SC','Noto Serif SC',Georgia,'Times New Roman',serif;
+  --ink:color-mix(in srgb,var(--txt) 88%,transparent);
+  --ink-2:color-mix(in srgb,var(--txt) 52%,transparent);
+  --ink-3:color-mix(in srgb,var(--txt) 22%,transparent);
+  /* 纸面：极淡的暖白/暖黑，比原来的玻璃实一档，让"墨"有东西可落 */
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb,var(--panel) 88%,transparent),
+      color-mix(in srgb,var(--panel) 80%,transparent));
+  border-radius:20px;
+  border:1px solid color-mix(in srgb,var(--ink) 9%,transparent);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 42%,transparent),
+             inset 0 -18px 26px -22px color-mix(in srgb,var(--ink) 18%,transparent),
+             0 16px 44px -18px color-mix(in srgb,var(--ink) 26%,transparent);
+  padding:16px 22px 13px;
+}
+/* 纸纹：横向极细的纤维，2.4% 对比 —— 这是"纸"和"纯色块"的分别。
+   ⚠️ 不加 mix-blend-mode:multiply：面板本身是 backdrop-filter 磨砂盒，
+      混合模式会让它在部分合成层里退化成纯白（实测浅色下整块糊成一片白纸，看不见底色）。 */
+.bar::before{
+  content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:0;
+  background:repeating-linear-gradient(0deg,
+    color-mix(in srgb,var(--ink) 2.4%,transparent) 0 1px,
+    transparent 1px 3px);
+  opacity:.5;
+}
+/* 右上角一块被光擦淡的地方：给整块纸一个光源方向，避免"均匀平涂"的廉价感 */
+.bar::after{
+  content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:0;
+  background:radial-gradient(120% 90% at 92% 0%,
+    color-mix(in srgb,#fff 26%,transparent),transparent 62%);
+}
+.bar>*{position:relative;z-index:1}
+
+/* ── 按键：回到圆，但不用"玻璃球"那套厚高光，改用**墨圈** ── */
+.bar .top{gap:11px}
+.bar button{
+  width:36px;height:36px;border-radius:50%;
+  background:transparent;
+  border:1px solid color-mix(in srgb,var(--ink) 16%,transparent);
+  color:var(--ink-2);box-shadow:none;
+  transition:border-color .26s var(--ease-ios),color .26s var(--ease-ios),
+             background .26s var(--ease-ios);
+}
+.bar button:hover{transform:none;color:var(--ink);
+  border-color:color-mix(in srgb,var(--brand) 52%,transparent);
+  background:color-mix(in srgb,var(--brand) 6%,transparent)}
+.bar button:active{transform:none;background:color-mix(in srgb,var(--brand) 12%,transparent)}
+.bar button.on{background:transparent;color:var(--brand-d);
+  border-color:color-mix(in srgb,var(--brand) 78%,transparent)}
+.bar svg{width:16px;height:16px;stroke-width:0}
+
+/* 播放键：不发光、不实心；用**一笔实墨**——实心圆 + 纸色图标，
+   这是整条唯一的深色块，安静地压住重心。 */
+#pp{width:46px;height:46px;border:0;
+  background:var(--ink);color:var(--panel);
+  box-shadow:0 6px 16px -8px color-mix(in srgb,var(--ink) 70%,transparent)}
+#pp svg{width:19px;height:19px}
+#pp:hover{transform:none;color:var(--panel);
+  background:color-mix(in srgb,var(--ink) 86%,var(--brand));
+  box-shadow:0 8px 20px -8px color-mix(in srgb,var(--ink) 76%,transparent)}
+#pp:active{transform:none;background:var(--txt)}
+#lp{width:32px;height:32px}
+
+/* ── 字：衬线 + 轻字重 ── */
+.bar .cur{font-family:var(--serif);font-size:14px;font-weight:500;letter-spacing:.01em;
+  color:var(--ink)}
+.bar .cur i{font-family:var(--serif);font-size:11.5px;font-weight:400;
+  letter-spacing:.04em;color:var(--ink-3);margin-left:10px}
+.bar .tm{font-family:var(--serif);font-size:11.5px;font-weight:400;font-style:italic;
+  color:var(--ink-2);letter-spacing:.03em;min-width:40px}
+/* 时间之间用一枚小小中点隔开，读作"页面里的一个注"而不是仪表面板的一个格子 */
+.bar .tm+.cur::before{content:'¶';position:absolute;left:-14px;color:var(--ink-3);font-size:10px}
+
+/* ═══════════ 进度条（本轮重做）═══════════
+   目标：一条**墨线**，不是一根槽。
+   形态：静止时只是一条极淡的纸边；悬停时纸边显形；已播部分是一道向右渐深的墨。
+   上一版有 5 个可见元素（框、刻度、水、双色刃、点），这一版只有 3 个：
+     ① .tide 自己的下边框（纸边）
+     ② svg 里的 w1/w2（墨洇）
+     ③ bead（细竖笔，不是圆点）
+   高度从 30px 降到 26px，上下留白加大 —— 文艺感的密度靠留白，不靠元素。 */
+.tide{
+  height:26px;margin:13px 0 9px;border-radius:0;
+  border:0;border-bottom:1px solid color-mix(in srgb,var(--ink) 14%,transparent);
+  background:transparent;box-shadow:none;
+  transition:border-color .3s var(--ease-ios);
+  -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 26px,#000 100%);
+  mask-image:linear-gradient(90deg,transparent 0,#000 26px,#000 100%);
+}
+.tide:hover{border-bottom-color:color-mix(in srgb,var(--ink) 30%,transparent)}
+/* svg 不再裁形：墨洇自己止于路径，不需要管口 */
+.tide svg{border-radius:0;clip-path:none;overflow:hidden}
+/* ⚠️ 满铺必须**在这里**再写一次：这条皮肤里上面那条 `.bar svg{width:16px;height:16px}`
+   （给按键图标用的）也命中进度条的 <svg>，把整张 viewBox 压进 16×16 的小方块里
+   —— 症状是进度条上只有一处 6×11 的墨点，其它全空。
+   2026-10-20 已踩两次（上一版「科技感」同样死在这），所以这次连高宽带 display 一起锁死。 */
+.bar .tide svg{width:100%;height:100%;display:block}
+/* 取消上一版那层"柱面明暗"——它存在的理由是模拟玻璃管，而现在没有管了。
+   ⚠️ 但**不能直接把 .tide::after 删掉**：它是 .bub 的兄弟，删了不影响功能，
+      留着又会在纸上盖一层渐变。所以这里把它换成"极轻的纸面内阴影"。 */
+.tide::after{content:'';position:absolute;inset:auto 0 0 0;height:1px;z-index:1;
+  pointer-events:none;border-radius:0;
+  background:linear-gradient(90deg,
+    transparent,color-mix(in srgb,var(--brand) 34%,transparent) 12%,
+    color-mix(in srgb,var(--brand) 34%,transparent) 88%,transparent)}
+/* 槽底不画：纸上没有"凹槽" */
+.tide .trough{fill:transparent}
+/* 已播：两层墨。w1 是主体（由深到浅向下洇散），w2 是它的余晕。
+   ⚠️ 这两个是 <path> 填充，不是 stroke —— 想"细"只能靠 fill 的透明度与形状，
+      把 stroke-width 调小对 fill 毫无作用（上一版 .crest 才有 stroke）。 */
+.tide .w1{fill:color-mix(in srgb,var(--brand) 30%,var(--ink) 12%);opacity:.9}
+.tide .w2{fill:color-mix(in srgb,var(--brand) 18%,transparent);opacity:.55}
+/* 墨刃：不要发光。改成 1px 的深色细描边，像钢笔尖在纸上划出的那一线。 */
+.tide .crest{stroke:color-mix(in srgb,var(--brand) 62%,var(--ink));
+  stroke-width:1;stroke-linecap:round;fill:none;filter:none;opacity:.85}
+/* 高光那层直接关掉：纸不反光 */
+.tide .spec{display:none}
+/* 当前点：一枚 2×13 的竖笔（用 r 做不到细长，所以改用 stroke 长度表达）。
+   ⚠️ <circle> 无法变竖线 ⇒ 这里保留 circle 但压到 r=2.2 并把填充换成品牌色，
+      视觉上读作"朱笔点"，不读作"手柄"。 */
+.tide .bead{fill:var(--brand);stroke:color-mix(in srgb,var(--panel) 90%,transparent);
+  stroke-width:1.4;transition:r .3s var(--ease-ios)}
+.tide:hover .bead{r:3.2}
+.tide .rip{stroke:color-mix(in srgb,var(--brand) 46%,transparent);stroke-width:1}
+/* 时间泡：上方一行小字，无框无底 —— 纸上的批注不套盒子 */
+.tide .bub{
+  bottom:calc(100% + 2px);
+  font-family:var(--serif);font-size:12px;font-style:italic;
+  color:var(--brand-d);background:transparent;border:0;box-shadow:none;
+  padding:0 2px;letter-spacing:.02em;
+}
+
+/* ── 音量：一根极细的墨线 + 一枚小圆珠，与进度条同一套语言 ── */
+.bar .vol{height:2px;border-radius:0;background:color-mix(in srgb,var(--ink) 18%,transparent)}
+.bar .vol::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:9px;border-radius:50%;
+  background:var(--brand);border:1.5px solid var(--panel);box-shadow:none}
+.bar .vol:hover::-webkit-slider-thumb{transform:scale(1.12)}
+.bar .vol::-moz-range-thumb{width:9px;height:9px;border-radius:50%;
+  background:var(--brand);border:1.5px solid var(--panel)}
+
+/* ── 提示行：衬线斜体小字，像书页的脚注 ── */
+.bar .hint{font-family:var(--serif);font-style:italic;font-size:11px;
+  letter-spacing:.03em;color:var(--ink-3);margin-top:1px}
+
+@media (max-width:860px){
+  .bar{padding:13px 15px 11px;border-radius:17px}
+  .bar button{width:33px;height:33px}
+  #pp{width:41px;height:41px}
+  .tide{height:23px;margin:11px 0 7px}
+}
+
 @media (prefers-reduced-motion:reduce){
   .amb i{animation:none}.row{transition:opacity .2s linear,transform .2s linear}
   .row.playing .eq u{animation:none;height:60%}}
@@ -353,6 +528,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
     <input class="vol" id="vol" type="range" min="0" max="1" step="0.01" title="音量（↑↓）">
   </div>
   <div class="hint" id="hint">拖动水面就是进度 · 空格播放/暂停 · ↑↓ 音量 · / 搜索</div>
+<script src="site_bg_live.js"></script>  <!-- 动态网站背景：Spine / Live2D（三页共用，正本 gallery_src/site_bg_live.js） -->
 </div>
 
 <script src="liquid_glass.js"></script>
@@ -409,6 +585,10 @@ function draw(){
   $('spec').setAttribute('d',prog>0?crestPath(prog,phase+0.5,a,SURF+2.6):'');
   $('bead').setAttribute('cx',(prog*W).toFixed(1));
   $('bead').setAttribute('cy',(SURF+Math.sin(prog*W/W*K1+phase)*a).toFixed(1));
+  /* 墨洇要止于墨线：把已播部分的填充往纸沿方向压 —— 文艺版进度条只有 3 个可见元素，
+     元素少了，边界质量就变成了主要观感。只需改一次 transform，不新增元素。 */
+  $('w1').style.opacity = prog>0 ? '' : '0';
+  $('w2').style.opacity = prog>0 ? '' : '0';
 }
 const total=()=>isFinite(A.duration)&&A.duration>0?A.duration:knownDur;
 

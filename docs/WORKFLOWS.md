@@ -4995,3 +4995,100 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 `gallery_src/index.html`（`bgTarget()/skTarget()` + `renderActs()` + `.bgtag/.bgbtn.alt`）、
 `gallery_src/bgm.html`（播放条玻璃 + `SPX` 粒子）、`gallery_src/backgrounds.html`（暗房 + 相纸 + 吸附）、
 `scripts/deploy_gallery.py`（`FILES` 加一项）。验收：`scripts/diag/site_live_bg_probe.py`（12 条）。
+
+---
+
+### WF-52: 动态背景重新接入与「会不会卡」的正确量法（2026-10-20）
+
+**目标**: 让 Spine 动态皮肤 / Live2D 模型能像背景图一样设为整站背景（无交互），并且**先给出
+可信的"会不会卡"结论再动手**，而不是"先做出来再看"。
+**适用场景**: 任何"要不要给页面加一层持续重绘的 canvas"的决策；或用户问"这样会不会卡/费电"。
+
+**一、判据（先定,再量）**
+
+| 量 | 怎么取 | 通过线 | 为什么是它 |
+|---|---|---|---|
+| `UNMASKED_RENDERER_WEBGL` | 页面里查 `WEBGL_debug_renderer_info` | 必须含真实显卡名，**不是 SwiftShader** | 量具没硬件加速，整组数据作废（§164） |
+| 每帧主线程耗时 | `Performance.getMetrics()` 的 `TaskDuration` 差分 ÷ 帧数 | **< 0.3 ms** | 与渲染后端无关，真实反映主线程压力 |
+| 长任务 | `PerformanceObserver` 的 `longtask` | **0 个 >50ms** | 有长任务就会有可感知的卡顿 |
+| 页面 fps | rAF 计数 | 不掉（相对基线） | 余量指标，**不能单独作为"不卡"的证据** |
+| 背景模块自身帧率 | 模块内部计数器（**不采样 canvas**） | 约等于设定上限 | `preserveDrawingBuffer:false` ⇒ 外部 `drawImage` 恒为空 |
+
+**二、步骤**
+
+1. **取回代码**：`git show <好提交>:gallery_src/site_bg_live.js > gallery_src/site_bg_live.js`。
+2. **三页接入**：`index.html` / `backgrounds.html` 紧跟 `water_bg.js` 之后；`bgm.html` 放在
+   **`</div>`（`.bar` 结束）之后**——`water_bg.js` 的 `host()` 会 `document.body.insertBefore`，
+   脚本若在 `<head>` 里，`document.body` 还是 null，直接 `TypeError`（§160 已记）。
+3. **加进部署清单**：`scripts/deploy_gallery.py` 的 `FILES` 加 `'site_bg_live.js'`，
+   否则运行目录缺这个文件、`--check` 也看不见它。
+4. **限帧**（不是优化，是设计）：
+   - Live2D：`app.ticker.maxFPS = 24`（pixi 内部按 `_minElapsedMS` 对齐时间戳）。
+   - Spine：rAF 里 `if(ts - loop._lastDraw < 1000/24 - 1){ raf=requestAnimationFrame(loop); return; }`
+     —— **跳帧也必须继续排下一帧**，`return` 不排就永久停住。
+5. **量**：`.diag/perf_cost.py`（真窗口、屏幕外、`Performance.getMetrics` + longtask + draw call）。
+6. **验收**：`py -3 scripts/diag/site_live_bg_probe.py`（12 条，含"刷新后自动恢复"）。
+
+**三、踩坑记录**
+
+- **测试页的三个连环 bug**（上一轮 `water=None` 的真正原因）：`SiteBg` 定义在 `water_bg.js`
+  **之后**（水面初始化读不到）→ 挪到 `<head>`（`document.body` 为 null 抛 TypeError）→
+  最终必须放在 `<body>` 内、`#bgfx` 之后。**顺序即判据**，改一处就换一个症状。
+- **回滚把 `sload()` 修复一起带走了**：动态记录**本来就不带 url**（带 url 会写出 `url("")` 产生 404），
+  所以判据必须是 `o.url || o.kind==='spine' || o.kind==='live2d'`；只查 `url` 会让"刷新后背景消失"且
+  控制台一个字都不报。`4f3ea18` 里**修过**这一处，但 `b7e759a` 的回滚命令
+  `git checkout 0884844 -- <四个前端文件>` 是按**文件**还原的 ⇒ 同文件里**已经正确**的改动被一起退回。
+  **判据：回滚到"某个文件"之前，先 `git show <提交>:<文件>` 看该文件里还有没有别的正确改动**
+  （按文件回滚 = 按文件放弃，不是按 hunk 放弃）。
+- **`--headless=new` 拿不到 GPU**：即使去掉 `--use-angle=swiftshader` 也可能回落软件渲染。
+  改用真实窗口 + `--window-position=-2400,0` 摆到屏幕外（不打扰用户）。
+- **`perf_cost` 第一版崩在 `a['de']`**：`hookGL()` 在"还没有动态背景"时返回 `{err}`，
+  Python 侧 `json.dumps(None)` 得到 `'null'` ⇒ `json.loads` 成 `None` 再下标。**先判空再下标**。
+
+**四、涉及文件**
+
+`gallery_src/site_bg_live.js`（取回 + 两处限帧）、`gallery_src/favorites.js`（`sload` 判据）、
+`gallery_src/index.html` / `backgrounds.html` / `bgm.html`（各加一行 `<script>`）、
+`scripts/deploy_gallery.py`（`FILES`）、`scripts/diag/perf_cost.py` + `perf_livebg_gpu.py`（新，入库）、
+`scripts/diag/site_live_bg_probe.py`（既有，12 条）、`scripts/diag/shot_bgm_bar.py`（新，截图取证）。
+相关：`WF-16`（回归套件）、`§164`（fps 不是成本指标）、`§160`（Spine 七步绘制序列 / 404 伪装 Network error）。
+
+---
+
+### WF-53: 给现成组件整块换「视觉皮肤」——整块替换 + 断言，而不是逐条 Edit（2026-10-20）
+
+**目标**: 把一个已有组件从一种视觉语言换到另一种（本轮：科技感 → 文艺感），且**不留旧语言残影**。
+**适用场景**: 用户说"太丑了/换个风格/再文艺一点/不要圆润的那种"，而现有组件已经有 N 条覆盖样式。
+
+**一、判据**
+
+- 旧皮肤的标志性属性必须**计数归零**（例：`clip-path:polygon`、`repeating-linear-gradient(90deg)`、
+  `font-family:ui-monospace`），脚本里 `assert count == 0`，不靠肉眼扫。
+- 新皮肤的标志性属性必须**存在**（例：`--ink:`、`--serif`、段落标题）。
+- 只碰一个组件：本轮只改 `bgm.html` 的播放条，**0 行 JS/DOM 改动**（避免上一轮"一次动四处、用户
+  无法指出哪块不对"的复现，见 §161~§163 档案）。
+- 改完必须有**截图 + 几何断言**，不能只给图让用户自己看（§165 的坑就是"看起来像配色问题"）。
+
+**二、步骤**
+
+1. 用 Python 脚本按**首尾标记**切出旧块（`s.index(起始注释)` ~ `s.index(下一个 @media)`），
+   整块替换 —— 逐条 `Edit` 会漏，漏一条就是一处旧语言残影。
+2. 脚本末尾直接跑断言，`sys.exit(1)` 表示失败；**断言写在脚本里，不写在脑子里**。
+3. `py -3 scripts/deploy_gallery.py` → `--check`。
+4. `py -3 scripts/diag/shot_bgm_bar.py`：4 条几何断言 + 浅/暗两主题截图。
+5. 给用户看图，**一次只给一处改动**，等拍板。
+
+**三、踩坑记录**
+
+- **`mix-blend-mode:multiply` 叠在 `backdrop-filter` 盒上会退化成纯白**：实测浅色主题下整个面板
+  糊成一片白纸，看不见底色。删掉混合模式即恢复（纸纹靠 2.4% 对比的重复渐变本身就够）。
+- **`.bar svg{16px}` 会连带压扁进度条**（§165）：写"给某类元素"的尺寸规则前先 `grep` 该类全部后代。
+- **`<circle>` 做不出"细长竖笔"**：`r` 只能做正圆，想竖线得换 `<line>` 或 `rect`。本轮退让成
+  "朱笔点"（小圆 + 品牌色），并把理由写进注释，避免下一个人又去试 `r`。
+- **`clip-path` 不做细长切角时，`overflow:hidden` 也必须跟着改**：去 `clip-path` 后 `overflow` 仍是
+  hidden，会裁掉沿线浮出的时间泡。
+
+**四、涉及文件**
+
+`gallery_src/bgm.html`（播放条整块覆盖）、`scripts/diag/shot_bgm_bar.py`（新，截图 + 几何断言）、
+`.diag/swap_skin.py`（一次性替换脚本，带 5 条断言）。相关：`§165`、`§161~§163`（被否的科技感档案）。

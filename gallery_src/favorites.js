@@ -81,7 +81,14 @@ var SKEY='gallery.sitebg';
 var S={ v:null };
 function sload(){
   try{ var o=JSON.parse(localStorage.getItem(SKEY)||'null');
-       return (o&&o.url)?o:null; }catch(e){ return null; }
+       /* ⚠️ 判据是"哪个 kind 有活路"，不是"有没有 url"。
+          2026-10-20 实测：动态背景（spine/live2d）的记录**本来就不带 url**
+          （带 url 反而会写出 url("")，稳定 404），所以只查 `o.url` 会在刷新那一刻
+          把用户刚设好的动态背景静默丢掉 —— 页面看着"忘了我的设置"，控制台一个字都不报。
+          这个 bug 在回滚前就存在，当时 12 项验收里没有"刷新"这一条。 */
+       if(!o) return null;
+       return (o.url || o.kind==='spine' || o.kind==='live2d') ? o : null;
+  }catch(e){ return null; }
 }
 function sapply(){
   var r=document.documentElement;
