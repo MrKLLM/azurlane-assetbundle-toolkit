@@ -425,9 +425,11 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 .tide .trough{fill:transparent}
 /* 已播：两层墨。w1 是主体（由深到浅向下洇散），w2 是它的余晕。
    ⚠️ 这两个是 <path> 填充，不是 stroke —— 想"细"只能靠 fill 的透明度与形状，
-      把 stroke-width 调小对 fill 毫无作用（上一版 .crest 才有 stroke）。 */
-.tide .w1{fill:color-mix(in srgb,var(--brand) 30%,var(--ink) 12%);opacity:.9}
-.tide .w2{fill:color-mix(in srgb,var(--brand) 18%,transparent);opacity:.55}
+      把 stroke-width 调小对 fill 毫无作用（上一版 .crest 才有 stroke）。
+   2026-10-20 二改：30%→22%、opacity .9→.82。原来那版读作"一条蓝色矩形"，
+   太实；水彩的密度靠叠出来的深浅差，不靠单层不透明度。 */
+.tide .w1{fill:color-mix(in srgb,var(--brand) 22%,var(--ink) 8%);opacity:.82}
+.tide .w2{fill:color-mix(in srgb,var(--brand) 14%,transparent);opacity:.5}
 /* 墨刃：不要发光。改成 1px 的深色细描边，像钢笔尖在纸上划出的那一线。 */
 .tide .crest{stroke:color-mix(in srgb,var(--brand) 62%,var(--ink));
   stroke-width:1;stroke-linecap:round;fill:none;filter:none;opacity:.85}
@@ -503,13 +505,37 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
         <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" style="stop-color:var(--brand);stop-opacity:.26"/>
           <stop offset="1" style="stop-color:var(--brand);stop-opacity:.10"/></linearGradient>
+        <!-- 笔触横向淡入淡出（2026-10-20 加）。
+             为什么不用 mask：mask 的渐变是固定坐标系写的，而"前沿在哪"每帧都在变，
+             固定渐变追不上 —— 前沿会是一条硬边，正是要消掉的那个东西。
+             改法是把同一层横向渐变**每帧重设 stop 的 x 位置**（见 draw() 里的 inkGrad），
+             让淡出窗口始终贴着当前进度。userSpaceOnUse 才能用 viewBox 坐标（0..1000）。 -->
+        <linearGradient id="ink1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1000" y2="0">
+          <stop id="k1a" offset="0" style="stop-color:#fff;stop-opacity:0"/>
+          <stop id="k1b" offset="0.06" style="stop-color:#fff;stop-opacity:.55"/>
+          <stop id="k1c" offset="0.5" style="stop-color:#fff;stop-opacity:1"/>
+          <stop id="k1d" offset="0.92" style="stop-color:#fff;stop-opacity:.72"/>
+          <stop id="k1e" offset="1" style="stop-color:#fff;stop-opacity:0"/>
+        </linearGradient>
+        <linearGradient id="ink2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1000" y2="0">
+          <stop id="k2a" offset="0" style="stop-color:#fff;stop-opacity:0"/>
+          <stop id="k2b" offset="0.06" style="stop-color:#fff;stop-opacity:.45"/>
+          <stop id="k2c" offset="0.5" style="stop-color:#fff;stop-opacity:1"/>
+          <stop id="k2d" offset="0.9" style="stop-color:#fff;stop-opacity:.6"/>
+          <stop id="k2e" offset="1" style="stop-color:#fff;stop-opacity:0"/>
+        </linearGradient>
+        <!-- 两层合成：纵向的墨色渐变 × 横向的笔触浓淡。-->
+        <mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="46">
+          <rect x="0" y="0" width="1000" height="46" fill="url(#ink1)"/></mask>
+        <mask id="m2" maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="46">
+          <rect x="0" y="0" width="1000" height="46" fill="url(#ink2)"/></mask>
       </defs>
       <!-- 裁形只用 CSS 那一条（.tide svg{clip-path:inset(0 round 999px)}）。
            原来这里还有个 SVG clipPath rx=12：svg 是 preserveAspectRatio=none 拉伸的，
            viewBox 里写死的圆角在非等比缩放后两端会成椭圆，比 CSS 胶囊更紧，会把管口削平。 -->
       <g>
       <rect class="trough" x="0" y="0" width="1000" height="46"/>
-      <path class="w2" id="w2" d="" fill="url(#g2)"/><path class="w1" id="w1" d="" fill="url(#g1)"/>
+      <path class="w2" id="w2" d="" fill="url(#g2)" mask="url(#m2)"/><path class="w1" id="w1" d="" fill="url(#g1)" mask="url(#m1)"/>
       <path class="spec" id="spec" d=""/>
       <path class="crest" id="crest" d=""/>
       <circle class="rip" id="rip" cx="0" cy="23" r="2"/>
@@ -559,9 +585,12 @@ function wavePath(prog,ph,am,base,dir){
   let d=`M0 ${H}L0 ${surfY(0,ph*dir,am,base).toFixed(2)}`;
   for(let x=8;x<=x1;x+=6) d+=`L${Math.min(x,x1).toFixed(1)} ${surfY(x,ph*dir,am,base).toFixed(2)}`;
   /* 前沿不能直接 `L x1 H` —— 那是一刀垂直壁，读作悬崖不读作水。
-     用一条 x 方向带偏移的二次曲线把水面收进池底，就是弯月面。 */
-  const yE=surfY(x1,ph*dir,am,base);
-  return d+`Q${(x1+2.5).toFixed(1)} ${(yE+7).toFixed(2)} ${x1.toFixed(1)} ${H}Z`;
+     原版用 2.5px 的 x 偏移做弯月面，实测放大看**仍然是一条直边**（2026-10-20 量过：
+     2.5/1000 的偏移在 894px 宽上只有 2.2px，等于没有）。
+     改成一段真长度的斜收：横向收 14px、纵向落到池底，读作"水退回去"而不是"被切开"。 */
+  const xE=Math.max(0,x1-26);
+  const yE=surfY(xE,ph*dir,am,base);
+  return d+`C${xE.toFixed(1)} ${(yE+2).toFixed(2)} ${x1.toFixed(1)} ${(yE+11).toFixed(2)} ${x1.toFixed(1)} ${H}Z`;
 }
 function crestPath(prog,ph,am,base){
   const x1=prog*W;let d='';
@@ -585,11 +614,24 @@ function draw(){
   $('spec').setAttribute('d',prog>0?crestPath(prog,phase+0.5,a,SURF+2.6):'');
   $('bead').setAttribute('cx',(prog*W).toFixed(1));
   $('bead').setAttribute('cy',(SURF+Math.sin(prog*W/W*K1+phase)*a).toFixed(1));
+  inkGrad(prog);
   /* 墨洇要止于墨线：把已播部分的填充往纸沿方向压 —— 文艺版进度条只有 3 个可见元素，
      元素少了，边界质量就变成了主要观感。只需改一次 transform，不新增元素。 */
   $('w1').style.opacity = prog>0 ? '' : '0';
   $('w2').style.opacity = prog>0 ? '' : '0';
 }
+/* 笔触浓淡：让两端的墨自己化开，而不是被路径切一刀。
+   起点淡入固定 26px（纸边不该有硬头）；前沿淡出窗口随 pro，取"已播宽度的 18%"，
+   但**夹在 18~70px** —— 太窄等于没淡出，太宽会把整条染成半透明。
+   ⚠️ 用 setAttribute('offset') 而不是 style.offset：后者在部分内核里不触发重绘。 */
+const inkGrad=(prog)=>{
+  const x1=Math.max(0,prog*W);
+  const fade=Math.min(70,Math.max(18,x1*0.18));
+  const s1=26/W, s4=Math.max(s1+0.001,(x1-fade)/W);
+  const set=(id,v)=>$(id).setAttribute('offset',Math.max(0,Math.min(1,v)).toFixed(4));
+  set('k1b',s1); set('k1d',s4);
+  set('k2b',s1); set('k2d',s4);
+};
 const total=()=>isFinite(A.duration)&&A.duration>0?A.duration:knownDur;
 
 /* ───────── 数据 ───────── */
