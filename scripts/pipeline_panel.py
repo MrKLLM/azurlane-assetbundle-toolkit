@@ -160,6 +160,15 @@ def running_job():
 
 # ------------------------------------------------------------------ 背景人工标注
 _BG_REVIEW = {'at': 0.0, 'data': None}
+_BG_LOCK = threading.Lock()
+BGPUB = {'id': 0, 'state': 'idle', 'step': 0, 'total': 4, 'title': '',
+         'error': '', 'saved': 0, 'started': ''}
+BG_STEPS = (
+    ('生成复核索引', ['scripts/build_bg_meta.py', '--allow-unlabeled'], 300),
+    ('发布角色标注', ['scripts/publish_bg_char_flags.py', '--from-annotations'], 300),
+    ('重建背景索引', ['scripts/build_bg_meta.py'], 300),
+    ('生成新缩略图', ['scripts/make_bg_thumbs.py'], 900),
+)
 
 
 def _run_py(argv, timeout=300):
@@ -195,8 +204,40 @@ def bg_review(fresh=False):
     return data
 
 
+def bg_publish_worker(job_id):
+    """后台跑 4 步发布；每完成一步更新 BGPUB，前端轮询画真实步进度。"""
+    for i, (title, argv, timeout) in enumerate(BG_STEPS):
+        with _BG_LOCK:
+            if BGPUB.get('id') != job_id:
+                return
+            BGPUB.update(state='running', step=i, title=title, error='')
+        rc, out = _run_py(argv, timeout)
+        with _BG_LOCK:
+            if BGPUB.get('id') != job_id:
+                return
+            BGPUB['step'] = i + 1
+            if rc != 0:
+                BGPUB.update(state='error', title=title,
+                             error='%s失败（rc=%s）' % (title, rc),
+                             detail=out[-1600:])
+                return
+    with _BG_LOCK:
+        if BGPUB.get('id') == job_id:
+            BGPUB.update(state='done', step=len(BG_STEPS), title='完成')
+    _BG_REVIEW.update(at=0.0, data=None)
+
+
+def bg_publish_status(job_id=None):
+    with _BG_LOCK:
+        d = dict(BGPUB)
+    if job_id is not None and d.get('id') != job_id:
+        return {'error': '这个发布任务已不存在（面板可能重启过）', 'state': 'stale'}
+    d['steps'] = [x[0] for x in BG_STEPS]
+    return d
+
+
 def bg_chars_save(body):
-    """保存人工标注；`publish=true` 时再走 建索引 → 发 flags → 重建索引 → 缩略图。"""
+    """保存人工标注；`publish=true` 时启动后台 4 步发布（不阻塞 HTTP 请求）。"""
     labels = body.get('labels')
     if not isinstance(labels, dict):
         return {'error': 'labels 必须是 {key: 0|1}'}
@@ -245,19 +286,16 @@ def bg_chars_save(body):
         return {'ok': True, 'saved': saved, 'published': False, 'pending': len(missing),
                 'error': '还有 %d 张场景图没判，补齐后才能发布（前几张：%s）'
                          % (len(missing), '、'.join(missing[:5]))}
-    steps = []
-    for title, argv, timeout in (
-            ('生成复核索引', ['scripts/build_bg_meta.py', '--allow-unlabeled'], 300),
-            ('发布角色标注', ['scripts/publish_bg_char_flags.py', '--from-annotations'], 300),
-            ('重建背景索引', ['scripts/build_bg_meta.py'], 300),
-            ('生成新缩略图', ['scripts/make_bg_thumbs.py'], 900)):
-        rc, out = _run_py(argv, timeout)
-        steps.append({'step': title, 'rc': rc, 'out': out[-1600:]})
-        if rc != 0:
-            return {'ok': True, 'saved': saved, 'published': False, 'steps': steps,
-                    'error': title + '失败（标注已保存）'}
-    _BG_REVIEW.update(at=0.0, data=None)
-    return {'ok': True, 'saved': saved, 'published': True, 'pending': 0, 'steps': steps}
+    with _BG_LOCK:
+        if BGPUB.get('state') == 'running':
+            return {'error': '上一次发布还在跑（%s），等它结束' % BGPUB.get('title')}
+        BGPUB.update(id=BGPUB.get('id', 0) + 1, state='running', step=0,
+                     total=len(BG_STEPS), title='准备中', error='', detail='',
+                     saved=saved, started=time.strftime('%H:%M:%S'))
+        job_id = BGPUB['id']
+    threading.Thread(target=bg_publish_worker, args=(job_id,), daemon=True).start()
+    return {'ok': True, 'saved': saved, 'published': False, 'job': job_id,
+            'pending': 0, 'total': len(BG_STEPS), 'steps': [x[0] for x in BG_STEPS]}
 
 
 def start_job(label, argv, script=None):
@@ -713,6 +751,9 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, cleanup_list())
         if u.path == '/api/bg_review':
             return self._send(200, bg_review(q.get('fresh') == '1'))
+        if u.path == '/api/bgchars/status':
+            jid = q.get('job')
+            return self._send(200, bg_publish_status(int(jid) if jid and jid.isdigit() else None))
         if u.path == '/bgimg':
             key = q.get('key', '')
             if '/' not in key:
@@ -2452,6 +2493,22 @@ pre .bad{color:#E08A69!important}
 #glMsg{flex:1;min-width:180px;font:400 10px/1.5 var(--font-mono)!important;
   color:var(--ink-3)!important}
 #glPublish:disabled,#glDraft:disabled{opacity:.35;cursor:not-allowed}
+/* 四步发布：步数是真的，当前步用墨点在跑；不做“假装百分比”的定时器。 */
+.glprog{margin:10px 0 0;padding:10px 12px;border:1px solid var(--rule);background:var(--paper-2)}
+.glprog-track{position:relative;height:5px;background:var(--paper-3);border:1px solid var(--rule);overflow:hidden}
+.glprog-track i{display:block;height:100%;width:100%;transform:scaleX(0);transform-origin:left;
+  background:linear-gradient(90deg,var(--accent-d),var(--accent));
+  transition:transform .35s ease}
+.glprog-track::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,#fff 42%,transparent),transparent);
+  transform:translateX(-100%);animation:glsheen 1.3s ease-in-out infinite}
+.glprog[data-done="1"] .glprog-track::after{display:none}
+@keyframes glsheen{to{transform:translateX(100%)}}
+.glprog-meta{display:flex;justify-content:space-between;gap:12px;margin-top:6px;
+  font:400 10px/1.5 var(--font-mono)!important;color:var(--ink-3)!important}
+#glprogStep{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#glprogPct{flex:none;font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){.glprog-track::after{animation:none}}
 #signmodal.on{display:flex;align-items:center;justify-content:center}
 #signmodal .veil{position:absolute;inset:0;background:rgba(24,21,17,.58)}
 #signmodal .sheet{
@@ -2939,6 +2996,10 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
       <p id="glSub">正在读…</p>
     </div>
     <div id="glBody" class="glbody"><span class="dim">点「背景标注」后开始扫描。</span></div>
+    <div id="glProgress" class="glprog" hidden>
+      <div class="glprog-track"><i id="glprogFill"></i></div>
+      <div class="glprog-meta"><span id="glprogStep">—</span><span id="glprogPct">0%</span></div>
+    </div>
     <label class="glagree"><input type="checkbox" id="glAgree">
       <span>我确认发布会写 <code>annotations/bg_char_labels.json</code>、
         <code>inputs/gamecfg/bg_char_flags.json</code> 与 <code>Output/gallery_v2/bg_meta.json</code>（会先生成复核索引，再发布，再重建）。</span></label>
@@ -4719,10 +4780,13 @@ $('#newGo').onclick=async()=>{
 };
 
 /* ── 背景标注复核台 ─────────────────────────────────────────────────── */
-let GL={data:null,picks:{},busy:false};
+let GL={data:null,picks:{},busy:false,pub:null,pubTimer:null};
 function openBgLabel(){
   bgHeal();
-  GL.picks={}; $('#glAgree').checked=false;
+  GL.picks={}; GL.pub=null;
+  if(GL.pubTimer){ clearInterval(GL.pubTimer); GL.pubTimer=null; }
+  $('#glProgress').hidden=true; $('#glProgress').dataset.done='0';
+  $('#glAgree').checked=false;
   $('#bglabelmodal').classList.add('on');
   $('#bglabelmodal').setAttribute('aria-hidden','false');
   $('#glBody').innerHTML=inkWait('正在扫描 Output/Raw 与人工标注…（约十几秒）');
@@ -4731,6 +4795,8 @@ function openBgLabel(){
   loadBgReview(false);
 }
 function closeBgLabel(){
+  if(GL.pubTimer){ clearInterval(GL.pubTimer); GL.pubTimer=null; }
+  GL.pub=null;
   $('#bglabelmodal').classList.remove('on');
   $('#bglabelmodal').setAttribute('aria-hidden','true');
   GL.busy=false;
@@ -4813,17 +4879,63 @@ function updateGlButtons(){
       (d.pending===0?'没有待判图':'全部已判，可以发布')));
 }
 
+function renderPubProgress(step,total,title,state){
+  if(!$('#glProgress')) return;
+  const n=Math.max(1,total||4), s=Math.max(0,Math.min(n,step||0));
+  $('#glProgress').hidden=false;
+  $('#glProgress').dataset.done=state==='done'?'1':'0';
+  $('#glprogFill').style.transform='scaleX('+(s/n).toFixed(4)+')';
+  $('#glprogPct').textContent=Math.round(s/n*100)+'%';
+  $('#glprogStep').textContent=(state==='running'
+    ? ('第 '+Math.min(n,s+1)+'/'+n+' 步 · ')
+    : '')+(title||'');
+}
+function pubFail(msg,detail){
+  if(GL.pubTimer){ clearInterval(GL.pubTimer); GL.pubTimer=null; }
+  GL.pub=null; GL.busy=false;
+  $('#glMsg').textContent=msg||'发布失败';
+  if(detail){ $('#glMsg').title=String(detail).slice(0,500); }
+  updateGlButtons();
+}
+async function pollBgPublish(job,total){
+  if(GL.pubTimer){ clearInterval(GL.pubTimer); }
+  const tick=async()=>{
+    if(!GL.pub||GL.pub.job!==job) return;
+    try{
+      const s=await (await fetch('/api/bgchars/status?job='+job)).json();
+      if(s.error){ pubFail(s.error); return; }
+      renderPubProgress(s.step,s.total||total,s.title,s.state);
+      if(s.state==='done'){
+        if(GL.pubTimer){ clearInterval(GL.pubTimer); GL.pubTimer=null; }
+        GL.pub=null; GL.busy=false;
+        closeBgLabel();
+        showReceipt('背景标注已发布 · 新增/更新 '+(s.saved||0)+' 条 · 4/4 步完成','good');
+        await apiState(true);
+      }else if(s.state==='error'){
+        pubFail(s.error||'发布失败',s.detail);
+      }
+    }catch(e){ pubFail('读发布状态失败：'+e); }
+  };
+  GL.pubTimer=setInterval(tick,900); tick();
+}
 async function saveBgChars(publish){
   if(!publish && !Object.keys(GL.picks).length) return;
   GL.busy=true; updateGlButtons();
   $('#glMsg').textContent=publish?'保存并发布中…（会重建背景索引与缩略图）':'保存草稿中…';
+  if(publish) renderPubProgress(0,4,'准备中','running');
   try{
     const r=await fetch('/api/bgchars',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({labels:GL.picks,publish:publish})});
     const j=await r.json();
     if(j.error){
-      $('#glMsg').textContent=j.error+
-        (j.steps?(' · '+j.steps.map(s=>s.step+':'+s.rc).join(' · ')):'');
+      $('#glMsg').textContent=j.error;
+      if($('#glProgress')) $('#glProgress').hidden=true;
+      return;
+    }
+    if(publish && j.job){
+      GL.pub={job:j.job,total:j.total||4};
+      renderPubProgress(0,j.total||4,(j.steps&&j.steps[0])||'准备中','running');
+      pollBgPublish(j.job,j.total||4);
       return;
     }
     if(j.published){
@@ -4837,7 +4949,9 @@ async function saveBgChars(publish){
     }
   }catch(e){
     $('#glMsg').textContent='提交失败：'+e;
-  }finally{ GL.busy=false; updateGlButtons(); }
+  }finally{
+    if(!GL.pub){ GL.busy=false; updateGlButtons(); }
+  }
 }
 $('#glRefresh').onclick=()=>loadBgReview(true);
 $('#glDraft').onclick=()=>saveBgChars(false);

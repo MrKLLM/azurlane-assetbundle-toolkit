@@ -11539,6 +11539,8 @@ STAGES 里 derive 的标题/判据/writes 同步改成"缩略图 / 台词表 / �
 - 控制台「背景标注」复核台：`/api/bg_review` 出清单 + 缩略图，`/api/bgchars` 保存标注；
   发布按顺序 `allow-unlabeled build → publish flags --from-annotations → strict build → make_bg_thumbs`，
   并要求用户勾选确认会写 `annotations/`、`inputs/gamecfg/bg_char_flags.json`、`bg_meta`。
+- 发布是**后台任务 + 轮询**（`BGPUB` / `/api/bgchars/status`）：完成后一步才推进一格，
+  当前步用墨点/流光；四步合计约数十秒，不能拿定时器假装百分比，也不能让 HTTP 请求一直挂着。
 - 标注写 `annotations/bg_char_labels.json`（merge + 原子写）；`bsmre` 等未命名词根继续只报不编。
 
 **判据（真实假图实测）**：临时放一张新 `bg/zz_probe_new.png` 后，

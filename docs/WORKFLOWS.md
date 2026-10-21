@@ -5208,6 +5208,8 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 - 每张只给「有角色 / 无角色」两个值；「不确定」不允许写进发布件，宁可留在 pending。
 - 发布按钮必须同时要求：全部图已判 + 用户勾选"知道会写 `annotations/`、`inputs/gamecfg/
   bg_char_flags.json`、`Output/gallery_v2/bg_meta.json`"；`--allow-unlabeled` 只是中间态，不是发布。
+- 四步发布走**后台任务 + 轮询**（`BGPUB` / `/api/bgchars/status`）：每完成一步才前进一格
+  （1/4…4/4），当前步用墨点/流光，不用定时器假推进；失败停在失败步并显示该步输出尾部。
 - 复核台顶部固定显示 `场景 N / 已判 N / 待判 N`，并列出 `unnamed_roots`（只读；命名仍走 WF-48）。
 
 **踩坑记录**
