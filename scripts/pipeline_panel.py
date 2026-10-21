@@ -43,6 +43,12 @@ PIPE = os.path.join(ROOT, 'scripts', 'update_pipeline.py')
 WORK = os.path.join(ROOT, '.diag', 'pipeline')
 PANEL = os.path.join(WORK, 'panel')
 RUNS = os.path.join(PANEL, 'runs.json')
+STATE = os.path.join(WORK, 'pipeline_state.json')
+ARCHIVE = os.path.join(PANEL, 'archive')
+BG_REVIEW_JSON = os.path.join(PANEL, 'bg_review.json')
+ANNOT = os.path.join(ROOT, 'annotations', 'bg_char_labels.json')
+RAW_DIR = os.path.join(ROOT, 'Output', 'Raw')
+BG_THUMBS = os.path.join(ROOT, 'Output', 'gallery_v2', 'bg_thumbs')
 PORT = 8788
 PY = sys.executable
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1')
@@ -117,6 +123,32 @@ def save_runs(runs):
     os.replace(tmp, RUNS)
 
 
+def new_round():
+    """归档本轮阶段缓存与任务记录，回到第 1 步。
+
+    只动 .diag/pipeline/ 下的**状态**，不碰 Output/、inputs/、files/ 与任何阶段产物。
+    为什么不能靠删文件当"重置"：pipeline_state.json 是阶段缓存，删了只是让阶段显示
+    idle；真正开新一轮仍要重新跑。归档而不是删，是为了还能回看上一轮到底跑了什么。
+    """
+    refresh_states()
+    running = running_job()
+    if running:
+        return {'error': '还有任务在跑（%s），等它结束再开新一轮' % running.get('label', '')}
+    os.makedirs(ARCHIVE, exist_ok=True)
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    moved = []
+    for src, name in ((STATE, 'pipeline_state'), (RUNS, 'runs')):
+        if os.path.isfile(src):
+            dst = os.path.join(ARCHIVE, '%s_%s.json' % (name, stamp))
+            os.replace(src, dst)
+            try:
+                moved.append(os.path.relpath(dst, ROOT).replace('\\', '/'))
+            except ValueError:          # 测试把归档目录挪到别的盘符时也能报出来
+                moved.append(dst.replace('\\', '/'))
+    save_runs([])
+    return {'ok': True, 'stamp': stamp, 'archived': moved}
+
+
 def running_job():
     for r in load_runs():
         if r.get('state') == 'running':
@@ -124,6 +156,108 @@ def running_job():
                 return r
             r['state'] = 'gone'
     return None
+
+
+# ------------------------------------------------------------------ 背景人工标注
+_BG_REVIEW = {'at': 0.0, 'data': None}
+
+
+def _run_py(argv, timeout=300):
+    try:
+        p = subprocess.run([PY] + argv, cwd=ROOT, capture_output=True, text=True,
+                           encoding='utf-8', errors='replace', timeout=timeout, env=ENV)
+        return p.returncode, (p.stdout or '') + (p.stderr or '')
+    except subprocess.TimeoutExpired:
+        return 124, '超时（%ds）' % timeout
+    except Exception as e:
+        return 1, '%s: %s' % (type(e).__name__, e)
+
+
+def bg_review(fresh=False):
+    """扫描 Raw + 现有标注，返回待人工判「有没有角色」的新场景图。
+
+    走 `build_bg_meta.py --review-out`，不写正式索引：新图正是 has_char 闸门要拦的东西，
+    先给人工一张可点的清单。结果缓存 2 分钟，避免每开一次弹窗都重扫 1,900 张图。
+    """
+    if (not fresh and _BG_REVIEW['data'] is not None
+            and time.time() - _BG_REVIEW['at'] < 120):
+        return _BG_REVIEW['data']
+    os.makedirs(PANEL, exist_ok=True)
+    rc, out = _run_py(['scripts/build_bg_meta.py', '--review-out', BG_REVIEW_JSON], 300)
+    if rc != 0:
+        return {'error': '扫描新背景失败', 'log': out[-1600:]}
+    try:
+        with open(BG_REVIEW_JSON, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        return {'error': '读不到复核清单：%s' % e}
+    _BG_REVIEW.update(at=time.time(), data=data)
+    return data
+
+
+def bg_chars_save(body):
+    """保存人工标注；`publish=true` 时再走 建索引 → 发 flags → 重建索引 → 缩略图。"""
+    labels = body.get('labels')
+    if not isinstance(labels, dict):
+        return {'error': 'labels 必须是 {key: 0|1}'}
+    if len(labels) > 5000:
+        return {'error': '一次提交的标注太多（>5000）'}
+    data = bg_review()
+    if data.get('error'):
+        return data
+    scene = set(data.get('scene_keys') or [])
+    if not scene:
+        return {'error': '复核清单为空，先重扫'}
+    clean = {}
+    for k, v in labels.items():
+        if k not in scene:
+            return {'error': '这张图不在本轮场景清单里：%s' % k}
+        if int(v) not in (0, 1):
+            return {'error': '标注值只能是 0/1：%s=%r' % (k, v)}
+        clean[k] = int(v)
+    if not os.path.isfile(ANNOT):
+        return {'error': '缺 %s（人工标注正本）' % os.path.relpath(ANNOT, ROOT)}
+    try:
+        with open(ANNOT, encoding='utf-8') as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        return {'error': '读标注正本失败：%s' % e}
+    all_labels = doc.setdefault('labels', {})
+    before = len(all_labels)
+    all_labels.update(clean)
+    doc['updated_at'] = time.strftime('%Y-%m-%d %H:%M')
+    doc.setdefault('schema', 1)
+    doc.setdefault('note', '场景背景「画面里有没有角色」的人工视觉标注合并正本。')
+    tmp = ANNOT + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(doc, f, ensure_ascii=False, indent=0)
+        os.replace(tmp, ANNOT)
+    except OSError as e:
+        return {'error': '写标注正本失败：%s' % e}
+    _BG_REVIEW.update(at=0.0, data=None)
+    saved = len(all_labels) - before
+    if not body.get('publish'):
+        return {'ok': True, 'saved': saved, 'published': False, 'pending': len(scene - set(all_labels))}
+
+    missing = sorted(scene - set(all_labels))
+    if missing:
+        return {'ok': True, 'saved': saved, 'published': False, 'pending': len(missing),
+                'error': '还有 %d 张场景图没判，补齐后才能发布（前几张：%s）'
+                         % (len(missing), '、'.join(missing[:5]))}
+    steps = []
+    for title, argv, timeout in (
+            ('生成复核索引', ['scripts/build_bg_meta.py', '--allow-unlabeled'], 300),
+            ('发布角色标注', ['scripts/publish_bg_char_flags.py', '--from-annotations'], 300),
+            ('重建背景索引', ['scripts/build_bg_meta.py'], 300),
+            ('生成新缩略图', ['scripts/make_bg_thumbs.py'], 900)):
+        rc, out = _run_py(argv, timeout)
+        steps.append({'step': title, 'rc': rc, 'out': out[-1600:]})
+        if rc != 0:
+            return {'ok': True, 'saved': saved, 'published': False, 'steps': steps,
+                    'error': title + '失败（标注已保存）'}
+    _BG_REVIEW.update(at=0.0, data=None)
+    return {'ok': True, 'saved': saved, 'published': True, 'pending': 0, 'steps': steps}
 
 
 def start_job(label, argv, script=None):
@@ -577,6 +711,29 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, disk_report(q.get('fresh') == '1'))
         if u.path == '/api/cleanup':
             return self._send(200, cleanup_list())
+        if u.path == '/api/bg_review':
+            return self._send(200, bg_review(q.get('fresh') == '1'))
+        if u.path == '/bgimg':
+            key = q.get('key', '')
+            if '/' not in key:
+                return self._send(400, {'error': 'key 必须是 <目录>/<名>'})
+            d, name = key.split('/', 1)
+            if not (re.fullmatch(r'[A-Za-z0-9_]+', d)
+                    and re.fullmatch(r'[A-Za-z0-9_.-]+', name)):
+                return self._send(403, {'error': '非法图名'})
+            thumb = os.path.realpath(os.path.join(BG_THUMBS, d, name + '.webp'))
+            raw = os.path.realpath(os.path.join(RAW_DIR, d, name + '.png'))
+            base_t = os.path.realpath(BG_THUMBS) + os.sep
+            base_r = os.path.realpath(RAW_DIR) + os.sep
+            src, ctype = None, 'application/octet-stream'
+            if thumb.startswith(base_t) and os.path.isfile(thumb):
+                src, ctype = thumb, 'image/webp'
+            elif raw.startswith(base_r) and os.path.isfile(raw):
+                src, ctype = raw, 'image/png'
+            if not src:
+                return self._send(404, {'error': '图不在盘上'})
+            with open(src, 'rb') as f:
+                return self._send(200, f.read(), ctype)
         if u.path == '/api/log':
             # 必须在这里也刷一次状态：前端追日志期间停掉了 8s 一次的 /api/state 轮询，
             # 只靠那边刷新的话，任务早就结束了面板还会一直显示「运行中」。
@@ -624,6 +781,10 @@ class H(BaseHTTPRequestHandler):
             if err:
                 return self._send(409, {'error': err})
             return self._send(200, {'id': rid})
+        if u.path == '/api/bgchars':
+            return self._send(200, bg_chars_save(body))
+        if u.path == '/api/newround':
+            return self._send(200, new_round())
         if u.path != '/api/run':
             return self._send(404, {'error': 'not found'})
         valid = {s['key'] for s in stage_keys()[0]}
@@ -1767,7 +1928,21 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
   background:var(--accent)!important;flex:0 0 auto;
 }
 .eyebrow.red i{background:var(--fail)!important}
-.eyebrow.run i{background:var(--run)!important;animation:none!important}
+/* 运行中：让那条 30px 的朱砂短线像笔锋一样呼吸；不再是静止的装饰线。 */
+@keyframes inklinepulse{0%,100%{opacity:.35;transform:scaleX(.55)}50%{opacity:1;transform:scaleX(1)}}
+.eyebrow.run i{background:var(--run)!important;transform-origin:left;
+  animation:inklinepulse 1.4s ease-in-out infinite!important}
+/* 局部等待：三颗墨点 + 文案；扫描/盘点这类没有字节可量的阶段用它，不假装百分比。 */
+.inkwait{display:inline-flex;align-items:center;gap:7px;vertical-align:middle;
+  font:400 10px/1.6 var(--font-mono)!important;color:var(--ink-3)!important}
+.inkwait i{width:5px;height:5px;border-radius:50%;background:var(--accent)!important;
+  opacity:.3;animation:inkdot 1.2s ease-in-out infinite}
+.inkwait i:nth-child(2){animation-delay:.14s}.inkwait i:nth-child(3){animation-delay:.28s}
+.inkwait em{font-style:normal}
+@keyframes inkdot{0%,100%{transform:translateY(0);opacity:.28}45%{transform:translateY(-4px);opacity:.95}}
+@media (prefers-reduced-motion:reduce){
+  .eyebrow.run i,.inkwait i{animation:none!important}
+}
 .stepstate{
   margin-left:4px;padding:2px 6px;
   font:500 8px/1.4 var(--font-mono)!important;letter-spacing:.12em;
@@ -2204,24 +2379,79 @@ pre .bad{color:#E08A69!important}
 /* 清理中心弹窗复用同一套骨架：⚠️ 类名（.veil/.sheet）不带定位，
    定位/遮罩全在 ID 选择器上 —— 漏了这条弹窗就是一段不可见的 inline 文本
    （2026-10-18 13:40 实测：DOM 里 rows=5、探针判据全过，屏幕上却什么都没有）。 */
-#cleanmodal{position:fixed;inset:0;z-index:80;display:none}
-#cleanmodal.on{display:flex;align-items:center;justify-content:center}
-#cleanmodal .veil{position:absolute;inset:0;background:rgba(24,21,17,.58)}
-#cleanmodal .sheet{
+#cleanmodal,#newmodal{position:fixed;inset:0;z-index:80;display:none}
+#cleanmodal.on,#newmodal.on{display:flex;align-items:center;justify-content:center}
+#cleanmodal .veil,#newmodal .veil{position:absolute;inset:0;background:rgba(24,21,17,.58)}
+#cleanmodal .sheet,#newmodal .sheet{
   position:relative;width:min(620px,92vw);max-height:86vh;overflow:auto;
   background:var(--card);border:1px solid var(--rule);padding:22px 24px}
-#cleanmodal .kicker{
+#cleanmodal .kicker,#newmodal .kicker{
   display:block;font:500 8px/1.4 var(--font-mono)!important;letter-spacing:.26em;
   color:var(--ink-3)!important;text-transform:uppercase}
-#cleanmodal .kicker i{font-style:normal;color:var(--accent);margin:0 6px}
-#cleanmodal h3{
+#cleanmodal .kicker i,#newmodal .kicker i{font-style:normal;color:var(--accent);margin:0 6px}
+#cleanmodal h3,#newmodal h3{
   margin:10px 0 4px;font:500 24px/1.25 var(--font-display)!important;
   letter-spacing:.05em;color:var(--ink)!important}
-#cleanmodal .shead p{
+#cleanmodal .shead p,#newmodal .shead p{
   margin:0 0 16px;font:400 11px/1.7 var(--font-mono)!important;
   color:var(--ink-3)!important}
-#cleanmodal .sact{
+#cleanmodal .sact,#newmodal .sact{
   display:flex;justify-content:flex-end;gap:14px;margin-top:18px}
+#newmodal .snote{
+  margin:0 0 16px;padding:9px 12px;border-left:2px solid var(--ochre);
+  background:var(--ochre-l);font:400 10px/1.75 var(--font-mono)!important;
+  color:var(--ochre)!important}
+
+/* ── 背景标注复核台：新图缩略图 + 有/无角色。新图会卡住 has_char 闸门， */
+/* 这里必须让人能一屏判完，而不是去翻 .diag 里的拼板。 */
+#bglabelmodal{position:fixed;inset:0;z-index:85;display:none}
+#bglabelmodal.on{display:flex;align-items:center;justify-content:center}
+#bglabelmodal .veil{position:absolute;inset:0;background:rgba(24,21,17,.58)}
+#bglabelmodal .sheet{
+  position:relative;width:min(1180px,96vw);max-height:92vh;display:flex;flex-direction:column;
+  background:var(--card);border:1px solid var(--rule);padding:22px 24px}
+#bglabelmodal .kicker{
+  display:block;font:500 8px/1.4 var(--font-mono)!important;letter-spacing:.26em;
+  color:var(--ink-3)!important;text-transform:uppercase}
+#bglabelmodal .kicker i{font-style:normal;color:var(--accent);margin:0 6px}
+#bglabelmodal h3{margin:10px 0 4px;font:500 24px/1.25 var(--font-display)!important;
+  letter-spacing:.05em;color:var(--ink)!important}
+#bglabelmodal .shead p{margin:0 0 14px;font:400 11px/1.7 var(--font-mono)!important;
+  color:var(--ink-3)!important}
+.glbody{overflow:auto;min-height:140px;padding:2px 4px 2px 0;flex:1}
+.glgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:12px}
+.glcard{border:1px solid var(--rule);background:var(--paper-2);padding:8px;
+  display:flex;flex-direction:column;gap:6px;transition:border-color .15s,background .15s}
+.glcard img{width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--paper-3);
+  border:1px solid var(--rule)}
+.glcard .k{font:400 9.5px/1.5 var(--font-mono)!important;color:var(--ink-3)!important;
+  word-break:break-all}
+.glcard .n{font:400 10.5px/1.6 var(--font-ui)!important;color:var(--ink-2)!important;
+  min-height:2.6em}
+.glcard .b{display:flex;gap:6px}
+.glcard .b button{flex:1;font:400 10px/1.4 var(--font-ui)!important;cursor:pointer;
+  padding:5px 6px;border:1px solid var(--rule);background:var(--paper-3);
+  color:var(--ink-2);border-radius:0}
+.glcard .b button:hover{border-color:var(--accent);color:var(--accent-d)}
+.glcard .b button.on{border-color:var(--accent);background:var(--accent-l);color:var(--accent-d);
+  font-weight:600}
+.glcard.pick1{border-color:var(--accent);background:var(--accent-l)}
+.glcard.pick0{border-color:var(--ink-3);background:var(--paper-3)}
+.glroot{margin-top:14px;padding:10px 12px;border:1px solid var(--rule);
+  background:var(--paper-2);font:400 10.5px/1.7 var(--font-ui)!important;color:var(--ink-2)!important}
+.glroot b{display:block;margin-bottom:4px;color:var(--ink)!important}
+.glroot code{font:10px/1.5 var(--font-mono)!important;color:var(--accent-d)!important;
+  background:var(--paper-3);padding:1px 4px;border:1px solid var(--rule);margin:0 2px}
+.glok{padding:22px 14px;text-align:center;font:400 12px/1.8 var(--font-ui)!important;
+  color:var(--ink-2)!important}
+.glagree{display:flex;gap:8px;align-items:flex-start;margin:10px 0 0;
+  font:400 10px/1.6 var(--font-ui)!important;color:var(--ink-3)!important;cursor:pointer}
+.glagree input{accent-color:var(--accent);margin:2px 0 0;flex:none}
+.glfoot{display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:12px;
+  border-top:1px solid var(--rule);flex-wrap:wrap}
+#glMsg{flex:1;min-width:180px;font:400 10px/1.5 var(--font-mono)!important;
+  color:var(--ink-3)!important}
+#glPublish:disabled,#glDraft:disabled{opacity:.35;cursor:not-allowed}
 #signmodal.on{display:flex;align-items:center;justify-content:center}
 #signmodal .veil{position:absolute;inset:0;background:rgba(24,21,17,.58)}
 #signmodal .sheet{
@@ -2506,6 +2736,8 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
   </div>
   <div class="act">
     <button id="bBg" class="ghost" title="B：背景（航路版画 / 海图 / 墨迹 / 素纸 / 自定义图片）" aria-expanded="false">背景</button>
+    <button id="bBgLabel" class="ghost" title="新背景图人工标注：有角色 / 无角色（只列场景背景）">背景标注</button>
+    <button id="bNew" class="ghost" title="归档本轮阶段缓存与任务记录，回到第 1 步（不动 Output）">新一轮</button>
     <button id="bDetail" class="ghost" title="D：展开证据（全部阶段 / 日志 / 对照表 / 指纹）">细节</button>
     <button id="bSea" class="ghost" title="S：夜读模式 开/关（暖墨底，非旧版紫黑）">夜读 · 关</button>
     <span class="kbd" title="1-5 切步骤 · R 跑当前这一步 · D 细节 · B 背景 · P 只看计划 · H 帮助 · Esc 关闭 · S 夜读 · M 动效从简">
@@ -2660,7 +2892,7 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
       <p id="cleanSub">只列**明确可再生**的东西；承重目录不在这张单子上，也不允许通过面板删。</p>
     </div>
     <div class="sbody">
-      <div id="cleanList" class="cleanlist"><span class="dim">盘点中…</span></div>
+      <div id="cleanList" class="cleanlist"><span class="inkwait"><i></i><i></i><i></i><em>盘点中…</em></span></div>
       <div class="blocked">
         <div class="bk"><b>⛔ 面板不允许删（写了原因，不是懒得做按钮）</b></div>
         <div class="bi"><b>源包 files/AssetBundles</b> —— 清单只是"目录"，不是"内容"。
@@ -2674,6 +2906,48 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
     </div>
     <div class="sact">
       <button type="button" class="ghost" data-cclose>关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新一轮：阶段缓存与任务记录会归档，界面回到第 1 步。
+     这不是"清空数据"——Output/、inputs/、files/ 一个字节都不动。 -->
+<div id="newmodal" aria-hidden="true">
+  <div class="veil" data-nclose></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="newTitle">
+    <div class="shead">
+      <span class="kicker">NEW ROUND <i>·</i> 新一轮</span>
+      <h3 id="newTitle">归档本轮，回到第 1 步</h3>
+      <p>只归档 <code>.diag/pipeline/</code> 里的阶段缓存与任务记录，不碰 Output / inputs / files；归档文件留在 <code>.diag/pipeline/panel/archive/</code>。</p>
+    </div>
+    <p id="newNote" class="snote">—</p>
+    <div class="sact">
+      <button type="button" class="ghost" data-nclose>取消</button>
+      <button type="button" class="pact" id="newGo">归档并开始新一轮</button>
+    </div>
+  </div>
+</div>
+
+<!-- 背景标注复核台：新场景图会卡住 build_bg_meta 的 has_char 闸门。
+     这里按真实缩略图逐张点"有角色/无角色"，保存到入库正本后再发布。 -->
+<div id="bglabelmodal" aria-hidden="true">
+  <div class="veil" data-glclose></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="glTitle">
+    <div class="shead">
+      <span class="kicker">REVIEW <i>·</i> 背景标注</span>
+      <h3 id="glTitle">新背景：画面里有没有角色？</h3>
+      <p id="glSub">正在读…</p>
+    </div>
+    <div id="glBody" class="glbody"><span class="dim">点「背景标注」后开始扫描。</span></div>
+    <label class="glagree"><input type="checkbox" id="glAgree">
+      <span>我确认发布会写 <code>annotations/bg_char_labels.json</code>、
+        <code>inputs/gamecfg/bg_char_flags.json</code> 与 <code>Output/gallery_v2/bg_meta.json</code>（会先生成复核索引，再发布，再重建）。</span></label>
+    <div class="glfoot">
+      <span id="glMsg">—</span>
+      <button type="button" class="ghost" id="glRefresh">重扫</button>
+      <button type="button" class="ghost" id="glDraft" disabled>只保存草稿</button>
+      <button type="button" class="ghost" data-glclose>关闭</button>
+      <button type="button" class="pact" id="glPublish" disabled>保存并发布</button>
     </div>
   </div>
 </div>
@@ -2839,6 +3113,7 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let MY_BUILD='__BUILD__';   // 服务端把 PAGE 的哈希内联进来；改了源码重启后旧页会自己 reload
                            // （用 let 而非 const：注入式测试要能改写它，见 panel_paper_probe）
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const inkWait=t=>'<span class="inkwait"><i></i><i></i><i></i><em>'+esc(t)+'</em></span>';
 let S=null, step=1, curJob=null, off=0, follow=true, timer=null, force=false;
 let SEA = false;   // 星野背景已退役（2026-10-17 纸本控制台）；变量保留只为不拆旧调用点
 let NIGHT = localStorage.getItem('panel.night')==='1';
@@ -3814,6 +4089,12 @@ function askOf(n){
     return {eb, red:1, ask:'还没换完：有 '+nEm(notYet.length)+' 项这轮根本没跑',
       why:'没跑过的项不算完成。差在：'+whereNot+'。'+staleWarn,
       acts:[goGap,{a:'detail',t:'看是哪几项',k:'link2'}]};
+  if(fail && fail.key==='labels') return {eb, red:1,
+    ask:'标签重建没过：先看有没有新背景图没判「有没有角色」',
+    why:'新场景图会卡住 has_char 闸门（场景背景必须逐张人工判过，不能拿文件名规则冒充）。'+
+        '点「打开背景标注」按缩略图逐张判；判完发布会自动重建 bg_meta 与缩略图。'+tail,
+    acts:[{a:'bglabel',t:'⚑ 打开背景标注',k:'pact mag'},
+          {a:'detail',t:'看日志',k:'link2'}]};
   if(fail) return {eb, red:1, ask:fail.key+' 这一步没过',
     why:'闸门判红说明这次换入会丢东西——别绕，先查源包。'+tail,
     acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},
@@ -3836,8 +4117,10 @@ function askOf(n){
       why:'没跑过的项不算完成。差在：'+where+'。'+staleWarn,
       acts:[goGap,{a:'detail',t:'看是哪几项',k:'link2'}]};
   }
-  return {eb, ask:'这次更新已经换完了', why:'画廊已部署、回归跑过；要再来一轮就从第 1 步开始。',
-    acts:[{a:'regress',t:'▶ 只跑回归',k:'pact mag'},{a:'detail',t:'看细节',k:'link2'}]};
+  return {eb, ask:'这次更新已经换完了', why:'画廊已部署、回归跑过。要再来一轮就点「开始新一轮」——'+
+      '会归档本轮阶段缓存与任务记录（不动 Output），回到第 1 步；旧记录仍留在 .diag/pipeline/panel/archive/。',
+    acts:[{a:'newround',t:'↺ 开始新一轮',k:'pact mag'},
+          {a:'regress',t:'▶ 只跑回归',k:'link2'},{a:'detail',t:'看细节',k:'link2'}]};
 }
 
 function render(){
@@ -4168,6 +4451,8 @@ function ctaRun(a, to){
   if(a==='goto') return void (step=Math.max(1,Math.min(stepMax(),+to||1)), render());
   if(a==='prev') return void (step=Math.max(1,step-1), render());
   if(a==='detail') return void openDetail();
+  if(a==='newround') return void openNew();
+  if(a==='bglabel') return void openBgLabel();
   if(a==='diff'||a==='recheck') return post({stages:['preflight']},{label:'重查闸门'});
   if(a==='pullcheck') return post({stages:['pull']},{label:'看设备差异'});
   if(a==='pull'){
@@ -4369,7 +4654,7 @@ function renderDisk(d){
 }
 async function loadDisk(fresh){
   const box=$('#disk');
-  if(fresh) box.innerHTML='<span class="dim">盘点中…（约 1 分钟，好了自动刷）</span>';
+  if(fresh) box.innerHTML=inkWait('盘点中…（约 1 分钟，好了自动刷）');
   try{
     const j=await (await fetch('/api/disk'+(fresh?'?fresh=1':''))).json();
     if(j.status==='computing'){
@@ -4392,6 +4677,172 @@ function closeClean(){ $('#cleanmodal').classList.remove('on');
                        $('#cleanmodal').setAttribute('aria-hidden','true'); }
 $('#bClean').onclick=openClean;
 $$('#cleanmodal [data-cclose]').forEach(e=>e.onclick=closeClean);
+
+/* ── 新一轮：归档本轮状态，回到第 1 步 ─────────────────────────────────
+   以前界面会永久停在"这次更新已经换完了"，因为 pipeline_state.json 与 runs.json
+   是持久化的；重启控制台也不会清。这里给它一个显式出口，且只动 .diag 下的状态。 */
+function openNew(){
+  bgHeal();
+  const runs=(S&&S.runs)||[], running=runs.filter(r=>r.state==='running');
+  const done=Object.keys((S&&S.state)||{}).length;
+  $('#newNote').textContent = running.length
+    ? ('还有任务在跑（'+(running[0].label||running[0].id||'')+'），等它结束再开新一轮。')
+    : ('将归档：阶段结论 '+done+' 条 · 任务记录 '+runs.length+' 条。'+
+       '界面回到第 1 步；源包、inputs 与 Output 产物一个字节都不动。');
+  $('#newGo').disabled = !!running.length;
+  $('#newmodal').classList.add('on');
+  $('#newmodal').setAttribute('aria-hidden','false');
+}
+function closeNew(){ $('#newmodal').classList.remove('on');
+                     $('#newmodal').setAttribute('aria-hidden','true'); }
+$('#bNew').onclick=openNew;
+$$('#newmodal [data-nclose]').forEach(e=>e.onclick=closeNew);
+$('#newGo').onclick=async()=>{
+  const b=$('#newGo'); b.disabled=true;
+  let j=null;
+  try{
+    const r=await fetch('/api/newround',{method:'POST'});
+    j=await r.json();
+  }catch(e){
+    $('#newNote').textContent='新一轮没起来：'+e; b.disabled=false; return;
+  }
+  if(j.error){ $('#newNote').textContent=j.error; b.disabled=false; return; }
+  SIGNED.clear(); force=false; curJob=null; off=0; LINES=[]; follow=true;
+  PENDING=null; LASTSTEP=null; mounted.clear();
+  const lg=$('#log'); if(lg) lg.textContent='';
+  const rc=$('#receipt'); if(rc){ rc.hidden=true; rc.textContent=''; }
+  closeNew();
+  await apiState(true);
+  step=1; render();
+  showReceipt('新一轮已开始 · 归档 '+(j.archived&&j.archived.length?j.archived.join('、'):'（没有旧状态）')
+              +' · 界面回到第 1 步','good');
+};
+
+/* ── 背景标注复核台 ─────────────────────────────────────────────────── */
+let GL={data:null,picks:{},busy:false};
+function openBgLabel(){
+  bgHeal();
+  GL.picks={}; $('#glAgree').checked=false;
+  $('#bglabelmodal').classList.add('on');
+  $('#bglabelmodal').setAttribute('aria-hidden','false');
+  $('#glBody').innerHTML=inkWait('正在扫描 Output/Raw 与人工标注…（约十几秒）');
+  $('#glSub').textContent='只列 group=scene 的场景背景；登录/其他类目不在这张清单里。';
+  $('#glMsg').textContent='扫描中…';
+  loadBgReview(false);
+}
+function closeBgLabel(){
+  $('#bglabelmodal').classList.remove('on');
+  $('#bglabelmodal').setAttribute('aria-hidden','true');
+  GL.busy=false;
+}
+$('#bBgLabel').onclick=openBgLabel;
+$$('#bglabelmodal [data-glclose]').forEach(e=>e.onclick=closeBgLabel);
+$('#glAgree').onchange=updateGlButtons;
+
+async function loadBgReview(fresh){
+  if(GL.busy) return;
+  GL.busy=true; updateGlButtons();
+  GL.picks={};
+  $('#glBody').innerHTML=inkWait('正在扫描 Output/Raw 与人工标注…（约十几秒）');
+  try{
+    const r=await fetch('/api/bg_review'+(fresh?'?fresh=1':''));
+    const j=await r.json();
+    if(j.error){
+      $('#glBody').innerHTML='<div class="glok">扫描失败：'+esc(j.error)+'</div>'+
+        (j.log?'<pre style="white-space:pre-wrap;font:10px/1.5 var(--font-mono);color:var(--ink-3)">'+esc(j.log)+'</pre>':'');
+      $('#glMsg').textContent=j.error; return;
+    }
+    GL.data=j; renderBgReview();
+  }catch(e){
+    $('#glBody').innerHTML='<div class="glok">读不到复核清单：'+esc(String(e))+'</div>';
+    $('#glMsg').textContent='读不到复核清单';
+  }finally{ GL.busy=false; updateGlButtons(); }
+}
+
+function renderBgReview(){
+  const d=GL.data; if(!d) return;
+  const un=d.unlabeled||[];
+  $('#glSub').textContent='场景 '+(d.scene_total||0)+' 张 · 已判 '+(d.labeled||0)+
+    ' · 待判 '+(d.pending||0)+'。只列 group=scene；登录/其他类目不在这张清单里。';
+  let html='';
+  if(!un.length){
+    html+='<div class="glok">场景背景已经全部判过，没有待标注的新图。</div>';
+  }else{
+    html+='<div class="glgrid">'+un.map(it=>{
+      const p=GL.picks[it.key];
+      const cn=(it.cn&&it.cn[0]&&it.cn[0].cn)||it.series||it.root||'';
+      return '<div class="glcard'+(p===1?' pick1':p===0?' pick0':'')+'" data-key="'+esc(it.key)+'">'+
+        '<img loading="lazy" src="/bgimg?key='+encodeURIComponent(it.key)+'" alt="">'+
+        '<div class="k">'+esc(it.key)+'</div>'+
+        '<div class="n">'+esc(cn||'(无中文名)')+' · '+esc(it.root||'')+'</div>'+
+        '<div class="b"><button type="button" data-gv="1" class="'+(p===1?'on':'')+'">有角色</button>'+
+        '<button type="button" data-gv="0" class="'+(p===0?'on':'')+'">无角色</button></div></div>';
+    }).join('')+'</div>';
+  }
+  const roots=d.unnamed_roots||[];
+  if(roots.length){
+    html+='<div class="glroot"><b>新活动子标签已自动创建，但这些词根还没有中文名</b>'+
+      roots.map(r=>'<code>'+esc(r.root)+'</code>×'+r.n).join(' ')+
+      '<br>游戏表里查不到时保持英文，不要硬编；命名流程见 WF-48。</div>';
+  }
+  $('#glBody').innerHTML=html;
+  updateGlButtons();
+}
+
+$('#glBody').onclick=e=>{
+  const b=e.target.closest('[data-gv]'); if(!b) return;
+  const card=b.closest('.glcard'); if(!card) return;
+  const key=card.dataset.key, v=+b.dataset.gv;
+  GL.picks[key]=v;
+  card.classList.toggle('pick1',v===1); card.classList.toggle('pick0',v===0);
+  card.querySelectorAll('[data-gv]').forEach(x=>x.classList.toggle('on',+x.dataset.gv===v));
+  updateGlButtons();
+};
+
+function updateGlButtons(){
+  const d=GL.data, un=(d&&d.unlabeled)||[];
+  const left=un.filter(x=>GL.picks[x.key]===undefined).length;
+  const picks=Object.keys(GL.picks).length;
+  const agree=$('#glAgree').checked;
+  if($('#glPublish')) $('#glPublish').disabled=
+    GL.busy||!d||left>0||!agree||(d.pending===0&&picks===0);
+  if($('#glDraft')) $('#glDraft').disabled=GL.busy||!d||picks===0;
+  if($('#glRefresh')) $('#glRefresh').disabled=GL.busy;
+  if($('#glMsg')) $('#glMsg').textContent=GL.busy?'处理中…':
+    (!d?'—':(left?('还有 '+left+' 张未判'):
+      (d.pending===0?'没有待判图':'全部已判，可以发布')));
+}
+
+async function saveBgChars(publish){
+  if(!publish && !Object.keys(GL.picks).length) return;
+  GL.busy=true; updateGlButtons();
+  $('#glMsg').textContent=publish?'保存并发布中…（会重建背景索引与缩略图）':'保存草稿中…';
+  try{
+    const r=await fetch('/api/bgchars',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({labels:GL.picks,publish:publish})});
+    const j=await r.json();
+    if(j.error){
+      $('#glMsg').textContent=j.error+
+        (j.steps?(' · '+j.steps.map(s=>s.step+':'+s.rc).join(' · ')):'');
+      return;
+    }
+    if(j.published){
+      closeBgLabel();
+      showReceipt('背景标注已发布 · 新增/更新 '+j.saved+' 条 · 缩略图已重建','good');
+      await apiState(true);
+    }else{
+      $('#glMsg').textContent='草稿已保存（'+j.saved+' 条）'+
+        (j.pending!=null?('；还有 '+j.pending+' 张未判'):'');
+      await loadBgReview(true);
+    }
+  }catch(e){
+    $('#glMsg').textContent='提交失败：'+e;
+  }finally{ GL.busy=false; updateGlButtons(); }
+}
+$('#glRefresh').onclick=()=>loadBgReview(true);
+$('#glDraft').onclick=()=>saveBgChars(false);
+$('#glPublish').onclick=()=>saveBgChars(true);
+
 function gb2(b){ return b>=1073741824 ? (b/1073741824).toFixed(2)+' GB' : (b/1048576).toFixed(0)+' MB'; }
 function renderClean(j){
   const rows=(j.targets||[]).map(t=>{
@@ -4484,6 +4935,8 @@ document.addEventListener('keydown',e=>{
   if(t && t.matches && t.matches('input,textarea,select')) return;
   const k=(e.key||'').toLowerCase();
   if(k==='escape'){
+    if($('#bglabelmodal')&&$('#bglabelmodal').classList.contains('on')){ closeBgLabel(); return; }
+    if($('#newmodal')&&$('#newmodal').classList.contains('on')){ closeNew(); return; }
     if($('#signmodal')&&$('#signmodal').classList.contains('on')){ closeSign(); return; }
     if($('#cleanmodal')&&$('#cleanmodal').classList.contains('on')){ closeClean(); return; }
     if($('#bgpick')&&$('#bgpick').classList.contains('on')){ bgPickOpen(false); return; }
@@ -4780,7 +5233,7 @@ function bgActive(){
   if(!BG.cv) return false;
   if(document.body.classList.contains('calm')) return false;
   if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches) return false;
-  if(document.querySelector('#detail.on,#help.on,#signmodal.on,#cleanmodal.on,#lightbox.on,#bgpick.on'))
+  if(document.querySelector('#detail.on,#help.on,#signmodal.on,#cleanmodal.on,#newmodal.on,#bglabelmodal.on,#lightbox.on,#bgpick.on'))
     return false;
   return true;
 }

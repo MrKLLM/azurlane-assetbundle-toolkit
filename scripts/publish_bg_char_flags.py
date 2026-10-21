@@ -26,6 +26,7 @@
 import argparse
 import datetime
 import glob
+import hashlib
 import json
 import os
 import sys
@@ -91,6 +92,42 @@ def gate(cells):
     return ok
 
 
+def update_manifest(cells):
+    """发布后同步台账的 bytes/sha/rows/coverage。
+
+    这个文件由脚本生成、本体 gitignore；台账是唯一入库的回指。不更新台账，
+    `check_inputs.py gamecfg` 必然报 drift —— 而漂移本身是正确信号，
+    不能靠"反正没人看"把它留成常态。"""
+    mp = os.path.join(ROOT, 'inputs', 'gamecfg', 'MANIFEST.json')
+    if not os.path.isfile(mp):
+        return
+    try:
+        with open(mp, encoding='utf-8') as f:
+            led = json.load(f)
+        raw = open(OUT, 'rb').read()
+        sha = hashlib.sha256(raw).hexdigest()
+        n_has = sum(cells.values())
+        n = len(cells)
+        for rec in led.get('files') or []:
+            if rec.get('path') != 'bg_char_flags.json':
+                continue
+            rec['bytes'] = len(raw)
+            rec['sha256'] = sha
+            rec['rows'] = n
+            rec['coverage'] = ('%d/%d 场景背景全覆盖（有角色 %d / 无角色 %d）；'
+                               '登录与其他类目未标注，消费方不得把它们当「无角色」隐藏'
+                               % (n, n, n_has, n - n_has))
+            break
+        led.setdefault('provenance', {})['landed_at'] = datetime.date.today().isoformat()
+        tmp = mp + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(led, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, mp)
+        print('[WRITE] %s（台账同步 bytes/sha）' % os.path.relpath(mp, ROOT))
+    except (OSError, ValueError) as e:
+        print('[WARN] 台账同步失败：%s（发布件已写，需手工修 MANIFEST）' % e)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--from-annotations', action='store_true',
@@ -141,6 +178,7 @@ def main():
         json.dump(doc, f, ensure_ascii=False, separators=(',', ':'))
     print('[WRITE] %s（%d 条 / %.1f KB）'
           % (os.path.relpath(OUT, ROOT), len(cells), os.path.getsize(OUT) / 1024))
+    update_manifest(cells)
     return 0
 
 

@@ -143,8 +143,10 @@ async function startLive2D(v, myseq){
 
   var cv=ensureCanvas();
   var app=new PIXI.Application({ view:cv, backgroundAlpha:0, antialias:true,
-    width:window.innerWidth, height:window.innerHeight, resolution:Math.min(2,window.devicePixelRatio||1),
+    width:window.innerWidth, height:window.innerHeight, resolution:Math.min(1.5,window.devicePixelRatio||1),
     autoDensity:true });
+  /* 背景不是查看器：2× DPR 在全屏画布上只是多 77% 填充像素，24fps 下看不出差别，
+     却会让整页合成更贵。1.5× 是"近看仍清楚、远看仍是背景"的折中。 */
   /* ⚠️ 模型路径必须带 PREFIX（= 页面上一层的 Output/），否则 404 会被库报成
      "Network error" 而不告诉你是哪个文件 —— 见 PREFIX() 那段注释。 */
   var modelUrl=PREFIX()+v.model+'/'+v.base+'.model3.json';
@@ -201,6 +203,11 @@ async function startLive2D(v, myseq){
     stop:function(){
       window.removeEventListener('resize', onR);
       try{ app.destroy(true,{children:true,baseTexture:true,texture:true}); }catch(e){}
+    },
+    setPaused:function(p){
+      /* 切到后台时停掉 ticker：rAF 本来会被节流，但 Explicit stop 能连同
+         纹理更新一起停，回来再 start，不让隐藏标签页白耗电。 */
+      try{ if(p) app.ticker.stop(); else app.ticker.start(); }catch(e){}
     }
   };
 }
@@ -367,7 +374,7 @@ async function startSpine(v, myseq){
   var onR=fit; window.addEventListener('resize', onR);
 
   var raf=0, last=performance.now();
-  var cancelled=false;
+  var cancelled=false, paused=false;
   /* ⚠️ 这段调用序列是**逐字对齐首页 `frame()`** 的（index.html 约 2609 行），少一步就黑屏：
        gl.clear → camera.position.set → camera.zoom → **camera.update()** → **scene.begin()**
        → drawSkeleton → **scene.end()**
@@ -385,6 +392,7 @@ async function startSpine(v, myseq){
   var FMIN = 1000/24 - 1;
   function loop(ts){
     if(cancelled) return;
+    if(paused){ raf=requestAnimationFrame(loop); return; }
     if(ts - loop._lastDraw < FMIN){ raf=requestAnimationFrame(loop); return; }
     loop._lastDraw = ts;
     var dt=Math.min(0.05,(ts-last)/1000||0); last=ts;
@@ -415,7 +423,8 @@ async function startSpine(v, myseq){
       if(raf) cancelAnimationFrame(raf);
       window.removeEventListener('resize', onR);
       Object.keys(main.textures).forEach(function(k){ try{ main.textures[k].dispose(); }catch(e){} });
-    }
+    },
+    setPaused:function(p){ paused=!!p; }
   };
 }
 
@@ -447,6 +456,7 @@ async function sync(){
   var v = (window.SiteBg&&SiteBg.get)?SiteBg.get():null;
   stop();
   if(!isLive(v)) return;
+  if(window.InkLoad) InkLoad.start('载入动态背景…');
 
   /* 站用背景是 id 唯一标识：kind+key 相同就不重建（避免 renderActs 反复触发时闪一下） */
   var myseq=++seq;
@@ -458,6 +468,8 @@ async function sync(){
     var inst = v.kind==='live2d' ? await startLive2D(v,myseq) : await startSpine(v,myseq);
     if(seq!==myseq||!inst){ if(inst)try{inst.stop()}catch(e){} return; }
     cur=inst;
+    syncPause();
+    if(window.InkLoad) InkLoad.done('动态背景就绪');
   }catch(e){
     lastErr=String((e&&e.stack)||e||'unknown');
     if(seq===myseq){
@@ -468,9 +480,15 @@ async function sync(){
       document.documentElement.classList.remove('has-livebg');
       hide();
       cur=null;
+      if(window.InkLoad) InkLoad.fail('动态背景加载失败，已退回静态底');
     }
   }
 }
+
+/* 切到后台就停渲染。rAF 本来会节流，但显式停掉 ticker/绘制能连纹理更新一起停；
+   回来时恢复，不等下一次 sitebgchange。 */
+function syncPause(){ if(cur&&cur.setPaused){ try{ cur.setPaused(document.hidden); }catch(e){} } }
+document.addEventListener('visibilitychange', syncPause);
 
 /* 事件：favorites.js 的 SiteBg.set/clear 都会派发 sitebgchange */
 document.addEventListener('sitebgchange', sync);

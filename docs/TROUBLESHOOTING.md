@@ -11487,3 +11487,107 @@ STAGES 里 derive 的标题/判据/writes 同步改成"缩略图 / 台词表 / �
 
 **涉及文件**：`scripts/pipeline_panel.py`（`#bgstage` 五层、`BG` 引擎、`#bgpick`）、
 `scripts/diag/panel_paper_probe.py`。做法与判据模板见 **WF-54**。
+
+---
+
+## §171 控制台“用过一次就一直保持”：阶段缓存持久化，却没有新一轮出口（2026-10-21）
+
+**现象**：完整跑完一轮后再打开控制台，主屏一直停在“这次更新已经换完了”；关掉服务重开也一样。
+用户问“下次用怎么办”。
+
+**根因**：不是卡死，也不是缓存没刷新——`.diag/pipeline/pipeline_state.json`（阶段结论）与
+`.diag/pipeline/panel/runs.json`（任务记录）本来就是**持久化设计**，用于续跑；
+但终止态只给了「只跑回归 / 看细节」，没有显式“归档本轮、回到第 1 步”的出口。
+源包/配置变了时指纹会让相关阶段失效，可当前没有新输入时界面就该停在那里——缺的是动作，不是刷新。
+
+**修法**：
+- `pipeline_panel.py` 增加 `POST /api/newround`：确认无任务在跑后，把
+  `pipeline_state.json` 与 `runs.json` **归档**到 `.diag/pipeline/panel/archive/`（`os.replace`），
+  写空 `runs.json`；**不碰 Output / inputs / files**。
+- 页头常驻「新一轮」，终止态主 CTA 也给「开始新一轮」；弹窗写明会归档什么、不动什么，
+  用户勾选/确认后才执行。
+- 归档而不是删除：上一轮到底跑了什么、哪些阶段判绿仍需可回看。
+
+**判据**：临时实例里点「新一轮」→ 弹窗关闭、`.diag` 侧出现带时间戳的两份归档、`runs.json == []`、
+`pipeline_state.json` 不存在、界面回到第 1 步；正在跑的任务必须被拒绝。
+`panel_paper_probe.py` 的版面/窄屏判据继续全绿。
+
+**坑**：
+- 不要用删除文件当“重置”。删了只会丢结论；归档才有回看价值。
+- `running_job()` 只认面板自己 `runs.json` 里的任务；命令行另起的流水线它看不见，
+  所以弹窗文案要说明“请在无任务时使用”，服务端仍要再拒绝一次正在跑的任务。
+- 测试若把归档目录放到另一个盘符，`os.path.relpath` 会抛 `ValueError`；归档响应要回退成绝对路径。
+
+---
+
+## §172 新背景图让 labels 链整段判红：`has_char` 是人工闸门，而管线没有入口（2026-10-21）
+
+**现象**：新活动背景导出后，`labels` 阶段红；日志里是
+`FAIL 场景背景每张都带 has_char（默认视图不许藏掉“没判过”的场景图）`。
+`.diag/bglabels` 有旧拼板工具，但控制台没有“这里新图要判有/无角色”的入口。
+
+**根因**：
+- `build_bg_meta.py` 的严格闸门要求**每张 scene 图**都有 `has_char`；新图没有，必然红。
+- `publish_bg_char_flags.py` 的 gate 拿**现有 `bg_meta.json`** 做 scene key 集；
+  新图还没进 `bg_meta` 时，先发 flags 会拿旧 key 集照样判绿，把新图静默漏掉。
+- 管线不会看图；`_cg` 文件名规则精确率只有 86%、召回 79%，不能当默认视图依据。
+  所以这里必须是**人工逐张判**，而不是加个自动规则让它变绿。
+
+**修法**：
+- `build_bg_meta.py` 增加 `--review-out`（只写待判清单，不写正式索引）与
+  `--allow-unlabeled`（复核中间态允许未判图进 `bg_meta`，不发布 flags）。
+- 控制台「背景标注」复核台：`/api/bg_review` 出清单 + 缩略图，`/api/bgchars` 保存标注；
+  发布按顺序 `allow-unlabeled build → publish flags --from-annotations → strict build → make_bg_thumbs`，
+  并要求用户勾选确认会写 `annotations/`、`inputs/gamecfg/bg_char_flags.json`、`bg_meta`。
+- 标注写 `annotations/bg_char_labels.json`（merge + 原子写）；`bsmre` 等未命名词根继续只报不编。
+
+**判据（真实假图实测）**：临时放一张新 `bg/zz_probe_new.png` 后，
+`--review-out` 报 `场景 1306 / 已判 1305 / 待判 1`；严格 `--check` 红在 `场景背景每张都带 has_char`；
+`--allow-unlabeled --check` 绿；删掉假图后恢复 1305/0。复核台端到端测试覆盖：
+打开→图中加载→点“有角色”→勾确认→发布→标注正本出现新 key→回执成功。
+
+**坑**：
+- 顺序不能反：先发 flags 后补 bg_meta，gate 会拿旧 scene 集判绿（静默漏新图）。
+- `--allow-unlabeled` 不是发布态；它写出的 `bg_meta` 会有未判图，默认视图会显示它们。
+- 新词根只有 1 张时不会进 `roots` 子标签（页面只建 n≥2 的组），但仍要在清单里报出来。
+- 不要整份覆盖 `annotations/bg_char_labels.json`；它包含手工历史标注，丢了不可再生。
+
+**涉及文件**：`scripts/build_bg_meta.py`、`scripts/publish_bg_char_flags.py`、
+`scripts/rebuild_labels.py`、`scripts/make_bg_thumbs.py`、`scripts/pipeline_panel.py`、
+`annotations/bg_char_labels.json`。流程模板见 **WF-55**。
+
+---
+
+## §173 动态背景：渲染器在 ≠ 用户能设；动态记录不能用 `url` 判等（2026-10-21）
+
+**现象**：`site_bg_live.js` 与 `site_live_bg_probe.py` 都在、探测全绿；但首页详情弹窗只有
+“设为网站背景”（静态立绘），Spine/Live2D 用户根本点不到。把某动态皮肤加进背景后，
+再点另一个动态皮肤，表现像“取消背景”而不是“换背景”。
+
+**根因**：
+- `b7e759a` 按**文件**整体回滚时，把 `index.html` 的 `bgTarget/skTarget` 双动作按钮
+  （Live2D → Spine → 静态）一起带走了，而 `site_bg_live.js` 后来又被 `536b80b` 单独加回：
+  渲染器在、入口没了。直接调 `SiteBg.set()` 的探针绕过了入口，所以全绿也说明不了用户能设。
+- 动态背景记录**本来就没有 `url`**（资源靠 `kind+key` 定位）。旧的 `same/SiteBg.toggle`
+  只比 `url`，两个动态模型都是 `''` ⇒ 被判成同一张，点第二个等于“再点一次取消”。
+- `sapply()` 对动态类型若无分支，会写 `--site-bg:url("")`，浏览器报 404；设置瞬间看不出异常。
+
+**修法**：
+- `index.html` 恢复 `bgTarget()`（动态优先）与 `skTarget()`（静态图显式次级键），
+  主按钮角标标明 Live2D/动态皮肤；每次换皮肤重绘，避免“看着 A 设成 B”。
+- `favorites.js`：`isLiveKind()` + `same(a,b)` 按 `kind+key`；`sapply()` 动态分支只加
+  `has-sitebg`，不碰 background-image；`sload()` 的读回判据包含 `kind`。
+- 背景层按需挂载、24fps、隐藏标签页暂停；Live2D 渲染分辨率上限 1.5 DPR；
+  载入用 `InkLoad.start/done`，失败退静态底并 `fail`。
+
+**判据**：`scripts/diag/livebg_ui_probe.py` 只走真 UI（卡片→皮肤→按钮→刷新）：
+角标、`SiteBg.get().kind`、`#sitelive canvas`、帧推进、`pointer-events:none`、静态次级键、
+同钮再点取消、Spine→Live2D 是切换不是取消、刷新恢复；并记录 base/Live2D/static/Spine
+四档进程树 WorkingSet。本机本次：Live2D ΔWS ≈ +0.01 GB，Spine ΔWS ≈ +0.18 GB；
+成本量法仍按 WF-52/§164，不只报 fps。
+
+**坑**：
+- 只调 `SiteBg.set()` 的探针不能证明入口存在；入口必须点按钮。
+- 离屏 Chrome 可能 `document.hidden=true`，会把我们自己的暂停误判成“帧不动”；先打印可见性。
+- 动态背景的 `url` 是空串，不要把 `SiteBg.is(url)` 写成唯一判据；所有涉及背景身份的地方
+  都要传 `kind/key`（背景库的静态路径仍可只传 url，但内部要兼容动态）。

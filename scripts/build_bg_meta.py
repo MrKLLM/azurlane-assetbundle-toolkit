@@ -410,6 +410,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--sample', help='逗号分隔的图名或类目，只出这几条记录，不写正式产物')
     ap.add_argument('--check', action='store_true', help='只跑统计与断言，不写文件')
+    ap.add_argument('--review-out', metavar='PATH',
+                    help='只写新背景人工标注清单（不写 bg_meta.json）；用于控制台复核台')
+    ap.add_argument('--allow-unlabeled', action='store_true',
+                    help='复核阶段允许新场景图暂未标注；写 bg_meta.json 供复核，不发布 flags')
     a = ap.parse_args()
 
     want = a.sample.split(',') if a.sample else None
@@ -417,6 +421,31 @@ def main():
     if res is None:
         return 2
     items, root_labels, picked, dropped, groups, roots = res
+
+    # 复核台：只出"新场景图 + 待命名词根"，不写 bg_meta.json。
+    # 这一步**必须**排在 has_char 闸门之前：新图正是闸门要拦的东西，先给人工一张可点的清单。
+    if a.review_out:
+        scene = [i for i in items if i['group'] == 'scene']
+        un = [i for i in scene if 'has_char' not in i]
+        plain = ('key', 'root_dir', 'name', 'root', 'tier', 'series', 'w', 'h', 'img', 'thumb')
+        doc = {
+            'generated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'scene_total': len(scene),
+            'labeled': len(scene) - len(un),
+            'pending': len(un),
+            'scene_keys': sorted(i['key'] for i in scene),
+            'unlabeled': [{k: i.get(k) for k in plain} | {'cn': i.get('cn') or []} for i in un],
+            'unnamed_roots': [{'root': k, 'n': v['n'], 'cn': v['cn'], 'cn_from': v['cn_from']}
+                              for k, v in roots.items() if v.get('cn_from') == 'root'],
+            'note': '只列 group=scene；登录/其他类目从没判过，不在这张清单里',
+        }
+        os.makedirs(os.path.dirname(os.path.abspath(a.review_out)), exist_ok=True)
+        with open(a.review_out, 'w', encoding='utf-8') as f:
+            json.dump(doc, f, ensure_ascii=False, indent=1)
+        print('[REVIEW] %s（场景 %d / 已判 %d / 待判 %d）'
+              % (a.review_out, len(scene), len(scene) - len(un), len(un)))
+        return 0
+
     t, per = stats(items)
     n = len(items)
     print('背景图 %d 张 / 词根 %d 个已拿到中文标签' % (n, len(root_labels)))
@@ -499,9 +528,7 @@ def main():
     print('%s 标注发布件在位（缺了则背景页默认视图退回「全部」，不静默改判）'
           % ('OK ' if cf else 'WARN'))
     if cf:
-        for desc, passed in [
-            ('场景背景每张都带 has_char（默认视图不许藏掉"没判过"的场景图）',
-             all('has_char' in i for i in items if i['group'] == 'scene')),
+        char_checks = [
             ('has_char 值域只有 0/1（裁定没收敛就不该有这份发布件）',
              set(i['has_char'] for i in marked) <= {0, 1}),
             ('非场景类目不带 has_char（没判过 ≠ 无角色，不许被默认视图隐藏）',
@@ -511,7 +538,14 @@ def main():
             ('条数与有角色数同发布件 counts 一致',
              len(marked) == len(cf['labels'])
              and sum(i['has_char'] for i in marked) == cf['counts']['has']),
-        ]:
+        ]
+        if a.allow_unlabeled:
+            print('WARN 允许新场景图暂未标注（--allow-unlabeled）：先生成复核用索引，'
+                  '未判图不带 has_char，默认视图会照常显示。')
+        else:
+            char_checks.insert(0, ('场景背景每张都带 has_char（默认视图不许藏掉"没判过"的场景图）',
+                                   all('has_char' in i for i in items if i['group'] == 'scene')))
+        for desc, passed in char_checks:
             print('%s %s' % ('OK ' if passed else 'FAIL', desc))
             ok &= passed
         print('  画面: 有角色 %d / 无角色 %d / 未标注 %d（默认视图只隐藏"无角色"）'

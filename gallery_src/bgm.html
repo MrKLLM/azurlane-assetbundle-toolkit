@@ -87,6 +87,22 @@ html.lg input.q.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(--lgf,
 .grp>span:not(.chip){font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--txt2);
   white-space:nowrap;padding:3px 8px;border-radius:7px;
   background:color-mix(in srgb,var(--brand) 10%,var(--panel))}
+/* 活动名单有 95 个，铺成 chip 会占掉首屏；这里用下拉，和 chip 组并排但明确是"选一个"。
+   仍走同一套玻璃底/描边，不自造第二套控件。 */
+#fEvent{font:inherit;font-size:12.5px;color:var(--txt2);cursor:pointer;
+  background:color-mix(in srgb,var(--panel) 62%,transparent);
+  border:1px solid var(--chip-line);border-radius:var(--r-chip);
+  padding:5px 28px 5px 12px;max-width:min(300px,58vw);
+  appearance:none;-webkit-appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--txt2) 50%),
+    linear-gradient(135deg,var(--txt2) 50%,transparent 50%);
+  background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+  transition:border-color var(--t-col) var(--ease-ios),background-color var(--t-col) var(--ease-ios)}
+#fEvent:hover{border-color:var(--brand);color:var(--brand-d)}
+#fEvent:focus{outline:none;border-color:var(--brand);
+  background-color:color-mix(in srgb,var(--panel) 82%,transparent)}
+#fEvent:disabled{opacity:.45;cursor:default}
 .chip{font-size:12.5px;color:var(--txt2);background:color-mix(in srgb,var(--panel) 62%,transparent);
   border:1px solid var(--chip-line);border-radius:var(--r-chip);padding:5px 12px;cursor:pointer;
   white-space:nowrap;user-select:none;
@@ -137,6 +153,8 @@ html.lg .row.playing.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(-
   border-color:color-mix(in srgb,var(--brand) 26%,transparent)}
 .tag.sh{color:var(--pop-d);background:color-mix(in srgb,var(--pop-l) 78%,transparent);
   border-color:color-mix(in srgb,var(--pop) 26%,transparent)}
+.tag.ev{color:var(--ok-d);background:color-mix(in srgb,var(--ok) 14%,transparent);
+  border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
 .row .mt{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
 .row .mt i{display:block;font-style:normal;font-size:10.5px;opacity:.72}
 .play{width:36px;height:36px;border:0;border-radius:50%;cursor:pointer;position:relative;
@@ -282,7 +300,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   .bar{left:10px;right:10px;bottom:8px;width:auto;padding:9px 11px 8px;border-radius:22px;
     transform:translateY(105%)}
   .bar.on{transform:translateY(0)}
-  .bar .top{display:grid;grid-template-columns:34px 44px 34px minmax(30px,auto) minmax(0,1fr) minmax(30px,auto) 34px;gap:6px}
+  .bar .top{display:grid;grid-template-columns:34px 44px 34px minmax(0,1fr) minmax(30px,auto) minmax(30px,auto) 34px;gap:6px}
   .bar button{width:34px;height:34px}
   .bar #pp{width:44px;height:44px}
   .bar #lp{width:30px;height:30px}
@@ -319,17 +337,19 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   --ink:color-mix(in srgb,var(--txt) 88%,transparent);
   --ink-2:color-mix(in srgb,var(--txt) 52%,transparent);
   --ink-3:color-mix(in srgb,var(--txt) 22%,transparent);
-  /* 纸面：极淡的暖白/暖黑，比原来的玻璃实一档，让"墨"有东西可落 */
+  /* 纸面不要做成不透明块：保留一层透光，让下面的曲目与背景仍被看见；
+     背散由 base .bar 与 liquid_glass 的那一盒负责，这里只调纸的密度。 */
   background:
     linear-gradient(180deg,
-      color-mix(in srgb,var(--panel) 88%,transparent),
-      color-mix(in srgb,var(--panel) 80%,transparent));
-  border-radius:20px;
-  border:1px solid color-mix(in srgb,var(--ink) 9%,transparent);
-  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 42%,transparent),
+      color-mix(in srgb,var(--panel) 64%,transparent),
+      color-mix(in srgb,var(--panel) 52%,transparent));
+  border-radius:18px;
+  border:1px solid color-mix(in srgb,var(--ink) 10%,transparent);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 50%,transparent),
              inset 0 -18px 26px -22px color-mix(in srgb,var(--ink) 18%,transparent),
-             0 16px 44px -18px color-mix(in srgb,var(--ink) 26%,transparent);
-  padding:16px 22px 13px;
+             0 16px 44px -18px color-mix(in srgb,var(--ink) 28%,transparent);
+  padding:11px 17px 9px;
+  width:min(850px,calc(100vw - 28px));
 }
 /* 纸纹：横向极细的纤维，2.4% 对比 —— 这是"纸"和"纯色块"的分别。
    ⚠️ 不加 mix-blend-mode:multiply：面板本身是 backdrop-filter 磨砂盒，
@@ -342,15 +362,32 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   opacity:.5;
 }
 /* 右上角一块被光擦淡的地方：给整块纸一个光源方向，避免"均匀平涂"的廉价感 */
+/* 光源跟着指针走一小段：不是整块反光，只在鼠标附近擦亮纸面。
+   没有指针时仍停在右上，保持原来的光源方向。 */
 .bar::after{
   content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:0;
-  background:radial-gradient(120% 90% at 92% 0%,
-    color-mix(in srgb,#fff 26%,transparent),transparent 62%);
+  background:
+    radial-gradient(190px circle at var(--mx,82%) var(--my,0%),
+      color-mix(in srgb,#fff 30%,transparent),transparent 68%),
+    radial-gradient(120% 90% at 92% 0%,
+      color-mix(in srgb,#fff 18%,transparent),transparent 62%);
+  opacity:.9;transition:opacity .3s var(--ease-ios);
 }
+.bar:hover::after{opacity:1}
 .bar>*{position:relative;z-index:1}
 
 /* ── 按键：回到圆，但不用"玻璃球"那套厚高光，改用**墨圈** ── */
 .bar .top{gap:11px}
+/* 进度行：时间放在墨线两端，控制键与曲名放在下一行。
+   这样"点了以后有没有在走"不用在控制键之间找数字。 */
+.seekrow{display:flex;align-items:center;gap:10px;margin:1px 0 5px}
+.seekrow .tm{flex:none;min-width:36px;text-align:left}
+.seekrow #t1{text-align:right}
+.seekrow .tide{flex:1;margin:0}
+.curwrap{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:0}
+.curwrap .cur{display:block;flex:none}
+.cmeta{font:10.5px/1.5 "Segoe UI","Microsoft YaHei",sans-serif;color:var(--ink-3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:1.5em}
 .bar button{
   width:36px;height:36px;border-radius:50%;
   background:transparent;
@@ -381,13 +418,17 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 
 /* ── 字：衬线 + 轻字重 ── */
 .bar .cur{font-family:var(--serif);font-size:14px;font-weight:500;letter-spacing:.01em;
-  color:var(--ink)}
+  color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar .cur i{font-family:var(--serif);font-size:11.5px;font-weight:400;
   letter-spacing:.04em;color:var(--ink-3);margin-left:10px}
 .bar .tm{font-family:var(--serif);font-size:11.5px;font-weight:400;font-style:italic;
-  color:var(--ink-2);letter-spacing:.03em;min-width:40px}
-/* 时间之间用一枚小小中点隔开，读作"页面里的一个注"而不是仪表面板的一个格子 */
-.bar .tm+.cur::before{content:'¶';position:absolute;left:-14px;color:var(--ink-3);font-size:10px}
+  color:var(--ink-2);letter-spacing:.03em;min-width:34px;text-align:center}
+.bar .seekrow .tm{min-width:40px;text-align:left}
+.bar .seekrow #t1{text-align:right}
+.bar .buf{font:10px/1.5 var(--font-mono,monospace);color:var(--brand-d);
+  padding:2px 6px;border:1px solid color-mix(in srgb,var(--brand) 28%,transparent);
+  border-radius:999px;white-space:nowrap;animation:bufpulse 1.1s ease-in-out infinite}
+@keyframes bufpulse{0%,100%{opacity:.55}50%{opacity:1}}
 
 /* ═══════════ 进度条（本轮重做）═══════════
    目标：一条**墨线**，不是一根槽。
@@ -398,12 +439,10 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
      ③ bead（细竖笔，不是圆点）
    高度从 30px 降到 26px，上下留白加大 —— 文艺感的密度靠留白，不靠元素。 */
 .tide{
-  height:26px;margin:13px 0 9px;border-radius:0;
+  height:18px;margin:5px 0 6px;border-radius:0;
   border:0;border-bottom:1px solid color-mix(in srgb,var(--ink) 14%,transparent);
   background:transparent;box-shadow:none;
   transition:border-color .3s var(--ease-ios);
-  -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 26px,#000 100%);
-  mask-image:linear-gradient(90deg,transparent 0,#000 26px,#000 100%);
 }
 .tide:hover{border-bottom-color:color-mix(in srgb,var(--ink) 30%,transparent)}
 /* svg 不再裁形：墨洇自己止于路径，不需要管口 */
@@ -428,8 +467,10 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
       把 stroke-width 调小对 fill 毫无作用（上一版 .crest 才有 stroke）。
    2026-10-20 二改：30%→22%、opacity .9→.82。原来那版读作"一条蓝色矩形"，
    太实；水彩的密度靠叠出来的深浅差，不靠单层不透明度。 */
-.tide .w1{fill:color-mix(in srgb,var(--brand) 22%,var(--ink) 8%);opacity:.82}
-.tide .w2{fill:color-mix(in srgb,var(--brand) 14%,transparent);opacity:.5}
+/* 墨洇退成"纸背透出来的一层水光"，主读数交给底部那条实线；
+   两层都保留：一道是气质，一条是准头。 */
+.tide .w1{fill:color-mix(in srgb,var(--brand-d) 44%,var(--ink) 18%);opacity:.42}
+.tide .w2{fill:color-mix(in srgb,var(--brand) 20%,transparent);opacity:.26}
 /* 墨刃：不要发光。改成 1px 的深色细描边，像钢笔尖在纸上划出的那一线。 */
 .tide .crest{stroke:color-mix(in srgb,var(--brand) 62%,var(--ink));
   stroke-width:1;stroke-linecap:round;fill:none;filter:none;opacity:.85}
@@ -438,10 +479,25 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 /* 当前点：一枚 2×13 的竖笔（用 r 做不到细长，所以改用 stroke 长度表达）。
    ⚠️ <circle> 无法变竖线 ⇒ 这里保留 circle 但压到 r=2.2 并把填充换成品牌色，
       视觉上读作"朱笔点"，不读作"手柄"。 */
-.tide .bead{fill:var(--brand);stroke:color-mix(in srgb,var(--panel) 90%,transparent);
-  stroke-width:1.4;transition:r .3s var(--ease-ios)}
-.tide:hover .bead{r:3.2}
+/* 水面上的小珠与底部实线珠重复；保留后者（准），前者只留 cx 供探针读，不画。 */
+.tide .bead{display:none}
 .tide .rip{stroke:color-mix(in srgb,var(--brand) 46%,transparent);stroke-width:1}
+/* 压在墨洇底部的实线进度：SVG 圆珠在非等比缩放下会被压扁，这条 HTML 线负责"读得懂"。
+   三层：缓冲（浅）、已播（深）、当前点（朱砂小圆）；全部 pointer-events:none，
+   拖拽仍由 .tide 自己接。 */
+.tide .rail{position:absolute;left:0;right:0;bottom:0;height:3px;z-index:3;
+  pointer-events:none;border-radius:2px;overflow:visible;
+  background:color-mix(in srgb,var(--ink) 8%,transparent)}
+.tide .rail em,.tide .rail i{position:absolute;left:0;top:0;height:100%;width:100%;
+  transform:scaleX(0);transform-origin:left;border-radius:2px;display:block}
+.tide .rail em{background:color-mix(in srgb,var(--brand) 20%,transparent)}
+.tide .rail i{background:linear-gradient(90deg,color-mix(in srgb,var(--brand-d) 78%,var(--ink)),
+  color-mix(in srgb,var(--brand) 64%,var(--ink)));box-shadow:0 0 8px -2px color-mix(in srgb,var(--brand) 55%,transparent)}
+.tide .rail b{position:absolute;top:50%;left:0;width:9px;height:9px;border-radius:50%;
+  background:var(--brand-d);border:2px solid var(--panel);
+  transform:translate(-50%,-50%);box-shadow:0 0 0 1px color-mix(in srgb,var(--brand) 32%,transparent);
+  transition:width .18s var(--ease-ios),height .18s var(--ease-ios)}
+.tide:hover .rail b{width:11px;height:11px}
 /* 时间泡：上方一行小字，无框无底 —— 纸上的批注不套盒子 */
 .tide .bub{
   bottom:calc(100% + 2px);
@@ -455,6 +511,26 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 .bar .vol::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:9px;border-radius:50%;
   background:var(--brand);border:1.5px solid var(--panel);box-shadow:none}
 .bar .vol:hover::-webkit-slider-thumb{transform:scale(1.12)}
+
+/* 窄屏：把播放条从"桌面宽条"收成贴底的一行，标题让位给时间；
+   宽屏的 850px 是上限，不是最小宽度。 */
+@media (max-width:760px){
+  .bar{left:8px;right:8px;width:auto;border-radius:16px;padding:9px 12px 8px}
+  .bar .top{display:grid;grid-template-columns:34px 44px 34px minmax(0,1fr) 34px;gap:6px}
+  .bar .buf,.bar .vol{display:none}
+  .seekrow{gap:6px}
+  .seekrow .tm{min-width:30px;font-size:10px}
+  .tide{height:16px;margin:0}
+  .cmeta{display:none}
+  .wrap{padding-bottom:112px}
+}
+/* 播放条是固定层：最后几行不能被它永久盖住。 */
+.wrap{padding-bottom:118px}
+/* 普通行也给一点点"跟手"：不缩放，只上浮 1px，和背景库/主页的卡片同一套手感。 */
+.row{transition:opacity .5s var(--ease-ios),transform .5s var(--ease-ios),
+  border-color var(--t-col) var(--ease-ios),box-shadow var(--t-col) var(--ease-ios),
+  background var(--t-col) var(--ease-ios)}
+.row:hover{transform:translateY(-1px)}
 .bar .vol::-moz-range-thumb{width:9px;height:9px;border-radius:50%;
   background:var(--brand);border:1.5px solid var(--panel)}
 
@@ -475,6 +551,11 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 </style>
 </head>
 <body>
+<div id="bootveil" aria-hidden="true">
+  <div class="bv-inner"><div class="bv-ink"><i></i><i></i><i></i></div>
+    <p class="bv-t">正在整理音乐库…</p><p class="bv-s">读取曲目、专辑与活动回忆</p>
+    <span class="bv-line"></span></div>
+</div>
 <div class="amb"><i></i><i></i><i></i></div>
 <header>
   <a class="back" href="index.html">← 资产浏览器</a>
@@ -490,12 +571,19 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   <div class="tools"><input class="q" id="q" placeholder="搜曲名 / 中文 / 标识符 / 舰名   （/ 聚焦）" autocomplete="off"></div>
   <div class="grp" id="gUsage"><span>用途</span></div>
   <div class="grp" id="gScene"><span>出处</span></div>
+  <div class="grp" id="gEvent"><span>活动回忆</span>
+    <select id="fEvent" title="来自 memory_storyline 的回忆章节名；只覆盖部分曲目，不是全量活动目录">
+      <option value="">全部活动</option>
+    </select>
+  </div>
   <div class="grp" id="gAlbum"><span>专辑</span></div>
   <div class="grp"><span>收藏</span><span class="chip" id="cFav" title="只看已收藏的曲子">★ 只看收藏<b id="favN">0</b></span></div>
   <div id="list"></div>
 </div>
 
 <div class="bar" id="bar">
+  <div class="seekrow">
+    <span class="tm" id="t0">0:00</span>
   <div class="tide" id="tide">
     <svg viewBox="0 0 1000 46" preserveAspectRatio="none" aria-hidden="true">
       <defs>
@@ -541,19 +629,24 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
       <circle class="rip" id="rip" cx="0" cy="23" r="2"/>
       <circle class="bead" id="bead" cx="0" cy="17" r="4.5"/></g>
     </svg>
+    <!-- 水面之上再压一条清晰的墨线：SVG 是 preserveAspectRatio=none 拉伸的，
+         圆形珠与 24px 管壁在窄高度下会被压扁；这条 HTML 线才是"读得懂"的进度。 -->
+    <span class="rail" aria-hidden="true"><em id="tidebuf"></em><i id="tidefill"></i><b id="tidebead"></b></span>
     <span class="bub" id="bub">0:00</span>
+  </div>
+    <span class="tm" id="t1">0:00</span>
   </div>
   <div class="top">
     <button id="prev" title="上一首（Ctrl+←）"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7l9 7V5z"/></svg></button>
     <button id="pp" title="播放 / 暂停（空格）"><svg viewBox="0 0 24 24"><path id="ppath" d="M8 5v14l11-7z"/></svg></button>
     <button id="next" title="下一首（Ctrl+→）"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 19l9-7-9-7z"/></svg></button>
-    <span class="tm" id="t0">0:00</span>
-    <span class="cur" id="cur">—</span>
-    <span class="tm" id="t1">0:00</span>
+    <span class="curwrap"><span class="cur" id="cur">—</span><span class="cmeta" id="cmeta"></span></span>
+    <span class="buf" id="buf" hidden>缓冲中</span>
     <button id="lp" title="单曲循环"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z"/></svg></button>
     <input class="vol" id="vol" type="range" min="0" max="1" step="0.01" title="音量（↑↓）">
   </div>
-  <div class="hint" id="hint">拖动水面就是进度 · 空格播放/暂停 · ↑↓ 音量 · / 搜索</div>
+  <div class="hint" id="hint">拖动墨线就是进度 · 空格播放/暂停 · ↑↓ 音量 · / 搜索</div>
+<script src="loading.js"></script>
 <script src="site_bg_live.js"></script>  <!-- 动态网站背景：Spine / Live2D（三页共用，正本 gallery_src/site_bg_live.js） -->
 </div>
 
@@ -562,8 +655,12 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 <script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
 <script>
 const P='';
-let T=[],view=[],idx=-1,fU='',fS='',fA='',knownDur=0,fFav=false;
+let T=[],view=[],idx=-1,fU='',fS='',fA='',fE='',knownDur=0,fFav=false;
 const A=new Audio(); A.volume=+(localStorage.getItem('gallery.vol')??0.8);
+/* 缓冲状态说人话：只在真的等数据时显示一枚小胶囊，不拿"转圈"装饰正常播放。 */
+function setBuf(on){ const b=$('buf'); if(b) b.hidden=!on; }
+['waiting','stalled'].forEach(ev=>A.addEventListener(ev,()=>setBuf(true)));
+['playing','canplay','seeked'].forEach(ev=>A.addEventListener(ev,()=>setBuf(false)));
 const $=id=>document.getElementById(id);
 const mmss=s=>{s=Math.max(0,Math.round(s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 const name=t=>t.title_cn||t.title;
@@ -619,6 +716,20 @@ function draw(){
      元素少了，边界质量就变成了主要观感。只需改一次 transform，不新增元素。 */
   $('w1').style.opacity = prog>0 ? '' : '0';
   $('w2').style.opacity = prog>0 ? '' : '0';
+  /* 实线层：已播、缓冲、当前点。与 SVG 的墨洇分开，保证窄高度下仍读得懂。 */
+  const rf=$('tidefill'), rb=$('tidebead'), rbuf=$('tidebuf');
+  if(rf) rf.style.transform='scaleX('+prog.toFixed(4)+')';
+  if(rb) rb.style.left=(prog*100).toFixed(3)+'%';
+  if(rbuf){
+    let bf=0;
+    try{
+      if(A.buffered&&A.buffered.length){
+        const d=A.duration;
+        if(isFinite(d)&&d>0) bf=Math.max(0,Math.min(1,A.buffered.end(A.buffered.length-1)/d));
+      }
+    }catch(e){}
+    rbuf.style.transform='scaleX('+bf.toFixed(4)+')';
+  }
 }
 /* 笔触浓淡：让两端的墨自己化开，而不是被路径切一刀。
    起点淡入固定 26px（纸边不该有硬头）；前沿淡出窗口随 pro，取"已播宽度的 18%"，
@@ -637,19 +748,36 @@ const total=()=>isFinite(A.duration)&&A.duration>0?A.duration:knownDur;
 /* ───────── 数据 ───────── */
 async function boot(){
   let j;
-  try{ j=await (await fetch(P+'bgm.json',{cache:'no-store'})).json() }
-  catch(e){ $('list').innerHTML='<div class="empty">读不到 <code>bgm.json</code>。<br>生成：'+
-    '<code>py -3 scripts/build_bgm_index.py</code></div>'; $('sub').textContent='数据缺失'; return }
+  try{ j=window.InkLoad ? await InkLoad.fetchJSON(P+'bgm.json','读取音乐索引')
+                        : await (await fetch(P+'bgm.json',{cache:'no-store'})).json() }
+  catch(e){
+    $('list').innerHTML='<div class="empty">读不到 <code>bgm.json</code>。<br>生成：'+
+      '<code>py -3 scripts/build_bgm_index.py</code></div>'; $('sub').textContent='数据缺失';
+    if(window.InkLoad){ InkLoad.fail('音乐索引读取失败'); InkLoad.bootDone(); }
+    return;
+  }
   T=j.tracks; const c=j.counts;
-  $('sub').textContent=`${c.tracks} 首 · ${c.hours} 小时 · ${c.mb} MB · 官方中文名 ${c.named_cn} · 有出处 ${c.with_scene}`;
+  $('sub').textContent=`${c.tracks} 首 · ${c.hours} 小时 · ${c.mb} MB · 官方中文名 ${c.named_cn} · 有出处 ${c.with_scene}`+
+    (c.with_event?` · 活动回忆 ${c.with_event}`:'');
   chips('gUsage','usage',c.usages,'用途');chips('gScene','scene',c.scene_kinds,'出处');
   chips('gAlbum','album',[...new Set(T.map(t=>t.album).filter(Boolean))],'专辑');
+  /* 活动是"名单"不是"标签墙"：95 个章节铺成 chip 会把首屏吃掉，用下拉。 */
+  const evs=c.events||[], sel=$('fEvent');
+  if(evs.length){
+    sel.insertAdjacentHTML('beforeend',evs.map(e=>{
+      const n=T.filter(t=>(t.events||[]).includes(e)).length;
+      return `<option value="${esc(e)}">${esc(e)} (${n})</option>`;
+    }).join(''));
+  }else{
+    sel.disabled=true; sel.title='这一轮 bgm.json 没有活动字段（旧索引），先跑 build_bgm_index.py';
+  }
   render();
   const th=$('gTheme');th.querySelector('[data-t="'+(document.documentElement.dataset.theme||'light')+'"]')
     .classList.add('on');
   th.onclick=e=>{const b=e.target.closest('button');if(!b)return;
     [...th.querySelectorAll('button')].forEach(x=>x.classList.toggle('on',x===b))};
   if(!REDUCE) raf=requestAnimationFrame(t=>{last=t;tick(t)}); else draw();
+  if(window.InkLoad) InkLoad.bootDone();
   /* 收藏：委托点击要在第一次 render() 之后挂（星标是拼进 innerHTML 的，没有委托就没人接点击，
      而且不会报错，只是点了没反应）。点星之后若正开着「只看收藏」必须立刻重筛。 */
   if(window.Fav){ Fav.bind(); favCount();
@@ -673,6 +801,7 @@ function render(){
   const q=$('q').value.trim().toLowerCase();
   /* 收藏的单位是一首曲子，键用 slug（稳定标识）—— 用行号会在换筛选后全部错位 */
   view=T.filter(t=>(!fU||t.usage===fU)&&(!fA||t.album===fA)&&(!fS||t.scenes.some(s=>s.t===fS))&&
+    (!fE||(t.events||[]).includes(fE))&&
     (!fFav||(window.Fav&&Fav.has('bgm',t.slug)))&&
     (!q||name(t).toLowerCase().includes(q)||t.slug.toLowerCase().includes(q)||
       (t.title_cn||'').toLowerCase().includes(q)||(t.ship||'').includes(q)));
@@ -681,6 +810,8 @@ function render(){
     const all=[];
     if(t.album)all.push(['al',t.album,'官方专辑']);
     if(t.ship)all.push(['sh',t.ship,'关联角色']);
+    /* 活动回忆放最前：它是这次新增的活动级归属，别被专辑/出处挤掉 */
+    (t.events||[]).forEach(e=>all.push(['ev',e,'活动回忆：'+e]));
     /* 一张表 = 一个标签：`远征地图·远汇点作战` 比并排两个标签读得清楚，
        也顺手把"类别"和"行名"的关系写明了（拆两个标签会让人以为是两个不同出处）*/
     t.scenes.forEach(s=>all.push(['',s.t+(s.n?'·'+s.n:''),s.t+(s.n?'：'+s.n:'')]));
@@ -719,6 +850,7 @@ function play(i){
   knownDur=t.dur||0;                        /* 服务器无 Range 时 A.duration 是 Infinity，先用手上的真值 */
   A.src=t.url;A.play().catch(()=>{});
   $('bar').classList.add('on');$('cur').innerHTML=esc(name(t))+(t.title_cn&&t.title!==t.title_cn?`<i>${esc(t.title)}</i>`:'');
+  $('cmeta').textContent=[t.album,t.usage,(t.events||[])[0]].filter(Boolean).join(' · ');
   $('t1').textContent=mmss(knownDur);document.title=name(t)+' · 音乐库';
   [...document.querySelectorAll('.row')].forEach(r=>r.classList.toggle('playing',+r.dataset.i===i));
   window.glassPlaying&&glassPlaying();
@@ -731,6 +863,19 @@ A.addEventListener('timeupdate',()=>{$('t0').textContent=mmss(A.currentTime)});
 A.addEventListener('loadedmetadata',()=>{if(isFinite(A.duration)&&A.duration>0)$('t1').textContent=mmss(A.duration)});
 
 /* 拖动水面 = 找位。松手时甩一圈涟漪，像真的碰了一下水 */
+/* 指针停在播放条上时，纸面光源跟着走一小段；离开就回右上。
+   用 rAF 合并 pointermove，避免高刷鼠标每帧改两次样式。 */
+const barEl=$('bar'); let hmx=0,hmy=0,hraf=0;
+barEl.addEventListener('pointermove',e=>{
+  const r=barEl.getBoundingClientRect(); hmx=e.clientX-r.left; hmy=e.clientY-r.top;
+  if(hraf) return;
+  hraf=requestAnimationFrame(()=>{ hraf=0;
+    barEl.style.setProperty('--mx',hmx.toFixed(1)+'px');
+    barEl.style.setProperty('--my',hmy.toFixed(1)+'px'); });
+});
+barEl.addEventListener('pointerleave',()=>{
+  barEl.style.removeProperty('--mx'); barEl.style.removeProperty('--my');
+});
 const tide=$('tide');
 const at=e=>{const r=tide.getBoundingClientRect();return Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))};
 function bubble(e){const r=tide.getBoundingClientRect();const f=at(e);
@@ -741,7 +886,10 @@ tide.onpointerleave=()=>{if(!tide.dataset.hold)tide.classList.remove('drag')}
 tide.onpointermove=bubble;
 tide.onpointerdown=e=>{tide.dataset.hold=1;tide.classList.add('drag');tide.setPointerCapture(e.pointerId);bubble(e)};
 tide.addEventListener('pointermove',e=>{if(tide.dataset.hold){bubble(e);const f=at(e);
-  $('w1').setAttribute('d',wavePath(f,phase,2.2+amp*4.6,20,1))}});
+  $('w1').setAttribute('d',wavePath(f,phase,2.2+amp*4.6,17,1));
+  const rf=$('tidefill'),rb=$('tidebead');
+  if(rf)rf.style.transform='scaleX('+f.toFixed(4)+')';
+  if(rb)rb.style.left=(f*100).toFixed(3)+'%';}});
 tide.onpointerup=e=>{const f=at(e),d=total();
   if(d)A.currentTime=f*d;
   delete tide.dataset.hold;tide.classList.remove('drag');
@@ -756,6 +904,7 @@ $('next').onclick=()=>play(idx+1>=view.length?0:idx+1);
 $('lp').onclick=()=>{$('lp').classList.toggle('on');A.loop=$('lp').classList.contains('on')};
 $('vol').value=A.volume;
 $('vol').oninput=e=>{A.volume=+e.target.value;localStorage.setItem('gallery.vol',e.target.value)};
+$('fEvent').onchange=e=>{ fE=e.target.value; idx=-1; render(); };
 document.querySelectorAll('.grp').forEach(g=>g.onclick=e=>{
   const b=e.target.closest('.chip');if(!b)return;
   const k=b.dataset.k,v=b.dataset.v;

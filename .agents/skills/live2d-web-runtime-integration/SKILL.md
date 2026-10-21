@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
 description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳、选某个动作时手会消失、部件在任何动作里都不动、切动作时某个部件闪一下、部件消失一下但 part 组读数恒定、同参数两次读出不同的显隐、扫出来的阈值表复现不了、把 34 片并成一个开关家族可疑、部件门那类否证报「0 个异常」但其实是键名读不到、手会淡到看不见而两拍差分报全0、按颜色认片把发光点判成金饰、同一会话跑两遍对照参数恒为默认值、动作中途的暗窗与换动作的淡化死区要分清、Live2D 当网站背景会不会卡、背景层限帧、fps 打满但实际耗多少主线程、swiftshader 量出来的 fps 能不能信、headless 拿不到 GPU。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.7.45
+version: 1.7.46
 ---
 
 # Live2D 网页运行时集成
@@ -1227,3 +1227,24 @@ Cubism4InternalModel.update(t,e){ super.update(t,e); t/=1e3; e/=1e3;
 **涉及文件**：`gallery_src/site_bg_live.js`（背景层本体）、
 `scripts/diag/perf_cost.py`（成本量法）、`scripts/diag/perf_livebg_gpu.py`（硬件后端 fps 对照）、
 `scripts/diag/site_live_bg_probe.py`（12 项功能验收）。
+
+## 21. 把模型暴露成“用户能设的网站背景”：入口、身份、暂停（2026-10-21）
+
+§20 解决“渲染器在不在、卡不卡”；这一节解决“用户能不能点到、换得动”。
+
+- **入口必须走页面自己的入口函数**：首页 `renderActs` 的 `bgTarget()` 决定当前皮肤默认设哪种背景
+  （Live2D → Spine → 静态图），静态图保留成旁边的次级键。回滚按**文件**进行时，
+  渲染器 `site_bg_live.js` 可能在、入口却没了；只调 `SiteBg.set()` 的探针会全绿，
+  但用户根本点不到。验收必须点卡片 → 皮肤 →「设为网站背景」。
+- **动态记录没有 `url`**：身份判等必须按 `kind+key`（`same(a,b)` / `SiteBg.is(url,kind,key)`）。
+  若只比 `url`，两个动态模型都是空串，点第二个会被判成“再点一次取消”。
+- **`sapply()` 要分动态/静态**：动态类型只加 `has-sitebg`，绝不写 `url("")`；
+  静态图才设置 `--site-bg`、`--site-fit`、`--site-pos`。
+- **生命周期**：`visibilitychange` 时暂停 ticker / Spine 绘制；Live2D 背景渲染分辨率上限 1.5 DPR
+  （背景不是查看器）；失败必须退回静态底并把错误显示出来，不能留黑屏。
+- **验收**：`scripts/diag/livebg_ui_probe.py` 走真 UI，测角标/挂载/帧推进/pointer-events/
+  静态次级键/取消/切换/刷新恢复；同时记录 base/Live2D/static/Spine 四档进程树 WorkingSet。
+  本机实测 Live2D ΔWS ≈ +0.01 GB、Spine ΔWS ≈ +0.18 GB，24fps 限帧；成本结论仍按 §20，
+  不要只看 fps。
+- **跨技能**：Spine 侧的绘制序列/取景见 `spine-web-runtime-integration` §14；
+  入口与身份坑的根因见 `docs/TROUBLESHOOTING.md` §173。

@@ -5176,3 +5176,93 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 `docs` 里的"背景与擦除"说明）、`scripts/diag/panel_paper_probe.py`（新增三节 20 条）。
 相关：**WF-46**（纸本版面）、**§170**（确定性/死规则的机理）、**§143**（hover 性能）、
 **§66/§137**（数据面不许叠背景/滤镜的纪律）。
+
+---
+
+### WF-55: 新背景图进库前的人工标注闸门——扫描、复核台、两阶段发布（2026-10-21）
+
+**判据**
+
+- 新场景图进 `Output/Raw/` 后，严格的 `py -3 scripts/build_bg_meta.py --check` 必须判红
+  （`场景背景每张都带 has_char`）。这不是"待办提示"，是**默认视图不许藏掉没判过的图**的硬闸。
+- `py -3 scripts/build_bg_meta.py --review-out <path>` 只写复核清单（`scene_total/labeled/pending/
+  unlabeled/unnamed_roots`），**不写 `bg_meta.json`**。用它核对 pending 数 == 本轮新图数。
+- 人工标注写 `annotations/bg_char_labels.json`（入库正本），`annotations/bg_char_adjudications.json`
+  只负责历史 `2` 的裁定；**不许拿文件名 `_cg` 规则当默认视图**（历史精确率 86%/召回 79%）。
+- 发布顺序固定，不能交换：
+  1. `build_bg_meta.py --review-out`（只读清单）
+  2. 复核台保存标注（merge，不整份覆盖）
+  3. `build_bg_meta.py --allow-unlabeled`（先把新 key 写进 `bg_meta`，供下一步 gate 用）
+  4. `publish_bg_char_flags.py --from-annotations`（gate 要求 flags key == `bg_meta` 的 scene key）
+  5. `build_bg_meta.py`（严格，补 `has_char`）
+  6. `make_bg_thumbs.py`（增量，新图缩略图；少了它背景页是空格子）
+- 判绿：严格 build 通过、`pending == 0`、无待命名词根、新图在背景页有缩略图，且 `labels` 阶段重跑不红。
+- 新增词根自动成为二级子标签的条件是 **n ≥ 2**（`bg_meta.roots` 只收 n≥2）；只有 1 张时
+  仍在 `unnamed_roots` / 复核清单里报出来，但页面上不会多一个分组，这是已知口径。
+
+**复核台**
+
+- 控制台页头「背景标注」→ `GET /api/bg_review` → `build_bg_meta --review-out`；
+  缩略图走 `GET /bgimg?key=<dir>/<name>`（优先 `bg_thumbs` 的 webp，缺则 Raw 原图），
+  只读、路径前缀校验。
+- 每张只给「有角色 / 无角色」两个值；「不确定」不允许写进发布件，宁可留在 pending。
+- 发布按钮必须同时要求：全部图已判 + 用户勾选"知道会写 `annotations/`、`inputs/gamecfg/
+  bg_char_flags.json`、`Output/gallery_v2/bg_meta.json`"；`--allow-unlabeled` 只是中间态，不是发布。
+- 复核台顶部固定显示 `场景 N / 已判 N / 待判 N`，并列出 `unnamed_roots`（只读；命名仍走 WF-48）。
+
+**踩坑记录**
+
+- `publish_bg_char_flags.py` 的 gate 比较的是**现有 `bg_meta`**：新图不在旧索引里时，它会拿旧 key 集
+  照样判绿，所以**不能先发 flags 再重建 bg_meta**（顺序反了会把新图静默漏掉）。
+- `build_bg_meta` 严格模式在 review 之前就把新图判红，但 `--review-out` 必须排在闸门前，
+  否则人工连"待判有哪几张"都拿不到。
+- 标注正本只做 merge + 原子写（tmp + `os.replace`）；并发会话写同一文件时要串行，不整份覆盖。
+- 复核图片不要用 `file://` 绝对路径；走 `/bgimg`，否则浏览器安全策略会让整张清单显示"加载失败"。
+- `--allow-unlabeled` 会写出"未判图不带 has_char"的 `bg_meta`，此时默认视图会显示这些图；
+  这是复核中间态，不是发布态。不要拿它当"已发布"证据。
+
+**涉及文件**
+
+`scripts/build_bg_meta.py`（`--review-out` / `--allow-unlabeled`）、
+`scripts/publish_bg_char_flags.py`、`scripts/rebuild_labels.py`（缩略图阶段）、
+`scripts/make_bg_thumbs.py`、`scripts/pipeline_panel.py`（`/api/bg_review`、`/api/bgchars`、`/bgimg`、
+复核台）、`annotations/bg_char_labels.json`、`inputs/gamecfg/bg_char_flags.json`。
+
+---
+
+### WF-56: 三页统一加载/等待层与播放器“实线进度”（2026-10-21）
+
+**判据**
+
+- 首屏：数据与首屏渲染完成后 `#bootveil` 必须消失；成功、失败、脚本缺失三条路径都要
+  `InkLoad.bootDone()`，另有 15s 兜底；遮罩不能盖住错误信息。
+- 顶部 `#inkbar`：有 `Content-Length` 时按真实字节推进；没有才退化为 indet。
+  `trackThumbs` 只统计首屏附近（`1.35×视口`）的图，完成/失败/8s 兜底后收起；
+  **不能拿全页 lazy 图当分母**。
+- 播放器：`.tide` 的 SVG 必须铺满（`shot_bgm_bar.py` 的几何判据不变）；
+  底部 `#tidefill` 的 transform 随 prog，`#tidebead` 的 left 随 prog，
+  `#tidebuf` 来自 `A.buffered`；`#buf` 只在 `waiting/stalled` 时显示，`playing/canplay` 收起。
+- 动态背景载入：`InkLoad.start('载入动态背景…')` → 成功 `done`、失败 `fail` 并退回静态底；
+  不允许"背景空着且无报错"。
+- 验收：`shot_bgm_bar.py`（4 条几何）+ `bgm_page_probe.py` + `bg_page_probe.py` +
+  `livebg_ui_probe.py`；截图仍要人眼过。
+
+**踩坑记录**
+
+- **CDP 连接先筛 `type=page`**：本机 Chrome 有扩展 background 页，连到它时 `Page.navigate`
+  不生效，表现为"页面没加载、`window.InkLoad` 不存在"的假红（2026-10-21 实测）。
+- 播放器重排后时间标签只留在进度行两端；若同时留在 `.top`，会出现两处时间且网格列数错位。
+- `background` 简写会重置 `background-image`；给 `#fEvent` 加自定义箭头后，focus 态必须用
+  `background-color`，否则箭头被擦掉。
+- 动态背景的记录没有 `url`：判等必须按 `kind+key`，`sapply` 动态分支不能写 `url("")`（§173）。
+- 离屏 Chrome 窗口可能让 `document.hidden=true`；验"帧推进"前先打印 `visibilityState`，
+  否则会把我们自己的 `visibilitychange` 暂停误判成"渲染坏了"。
+- Live2D 背景 DPR 上限 1.5；Spine 只加载 `parts[0]`；内存量法用 WF-52 的四档基线，
+  不要只看 fps（§164/§173）。
+
+**涉及文件**
+
+`gallery_src/loading.js`（新增，三页共用）、`gallery_src/index.html`、`gallery_src/backgrounds.html`、
+`gallery_src/bgm.html`、`gallery_src/site_bg_live.js`、`gallery_src/favorites.js`、
+`scripts/deploy_gallery.py`（FILES 加 `loading.js`）、`scripts/diag/livebg_ui_probe.py`、
+`scripts/diag/shot_bgm_bar.py`。

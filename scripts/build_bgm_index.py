@@ -126,6 +126,28 @@ def collect_refs(tables, stems_norm):
     return refs
 
 
+def event_refs(stems_norm):
+    """`memory_storyline` 的 99 条回忆章节 → 曲目。
+
+    这是目前唯一一份**活动级**中文名单：每行有 `name`（活动/回忆章节名）与 `bgm`。
+    只覆盖 569 首里的 86 首 —— 界面必须标清它只是"部分音乐"，不能冒充全量活动目录。
+    """
+    refs = {}
+    rows = _lua('memory_storyline.json') or []
+    for r in rows:
+        b = r.get('bgm')
+        name = str(r.get('name') or '').strip()
+        if not b or not name:
+            continue
+        stem = stems_norm.get(_norm_bgm(b))
+        if not stem:
+            continue
+        bucket = refs.setdefault(stem, [])
+        if name not in bucket:
+            bucket.append(name)
+    return refs
+
+
 def scan_tables():
     """重扫全部 lua 表找出处（慢约 1 分钟）。返回 {表名: 命中的曲名引用数}。"""
     out = {}
@@ -276,6 +298,8 @@ def main():
               + ', '.join(f'{k}({v})' for k, v in sorted(new.items(), key=lambda x: -x[1])[:12]))
     refs = collect_refs(SCENE_TABLES, stems_norm)
     print(f'出处：{len(refs)} / {len(stems)} 首至少被一张配置表引用')
+    evrefs = event_refs(stems_norm)
+    print(f'活动回忆：{len(evrefs)} / {len(stems)} 首能对上 memory_storyline 的章节名')
 
     tracks = []
     for f in oggs:
@@ -304,7 +328,8 @@ def main():
         tracks.append({'file': f, 'url': '../' + os.path.relpath(p, P.OUT).replace(os.sep, '/'),
                        'slug': stem, 'title': humanize(stem), 'title_cn': info.get('title_cn', ''),
                        'album': info.get('album', ''), 'usage': usage, 'ship': ship,
-                       'scenes': scenes, 'dur': round(dur or 0, 2), 'size': os.path.getsize(p)})
+                       'scenes': scenes, 'events': evrefs.get(stem, []),
+                       'dur': round(dur or 0, 2), 'size': os.path.getsize(p)})
     tracks.sort(key=lambda t: (t['album'] == '', t['album'], t['usage'], t['slug']))
     out = {'generated': dt.datetime.now().strftime('%Y-%m-%d %H:%M'),
            'source_dir': os.path.relpath(a.dir, P.ROOT).replace(os.sep, '/'),
@@ -313,8 +338,10 @@ def main():
                       'with_scene': sum(1 for t in tracks if t['scenes']),
                       'with_usage': sum(1 for t in tracks if t['usage']),
                       'with_ship': sum(1 for t in tracks if t['ship']),
+                      'with_event': sum(1 for t in tracks if t['events']),
                       'usages': sorted({t['usage'] for t in tracks if t['usage']}),
                       'scene_kinds': sorted({s['t'] for t in tracks for s in t['scenes']}),
+                      'events': sorted({e for t in tracks for e in t['events']}),
                       'hours': round(sum(t['dur'] for t in tracks) / 3600, 2),
                       'mb': round(sum(t['size'] for t in tracks) / 2 ** 20, 1)},
            'tracks': tracks}
@@ -324,9 +351,11 @@ def main():
     c = out['counts']
     print(f'[OK] {a.out}：{c["tracks"]} 首 / {c["hours"]} 小时 / {c["mb"]} MB')
     print(f'     官方中文名 {c["named_cn"]} 首 · 专辑 {c["albums"]} 张 · '
-          f'有出处 {c["with_scene"]} 首 · 有用途 {c["with_usage"]} 首 · 关联舰名 {c["with_ship"]} 首')
+          f'有出处 {c["with_scene"]} 首 · 有用途 {c["with_usage"]} 首 · '
+          f'关联舰名 {c["with_ship"]} 首 · 活动回忆 {c["with_event"]} 首')
     print(f'     用途：{", ".join(c["usages"])}')
     print(f'     出处：{", ".join(c["scene_kinds"])}')
+    print(f'     活动回忆：{len(c["events"])} 个章节')
     return 0
 
 

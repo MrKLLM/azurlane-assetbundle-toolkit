@@ -69,12 +69,13 @@ BGM_DIR = os.path.join(ROOT, 'Output', 'Audio', 'BGM')
 PUB_BG = os.path.join(ROOT, 'tools', 'sharecfg_re', '51_publish_bg_series.py')
 BUILD_BG = os.path.join(ROOT, 'scripts', 'build_bg_meta.py')
 BUILD_BGM = os.path.join(ROOT, 'scripts', 'build_bgm_index.py')
+MAKE_BG_THUMBS = os.path.join(ROOT, 'scripts', 'make_bg_thumbs.py')
 EXPORT_BG = os.path.join(ROOT, 'scripts', 'export_assets.py')
 
 # 子脚本输出很长，默认只回显这些"有判断价值"的行，避免刷屏。
 KEY_LINE = re.compile(
     r'(发布 \d+ 组|\[WRITE\]|闸门：|背景图 \d+ 张|词根 \d+ 个|曲目|官方中文名|专辑关联'
-    r'|失败:|成功:|导出完成|耗时:|✓|✗|FAIL|WARN)')
+    r'|失败:|成功:|完成 ok=|待生成|导出完成|耗时:|✓|✗|FAIL|WARN)')
 
 
 # ---------------------------------------------------------------- 小工具
@@ -144,14 +145,17 @@ def snapshot():
     if os.path.isfile(BG_META):
         for k, v in (load_json(BG_META).get('roots') or {}).items():
             bg[k] = {'cn': v.get('cn', ''), 'from': v.get('cn_from', ''), 'n': v.get('n', 0)}
-    tracks, albums, named, total = [], [], 0, 0
+    tracks, albums, named, total, events = [], [], 0, 0, 0
     if os.path.isfile(BGM_JSON):
         d = load_json(BGM_JSON)
         tracks = sorted(t.get('slug', '') for t in d.get('tracks') or [])
         albums = sorted({t.get('album') for t in (d.get('tracks') or []) if t.get('album')})
-        named = int((d.get('counts') or {}).get('named_cn') or 0)
+        c = d.get('counts') or {}
+        named = int(c.get('named_cn') or 0)
+        events = int(c.get('with_event') or 0)
         total = len(tracks)
-    return {'bg': bg, 'tracks': tracks, 'albums': albums, 'named': named, 'total': total}
+    return {'bg': bg, 'tracks': tracks, 'albums': albums, 'named': named,
+            'total': total, 'events': events}
 
 
 def load_baseline():
@@ -205,6 +209,15 @@ def rebuild_bg(check=False, verbose=False):
     ok = rc == 0 and ('[WRITE]' in out if not check else '闸门：绿' in out)
     if not ok:
         print('   ✗ bg_meta 未通过闸门')
+        return False
+    # 新图进库的最后一步：缩略图。增量、已存在即 skip；少了它背景页就是空格子。
+    # 只在正式重建时跑；--check 不写盘，也不拿旧 bg_meta 的缺图数冒充本轮结论。
+    if not check:
+        rc, out = run_stage('背景③：补齐新缩略图（增量，已存在跳过）',
+                            [PY, MAKE_BG_THUMBS], timeout=7200, verbose=verbose)
+        ok = rc == 0 and '完成' in out
+        if not ok:
+            print('   ✗ 缩略图生成失败（bg_meta 已写，补齐后可重跑 labels）')
     return ok
 
 
@@ -306,8 +319,8 @@ def report(cur, base, write_file=True):
         print('  说明：这些词根五条证据路线都没命中，按「不许编名」保留英文；')
         print('        知道出处就补 inputs/gamecfg/bg_category_labels.json 或 bg_series_labels.json。')
 
-    print('\n【音乐】曲目 %d 首 / 官方中文名 %d / 专辑 %d 张'
-          % (cur['total'], cur['named'], len(cur['albums'])))
+    print('\n【音乐】曲目 %d 首 / 官方中文名 %d / 专辑 %d 张 / 活动回忆 %d 首'
+          % (cur['total'], cur['named'], len(cur['albums']), cur['events']))
     new_tracks, new_albums = [], []
     if base is not None:
         old_t = set(base.get('tracks') or [])
@@ -342,6 +355,7 @@ def report(cur, base, write_file=True):
             'tracks_total': cur['total'],
             'named_cn': cur['named'],
             'albums': len(cur['albums']),
+            'with_event': cur['events'],
             'new_tracks': new_tracks,
             'new_albums': new_albums,
         },

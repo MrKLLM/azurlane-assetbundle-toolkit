@@ -79,6 +79,9 @@ function bind(){
 /* ───────────────────── 网站背景 ───────────────────── */
 var SKEY='gallery.sitebg';
 var S={ v:null };
+/* 动态背景四种 kind：bg / skin / spine / live2d。
+   spine 与 live2d 没有 url（资源靠 kind+key 定位），绝不能走 background-image。 */
+function isLiveKind(k){ return k==='spine'||k==='live2d'; }
 function sload(){
   try{ var o=JSON.parse(localStorage.getItem(SKEY)||'null');
        /* ⚠️ 判据是"哪个 kind 有活路"，不是"有没有 url"。
@@ -95,8 +98,15 @@ function sapply(){
   if(!S.v){ r.classList.remove('has-sitebg');
             r.style.removeProperty('--site-bg'); r.style.removeProperty('--site-fit');
             r.style.removeProperty('--site-pos'); return; }
+  /* 动态类型交给 site_bg_live.js；has-sitebg 仍要加，它管背景前的可读性规则。
+     这里若写 background-image，url 为空串会稳定 404，表现为"设了但什么都没发生"。 */
+  if(isLiveKind(S.v.kind)){
+    r.style.removeProperty('--site-bg');
+    r.classList.add('has-sitebg');
+    return;
+  }
   var skin=S.v.kind==='skin';
-  r.style.setProperty('--site-bg','url("'+S.v.url.replace(/"/g,'%22')+'")');
+  r.style.setProperty('--site-bg','url("'+(S.v.url||'').replace(/"/g,'%22')+'")');
   r.style.setProperty('--site-fit', skin?'contain':'cover');
   r.style.setProperty('--site-pos', skin?'50% 100%':'50% 50%');
   r.classList.add('has-sitebg');
@@ -107,9 +117,21 @@ function fired(){ document.dispatchEvent(new CustomEvent('sitebgchange',{detail:
 S.set=function(o){ S.v=o; try{ localStorage.setItem(SKEY,JSON.stringify(o)); }catch(e){} sapply(); fired(); };
 S.clear=function(){ S.v=null; try{ localStorage.removeItem(SKEY); }catch(e){} sapply(); fired(); };
 S.get=function(){ return S.v; };
-/* 同一个东西再点一次 = 取消（比"设为背景 / 取消背景"两个按钮省地方，也不会出现两个真相） */
-S.toggle=function(o){ if(S.v&&S.v.url===o.url) S.clear(); else S.set(o); return !!S.v; };
-S.is=function(url){ return !!(S.v&&S.v.url===url); };
+/* 同一个东西再点一次 = 取消。判等键按类型分：静态图用 kind+url，动态模型用 kind+key
+   （动态记录没有 url，按 url 判等会把"换一个模型"当成"取消"）。 */
+function same(a,b){
+  if(!a||!b) return false;
+  if(isLiveKind(a.kind)||isLiveKind(b.kind))
+    return a.kind===b.kind && a.key===b.key;
+  return a.kind===b.kind && a.url===b.url;
+}
+S.toggle=function(o){ if(same(S.v,o)) S.clear(); else S.set(o); return !!S.v; };
+S.is=function(url,kind,key){
+  if(!S.v) return false;
+  if(isLiveKind(S.v.kind)||isLiveKind(kind))
+    return S.v.kind===kind && S.v.key===key;
+  return S.v.url===url && (kind==null||S.v.kind===kind);
+};
 
 /* 样式由模块自己注入：漏一页就会变成"那页没背景"这种最难查的差别 */
 function css(){

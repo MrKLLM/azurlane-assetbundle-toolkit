@@ -165,6 +165,11 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
 .sheet .imgbox{background:var(--stage);display:flex;align-items:center;justify-content:center;
   min-height:320px;position:relative;overflow:hidden}
 .sheet .imgbox img{max-width:100%;max-height:88vh;display:block}
+/* 原图比缩略图大一个量级：点开时先给一句"在读原图"，不要让用户盯着一张空白。
+   pointer-events:none ⇒ 读图期间仍可点上一张/下一张或关闭。 */
+.ovload{position:absolute;inset:0;z-index:6;display:none;place-items:center;pointer-events:none;
+  background:color-mix(in srgb,var(--stage) 72%,transparent)}
+.ovload.on{display:grid}
 /* 缩放/平移：光标下那个点要跟着光标走，所以 transform-origin 固定 0 0，位移自己算 */
 .sheet .imgbox img,.fs img{transform-origin:0 0;transition:none;will-change:transform}
 .sheet .imgbox img{cursor:zoom-in}
@@ -239,6 +244,11 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
 </style>
 </head>
 <body>
+<div id="bootveil" aria-hidden="true">
+  <div class="bv-inner"><div class="bv-ink"><i></i><i></i><i></i></div>
+    <p class="bv-t">正在铺开背景库…</p><p class="bv-s">读取背景索引、词根与命名</p>
+    <span class="bv-line"></span></div>
+</div>
 <div class="amb"><i></i><i></i></div>
 <header>
   <a class="back" href="index.html">← 资产浏览器</a>
@@ -279,6 +289,7 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
          底部按钮行只留主动作 + 次级行 —— 六个按钮挤在 320px 侧栏里是"臃肿"的主源。
          所有 id 原样保留，JS 一行不用改；缩放/平移的 chrome() 判据本来就排除 button。 -->
     <div class="imgbox" id="ovbox"><img id="ovimg" alt="">
+      <div class="ovload" id="ovload"><span class="inkwait"><i></i><i></i><i></i><em>正在读取原图…</em></span></div>
       <button class="pn p" id="ovprev" title="上一张（←）" aria-label="上一张">‹</button>
       <button class="pn n" id="ovnext" title="下一张（→）" aria-label="下一张">›</button>
       <span class="zbadge" id="ovz">适配</span>
@@ -302,6 +313,7 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
   </div>
 </div>
 
+<script src="loading.js"></script>
 <script src="favorites.js"></script>
 <script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
 <script src="site_bg_live.js"></script>  <!-- 动态网站背景：Spine / Live2D（三页共用，正本 gallery_src/site_bg_live.js） -->
@@ -499,6 +511,10 @@ function open(key){
 function paint(){
   const it=view[cur]; if(!it) return;
   ovZ.reset();   // 换图必须回到"适配"：上一张的倍率与位移对这一张没有意义
+  if($('ovload')){
+    $('ovload').innerHTML='<span class="inkwait"><i></i><i></i><i></i><em>正在读取原图…</em></span>';
+    $('ovload').classList.add('on');
+  }
   $('ovimg').src=it.img; $('oven').textContent=it.key+' · '+it.name;
   $('ovdl').href=it.img; $('ovdl').download=it.name+'.png';
   if($('fs').classList.contains('on')) fsPaint();
@@ -547,7 +563,8 @@ function paint(){
     ? '「推断」= 这张图自己没有被引用，只有同词根的兄弟图被引用过。所以这里只给系列名（章节名），不给具体关卡 —— 我们不知道它究竟用在哪一小节。'
     : '「类目说明」是按下图所在目录给出的归类描述（依据写在下方），不是这张图的资产名；配置表里查不到它的中文名，页面不编。';
 }
-function close(){ $('ov').classList.remove('open'); cur=-1; $('ovimg').removeAttribute('src'); }
+function close(){ $('ov').classList.remove('open'); cur=-1; $('ovimg').removeAttribute('src');
+  if($('ovload')) $('ovload').classList.remove('on'); }
 
 /* ── 全屏看壁纸 ──
    `.fs` 遮罩层自己就铺满视口，所以 `requestFullscreen()` 失败（内嵌浏览器/无头环境
@@ -623,14 +640,19 @@ function zoomable(img, box, out){
   return {reset, get z(){return z;}, step:d=>zoomAt({x:box.clientWidth/2,y:box.clientHeight/2}, z*d)};
 }
 const ovZ=zoomable($('ovimg'),$('ovbox'),$('ovz'));
+$('ovimg').addEventListener('load',()=>{ const l=$('ovload'); if(l) l.classList.remove('on'); });
+$('ovimg').addEventListener('error',()=>{ const l=$('ovload'); if(l){ l.innerHTML='<span class="inkwait" style="color:var(--fail)"><em>原图读不到</em></span>'; } });
 const fsZ=zoomable($('fsimg'),$('fs'),$('fsz'));
 
 async function boot(){
   try{
-    const r=await fetch('bg_meta.json',{cache:'no-store'});
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    META=await r.json();
-  }catch(e){ $('sub').textContent='bg_meta.json 读不到：'+e.message+'（先跑 py -3 scripts/build_bg_meta.py）'; return; }
+    META=window.InkLoad ? await InkLoad.fetchJSON('bg_meta.json','读取背景索引')
+                        : await (await fetch('bg_meta.json',{cache:'no-store'})).json();
+  }catch(e){
+    $('sub').textContent='bg_meta.json 读不到：'+e.message+'（先跑 py -3 scripts/build_bg_meta.py）';
+    if(window.InkLoad){ InkLoad.fail('背景索引读取失败'); InkLoad.bootDone(); }
+    return;
+  }
   ALL=META.items; initFilters(); apply();
   const th=$('gTheme');
   th.querySelector('[data-t="'+(document.documentElement.dataset.theme||'light')+'"]')
@@ -645,6 +667,10 @@ async function boot(){
     b.onclick=()=>{ const it=view[cur]; if(!it) return;
       SiteBg.toggle({url:it.img,kind:'bg',key:it.key,label:title(it)}); syncBg(); }; });
   syncBg();
+  if(window.InkLoad){
+    InkLoad.bootDone();
+    requestAnimationFrame(()=>InkLoad.trackThumbs(document.getElementById('grid'),'铺开背景缩略图'));
+  }
 }
 function favCount(){ const e=$('favN'); if(e) e.textContent=Fav.count('bg'); }
 /* 按钮文案跟着"当前这张是不是已设为背景"走 —— 两处按钮共用同一个真相，不各存各的 */

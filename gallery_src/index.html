@@ -230,6 +230,16 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
 .bgbtn:hover{transform:translateY(-1px);border-color:var(--brand);color:var(--brand-d)}
 .bgbtn:active{transform:scale(.97)}
 .bgbtn.on{background:var(--grad-brand);color:var(--on-txt);border-color:transparent}
+/* 「Live2D / 动态皮肤」角标：告诉用户这一下点下去得到的是会动的背景还是一张图。
+   纯文字小角标，不新增按钮。 */
+.bgbtn .bgtag{font-style:normal;font-size:9.5px;font-weight:700;letter-spacing:.04em;
+  margin-left:6px;padding:1px 5px;border-radius:4px;vertical-align:1px;
+  background:color-mix(in srgb,#fff 26%,transparent)}
+.bgbtn.on .bgtag{background:color-mix(in srgb,#fff 30%,transparent)}
+/* 「静态图」是次级动作：更轻的描边、更小的字，明确退到主按钮后面 */
+.bgbtn.alt{padding:4px 8px;font-size:11px;opacity:.86;
+  background:transparent;border-style:dashed}
+.bgbtn.alt:hover{opacity:1}
 .side .hd .t{font-size:22px;font-weight:800;color:var(--txt);line-height:1.15}
 .side .hd .p{font-size:11px;color:var(--dim);margin-top:2px;font-weight:600}
 .meta{padding:8px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);
@@ -476,6 +486,11 @@ main{position:relative;z-index:1}
 </style>
 </head>
 <body>
+<div id="bootveil" aria-hidden="true">
+  <div class="bv-inner"><div class="bv-ink"><i></i><i></i><i></i></div>
+    <p class="bv-t">正在展开资产…</p><p class="bv-s">读取舰船索引与缩略图</p>
+    <span class="bv-line"></span></div>
+</div>
 <div id="bgfx" aria-hidden="true"><div class="bfield"><i class="glow g1"></i><i class="glow g2"></i><i class="glow g3"></i></div></div>
 <header class="main-toolbar">
   <h1>碧蓝航线资产浏览器</h1>
@@ -523,12 +538,19 @@ main{position:relative;z-index:1}
   </div>
 </div>
 
+<script src="./loading.js"></script>
 <script src="./favorites.js"></script>
 <script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
 <script src="site_bg_live.js"></script>  <!-- 动态网站背景：Spine / Live2D（三页共用，正本 gallery_src/site_bg_live.js） -->
 <script src="./index.js"></script>
 <script src="./vendor/spine/spine-all.js"></script>
 <script>
+if(!window.GALLERY){
+  const m=document.getElementById('main');
+  if(m) m.innerHTML='<div class="note">舰船索引没有加载（index.js 缺失或被拦）。<br>先跑 py -3 scripts/build_gallery_index.py。</div>';
+  if(window.InkLoad){ InkLoad.fail('索引没有加载'); InkLoad.bootDone(); }
+  throw new Error('GALLERY missing');
+}
 const G = window.GALLERY;
 const P = location.protocol === 'file:' ? '../' : '../'; // 图片相对路径前缀（两种协议下均可）
 /* ---------- 「其他」档的两类条目：剧情剪影（`_hei`）与认不出归属的组件立绘 ----------
@@ -1022,20 +1044,55 @@ function buildSkinList(s){
     el.appendChild(d);
   });
 }
-/* 弹窗头部动作：收藏（单位 = 这个角色）+ 把当前皮肤的立绘设成网站背景。
-   ⚠️ 每次换皮肤都要重画一遍——「设为背景」的 URL 跟着当前皮肤走，
-      留着上一张的就会做出"看着点的是 A、实际设的是 B"这种事。 */
+/* 当前皮肤能做哪种背景？优先级是「能动的优先」：
+   Live2D → Spine → 静态立绘。同一个皮肤三种资源常在，用户点「设为背景」
+   想要的是最有表现力的那个；静态图仍保留成旁边一个显式小键。 */
+function bgTarget(){
+  const sk=curSkin; if(!sk) return null;
+  const nm=(curShip?curShip.name:'')+(sk.label?(' · '+sk.label):'');
+  const l2=(sk.live2d||'').trim();
+  if(l2) return {kind:'live2d', key:sk.key||'', label:nm, url:'',
+    model:l2, base:sk.live2dBase||sk.key||''};
+  const sp=sk.spine;
+  if(sp&&(sp.folder||(sp.parts&&sp.parts.length)))
+    return {kind:'spine', key:sk.key||'', label:nm, url:'',
+      folder:sp.folder||sk.key||'',
+      parts:(sp.parts&&sp.parts.length)?sp.parts:[sp.folder||sk.key||'']};
+  const url=P+(sk.cg||sk.image||'');
+  if(!url) return null;
+  return {kind:'skin', key:sk.key||'', label:nm, url:url};
+}
+function skTarget(){
+  const sk=curSkin; if(!sk) return null;
+  const url=P+(sk.cg||sk.image||''); if(!url) return null;
+  return {kind:'skin', key:sk.key||'', url:url,
+    label:(curShip?curShip.name:'')+(sk.label?(' · '+sk.label):'')};
+}
+/* 弹窗头部动作：收藏（单位 = 这个角色）+ 把当前皮肤设成网站背景。
+   ⚠️ 每次换皮肤都要重画一遍，否则会出现"看着点的是 A、实际设的是 B"。 */
 function renderActs(){
   const el=document.getElementById('mActs'); if(!el||!window.Fav||!curShip) return;
-  const sk=curSkin, url=sk? (P+(sk.cg||sk.image||'')) : '';
+  const tg=bgTarget();
+  if(!tg){ el.innerHTML=Fav.btn('skin',curShip.id,curShip.name); return; }
+  const on=SiteBg.is(tg.url,tg.kind,tg.key);
+  const KINDNAME={live2d:'Live2D',spine:'动态皮肤',skin:'立绘'};
   el.innerHTML = Fav.btn('skin',curShip.id,curShip.name) +
-    (url? '<button class="bgbtn'+(SiteBg.is(url)?' on':'')+'" id="mSetBg" title="'+url+'">'
-        + (SiteBg.is(url)?'已设为背景':'设为网站背景')+'</button>' : '');
+    '<button class="bgbtn'+(on?' on':'')+'" id="mSetBg" data-act="set" '+
+      'title="'+(on?'再点一次取消背景':'把当前皮肤的'+KINDNAME[tg.kind]+'设为整站背景')+'">'+
+      (on?'已设为背景':'设为网站背景')+
+      (tg.kind!=='skin'?'<i class="bgtag">'+KINDNAME[tg.kind]+'</i>':'')+'</button>' +
+    (tg.kind!=='skin' ? (function(){
+        const st=skTarget(); if(!st) return '';
+        const son=SiteBg.is(st.url,'skin',st.key);
+        return '<button class="bgbtn alt'+(son?' on':'')+'" id="mSetBgStatic" data-act="static" '+
+          'title="用这个皮肤的静态立绘做背景（不动，但更省电）">'+(son?'已用静态图':'静态图')+'</button>';
+      })() : '');
 }
 document.addEventListener('click',e=>{
-  const b=e.target.closest && e.target.closest('#mSetBg'); if(!b) return;
-  const url=b.title, sk=curSkin, nm=(curShip?curShip.name:'')+(sk&&sk.label?(' · '+sk.label):'');
-  SiteBg.toggle({url:url,kind:'skin',key:sk?sk.key:'',label:nm});
+  const b=e.target.closest && e.target.closest('#mSetBg,#mSetBgStatic'); if(!b) return;
+  const tg = b.dataset.act==='static' ? skTarget() : bgTarget();
+  if(!tg) return;
+  SiteBg.toggle(tg);
   renderActs();
 });
 /* 收藏变了：正开着「已收藏」这一档时立刻重筛，否则点了星却看着没反应 */
@@ -1137,7 +1194,7 @@ function renderView(){
     }
   }
   else if(tab==='voice'){ renderVoice(); }
-  else if(tab==='spine'){ viewEl.innerHTML='<div class="note">正在初始化 Spine…</div>'; if(location.protocol==='file:') viewEl.innerHTML='<div class="note">Spine 实时播放需要通过本地服务器加载资源。<br>请运行 <b>启动资产浏览器.bat</b>（或 <b>python -m http.server</b> 于 Output 目录）后，浏览器打开提示的地址访问。</div>'; else startSpine(curShip, sk); }
+  else if(tab==='spine'){ viewEl.innerHTML='<div class="note">'+(window.InkLoad?InkLoad.waitHTML('正在初始化 Spine…'):'正在初始化 Spine…')+'</div>'; if(location.protocol==='file:') viewEl.innerHTML='<div class="note">Spine 实时播放需要通过本地服务器加载资源。<br>请运行 <b>启动资产浏览器.bat</b>（或 <b>python -m http.server</b> 于 Output 目录）后，浏览器打开提示的地址访问。</div>'; else startSpine(curShip, sk); }
   else if(tab==='live2d'){ renderLive2D(curShip, sk); }
 }
 /* 静态立绘/CG 交互浏览：滚轮缩放(以光标为中心) · 拖拽平移 · 双击100% · 全屏 */
@@ -1370,7 +1427,7 @@ async function renderLive2D(s, sk){
   }
   const my={cancelled:false, app:null, off:null}; l2State=my;
   const seq=++_l2seq;
-  viewEl.innerHTML='<div class="note">正在加载 Live2D 运行时…</div>';
+  viewEl.innerHTML='<div class="note">'+(window.InkLoad?InkLoad.waitHTML('正在加载 Live2D 运行时…'):'正在加载 Live2D 运行时…')+'</div>';
   try{ await loadLive2DRuntime(); }catch(e){ if(my.cancelled||seq!==_l2seq)return; viewEl.innerHTML=`<div class="note">Live2D 运行时加载失败：${e.message}</div>`; return; }
   if(my.cancelled||seq!==_l2seq)return;
   viewEl.innerHTML='<div id="l2wrap"></div><div class="l2panel" id="l2panel"></div><div class="spine-bar" id="l2bar"><span class="pill">Live2D：'+sk.key+'</span><span class="hint">加载中…</span></div>';
@@ -2642,6 +2699,10 @@ paintClearBg();
    没有委托就没人接它们的点击（也不会报错，只是点了没反应——最难查的那种）。 */
 if(window.Fav) Fav.bind();
 apply();
+if(window.InkLoad){
+  InkLoad.bootDone();
+  requestAnimationFrame(()=>InkLoad.trackThumbs(document.getElementById('main'),'铺开缩略图'));
+}
 </script>
 </body>
 </html>

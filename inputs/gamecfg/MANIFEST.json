@@ -19,7 +19,7 @@
    "scripts/publish_bg_char_flags.py",
    "tools/sharecfg_re/51_publish_bg_series.py"
   ],
-  "landed_at": "2026-10-19"
+  "landed_at": "2026-10-21"
  },
  "files": [
   {
@@ -38,7 +38,7 @@
   {
    "path": "bg_char_flags.json",
    "bytes": 31701,
-   "sha256": "542d73aca9617ab30d6ee461544850166c3c730b0e98de33af811e902209bb8b",
+   "sha256": "61e2a2bead6853e106106c253a1d24a2bb4223ba36ee3896e71158d76cef53be",
    "rows": 1305,
    "role": "场景背景「画面里有没有角色」的人工视觉标注结论（1=有角色形象 / 0=没有）—— 背景页**默认视图**的筛选依据；文件名规则（含 `_cg`）精确率 86%/召回率 79%，不够当默认视图，故逐格目视标注",
    "consumers": [
@@ -46,7 +46,7 @@
    ],
    "source": "annotations/bg_char_labels.json（= .diag/bglabels 5×5 拼板逐格标注 + annotations/bg_char_adjudications.json 的 17 格全分辨率裁定；两份裁定正本入库，拼板可重生成）",
    "produced_by": "scripts/publish_bg_char_flags.py",
-   "coverage": "1,305/1,305 场景背景全覆盖（有角色 535 / 无角色 770）；⚠️ 登录与其他类目共 604 张**从未标注**，消费方不得把它们当「无角色」隐藏"
+   "coverage": "1305/1305 场景背景全覆盖（有角色 535 / 无角色 770）；登录与其他类目未标注，消费方不得把它们当「无角色」隐藏"
   },
   {
    "path": "bg_root_labels.json",
@@ -76,7 +76,7 @@
   {
    "path": "bg_series_labels.json",
    "bytes": 21169,
-   "sha256": "00f5e5d41e5c9185975594548f7b62cb0ead75ccf2f2676f50d94f0c349171d1",
+   "sha256": "5a4c519ca84de0712da455d9cbbd2e87fe4329dbef999e5267b66752487c3f9d",
    "rows": 54,
    "role": "背景图词根（Output/Raw png 的 root）→ 系列中文名，来源只有三条游戏表内路线：memory_template.mask+condition / re_map_template.bg+name / child2_data.name_background+name",
    "consumers": [
