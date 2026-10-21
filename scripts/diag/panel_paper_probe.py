@@ -7,12 +7,17 @@
 旧探针里的星点密度、背景显影、指针光效等判据已失去前提，保留作历史对照。
 本探针只判**新版面自己声称的东西**：
 
-  1. 骨架：5 个步骤、全部阶段卡片都在（不是"看起来有"）；
+ 1. 骨架：5 个步骤、全部阶段卡片都在（不是"看起来有"）；
   2. 字与色：主标题确实是衬线、纸底是暖色、全站零 backdrop-filter；
   3. 边界：星野与指针光效层确实退役（display:none），静止时 0 个动画；
   4. 交互：五步可点、细节/说明可开合、夜读可切换且能切回；
-  5. 窄屏：右栏折到底部、进度线不横穿文字、无横向溢出；
-  6. 截图：主屏 / 细节 / 夜读 / 窄屏四张，落到 .diag/panel_paper/。
+  5. 背景与悬停擦除（2026-10-21）：画布遮罩静止两帧 alpha 逐像素一致、划过处 alpha
+     显著下降而没划过的角落不变、约 0.8s 淡回同值；`calm` / 减少动态效果 / 弹层打开时停用；
+     夜读时画布纸色也换暖墨；自定义图片跨刷新保留；
+  6. 悬停语言回归（用户点名满意的那套）：阶段卡表面抬一档 + 左墨条变深 + 交叉高亮接线，
+     对照表 hover 转朱砂且不位移；五步索引 hover 下划线真的画得出来（不被 overflow 裁掉）；
+  7. 窄屏：右栏折到底部、进度线不横穿文字、无横向溢出；
+  8. 截图：主屏 / 细节 / 夜读 / 窄屏 / 擦除前后 / 背景选择器，落到 .diag/panel_paper/。
 
 用法:
   py -3 scripts/diag/panel_paper_probe.py --port 8790
@@ -223,6 +228,152 @@ def main():
         chk('星野层退役', nbg == 'none', nbg)
         chk('指针光效层退役', nfx == 'none', nfx)
 
+        # ── 背景与悬停擦除（2026-10-21）────────────────────────────────
+        # 判据全部落在**像素**上：遮罩画布自身的 alpha（240≈纸面 .94，0=全擦开）。
+        # 不靠截图肉眼，也不靠"有没有那个元素"冒充"效果成立"。
+        print('\n── 背景与悬停擦除 ─────────────────────────────')
+        TINY_PNG = ('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ'
+                    'AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
+        chk('背景四层在位（图 / 纸面遮罩 / 网格 / 纸纹）',
+            bool(pg.ev("!!document.getElementById('bgstage')&&"
+                       "!!document.getElementById('bgart')&&"
+                       "!!document.getElementById('bgveil')&&"
+                       "!!document.getElementById('bggrid')&&"
+                       "!!document.getElementById('bggrain')")))
+        bg0 = pg.ev("__probe.bg()") or {}
+        chk('默认背景是「航路版画」且是真的 SVG（不是空 DIV）',
+            bg0.get('art') == 'logbook' and bool(bg0.get('svg')), str(bg0.get('art')))
+        chk('遮罩画布按视口×dpr 建（不是 300×150 的默认画布）',
+            bool(pg.ev("(()=>{const c=document.getElementById('bgveil');"
+                       "const d=window.BG?BG.dpr:1;"
+                       "return c.width===Math.round(innerWidth*d)&&"
+                       "c.height===Math.round(innerHeight*d)&&c.width>800})()")),
+            str(bg0.get('veil')))
+        # 指针先停到角落，避免 hover/视差干扰静止比对
+        pg.cmd('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': 12, 'y': 12})
+        time.sleep(1.1)
+        pa = pg.ev("__probe.bgAlpha(800,420)")
+        pb = pg.ev("__probe.bgAlpha(1240,660)")
+        time.sleep(1.0)
+        pa2 = pg.ev("__probe.bgAlpha(800,420)")
+        pb2 = pg.ev("__probe.bgAlpha(1240,660)")
+        chk('静止时纸面接近不透明（底画只透 ~6%）',
+            isinstance(pa, int) and 232 <= pa <= 245, str(pa))
+        chk('静止两帧遮罩 alpha 完全一致（不闪）', pa == pa2 and pb == pb2,
+            f'{pa}/{pa2} {pb}/{pb2}')
+        chk('静止时没有绘制循环、没有残留笔迹',
+            not (bg0.get('raf') or False) and (pg.ev("__probe.bg().stamps") or 0) == 0,
+            f"raf={bg0.get('raf')} stamps={bg0.get('stamps')}")
+
+        for k in range(22):
+            pg.cmd('Input.dispatchMouseEvent',
+                   {'type': 'mouseMoved', 'x': 700 + k * 16,
+                    'y': 470 + (k % 4) * 6})
+            time.sleep(0.012)
+        time.sleep(0.05)
+        # 采样点必须在**笔迹末端**：淡出是按时间衰减的，取笔画中段会读到"已经淡了一半"的
+        # alpha（同一份实现早读 3、晚读 111 都发生过）。末端 ~30ms 前刚擦，才代表"擦得开"。
+        mid = pg.ev("__probe.bgAlpha(1010,495)")
+        far = pg.ev("__probe.bgAlpha(1400,900)")
+        dur = pg.ev("__probe.bg().lastMs") or 0
+        chk('划过处纸面被擦开（alpha 显著下降）',
+            isinstance(mid, int) and mid < 90, str(mid))
+        chk('没划过的角落不受影响（不是整张淡掉）',
+            isinstance(far, int) and far >= 232, str(far))
+        chk('单帧擦除耗时 < 12ms（不是拿卡顿换效果；SwiftShader 下留余量）', dur < 12, f'{dur}ms')
+        pg.shot('bg_erase.png')
+        time.sleep(1.5)
+        he = pg.ev("__probe.bgAlpha(820,500)")
+        chk('约 0.8s 内淡回同一张纸（alpha 复原）',
+            isinstance(he, int) and abs(he - pa) <= 1, f'{he} vs {pa}')
+        chk('淡净后绘制循环已停、无残留笔迹、无动画',
+            not (pg.ev("__probe.bg().raf") or False) and
+            (pg.ev("__probe.bg().stamps") or 0) == 0 and
+            (pg.ev("document.getAnimations().length") or 0) == 0)
+        pg.shot('bg_healed.png')
+
+        # 「设了 vs 没设」整屏对照：素纸必须真的回到旧观感（截图不同），
+        # 否则可能只是"选了个名字没换图"——这类假接线比效果本身更常见。
+        import hashlib
+        h1 = hashlib.sha1(open(os.path.join(OUT, 'bg_healed.png'), 'rb').read()).hexdigest()
+        pg.ev("__probe.bgChoose('paper')")
+        time.sleep(0.55)
+        pg.shot('bg_plain.png')
+        h2 = hashlib.sha1(open(os.path.join(OUT, 'bg_plain.png'), 'rb').read()).hexdigest()
+        chk('「素纸」与「航路版画」整屏观感确实不同（底图真的在渲染）',
+            h1 != h2, h1[:10] + ' vs ' + h2[:10])
+        chk('「素纸」下底层图隐藏、纸面遮罩仍在',
+            (pg.ev("getComputedStyle(document.getElementById('bgart')).opacity") or '') == '0'
+            and (pg.ev("__probe.bgAlpha(800,420)") or 0) >= 232)
+        pg.ev("__probe.bgChoose('logbook')")
+        time.sleep(0.5)
+
+        pg.ev("document.getElementById('bBg').click()")
+        time.sleep(0.4)
+        chk('「背景」按钮能打开选择器', bool(pg.ev("__probe.bg().open")))
+        chk('选择器给 5 个背景（含素纸与自定义）',
+            (pg.ev("document.querySelectorAll('#bgpresets .bgtile').length") or 0) == 5)
+        pg.shot('bg_picker.png')
+        pg.ev("__probe.bgChoose('chart')")
+        time.sleep(0.35)
+        chk('切到「海图」后底层图真的换了（并记进 localStorage）',
+            (pg.ev("__probe.bg().art") or '') == 'chart' and
+            (pg.ev("localStorage.getItem('panel.bgpreset')") or '') == 'chart')
+        pg.ev("__probe.bgChoose('logbook')")
+        pg.ev("__probe.bgPick(false)")
+        time.sleep(0.3)
+        # 选择器开着时擦除必须暂停：那是正在选东西，不是在看背景
+        pg.ev("__probe.bgPick(true)")
+        time.sleep(0.25)
+        for k in range(8):
+            pg.cmd('Input.dispatchMouseEvent',
+                   {'type': 'mouseMoved', 'x': 600 + k * 20, 'y': 640})
+            time.sleep(0.012)
+        time.sleep(0.1)
+        chk('选择器打开时擦除暂停（不抢交互）',
+            not (pg.ev("__probe.bg().raf") or False) and
+            (pg.ev("__probe.bgAlpha(700,640)") or 0) >= 232,
+            str(pg.ev("__probe.bgAlpha(700,640)")))
+        pg.ev("__probe.bgPick(false)")
+        time.sleep(0.3)
+        # 「动效从简」= 连背景擦除也停（用户按 M 就是要安静）
+        pg.ev("__probe.calm(true)")
+        for k in range(8):
+            pg.cmd('Input.dispatchMouseEvent',
+                   {'type': 'mouseMoved', 'x': 900 + k * 20, 'y': 700})
+            time.sleep(0.012)
+        time.sleep(0.1)
+        chk('「动效从简」下擦除停用',
+            not (pg.ev("__probe.bg().raf") or False) and
+            (pg.ev("__probe.bgAlpha(960,700)") or 0) >= 232,
+            str(pg.ev("__probe.bgAlpha(960,700)")))
+        pg.ev("__probe.calm(false)")
+        time.sleep(0.25)
+
+        # 五步索引 hover：下划线必须真的"从 0 拉到 100%"。
+        # 这条专门防那个坑：下划线写在 `label::after` 上会被 `label{overflow:hidden}` 裁掉，
+        # 屏幕上什么都没有、代码看着却对。现在画在盒内的 background-size 上。
+        pg.cmd('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': 12, 'y': 12})
+        time.sleep(0.3)
+        bs0 = pg.ev("getComputedStyle(document.querySelector('.snode:not(.on) label'))"
+                    ".backgroundSize") or ''
+        nr = pg.ev("JSON.stringify((()=>{const e=document.querySelector('.snode:not(.on)');"
+                   "if(!e) return null;const r=e.getBoundingClientRect();"
+                   "return [r.left,r.top,r.width,r.height]})())")
+        nr = json.loads(nr) if nr else None
+        if nr and nr[2] > 0:
+            pg.cmd('Input.dispatchMouseEvent',
+                   {'type': 'mouseMoved', 'x': int(nr[0] + nr[2] * .5),
+                    'y': int(nr[1] + nr[3] * .5)})
+            time.sleep(0.45)
+            bs1 = pg.ev("getComputedStyle(document.querySelector('.snode:not(.on):hover label'))"
+                        ".backgroundSize") or ''
+            chk('五步索引 hover 拉出一道下划线（盒内画，不会被 overflow 裁掉）',
+                bs0.replace('px', '').startswith('0') and bs1.startswith('100%'),
+                f'{bs0} → {bs1}')
+            pg.cmd('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': 12, 'y': 12})
+            time.sleep(0.25)
+
         print('\n── 静止与交互 ─────────────────────────────────')
         time.sleep(1.2)   # 五步点完会触发 .snode.in / .ask.swap 的入场动画，等它们跑完再判
         chk('静止时零个动画在跑', (pg.ev("document.getAnimations().length") or 0) == 0,
@@ -264,6 +415,57 @@ def main():
         chk('细节里有日志与最近任务',
             bool(pg.ev("!!document.getElementById('log')")) and
             (pg.ev("document.querySelectorAll('#runs tr').length") or 0) > 0)
+        # 悬停语言：用户在细节界面"挺满意"的就是这一套，写成判据防回归 ——
+        #   ① 阶段卡：表面**抬一档**（换底色），transform 永不动；
+        #   ② 左侧 2px 墨条变深（强调靠一道细线，不靠发光）；
+        #   ③ 右栏对应状态点被点亮（证据卡 ↔ 状态点的交叉高亮）。
+        # 用 CDP 可信鼠标制造 :hover，读 computed style —— 不靠截图肉眼。
+        rect = pg.ev("JSON.stringify((()=>{const e=document.querySelector("
+                     "'#cards .stage:not(.fail):not(.await)')||"
+                     "document.querySelector('#cards .stage');"
+                     "if(!e) return null;const r=e.getBoundingClientRect();"
+                     "return [r.left,r.top,r.width,r.height]})())")
+        rect = json.loads(rect) if rect else None
+        if rect and rect[2] > 0:
+            pg.cmd('Input.dispatchMouseEvent',
+                   {'type': 'mouseMoved', 'x': int(rect[0] + rect[2] * 0.3),
+                    'y': int(rect[1] + rect[3] * 0.5)})
+            time.sleep(0.45)
+            st_sel = "#cards .stage:not(.fail):not(.await)||#cards .stage"
+            st_bg = pg.ev("(()=>{const e=document.querySelector('#cards .stage:hover');"
+                          "return e?getComputedStyle(e).backgroundColor:null})()")
+            st_tick = pg.ev("(()=>{const e=document.querySelector('#cards .stage:hover');"
+                            "return e?getComputedStyle(e,'::before').backgroundColor:null})()")
+            hot = pg.ev("document.querySelectorAll('.snode .dot.hot').length") or 0
+            chk('阶段卡 hover 抬一档表面（纸面阶梯，不是上浮）',
+                st_bg == 'rgb(232, 224, 210)', str(st_bg))
+            chk('阶段卡 hover 左侧墨条变深（2px 细线语言）',
+                st_tick == 'rgb(138, 129, 116)', str(st_tick))
+            chk('阶段卡 hover 仍会标记右栏对应状态点（交叉高亮接线；当前布局下被抽屉盖住）',
+                hot >= 1, str(hot))
+            # 对照表：悬停边框转朱砂，图片与卡片本身不位移（不许上浮/果冻）
+            if (pg.ev("document.querySelectorAll('#sheets a').length") or 0) > 0:
+                pg.ev("document.querySelector('#sheets a').scrollIntoView({block:'center'})")
+                time.sleep(0.35)
+                r2 = json.loads(pg.ev(
+                    "JSON.stringify((()=>{const e=document.querySelector('#sheets a');"
+                    "const r=e.getBoundingClientRect();"
+                    "return [r.left,r.top,r.width,r.height]})())"))
+                pg.cmd('Input.dispatchMouseEvent',
+                       {'type': 'mouseMoved', 'x': int(r2[0] + r2[2] / 2),
+                        'y': int(r2[1] + r2[3] / 2)})
+                time.sleep(0.4)
+                sh_bd = pg.ev("getComputedStyle(document.querySelector('#sheets a:hover'))"
+                              ".borderTopColor")
+                sh_tf = pg.ev("getComputedStyle(document.querySelector('#sheets a:hover'))"
+                              ".transform")
+                chk('对照表 hover 边框转朱砂', sh_bd == 'rgb(166, 67, 46)', str(sh_bd))
+                chk('对照表 hover 不上浮/不缩放（纸面不许果冻）',
+                    sh_tf in (None, 'none'), str(sh_tf))
+                pg.ev("const c=document.querySelector('#detail .col');if(c)c.scrollTop=0")
+                time.sleep(0.25)
+            pg.cmd('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': 12, 'y': 12})
+            time.sleep(0.2)
         # 盘面与清单：打开抽屉会自动触发一次盘点（后台算，前端轮询）。
         # 只判骨架与接口接线，不判数值——数值随盘面变。
         chk('细节里有「盘面与清单」账本（四个目录行 + 清单行）',
@@ -554,6 +756,12 @@ def main():
         chk('夜读是暖墨而不是蓝黑', bool(pg.ev(
             "(()=>{const c=getComputedStyle(document.body).backgroundColor;"
             "const m=c.match(/\\d+/g).map(Number);return m[0]>=m[1]&&m[1]>=m[2]})()")), night)
+        # 画布也得换纸色：只换 body 的话，米色纸面会盖在暖墨底上（§137 型假绿）。
+        chk('夜读时纸面遮罩也换成暖墨（不是只在 body 上变色）',
+            (pg.ev("__probe.bg().paper") or '') == '23,21,18' and
+            abs((pg.ev("__probe.bgAlpha(800,420)") or 0) - 240) <= 2,
+            str(pg.ev("__probe.bg().paper")) + ' / alpha=' +
+            str(pg.ev("__probe.bgAlpha(800,420)")))
         pg.ev("document.getElementById('bSea').click()")
         time.sleep(0.4)
 
@@ -611,6 +819,50 @@ def main():
             '自动刷新' in (pg.ev("document.getElementById('warn').textContent") or ''),
             pg.ev("document.getElementById('warn').textContent"))
         pg.go(url, wait=2.4)
+
+        # ── 背景选择跨刷新保留（自定义图片走 localStorage 这条真实路径）──────
+        print('\n── 背景选择跨刷新 ─────────────────────────────')
+        pg.ev("__probe.bgImg(" + repr(TINY_PNG).replace("'", '"') + ")")
+        time.sleep(0.3)
+        bgc = pg.ev("__probe.bg()") or {}
+        chk('自定义图片能换上去（is-photo + data URL 落 localStorage）',
+            bool(bgc.get('photo')) and bool(pg.ev("localStorage.getItem('panel.bgimg')")),
+            str(bgc.get('art')))
+        pg.go(url, wait=3.0)
+        for _ in range(12):
+            if pg.ev("typeof LOADED!=='undefined'&&LOADED"):
+                break
+            time.sleep(0.5)
+        bgc2 = pg.ev("__probe.bg()") or {}
+        chk('刷新后自定义图片仍生效（不是刷新就回默认）',
+            bool(bgc2.get('photo')) and (bgc2.get('art') or '') == 'custom',
+            str(bgc2.get('art')))
+        pg.ev("localStorage.removeItem('panel.bgimg');__probe.bgChoose('logbook')")
+        time.sleep(0.35)
+        chk('「恢复默认」回到航路版画',
+            (pg.ev("__probe.bg().preset") or '') == 'logbook',
+            str(pg.ev("__probe.bg().preset")))
+
+        # ── 系统「减少动态效果」：擦除必须停用（不是只在 CSS 里 respect）──────
+        print('\n── 减少动态效果 ───────────────────────────────')
+        pg.cmd('Emulation.setEmulatedMedia',
+               {'features': [{'name': 'prefers-reduced-motion', 'value': 'reduce'}]})
+        pg.go(url, wait=3.0)
+        for _ in range(12):
+            if pg.ev("typeof LOADED!=='undefined'&&LOADED"):
+                break
+            time.sleep(0.5)
+        pa0 = pg.ev("__probe.bgAlpha(800,420)")
+        for k in range(10):
+            pg.cmd('Input.dispatchMouseEvent',
+                   {'type': 'mouseMoved', 'x': 500 + k * 22, 'y': 560})
+            time.sleep(0.012)
+        time.sleep(0.15)
+        chk('系统「减少动态效果」下擦除停用（不是只在 CSS 里 respect）',
+            not (pg.ev("__probe.bg().raf") or False) and
+            abs((pg.ev("__probe.bgAlpha(800,420)") or 0) - pa0) <= 1,
+            str(pg.ev("__probe.bgAlpha(800,420)")))
+        pg.cmd('Emulation.setEmulatedMedia', {'features': []})
 
         chk('全程无 JS 异常', not pg.exc, '; '.join(pg.exc[:3]))
         print('\n截图: ' + os.path.relpath(OUT, ROOT))

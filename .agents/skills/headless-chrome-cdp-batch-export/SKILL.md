@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。触发词（验收向）：点击没落地、开关无效还是探针没点到、画面改变判据全红而可逆判据全绿、取样哨兵值 None 参与比较、ES module 整块不初始化、vendor import 闭包、滑鼠标卡顿归因、帧时拆解、背景动效是不是罪魁、交替配对测量、顺序 A/B 的差不能当收益、property tree 节点数、静止不带 transform、判据放宽成恒真、绿着崩。
-version: 1.8.23
+version: 1.8.24
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -702,6 +702,29 @@ version: 1.8.23
    末尾要用 `a.out` 存截图 ⇒ `AttributeError: 'float' object has no attribute 'out'`。
    ⇒ 收尾用的名字（`a` / `args` / `out`）**不要当局部变量复用**；
    改完判据必须**跑到底看最后那行"通过/未通过"**，不能只看中途的判据行。
+
+### 画布类效果的像素级验收（擦除 / 淡净 / 静止帧）
+
+适用：页面里有"遮罩画布 + 指针擦出洞 + 时间衰减淡回"这类效果（背景图悬停擦除、显影、水波），
+要证明它**真的擦了、真的淡回、静止时真的不动**。四条判据全部落在像素上：
+
+1. **读画布自身的 alpha，不靠截图肉眼**。遮罩法：纸色 `rgba(paper, .94)` 铺满 ⇒ 静止帧 alpha≈240；
+   擦开处 alpha 应 <90；没划过的角落必须仍 ≥232（**局域性**——防"整张淡掉"冒充擦除）。
+   在页面里暴露 `__probe.bgAlpha(x,y)`（`ctx.getImageData` 单像素），CDP `Runtime.evaluate` 直接取值。
+2. **采样点选笔迹末端**。淡出是按时间衰减的：同一实现早读会得 3、晚 200ms 读会得 111——
+   取笔画中段会把"已经淡了一半"误判成"没擦开"。先划一小段、50ms 内读末端点。
+3. **静止帧要三零 + 两帧相等**：`raf=false`、`stamps=0`、`getAnimations()==0`，
+   且相隔 1s 两次读同一像素 alpha **完全相等**。canvas 的 rAF **不进** `getAnimations()`，
+   所以"画布没在重画"必须单独用 `raf/stamps` 证明；而切换背景的 CSS `transition` 会进
+   `getAnimations()` —— 切完等 ≥500ms 再判"静止零动画"。
+4. **暂停集合每条都要反向证据**：`body.calm`、`prefers-reduced-motion:reduce`
+   （`Emulation.setEmulatedMedia`）、任意弹层打开 —— 鼠标划过去 alpha 必须不变。
+   只写"代码里 respect 了"不算，探针要各自造一次真实划过。
+
+机制侧的确定性要求（否则判据会偶发红）：每帧从"整张底色"重画 + 按`笔迹×时间`画回，
+收尾清空笔迹再整张重铺一次；**不要只往洞上补色**（会一路漂到完全不透明）。
+跟指针的位移量（视差 transform）在 `pointerleave/blur/visibilitychange` 必须复位，
+否则"动过鼠标后的静止帧"和"刚加载的帧"不是同一张。
 
 ## 验证
 

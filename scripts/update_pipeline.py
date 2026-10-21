@@ -208,12 +208,18 @@ def stage_fp(s):
     return fingerprint(include_cfg=not getattr(s, 'produces_cfg', False))
 
 
+def stage_by_key(key):
+    """按 key 找阶段定义。`STAGES` 在本文件后半段才定义，故用 globals() 容错。"""
+    for s in globals().get('STAGES') or ():
+        if s.key == key:
+            return s
+    return None
+
+
 def stage_fp_by_key(key):
     """按阶段 key 取该阶段的指纹；认不出来的 key 保守用全指纹。"""
-    for s in STAGES if 'STAGES' in globals() else ():
-        if s.key == key:
-            return stage_fp(s)
-    return fingerprint()
+    s = stage_by_key(key)
+    return stage_fp(s) if s is not None else fingerprint()
 
 
 def base_of(fp):
@@ -236,18 +242,32 @@ def rejudge_state(st, cur_fp=None):
 
     只清"该重跑的那些"，保留的原地不动。这是一次性迁移，
     之后每轮都由 `stage_fp` 比较自然维持。
+
+    ⚠️ 指纹只能算**一次**：`fingerprint()` 要 walk 9 万多个源包（实测 0.25 秒/次）。
+    旧版这里对每个条目调两次 `stage_fp_by_key()`（一次进 keep/drop、一次进 out），
+    20 条 verdict + 6 条 done 的完整状态实测 **46 次 walk / 11.25 秒**，每次启动都白等。
+    现在先按"要不要带 cfg="各算一次（最多两次），再逐条比较。
     """
     fp = cur_fp or fingerprint()
     st = dict(st or {})
+    fps = {True: fp}                     # True = 全指纹（含 cfg=）
+    def want(k):
+        s = stage_by_key(k)
+        inc = not (s and s.produces_cfg)
+        if inc not in fps:
+            fps[inc] = fingerprint(include_cfg=inc)
+        return fps[inc]
     out, keep, drop = {}, [], []
     for k, v in (st.get('verdict') or {}).items():
-        (keep if v.get('fingerprint') == stage_fp_by_key(k) else drop).append(k)
-        if v.get('fingerprint') == stage_fp_by_key(k):
+        if v.get('fingerprint') == want(k):
             out[k] = v
+            keep.append(k)
+        else:
+            drop.append(k)
     dkeep, ddrop = [], []
     done = {}
     for k, v in (st.get('done') or {}).items():
-        if v.get('fingerprint') == stage_fp_by_key(k):
+        if v.get('fingerprint') == want(k):
             done[k] = v
             dkeep.append(k)
         else:
@@ -901,19 +921,33 @@ def st_paintings(full, approved):
         todo = rv.baseline_targets()
         log(f'  主皮肤 {len(todo)} 个 stem')
     fail = 0
+    why = []
     for i in range(0, len(todo), 50):
         batch = todo[i:i + 50]
         rc, so, _ = run([PY, 'scripts/compose_paintings_v2.py'] + batch + ['--out', tgt],
                         timeout=3600, echo=['完成', '✗'])
-        fail += len([l for l in so.splitlines() if l.startswith('✗')])
+        # ⚠️ 判据只认每批的收尾汇总行 `完成 N，失败 M`，**不数 `✗` 行**：
+        # 上一版数的是 `l.startswith('✗')`，而"没有可绘制部件"那条打的是 `"  ✗ …"`（两个前导空格）
+        # ⇒ 这种真失败一条都数不到；再叠上临时区里上一批留下的旧 png（n>0），阶段照样判绿。
+        # 该脚本恒 exit 0，所以"没读到汇总行"只能按**这一批全失败**处理（不许默认通过）。
+        m = re.search(r'完成\s*(\d+)，失败\s*(\d+)', so or '')
+        if m:
+            nf = int(m.group(2))
+            fail += nf
+            if nf:
+                why.append(f'批{min(i + 50, len(todo))} 失败{nf}')
+        else:
+            fail += len(batch)
+            why.append(f'批{min(i + 50, len(todo))} 缺汇总行（rc={rc}）')
         log(f'  批次进度 {min(i + 50, len(todo))}/{len(todo)} 失败累计 {fail}')
     n = count(tgt, '*.png')
     left = stale_in(tgt, len(todo))
     return verdict('paintings', n > 0 and fail == 0,
                    f'本次渲染 {len(todo)} 个 stem / 临时区共 {n} 张 / 渲染失败 {fail} 个'
+                   + (f'（{"; ".join(why[:4])}）' if why else '')
                    + (f' · ⚠️ 临时区还留着上一批的 {left} 张，第 3 步对照与第 4 步换入会把它们一起算进去'
                       if left else '')
-                   + '（该脚本失败仍 exit 0，判据是数 ✗ 行不是退出码）')
+                   + '（该脚本恒 exit 0，判据是每批「完成N，失败M」汇总行；缺汇总行=该批不算过）')
 
 
 def st_spine(full, approved):
@@ -934,6 +968,11 @@ def st_spine(full, approved):
         rc, so, _ = run([PY, 'scripts/extract_spine_v2.py'] + b + ['--out', tgt],
                         timeout=3600, echo=['成功', '失败', '✗'])
         fail += [l.split(':')[0].lstrip('✗ ') for l in so.splitlines() if l.startswith('✗')]
+        # extract_spine_v2 的 rc 只在"有皮肤没提出 / 拒绝覆写"时非 0（它已改成失败即非零，§111）。
+        # 正常失败会同时打 ✗ 行、被上一行数到；这里补 rc 是为了"崩在打 ✗ 之前"那种形状
+        # 也别被 stale 目录里的旧 parts.json 冒充通过。
+        if rc:
+            fail.append(f'批量{i // 25 + 1} rc={rc}')
         log(f'  批次进度 {min(i + 25, len(names))}/{len(names)} 失败累计 {len(fail)}')
     rc, so, _ = run([PY, 'scripts/extract_spine_v2.py', '--parts-only']
                     + names + ['--out', tgt], timeout=1800, echo=['成功', '失败'])
@@ -1036,9 +1075,15 @@ def st_audio(approved):
                     timeout=7200, echo=['包', '失败', '合计', '进度'])
     rc2, so2, _ = run([PY, 'scripts/diag/voice_gap_audit.py'], timeout=1800, echo=['缺口', '合计'])
     rc3, _, _ = run([PY, 'scripts/diag/l2d_voice_inventory.py'], timeout=600)
-    return verdict('audio', rc3 == 0 and rcg == 0 and rc2 == 0,
-                   f'cv_voice rc={rc}（单包失败不反映到退出码）；voice_gap_audit rc={rc2}'
-                   f'（恒 exit 0，非 0 = 它自己崩了）；l2d_voice_inventory（可信）rc={rc3}；{deg_line}')
+    # ⚠️ `extract_cv_voice` 的 rc 必须进判据：单包失败确实不反映到退出码（所以 rc=0 不等于全好，
+    # 还要看两道审计），但它 **rc≠0 只有一种含义**——撞了致命前置（没有 cv 包 / 缺 vgmstream /
+    # 抽查的台词磁盘缺文件），或者自己崩了。2026-10-21 复现：rc=2 时上一版只把它写在文案里，
+    # 阶段照样判绿。
+    return verdict('audio', rc == 0 and rc3 == 0 and rcg == 0 and rc2 == 0,
+                   f'cv_voice rc={rc}（单包失败不反映到退出码；**非 0 = 致命前置/崩溃，不是单包失败**）；'
+                   f'voice_gap_audit rc={rc2}（恒 exit 0，非 0 = 它自己崩了）；'
+                   f'l2d_voice_inventory（可信）rc={rc3}；{deg_line}'
+                   + ('' if rc == 0 else ' · ❌ cv_voice 非零退出：这一轮没解完，别把旧音频当新结果'))
 
 
 def st_bg_export(approved, full):
@@ -1239,6 +1284,19 @@ def st_swapin(approved):
 
 
 def st_derive(approved):
+    """缩略图 → **台词表** → 画廊索引 → 部署硬链。
+
+    ⚠️ 为什么台词表（`Output/gallery_v2/skin_words.json`）必须在这里重建（2026-10-21）：
+    它由 `inputs/gamecfg/{ship_skin_words,character_voice,name_code}.json` + `skin_voice.json`
+    join 出来（`scripts/build_skin_words.py`），而 `build_gallery_index.py` 直接读它
+    （缺文件直接 SystemExit）。此前**这条链没有任何阶段重建它**：
+    `cfg.publish` 2026-10-17 23:16 把皮肤表刷成 2871 行后，`skin_voice.json` 次日被 audio 档
+    更新了，但 `skin_words.json` 还是 10-05 的（少 2 个皮肤键，`lingmin_alter` 语音包号
+    还是旧的 701090，`sikula_h` 还是 202330）⇒ `verify_pipeline_e2e.py` 的
+    「台词表重生成」判据红，而阶段机全绿（没有任何阶段读它、也就没人发现它过期）。
+    放在建索引之前：索引要用新的词表；`gallery_index_diff_check` 已实测对
+    「voiceText 类字段」有白名单，重建后仍然过（2026-10-21 用临时目录实跑验证）。
+    """
     if 'derive' not in approved:
         return verdict('derive', True, '未签字 ⇒ 跳过，请 --approve derive')
     chg = [l.strip() for l in open(os.path.join(WORK, 'changed_paintings.txt'), encoding='utf-8')
@@ -1252,6 +1310,17 @@ def st_derive(approved):
             if os.path.isfile(p):
                 os.remove(p)
     run([PY, 'scripts/make_thumbs.py'], timeout=3600, echo=['完成'])
+    rc_w, so_w, _ = run([PY, 'scripts/build_skin_words.py'], timeout=1800,
+                        echo=['已写出', '正文字条', '产物'])
+    # 该脚本失败时真会非零退出（缺 namecode 展开/表读不出都 SystemExit）；
+    # 但"没打到「已写出」"同样不许算过——不然一个静默的空转就能让索引继续用旧词表。
+    ok_w = rc_w == 0 and '已写出' in (so_w or '')
+    words_note = '台词表已重建' if ok_w else f'台词表重建失败 rc={rc_w}'
+    if not ok_w:
+        tail = [l.strip()[:100] for l in (so_w or '').splitlines() if l.strip()][-2:]
+        return verdict('derive', False,
+                       f'{words_note}（{"; ".join(tail) or "没读到「已写出」行"}）'
+                       ' ⇒ 索引会用旧词表，拒绝继续建索引')
     rc, so, _ = run([PY, 'scripts/build_gallery_index.py'], timeout=1800, echo=['DONE'])
     new_idx = os.path.join(OUT, 'gallery_v2', 'index.json')
     rc2, so2, _ = run([PY, 'scripts/diag/gallery_index_diff_check.py', old_idx, new_idx],
@@ -1259,7 +1328,8 @@ def st_derive(approved):
     run([PY, 'scripts/deploy_gallery.py'], timeout=300)
     rc3, so3, _ = run([PY, 'scripts/deploy_gallery.py', '--check'], timeout=120)
     return verdict('derive', rc == 0 and rc2 == 0 and rc3 == 0,
-                   f'index 闸门 {"绿" if rc2 == 0 else "红"}；deploy --check {"4/4" if rc3 == 0 else "断链/漂移"}'
+                   f'{words_note}；index 闸门 {"绿" if rc2 == 0 else "红"}；'
+                   f'deploy --check {"4/4" if rc3 == 0 else "断链/漂移"}'
                    + (f'：{(so2.strip().splitlines() or ["?"])[-1][:70]}' if rc2 else ''))
 
 
@@ -1312,16 +1382,16 @@ STAGES = [
           'export_assets 汇总行「失败: 0」（退出码不可信）',
           step=3, writes='Output/Raw/{bg,commonbg,loadingbg,…}（无暂存通道）'),
     Stage('paintings', '静态立绘合成 → 临时区', 'staged', lambda a, f: st_paintings(f, a),
-          '数 ✗ 行（失败仍 exit 0）',
+          '每批「完成N，失败M」汇总行（脚本恒 exit 0；缺汇总行=该批不算过）',
           step=3, writes='.diag/pipeline/Paintings_v2', rate=1.25, unit='张'),
     Stage('spine', 'Spine 提取 + parts.json → 临时区', 'staged', lambda a, f: st_spine(f, a),
-          '每个目录都要有 parts.json',
+          '每个目录都要有 parts.json + 批量退出码（失败即非零）',
           step=3, writes='.diag/pipeline/Spine_v2', rate=1.7, unit='个皮肤'),
     Stage('live2d', 'Live2D 还原 + motion → 临时区', 'staged', lambda a, f: st_live2d(f, a),
           '[SUMMARY] 收尾行 + texorder/tex_completeness 闸门',
           step=3, writes='.diag/pipeline/Live2D'),
     Stage('audio', 'CV 语音包解码 + 台词表', 'live', lambda a, f: st_audio(a),
-          'l2d_voice_inventory 退出码',
+          'cv_voice 退出码（非 0=致命前置/崩溃）+ 两道只读审计 + 降级台账',
           step=3, writes='Output/Audio（无暂存通道）'),
     Stage('bgm', 'BGM 补导（cue → FLAC → 索引）', 'live', st_bgm,
           'rebuild_bgm_library 退出码 + 缺 N 汇总行（两个子脚本失败也 exit 0）',
@@ -1335,9 +1405,9 @@ STAGES = [
     Stage('swap-in', '备份换入 Paintings_v2', 'live', lambda a, f: st_swapin(a),
           'painting_swap_in 四道硬检查退出码',
           step=5, writes='Output/Paintings_v2（先备份到 Output/_OLD_bak/pipeline_<日期>/）'),
-    Stage('derive', '缩略图 / 索引 / 部署', 'live', lambda a, f: st_derive(a),
-          'gallery_index_diff_check 绿 + deploy --check 4/4 同 inode',
-          step=5, writes='Output/gallery_v2'),
+    Stage('derive', '缩略图 / 台词表 / 索引 / 部署', 'live', lambda a, f: st_derive(a),
+          'build_skin_words 退出码与「已写出」行 + gallery_index_diff_check 绿 + deploy --check 同 inode',
+          step=5, writes='Output/gallery_v2（含 skin_words.json 台词表）'),
     Stage('labels', '重建背景/音乐标签 + 漂移报告', 'live', st_labels,
           'rebuild_labels 退出码 + 新增词根/未命名清单',
           step=5, writes='Output/gallery_v2/{bg_meta,bgm}.json + inputs/gamecfg/bg_series_labels.json（签字后）'),
@@ -1478,17 +1548,24 @@ def main():
         except Exception as e:
             verdict(s.key, False, f'阶段自身抛异常 {type(e).__name__}: {e}')
         log(f'  ⏱ {s.key} 实际用了 {fmt_dur(time.time() - t1)}，整轮已用 {fmt_dur(time.time() - T0)}')
+        # ⚠️ 盖章用**这一阶段跑完那一刻的**指纹，不是本轮开始时算的那份（`fp`）：
+        #    `pull` / `cfg.publish` / `deps` 会在跑的过程中改写输入（源包数 / 配置表 / 依赖表），
+        #    起点指纹盖下去，下一轮 `rejudge_state()` 与面板 `/api/state` 按逐阶段指纹比较时
+        #    会把**刚跑完的结论全部作废**（2026-10-21 实测：20 条 verdict 全清）。
+        #    代价是每阶段多一次 walk（约 0.25 秒），相对整轮耗时可以忽略。
+        cur_fp = stage_fp(s)
         # ⚠️ 只缓存**判绿**的暂存阶段当"已完成"：把失败也记成已完成，下次跑到这里会被直接跳过，
         #    等于一条永远不再复查的流水线 —— 正是本项目最怕的那类静默失效。
         if RESULTS[s.key]['ok'] and s.tier == 'staged':
-            st['done'][s.key] = dict(RESULTS[s.key], fingerprint=stage_fp(s), scope=sc)
+            st['done'][s.key] = dict(RESULTS[s.key], fingerprint=cur_fp, scope=sc)
         else:
             st['done'].pop(s.key, None)
         # verdict 是另一件事：**给界面看的"上次结论"**，13 个阶段全都记。
         # 以前只有 done 那 4 个能被界面读到，其余一律显示"未跑"，看着像整条线没跑过。
         # 它不参与任何跳过判断。但每条都要盖上"哪批输入 + 哪份范围"两枚章，否则界面会拿
-        # 上一批的绿涂到这一批上（§74 那条假绿灯就是这么来的）。
-        st.setdefault('verdict', {})[s.key] = dict(RESULTS[s.key], fingerprint=fp, scope=sc)
+        # 上一批的绿涂到这一批上（§74 那条假绿灯就是这么来的）。盖章口径必须与读取端
+        # （`rejudge_state` / 面板的 `stage_fp_by_key`）**逐阶段**一致，不能拿整条 `fp`。
+        st.setdefault('verdict', {})[s.key] = dict(RESULTS[s.key], fingerprint=cur_fp, scope=sc)
         st['scope'] = sc
         json.dump(st, open(STATE, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
         if not RESULTS[s.key]['ok']:

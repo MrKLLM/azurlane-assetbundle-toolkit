@@ -735,7 +735,7 @@
 （用来吃掉配置表里的脏行，见 §56；**反向改动仍判红**）；② 条目集合不得增减；③ 换档只允许落在白名单新档；④ 无源数等于期望。另附**第三方裁判**（只打印不判红）：改名条目拿 `Output/WikiData/ship_data.json` 的维基名表投票，看有没有"只有旧值命中"的反例。口径见 `TROUBLESHOOTING.md` §39。
 
 #### 资源占用 / 进度可见性 / 签字门（2026-10-01 实测，回答"跑一次要多少 G、要多久、前台看得到吗"）
-- **占用**：13 个阶段**全串行**，阶段内部也是 for 循环一批一批 spawn ⇒ 同一时刻只有 1 个子进程。
+- **占用**：20 个阶段**全串行**，阶段内部也是 for 循环一批一批 spawn ⇒ 同一时刻只有 1 个子进程。
   按进程树采峰值 WorkingSet（`py -3 scripts/diag/peak_mem.py --tag x -- <命令>`，
   先用已知 400MB 分配自测过准头）：立绘 50 包一批 **0.63GB/17s**、8 个真主皮肤 **0.64GB/13s**、
   Spine 3 个 **0.50GB/5s**、依赖表 **3 秒 / 0.20GB**（它只读 `dependencies` 一个包，
@@ -839,7 +839,7 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 | 层 | 文件 | 说明 |
 |---|---|---|
 | 前端源码（唯一权威） | `gallery_src/index.html` | **2026-09-26 起与运行目录是硬链接**（同一份 inode），改正本即刻生效、不需部署；4 个文件（含 `cg_export.html`）已全部换链 |
-| 部署 / 漂移检查 | `scripts/deploy_gallery.py` | `--check`=只比对不写盘，**要求 4 个文件全部同 inode**，断链或内容漂移都 `exit 1`（改完前端/提交前必跑）；`--relink`=补链（要求两边逐字节相同，且正本无未提交改动才动手，防打断并行会话）；默认模式=用正本 copy 刷平（断链后回退用，刷平要再 `--relink`）。⚠️ 改正本**必须原地编辑**：整文件写回 / 「临时文件+改名」的原子保存会静默断链。**实测（2026-09-26）：agent 的 Edit 工具就是"写临时文件+改名"，每改一次必断链**（`os.stat().st_nlink` 两边都掉回 1）⇒ 所以真实节奏是「改 → `--check` 必红 → 默认模式刷平 → 提交 → `--relink` → `--check` 绿」，不要指望改完还是绿的 |
+| 部署 / 漂移检查 | `scripts/deploy_gallery.py` | `--check`=只比对不写盘，**要求 `FILES` 清单里每个文件同 inode**（数量以脚本为准，2026-10-21 为 12），断链或内容漂移都 `exit 1`（改完前端/提交前必跑）；`--relink`=补链（要求两边逐字节相同，且正本无未提交改动才动手，防打断并行会话）；默认模式=用正本 copy 刷平（断链后回退用，刷平要再 `--relink`）。⚠️ 改正本**必须原地编辑**：整文件写回 / 「临时文件+改名」的原子保存会静默断链。**实测（2026-09-26）：agent 的 Edit 工具就是"写临时文件+改名"，每改一次必断链**（`os.stat().st_nlink` 两边都掉回 1）⇒ 所以真实节奏是「改 → `--check` 必红 → 默认模式刷平 → 提交 → `--relink` → `--check` 绿」，不要指望改完还是绿的 |
 | 服务器 | `Output/gallery_v2/_gallery_server.py`（8777，已在跑则复用） | 回归脚本都打 `http://127.0.0.1:8777/gallery_v2/index.html`。⚠️ 它按**自身所在目录**算根（`ROOT=dirname(HERE)`），所以**只能双击 `Output\gallery_v2\` 里那份**；双击 `gallery_src\` 那份会把根算成仓库目录 → 404 + 「当前目录没找到 index.html」。⚠️ **8777 没起时，所有绑它的探针会集体报「GALLERY is not defined」/「页面脚本未就绪」——那是在量浏览器错误页，不是产品坏了**（2026-10-16 踩过一轮）。`interact_verify.py` / `talk_verify.py` 已改成**自带服务器**（空闲端口起正本，见 WF-43 第 4-5 条同理），不依赖 8777；其余探针仍需先起 8777。⚠️ **清代理要清四个变量**（`HTTP_PROXY`/`HTTPS_PROXY`/`http_proxy`/`https_proxy`）：只清大写、漏掉小写时，`http_proxy` 照样劫持 127.0.0.1，症状与"服务器没起"**一模一样**（都报页面函数 undefined）；`curl -o /dev/null` 在本机沙箱还会以退出码 23 掐断 `&&` 链，别用它当"服务器是否在跑"的链式前置 |
 | 模型数据 | `Output/Live2D/<key>/` | 前端直读（`P="..\/"`），无副本 |
 | 运行时库台账 | `gallery_src/vendor/MANIFEST.json` + `scripts/fetch_gallery_vendor.py` | `vendor/` 4 个第三方 JS 只在 gitignore 目录里，故版本/来源/sha256 全记在台账。**换机器或清过 `Output/` 后跑一次 `fetch_gallery_vendor.py` 即补齐**；`--check` 只校验（缺件/漂移 exit 1），可并进下面的回归清单 |
@@ -1649,7 +1649,7 @@ py -3 scripts/update_pipeline.py --only spine --force   # 只重跑某阶段，�
 等于下次不再检查，正是这类工具最容易造的静默失效。输入指纹变了自动全部作废重判。
 
 **判据（怎么确认编排器本身没坏）**：
-- `--plan` 退出码 0 且列出 13 个阶段与 live 档清单；
+- `--plan` 退出码 0 且列出 20 个阶段与 live 档清单；
 - `--only preflight,review` 在**没有任何临时产物**时也必须优雅判绿（不能抛异常）——
   第一版就是 `chg` 未初始化直接崩，被这条抓到；
 - `--only spine` 配一个 2 行的 `.diag/pipeline/affected.txt`，应只处理这 2 个 stem、
@@ -1687,7 +1687,7 @@ py -3 scripts/update_pipeline.py --only spine --force   # 只重跑某阶段，�
 或    py -3 scripts/pipeline_panel.py [--port 8788] [--no-open]
 ```
 
-**界面按「四步主线」组织，不是把 13 个阶段平铺成一张表**（第一版就是平铺，用户判"看不懂"）：
+**界面按「四步主线」组织，不是把 20 个阶段平铺成一张表**（第一版就是平铺，用户判"看不懂"）：
 
 | 步骤 | 阶段 | 主按钮（2026-09-30 起为短语式，原「（不下载）」那类安心话已删） |
 |---|---|---|
@@ -1754,7 +1754,7 @@ py -3 scripts/update_pipeline.py --only spine --force   # 只重跑某阶段，�
 外加任务生命周期 3 条与全程无 JS 异常。
 ⚠️ 三条通用手法（分区比对 / 固定指针位 / 取样框与滚动容器求交）见 §66 第二条；
 第四条「画布会重绘的页面不能拿逐像素当结论」见 §67 三。
-另外命令行侧原有几条继续有效：`/api/state` 要报出 13 个阶段与正确的 tier/scope/指纹；
+另外命令行侧原有几条继续有效：`/api/state` 要报出 20 个阶段与正确的 tier/scope/指纹；
 `POST /api/run {"plan":true}` 起任务且日志能读回；未知阶段名 → 400；
 `/file?path=../../...` → 403；`{"full":true}` → 400 并给出命令行替代；
 **任务结束后 `/api/log` 的 state 必须变成 done**（第一版不会变 —— 前端追日志期间停掉了
@@ -1927,7 +1927,7 @@ V 键正向对照（3：切旧版面整屏必须明显变化 >24 级，切回来
 主屏那句话由**写死的优先级**推出，不是把 13 条结论各印一遍：
 `正在跑 > 卡住了 > 等你签字 > 还没做 > 这一步过了`（见 `askOf(n)`，每步一张分支表）。
 ⚠️ 可检查性没被削弱：`写到/判据/上次` 三行照旧全量呈现，只是从常驻界面挪进一次 `D`。
-13 个阶段一个都不许被折叠这条判据，改由底部节点上的 `.dot` 数量继续把住。
+20 个阶段一个都不许被折叠这条判据，改由底部节点上的 `.dot` 数量继续把住。
 
 **「简约静态 + 丰富动态」怎么落地**
 - 静态时**几乎什么都没有**：主屏没有面板、没有描边、没有底色，只有一行小字 + 一句大字 + 一个按钮。
@@ -4536,7 +4536,7 @@ py -3 scripts/deploy_gallery.py --check                # 硬链/漂移
 **目标**: 一条命令回答「**盘上的产物，能不能用当前脚本原样再生成一次**」，而不是只看脚本退出码。
 **命令**:
 ```bash
-py -3 scripts/diag/verify_pipeline_e2e.py                  # 20 项，约 46s
+py -3 scripts/diag/verify_pipeline_e2e.py                  # 21 项，约 48s
 py -3 scripts/diag/verify_pipeline_e2e.py --quick          # 跳过重跑，只查输入/输出（约 23s）
 py -3 scripts/diag/verify_pipeline_e2e.py --selftest       # 证明闸门自己会红
 py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
@@ -4550,7 +4550,7 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
    除 `model3.json` 外逐字节、PNG 逐像素；`model3.json` 按「语义投影」比（别名动作组折叠、HitAreas 解析到文件）；
    Spine 2 个逐字节；背景 2 张逐字节；BGM/台词/画廊索引重新生成后逐字段或逐字节一致；音频抽 2 首能解出非零时长。
 3. **输出**：`index.json` counts 自洽、皮肤 key 不重、image/CG/缩略图/parts.json/model3 全存在；
-   `bg_meta` 四档相加=条目数且原图/缩略图全在；`bgm` 536 首 url 全在；`deploy_gallery.py --check` 11/11 同 inode。
+   `bg_meta` 四档相加=条目数且原图/缩略图全在；`bgm` 569 首 url 全在；`deploy_gallery.py --check` 12/12 同 inode（数量看脚本 `FILES`，别抄）。
 
 #### 踩坑记录
 - **Live2D-only 皮肤没有静态图就没有缩略图**：6 个 `image:""` 的条目曾被误判成缺 thumb；缩略图判据必须先看有没有图。
@@ -5107,3 +5107,72 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 `gallery_src/bgm.html`（播放条整块覆盖）、`scripts/diag/shot_bgm_bar.py`（新，截图 + 几何断言）、
 `scripts/diag/probe_ink_edge.py`（新，放大裁切 + 渐变 stop 数值，判断前沿是否真的化开）、
 `.diag/swap_skin.py`（一次性替换脚本，带 5 条断言）。相关：`§165`、`§161~§163`（被否的科技感档案）。
+
+---
+
+### WF-54: 给控制台主页加「背景图 + 悬停擦除」——画布遮罩、确定性静止帧与选择器（2026-10-21）
+
+**目标**: 在**不影响数据面可读性**的前提下给主页加一层可自选的背景图，指针划过时把"纸面"擦开
+露出底下的版画，约 0.8 秒淡回去；静止时与初始帧逐像素相同。
+**适用场景**: 用户说"主页加个悬停擦除的效果 / 背景图可以自选 / 要文艺感和时尚感（Claude 那种）"；
+或任何"页面底下有一张图、但正文必须一直好读"的场景。
+
+**一、结构（自下而上，缺一层观感就变）**
+
+| 层 | 元素 | 作用 | 纪律 |
+|---|---|---|---|
+| 1 | `#bgart` | 背景图（默认是现画的 SVG 版画，颜色走主题 token） | 不叠 hover 样式；夜读自动换色墨；照片用 CSS filter 压暗/降饱和 |
+| 2 | `#bgveil` | 纸色 canvas，`rgba(paper, .94)` | 只由"笔迹 + 时间"决定每一帧；指针擦洞用 `destination-out` + 预烘径向渐变精灵 |
+| 3 | `#bggrid` | 工程网格 | **必须在遮罩之上**，否则擦开后纸的规矩没了 |
+| 4 | `#bggrain` | 纸纹噪点 | 同上；夜读换反相噪点 |
+| 5 | `.app`（z-index 2） | 正文/右栏/顶栏 | 数据面（`pre`/表格/对照图）**一个像素都不参与** |
+
+纸色**从 token 读**（`getComputedStyle(document.body).getPropertyValue('--paper')`），
+不要写死 `#F1ECE2`；夜读切换必须调一次重铺（`nightApply()` → `__bgRepaint()`）。
+
+**二、步骤**
+
+1. DOM：在 `<body>` 末尾、`.app` 之前插 `#bgstage`（`position:fixed;inset:0;z-index:0;
+   pointer-events:none;contain:strict`）包上面 4 层；**不要复用**已有的退役背景层 id
+   （探针会按 id 断言 `display:none`）。`.app` 提到 z-index 2。
+2. 画布：`dpr=min(1.25, devicePixelRatio)`（省填充率；软边不需要 2x）；`resize` 140ms 防抖、
+   整层重画。纸色 alpha 0.94 ⇒ 静止时底画只透 6%，旧观感基本不变。
+3. 擦除：预烘一张 256px 径向渐变精灵；笔迹 = 图章；半径 `clamp(26,130, 26+speed*0.045)`；
+   快划用 `bgSwipe` 沿线段插值补图章。**每帧从整张纸重画**+`destination-out` 画回活笔迹，
+   收尾清空笔迹再铺一次 ⇒ 完成态就是初始帧。
+4. 暂停集合（全部要有）：`body.calm`（M 动效从简）、`prefers-reduced-motion:reduce`、
+   `#detail.on/#help.on/#signmodal.on/#cleanmodal.on/#lightbox.on/#bgpick.on` 任一打开。
+   弹层打开时顺手 `bgHeal()` 收摊。
+5. 选择器：header 加一颗「背景」按钮 + `#bgpick` 纸面弹层（z-index 75，别开全屏遮罩）；
+   预设（版画/海图/墨迹/素纸）+ 自定义图片（FileReader → 缩到 ≤1920px → JPEG → localStorage）；
+   选择器里的缩略图用**各图的一个可辨识局部**（`viewBox` 裁切），别把 1600×1000 压进 56px。
+6. 探针：`scripts/diag/panel_paper_probe.py` 新增「背景与悬停擦除」「背景选择跨刷新」
+   「减少动态效果」三节（20 条），见下判据。
+
+**三、判据（全部像素级，别靠截图肉眼）**
+
+- 静止两帧：`__probe.bgAlpha(x,y)` **完全相等**、`raf=false`、`stamps=0`、`getAnimations()==0`；
+- 擦除局域性：划过处 alpha 240→<90，而**没划过的角落仍 ≥232**（不是整张淡掉）；
+- 淡净复原：约 1.4s 后 alpha 回到 240±1，列表空、rAF 停；
+- 单帧成本：`__probe.bg().lastMs < 12ms`（SwiftShader 下留余量；真实机另量，见 WF-42/WF-52 口径）；
+- 暂停：选择器开着/`calm`/reduced-motion 时划鼠标 alpha 不变；
+- 夜读：`__probe.bg().paper === '23,21,18'` 且 alpha 仍 ≈240（只比 body 颜色会漏成假绿）；
+- 「设了 vs 没设」：素纸截图与默认背景截图**不同**（防"换了名字没换图"）；
+- 自定义图片跨刷新：`localStorage['panel.bgimg']` 存在、reload 后 `photo=true`、恢复默认后回 logbook。
+
+**四、踩坑记录**
+
+- **静止帧漂移**：只往洞上"补纸色"会一路漂到完全不透明；必须每帧从底重画（§170-1）。
+- **`label::after` 被 `overflow:hidden` 裁掉**：下划线要画在盒内 `background-size` 上（§170-2）。
+- **`:active` 被旧规则 `!important` 压死**：给新规则同时加 `!important` + 更高特异性（§170-3）。
+- **视差 transform 不复位**：`pointerleave`/`blur`/`visibilitychange` 要清空；否则初始帧≠静止帧。
+- **`pointermove` 逐事件同步**：改 rAF 合并（只记最新坐标，中间点由插值补）。
+- **切换背景的 `transition:opacity` 会进 `getAnimations()`**：切完等 ≥500ms 再判"静止零动画"。
+- **`will-change:transform` 不要常驻**在全屏层上（§143 的教训）。
+
+**五、涉及文件**
+
+`scripts/pipeline_panel.py`（`#bgstage` 五层、`BG` 引擎、`#bgpick` + `B` 键、`__probe.bg*` 钩子、
+`docs` 里的"背景与擦除"说明）、`scripts/diag/panel_paper_probe.py`（新增三节 20 条）。
+相关：**WF-46**（纸本版面）、**§170**（确定性/死规则的机理）、**§143**（hover 性能）、
+**§66/§137**（数据面不许叠背景/滤镜的纪律）。

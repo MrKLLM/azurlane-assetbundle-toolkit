@@ -94,6 +94,8 @@ def stage_keys():
     importlib.reload(up)          # 改了流水线脚本后不用重启面板
     return [{'key': s.key, 'title': s.title, 'tier': s.tier, 'judge': s.judge_desc,
              'step': s.step, 'writes': s.writes,
+             # 缓存指纹该不该带 `cfg=`：面板按它挑指纹，不自己再抄一条"cfg.* 前缀"规则
+             'produces_cfg': bool(getattr(s, 'produces_cfg', False)),
              # 预计耗时的两个来源都跟着阶段走（没量过的都是 0 ⇒ 进度台显示"未知"而不是猜）
              'est': getattr(s, 'est', 0.0), 'rate': getattr(s, 'rate', 0.0),
              'unit': getattr(s, 'unit', '')} for s in up.STAGES], dict(up.STEPS)
@@ -520,10 +522,12 @@ class H(BaseHTTPRequestHandler):
                     #   `cfg.*` 四个阶段用不含 `cfg=` 的指纹（它们的工作就是改写配置表，
                     #   拿自己的产物判过期会变成永动机）；其余阶段用全指纹。
                     #   只看整条相等会把「配置表刚刷新、下游该重跑」和「全都没变」混为一谈。
+                    # ⚠️ 指纹**只算一次**（两条），不能每条 state 各 walk 一遍 9 万文件。
+                    pair = fp_pair_safe()
+                    prod = {s['key']: s.get('produces_cfg') for s in stages}
                     def _fp_ok(k, v):
-                        want = (stage_fp_by_key_safe(k)
-                                or fingerprint_safe())
-                        return v.get('fingerprint') == want
+                        want = (pair or {}).get('nocfg' if prod.get(k) else 'full')
+                        return v.get('fingerprint') == (want or fingerprint_safe())
                     # done（跳过缓存）同样要认范围章：清单换过之后那条"已完成"就是假的
                     state = {k: v for k, v in (raw.get('done') or {}).items()
                              if v.get('scope') == sc_now and _fp_ok(k, v)}
@@ -563,7 +567,8 @@ class H(BaseHTTPRequestHandler):
                 'news': newsafe(),
                 # 一次 /api/state 只算**一遍**输入指纹（walk 9 万多个源包），往下传。
                 # 以前各处各算，实测冷缓存那一拍要 5.8 秒 —— 前端轮询超时，看着就是进度不动。
-                'fingerprint': (fp := fingerprint_safe()),
+                'fingerprint': (fp := ((fp_pair_safe() or {}).get('full')
+                                       or fingerprint_safe())),
                 'scope': scope_safe(fp),
                 'gauge': gauge_safe(run, stages, fp),
             })
@@ -948,6 +953,26 @@ def fingerprint_safe():
             print(f'[警告] 读输入指纹失败：{e}')
             return None
     return _cached('fp', 30.0, calc) or '(读不到：源包目录打不开？)'
+
+
+def fp_pair_safe():
+    """**一次**算两条指纹：全指纹 / 不含 `cfg=` 的指纹。
+
+    §157 改成"逐阶段判缓存"之后，每个阶段要挑其中一条。旧版 `_fp_ok` 对
+    **每个 key** 各调一次 `stage_fp_by_key_safe()` ⇒ 20 个阶段 = 20 次 walk 9 万
+    文件，实测冷缓存 4.0 秒；而两条各算一次只要 0.39 秒（2026-10-21 实测）。
+    这里整体缓存 30 秒，`/api/state` 里按阶段的 `produces_cfg` 挑一条用。
+    """
+    def calc():
+        sys.path.insert(0, HERE)
+        try:
+            import update_pipeline as up
+            return {'full': up.fingerprint(),
+                    'nocfg': up.fingerprint(include_cfg=False)}
+        except Exception as e:
+            print(f'[警告] 读输入指纹失败：{e}')
+            return None
+    return _cached('fp_pair', 30.0, calc)
 
 
 def base_of_fp(fp):
@@ -1616,27 +1641,17 @@ body.night{
   --idle:var(--ink-3); --pass:var(--moss); --fail:var(--accent);
   --await:var(--ochre); --run:var(--teal);
   --brand:var(--ink); --brand-hi:#fff; --pop:var(--accent);
-  background-image:
-    linear-gradient(color-mix(in srgb,var(--ink) 1.7%,transparent) 1px,transparent 1px),
-    linear-gradient(90deg,color-mix(in srgb,var(--ink) 1.7%,transparent) 1px,transparent 1px)!important;
-  background-size:40px 40px!important;
 }
 *{box-sizing:border-box}
 body{
   margin:0;overflow:hidden;color:var(--ink);
   font:13.5px/1.6 var(--font-ui);
   background-color:var(--paper)!important;
-  background-image:
-    linear-gradient(color-mix(in srgb,var(--ink) 2.4%,transparent) 1px,transparent 1px),
-    linear-gradient(90deg,color-mix(in srgb,var(--ink) 2.4%,transparent) 1px,transparent 1px)!important;
-  background-size:40px 40px!important;
   cursor:default!important;
 }
-body::after{
-  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
-  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.045'/%3E%3C/svg%3E");
-  opacity:.55;
-}
+/* 工程网格与纸纹噪点已搬进 #bgstage（2026-10-21「纸面之下」）：
+   它们必须盖在**擦除遮罩之上**，否则遮罩一铺，纸的网格与颗粒就没了；
+   body 只留底色，art / veil / grid / grain 的叠放顺序见文件末尾那一节。 */
 #bgfx{display:none!important}
 #fxbeam,#fxpool{display:none!important}
 a,button,.chip,.snode,.link2,.signbox,label,.runs tbody tr{cursor:pointer!important}
@@ -1649,7 +1664,7 @@ button:disabled,.pact:disabled{cursor:not-allowed!important}
 
 /* ── 骨架：左「当前指令」 / 右「五步索引」 ─────────────────────────── */
 .app{
-  position:relative;z-index:1;height:100vh;
+  position:relative;z-index:2;height:100vh;
   display:grid!important;
   grid-template-columns:minmax(0,1fr) 340px;
   grid-template-rows:auto auto 1fr auto;
@@ -1738,7 +1753,7 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
   color:var(--ochre)!important;
 }
 .foot:empty::after{
-  content:'READ ONLY · 预检不写盘 · 所有写操作都要签字';
+  content:'READ ONLY · 预检不写盘 · 所有写操作都要签字 · 鼠标划过纸面，可擦出底下的版画';
   color:var(--ink-3);letter-spacing:.12em;font-size:8px;
 }
 .eyebrow{
@@ -2335,7 +2350,144 @@ pre .bad{color:#E08A69!important}
   #detail .body{grid-template-columns:1fr!important;overflow:auto}
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   2026-10-21 · 纸面之下（背景图 + 悬停擦除）+ 交互补全
+   ----------------------------------------------------------------------
+   用户要：「主页加个悬停擦除的效果，然后背景图可以自选，默认的话你来设计，
+   要有文艺感和时尚感，比如 claude 那种感觉」。纸本控制台不退化，仍是
+   暖纸 / 墨 / 朱砂 / 苔绿 / 零投影 / 零玻璃。做法四层，自下而上：
+     ① #bgart  背景图。默认是给这个控制台画的「航路版画」（见 JS 里的 BG_ART），
+                只用主题 token 上色 ⇒ 夜读模式自动换色墨，不是另贴一张图。
+     ② #bgveil 纸面遮罩：2D 画布，铺一层纸色 alpha .94。静止时底画只透 6%，
+                像印刷品的透背；旧版观感基本不变。
+     ③ 指针划过 ⇒ 遮罩被**擦出洞**（洞半径随划速 26→130px），洞在 ~820ms 内
+                淡回去；收尾把整张布**画回同一帧** ⇒ 静止逐像素稳定（探针量这个）。
+     ④ #bggrid / #bggrain 工程网格与纸纹在遮罩**之上**：擦开的地方仍是"纸"，
+                不是一张裸图。数据面（日志/表格/对照图）一个像素都不参与。
+   夜读、动效从简（M）、系统"减少动态效果"、以及抽屉/弹层打开时，擦除一律停。
+   ══════════════════════════════════════════════════════════════════════ */
+#bgstage{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;contain:strict}
+#bgart{position:absolute;inset:-14px;background:center/cover no-repeat;
+  transition:opacity .42s var(--ez)}
+#bgart svg{display:block;width:100%;height:100%}
+#bgart.is-photo{filter:saturate(.88) contrast(.99) sepia(.04)}
+body.night #bgart.is-photo{filter:brightness(.52) saturate(.55) contrast(1.06)}
+#bgart[data-bg="paper"]{opacity:0}
+#bgveil{position:absolute;inset:0;width:100%;height:100%;display:block}
+#bggrid{position:absolute;inset:0;
+  background-image:
+    linear-gradient(color-mix(in srgb,var(--ink) 2.4%,transparent) 1px,transparent 1px),
+    linear-gradient(90deg,color-mix(in srgb,var(--ink) 2.4%,transparent) 1px,transparent 1px);
+  background-size:40px 40px}
+body.night #bggrid{
+  background-image:
+    linear-gradient(color-mix(in srgb,var(--ink) 1.7%,transparent) 1px,transparent 1px),
+    linear-gradient(90deg,color-mix(in srgb,var(--ink) 1.7%,transparent) 1px,transparent 1px)}
+#bggrain{position:absolute;inset:0;opacity:.55;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.045'/%3E%3C/svg%3E")}
+
+/* ── 背景选择器：和签字单同一套纸/墨，但更轻（它不是关卡，不该全屏） ── */
+#bgpick{position:fixed;z-index:75;display:none;top:62px;right:var(--gutter);
+  width:min(444px,calc(100vw - 32px));background:var(--paper-3);
+  border:1px solid var(--ink);padding:16px 18px 14px}
+#bgpick.on{display:block;animation:fadein .18s var(--ez)}
+#bgpick::before{content:'';position:absolute;inset:5px;border:1px solid var(--rule);pointer-events:none}
+#bgpick .bghd{position:relative;display:flex;align-items:baseline;justify-content:space-between;
+  gap:12px;border-bottom:1px solid var(--rule);padding-bottom:8px;margin-bottom:12px}
+#bgpick .bghd .ph{margin:0!important;padding:0!important;border:0!important}
+#bgpresets{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.bgtile{display:block!important;text-align:left!important;padding:0!important;
+  border:1px solid var(--rule)!important;background:var(--paper-2)!important;
+  border-radius:0!important;overflow:hidden;transition:border-color .16s var(--ez)}
+.bgtile:hover{border-color:var(--rule-2)!important;background:var(--paper-2)!important}
+.bgtile .th{display:block;height:56px;background:var(--paper);border-bottom:1px solid var(--rule);
+  overflow:hidden;position:relative}
+.bgtile .th svg{display:block;width:100%;height:100%}
+.bgtile b{display:block;font:500 12px/1.4 var(--font-display)!important;letter-spacing:.04em;
+  color:var(--ink)!important;padding:7px 9px 0}
+.bgtile i{display:block;font:400 8px/1.5 var(--font-mono)!important;letter-spacing:.12em;
+  color:var(--ink-3)!important;font-style:normal;padding:1px 9px 7px}
+.bgtile[aria-pressed="true"]{border-color:var(--accent)!important;background:var(--paper-3)!important}
+.bgtile[aria-pressed="true"] .th::after{content:'当前';position:absolute;right:0;top:0;
+  font:500 8px/1 var(--font-mono);letter-spacing:.14em;color:var(--paper-3);
+  background:var(--accent);padding:4px 6px}
+.bgtile .th .add{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font:400 9px/1.4 var(--font-mono);letter-spacing:.12em;color:var(--ink-3);
+  border:1px dashed var(--rule-2);margin:6px}
+.bgtile .th img{display:block;width:100%;height:100%;object-fit:cover}
+.bgct{display:flex;gap:14px;align-items:center;margin-top:12px;padding-top:10px;
+  border-top:1px solid var(--rule)}
+.bgct .upl{font:400 9.5px/1.4 var(--font-mono)!important;letter-spacing:.08em;
+  color:var(--ink)!important;border-bottom:1px solid var(--ink);padding:4px 0;cursor:pointer}
+.bgct .upl:hover{color:var(--accent)!important;border-bottom-color:var(--accent)!important}
+.bgct #bgClear{margin-left:auto}
+#bgpnote{margin:8px 0 0;font:400 9px/1.65 var(--font-mono)!important;color:var(--ink-3)!important}
+#bgpnote b{color:var(--accent)!important;font-weight:500}
+
+/* ── 把「细节抽屉里那套悬停语言」补到主页与表格 ──────────────────────
+   那套语言只有三条：① 抬的是**表面一档**（换底色），不是往上飘 —— transform 永不动；
+   ② 强调靠**一道细线**（阶段卡左侧 2px 墨条），不靠发光；③ 同一时刻只有朱砂
+   一个强调色，其余全中性。这里照着它补，不发明第二套。
+   ⚠️ 下划线不能挂 `label::after`：`.snode label` 带 overflow:hidden（省略号要它），
+   盒子外的伪元素会被裁掉。改成背景渐变画**盒内**的一道线（还能过渡）。 */
+.snode label{
+  background-image:linear-gradient(currentColor,currentColor);
+  background-size:0 1px;background-position:0 100%;background-repeat:no-repeat;
+  transition:color .2s var(--ez),background-size .24s var(--ez)}
+.snode:hover label{background-size:100% 1px}
+.snode.on label{background-size:100% 1px;
+  background-image:linear-gradient(var(--accent),var(--accent))}
+.snode .sfill i{transition:width .5s var(--ez)}
+.newt tbody tr,.runs tbody tr{transition:background-color .16s var(--ez)}
+.newt tbody tr:hover,.runs tbody tr:hover{background:var(--paper-2)}
+.newt tbody tr:hover td{border-bottom-color:var(--rule-2)}
+.runs tbody tr:hover td{color:var(--ink)}
+.sheets a{transition:border-color .16s var(--ez)}
+.sheets a .cap span:first-child{transition:color .16s var(--ez)}
+.sheets a:hover .cap span:first-child{color:var(--accent)}
+/* 按下 = 纸被压下去 1px（只有位移，没有缩放/回弹）。必须 !important + 比
+   `button:active{transform:none!important}` 更高的特异性，否则是条死规则。 */
+.pact:active,button.go:active,button.sign:active{transform:translateY(1px)!important}
+.stt{transition:color .18s var(--ez),border-color .18s var(--ez)}
+.chip{transition:color .12s var(--ez),border-color .12s var(--ez)}
+.link2{transition:color .14s var(--ez),border-bottom-color .14s var(--ez)}
+.gauge .gbar i{transition:width .45s var(--ez)}
+.viewnote,.gate,.receipt{animation:fadein .24s var(--ez)}
+#bSea.on::before{content:'';display:inline-block;width:4px;height:4px;margin-right:6px;
+  background:var(--ochre);vertical-align:1px}
+/* 旧主题的 `will-change:transform` 残留在 .pact 上；纸面不做位移，别长期占合成层。 */
+.pact{will-change:auto!important}
+/* 弹层给一道「版面压痕」内线（纸本印刷的规矩）；签字单上唯一残留的那道投影删掉，
+   纸本控制台立下的"零投影"在弹层上也一样成立。 */
+#signmodal .sheet{box-shadow:none!important}
+#signmodal .sheet::before,#cleanmodal .sheet::before{
+  content:'';position:absolute;inset:6px;border:1px solid var(--rule);pointer-events:none}
+/* 首屏：像刚印好的一版纸，各行依次落定。只播一次，1.15s 后连 body.boot 一起摘掉。
+   ⚠️ 不能用 fill:forwards —— 已完成但仍在 fill 里的动画会一直出现在
+   document.getAnimations() 里，探针那条「静止时零个动画在跑」当场判红。 */
+@keyframes settle{from{opacity:0;transform:translateY(7px)}}
+body.boot header{animation:settle .5s var(--ez) backwards}
+body.boot .now>*{animation:settle .52s var(--ez) backwards}
+body.boot .now>*:nth-child(2){animation-delay:.05s}
+body.boot .now>*:nth-child(3){animation-delay:.1s}
+body.boot .now>*:nth-child(4){animation-delay:.15s}
+body.boot .now>*:nth-child(5){animation-delay:.2s}
+body.boot .now>*:nth-child(6){animation-delay:.24s}
+body.boot .now>*:nth-child(7){animation-delay:.28s}
+body.boot .now>*:nth-child(8){animation-delay:.32s}
+body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
+@media (max-width:1080px){#bgpick{top:56px;right:16px}}
+
 </style></head><body>
+
+<!-- 背景四层（自下而上）：图 → 纸面遮罩（可被指针擦开）→ 工程网格 → 纸纹噪点。
+     全部 pointer-events:none，不参与任何点击；具体机制见 CSS 末节「纸面之下」。 -->
+<div id="bgstage" aria-hidden="true">
+  <div id="bgart" data-bg=""></div>
+  <canvas id="bgveil"></canvas>
+  <div id="bggrid"></div>
+  <div id="bggrain"></div>
+</div>
 
 <div id="bgfx" aria-hidden="true">
   <canvas id="nebula"></canvas><canvas id="stars"></canvas></div>
@@ -2353,10 +2505,11 @@ pre .bad{color:#E08A69!important}
     <div><h1>资产更新控制台</h1><p>ASSET UPDATE CONSOLE · RUNBOOK 05</p></div>
   </div>
   <div class="act">
+    <button id="bBg" class="ghost" title="B：背景（航路版画 / 海图 / 墨迹 / 素纸 / 自定义图片）" aria-expanded="false">背景</button>
     <button id="bDetail" class="ghost" title="D：展开证据（全部阶段 / 日志 / 对照表 / 指纹）">细节</button>
     <button id="bSea" class="ghost" title="S：夜读模式 开/关（暖墨底，非旧版紫黑）">夜读 · 关</button>
-    <span class="kbd" title="1-5 切步骤 · R 跑当前这一步 · D 细节 · P 只看计划 · H 帮助 · Esc 关闭 · S 夜读 · M 动效从简 · V 夜读">
-      <b>1-5</b> 步骤 · <b>R</b> 跑 · <b>D</b> 细节</span>
+    <span class="kbd" title="1-5 切步骤 · R 跑当前这一步 · D 细节 · B 背景 · P 只看计划 · H 帮助 · Esc 关闭 · S 夜读 · M 动效从简">
+      <b>1-5</b> 步骤 · <b>R</b> 跑 · <b>D</b> 细节 · <b>B</b> 背景</span>
     <button id="bHelp" class="help">怎么用</button>
   </div>
 </header>
@@ -2402,6 +2555,20 @@ pre .bad{color:#E08A69!important}
   <span class="track"><i class="fill" id="stepfill"></i></span>
   <div class="rail-ft"><span id="railCount">全部阶段</span><span>点击=查看 · 细节=证据</span></div>
 </nav>
+</div>
+
+<!-- 背景选择器：纸面版式，不开全屏遮罩 —— 它不是关卡，改坏了随时能改回来。
+     `B` 开关；五个格子由 JS 从 BG_ART 生成（图与选择器预览同一份正本，不抄两遍）。 -->
+<div id="bgpick" aria-hidden="true" role="dialog" aria-label="背景">
+  <div class="bghd"><span class="ph">BACKGROUND · 背景</span>
+    <button type="button" class="mini ghost" data-bgclose>关闭 ✕</button></div>
+  <div id="bgpresets"></div>
+  <div class="bgct">
+    <label class="upl">↑ 选一张本机图片<input id="bgFile" type="file" accept="image/*" hidden></label>
+    <button type="button" id="bgClear" class="mini ghost">恢复默认</button>
+  </div>
+  <p id="bgpnote">默认是给这个控制台画的「航路版画」：只用纸/墨/朱砂上色，夜读自动换色。
+    自定义图片只存在本机浏览器（localStorage），不上传、不写盘；先缩到 ≤1920px 再存。</p>
 </div>
 
 <!-- 细节抽屉：证据全在这儿，且一律不透明 -->
@@ -2634,11 +2801,11 @@ pre .bad{color:#E08A69!important}
   </ul>
 
   <h3>键位（摸熟比找按钮快）</h3>
-  <p><code>1</code>…<code>4</code> 切步骤 · <code>R</code> 跑当前步的主动作 ·
-  <code>P</code> 只看计划 · <code>H</code> 开关本抽屉 · <code>Esc</code> 关掉弹层 ·
-  <code>S</code> 开关星野背景 · <code>M</code> 开关「动效从简」（关掉光沿边框走一圈、
-  指针柔光、磁吸这些，只留状态本身）· <code>V</code> 开关「新旧版面对照」（对照更早那套
-  版面，看差异用），两个选择都会记住。</p>
+  <p><code>1</code>…<code>5</code> 切步骤 · <code>R</code> 跑当前步的主动作 ·
+  <code>P</code> 只看计划 · <code>D</code> 细节抽屉 · <code>B</code> 背景 ·
+  <code>H</code> 开关本抽屉 · <code>Esc</code> 关掉弹层 · <code>S</code>/<code>V</code>
+  夜读（暖墨底）· <code>M</code> 动效从简（只留状态与纸面，指针擦除也停）。
+  夜读、动效、背景三个选择都会记住。</p>
 
   <h3>进度台怎么读</h3>
   <p>只有<b>真的在跑</b>时，主屏下方才出现一条细带，四个量：<b>阶段 N/M</b>（M 是这次要跑的
@@ -2646,16 +2813,15 @@ pre .bad{color:#E08A69!important}
   导出子进程算在内）、<b>剩余</b>。剩余按各阶段的<b>历史均值</b>累加；某阶段还没有历史样本时
   它不装作知道 —— 前面标「≥」，表示那只是下限。不跑的时候这条带子完全不占位。</p>
 
-  <h3>背景与光效</h3>
-  <p>东京夜的星野，<b>显影式</b>：底上是三团不动的城市光晕（强度已压到旧版一半以下），
-  星点画在一张画布上，<b>静止时全灭</b>——划过哪里哪里才亮。每颗星是<b>预渲染的精灵</b>：
-  高斯核 + 按星随机旋转的锥形衍射芒，亮星六芒带淡色晕，暗星只是软边微点；
-  亮度按幂律分布（亮星不到 1%），颜色按<b>色温</b>（蓝白→白→淡金）而不是糖果色。
-  收摊时把每颗星的亮度与位置写回原位再画一帧，所以"亮过又淡掉"的终点和最初那张
-  <b>逐像素相同</b>；控件上的光效同一条规矩：全部由指针驱动，没有一条常驻循环。</p>
-  <p>觉得干扰：<code>S</code> 关整片星野，<code>M</code> 只关控件光效，
-  <code>V</code> 换回旧版面对照，三个都会记住。
-  想让它常驻一点微光（不划也能看见几颗），改 <code>ST.AMB</code> 这一个数就行。</p>
+  <h3>背景与擦除</h3>
+  <p>主页的背景是一张<b>压在纸面底下的版画</b>：静止时只透出 6%，所以不抢正文；
+  鼠标划过，纸面被<b>擦出洞</b>，洞随划速长大，约 0.8 秒淡回去 —— 收尾会把画布
+  画回同一帧，所以"擦过又淡掉"的终点和最初<b>逐像素相同</b>。网格与纸纹盖在纸面
+  之上，擦开的永远是纸，不是数据面。夜读、<code>M</code> 动效从简、系统"减少动态
+  效果"、以及任何抽屉/弹层打开时，擦除都自动停。</p>
+  <p><code>B</code> 打开背景选择：航路版画（默认）/ 海图 / 墨迹 / 素纸，或
+  <b>选一张本机图片</b>（只存本机浏览器，不上传、不写盘）。<code>S</code> /
+  <code>V</code> 切换夜读，两个选择都会记住。</p>
 
   <h3>出问题自己先查的三行</h3>
   <p><code>py -3 scripts/diag/check_inputs.py azdata</code> ·
@@ -3002,8 +3168,12 @@ function nightApply(){
   if(b){
     b.textContent = NIGHT ? '夜读 · 开' : '夜读 · 关';
     b.title = 'S：夜读模式 开/关（暖墨底，非旧版紫黑）';
+    /* 状态用"一颗实心点"表达，不再借强调色 —— 颜色仍然只属于判据状态。 */
+    b.classList.toggle('on',NIGHT);
   }
   if(ST.g){ starColors(); starsResize(); }
+  /* 纸面遮罩铺的是纸色，换夜读必须按新纸色重铺（否则暖墨底上压一张米色纸）。 */
+  if(window.__bgRepaint) window.__bgRepaint();
 }
 $('#bSea').onclick=()=>{
   NIGHT=!NIGHT; localStorage.setItem('panel.night',NIGHT?'1':'0');
@@ -3034,7 +3204,11 @@ function legacyApply(){
   else starColors();
 }
 const FX={beam:$('#fxbeam'),pool:$('#fxpool'),cur:null,last:null,down:false,pt:{}};
-const FXSEL='button,.step,.signbox,.sheets a';
+/* 2026-10-21：这份「指针光效遗产」在纸本改版里已整层退役（#fxbeam/#fxpool 都是
+   display:none），但 JS 仍在 hover 时起 SPRG 弹簧给按钮写内联 transform（磁吸）。
+   用户要的纸面是"零位移"，所以把选择器换成永不命中的占位符 —— 引擎睡着、代码留档，
+   旧版面的 `.mag{transition:transform .55s}` 也不会再被 inline style 触发。 */
+const FXSEL='.__fx_retired';
 function fxTone(el){
   const c=el.classList;
   // 边框光/柔光的颜色跟着**语义**走：主动作=蓝白，签字=等你签字的琥珀，其余中性。
@@ -3920,6 +4094,7 @@ function syncSign(){
   $('#signGo').disabled = !($('#signAgree').checked && name);
 }
 function openSign(o){
+  bgHeal();                       // 弹层一开就收摊，别让笔迹在遮罩后面继续跑
   SIGN_CTX=o; SIGN_ALT=o.alt||null;
   $('#signWhat').textContent=o.what||'';
   $('#signList').innerHTML=(o.keys||[]).map(k=>{
@@ -4211,7 +4386,7 @@ $('#bDisk').onclick=()=>loadDisk(true);
 
 /* ── 清理中心：弹窗列可清理项 + 写明禁止项 ───────────────────────────── */
 let CLEAN_POLL=null;
-function openClean(){ $('#cleanmodal').classList.add('on');
+function openClean(){ bgHeal(); $('#cleanmodal').classList.add('on');
                       $('#cleanmodal').setAttribute('aria-hidden','false'); loadClean(); }
 function closeClean(){ $('#cleanmodal').classList.remove('on');
                        $('#cleanmodal').setAttribute('aria-hidden','true'); }
@@ -4281,7 +4456,7 @@ $('#bForce').onclick=e=>{ force=!force; e.target.textContent=force?'缓存：已
 $('#bHelp').onclick=()=>$('#help').classList.add('on');
 /* 「细节」抽屉：弹簧推入（高阻尼、不过冲 —— 右侧抽屉过冲会在边上闪出一条缝，
    那是 bug 不是物理）。关掉时把焦点还给主屏。 */
-function openDetail(){ $('#detail').classList.add('on');
+function openDetail(){ bgHeal(); $('#detail').classList.add('on');
   loadDisk(false);
   const b=$('#detail .body');
   if(CALM){ b.style.transform=''; return; }
@@ -4311,6 +4486,7 @@ document.addEventListener('keydown',e=>{
   if(k==='escape'){
     if($('#signmodal')&&$('#signmodal').classList.contains('on')){ closeSign(); return; }
     if($('#cleanmodal')&&$('#cleanmodal').classList.contains('on')){ closeClean(); return; }
+    if($('#bgpick')&&$('#bgpick').classList.contains('on')){ bgPickOpen(false); return; }
     $('#help').classList.remove('on'); $('#lightbox').classList.remove('on');
     closeDetail(); return; }
   if(k==='d'){ toggleDetail(); e.preventDefault(); return; }
@@ -4318,6 +4494,7 @@ document.addEventListener('keydown',e=>{
     step=Number(k); render(); e.preventDefault(); return; }
   if(k==='h'){ $('#help').classList.toggle('on'); }
   else if(k==='s'){ $('#bSea').click(); }
+  else if(k==='b'){ bgPickToggle(); e.preventDefault(); }
   else if(k==='m'){ CALM=!CALM; localStorage.setItem('panel.calm',CALM?'1':'0'); calmApply(); }
   else if(k==='v'){ $('#bSea').click(); }
   else if(k==='p'){ if(!S||S.running) return; post({plan:true}); }
@@ -4332,7 +4509,7 @@ $$('#help [data-close]').forEach(el=>el.onclick=()=>$('#help').classList.remove(
 // 说明书两档。默认「简洁」= 只留"我要做什么"那四节，其余细节收着（用户：没看懂说明书）。
 // 分节靠 h3 的标题文本判定，所以改标题必须同时改这张表，否则那一节会静默变成常驻显示。
 const HDETAIL=['颜色与档位怎么读','为什么不信退出码','不在这里的两件事',
-               '键位','进度台怎么读','背景与光效','出问题自己先查的三行'];
+               '键位','进度台怎么读','背景与擦除','出问题自己先查的三行'];
 (function helpGroup(){
   let on=false;
   for(const el of $('#help .panel').children){
@@ -4352,6 +4529,414 @@ function hmApply(){
 $$('#help .hmode .seg').forEach(b=>b.onclick=()=>{
   HM=b.dataset.hm; localStorage.setItem('panel.helpmode',HM); hmApply(); });
 hmApply();
+
+/* ══ 背景：纸面之下（背景图 + 悬停擦除） ═══════════════════════════════
+   用户：「主页加个悬停擦除的效果，然后背景图可以自选，默认的话你来设计，
+   要有文艺感和时尚感，比如 claude 那种感觉」。
+   机制：背景图画在 #bgart；#bgveil 是一张铺满视口的纸色画布（alpha .94），
+   指针划过就被 destination-out 擦出洞（洞随划速长大），洞按时间淡回去。
+   **收尾一定要把画布整张重画成初始帧** —— 探针靠"擦过又淡掉 == 初始帧"判稳定，
+   也靠这一点保证 8 秒轮询截图逐像素相同。三条纪律：
+     · 只在指针移动时起 rAF；笔迹全淡完 ⇒ 立刻停 rAF、不残留常驻循环。
+     · 半径/淡出都按**时间**算，不按帧算（低帧率下"永远淡不干净"）。
+     · 数据面不吃这个效果：擦的永远是底下的纸，正文/表格/对照图一个像素都不动。
+   默认背景「航路版画」是现画的 SVG，颜色全部走主题 token ⇒ 夜读模式自动换墨；
+   自定义图片则压暗（夜读）或微降饱和（日间），不把一张彩色照片糊在纸面上。 */
+const BG={art:null,cv:null,ctx:null,W:0,H:0,dpr:1,rgb:[241,236,226],preset:'logbook',
+          img:'',photo:false,stamps:[],raf:0,last:null,lastT:0,lastMs:0,sprite:null,LIFE:820};
+const BG_ORDER=['logbook','chart','ink','paper','custom'];
+const BG_NAME={logbook:['航路版画','LOG & CHART · 默认'],chart:['海图','PORTOLAN'],
+               ink:['墨迹','INK WASH'],paper:['素纸','PLAIN'],custom:['自定义','本机图片']};
+const bgSvg=(inner,vb)=>'<svg viewBox="'+(vb||'0 0 1600 1000')+'" '+
+  'preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" '+
+  'style="display:block;width:100%;height:100%">'+inner+'</svg>';
+/* 选择器里的缩略图不是把整张 1600×1000 压进 56px 高（那样只剩几粒灰），
+   而是各取一个**能认出来**的局部：太阳 / 罗经花 / 墨团。 */
+const BG_CROP={logbook:'900 536 640 180',chart:'880 238 640 180',ink:'250 512 640 180'};
+
+/* ① 航路版画：细墨线 + 一只**雕版太阳**（朱砂底 + 横刻线 + 同心环）+ 罗经花 +
+      小船 + 幽灵编号。线色都比"只给眼睛看"重一档 —— 擦开时才有东西可看；
+      静止时这些线被纸面遮罩压到 6%，只剩一点印刷透背。 */
+function bgArtLogbook(sfx,vb){
+  const id='bgw-'+sfx, sun='bgs-'+sfx;
+  let hatch='';
+  for(let y=516;y<=780;y+=7) hatch+='M1104 '+y+'H1368 ';
+  /* 正文与右栏之间那块空白正对视线，放一只"制图玫瑰"：擦开时是满屏细圆弧。
+     页面另铺一层极淡的横线（0.09）：擦在文字上也至少有"纸被擦开"的反馈，
+     而那点不透明度在静止（×6%）时完全看不见，不伤正文。 */
+  let roseTicks='',roseStar='',ruling='';
+  for(let i=0;i<24;i++){ const a=i*Math.PI/12;
+    roseTicks+='M'+(930+Math.cos(a)*232).toFixed(1)+' '+
+               (500+Math.sin(a)*232).toFixed(1)+'L'+
+               (930+Math.cos(a)*246).toFixed(1)+' '+(500+Math.sin(a)*246).toFixed(1)+' '; }
+  for(let i=0;i<8;i++){ const a=-Math.PI/2+i*Math.PI/4,L=(i%2?74:112);
+    roseStar+='M930 500L'+(930+Math.cos(a)*L).toFixed(1)+' '+
+              (500+Math.sin(a)*L).toFixed(1)+' '; }
+  for(let y=124;y<=876;y+=32) ruling+='M112 '+y+'H1488 ';
+  return bgSvg(
+  '<defs><radialGradient id="'+id+'" cx="50%" cy="50%" r="50%">'+
+    '<stop offset="0" style="stop-color:var(--ink);stop-opacity:.2"/>'+
+    '<stop offset=".6" style="stop-color:var(--ink);stop-opacity:.08"/>'+
+    '<stop offset="1" style="stop-color:var(--ink);stop-opacity:0"/></radialGradient>'+
+    '<clipPath id="'+sun+'"><circle cx="1236" cy="648" r="118"/></clipPath></defs>'+
+  '<g fill="none" style="stroke:var(--ink);vector-effect:non-scaling-stroke">'+
+    '<path d="'+ruling+'" style="stroke-opacity:.09"/>'+
+    '<circle cx="930" cy="500" r="210" style="stroke-opacity:.4"/>'+
+    '<circle cx="930" cy="500" r="244" style="stroke-opacity:.26;stroke-dasharray:2 8"/>'+
+    '<path d="'+roseTicks+'" style="stroke-opacity:.4"/>'+
+    '<path d="'+roseStar+'" style="stroke-opacity:.36"/>'+
+    '<circle cx="930" cy="500" r="62" style="stroke-opacity:.32"/>'+
+    '<g style="stroke-opacity:.3"><circle cx="1236" cy="648" r="330"/>'+
+      '<circle cx="1236" cy="648" r="298"/></g>'+
+    '<circle cx="1236" cy="648" r="330" style="stroke-opacity:.3;stroke-dasharray:1 9"/>'+
+    '<circle cx="1236" cy="648" r="262" style="stroke-opacity:.36;stroke-dasharray:3 7"/>'+
+    '<circle cx="1236" cy="648" r="186" style="stroke-opacity:.5"/>'+
+    '<circle cx="1236" cy="648" r="118" style="stroke-opacity:.8;stroke-width:1.6"/>'+
+    '<path d="M64 792H1536" style="stroke-opacity:.62"/>'+
+    '<path d="M64 808H1536" style="stroke-opacity:.2"/>'+
+    '<path d="M108 852h272M108 868h180M108 884h108" style="stroke-opacity:.36"/>'+
+    '<path d="M1316 852h220M1392 868h144M1444 884h92" style="stroke-opacity:.36"/>'+
+    '<path d="M1006 648H1134M1338 648H1466" style="stroke-opacity:.5"/>'+
+    '<path d="M1096 590v-14M1376 598v-14M1096 706v14M1376 698v14" style="stroke-opacity:.4"/>'+
+    '<path d="M1556 96v732M1544 96v732" style="stroke-opacity:.22"/>'+
+    '<path d="M40 40h26M40 40v26M1560 960h-26M1560 960v-26" style="stroke-opacity:.3"/>'+
+  '</g>'+
+  '<g clip-path="url(#'+sun+')">'+
+    '<rect x="1104" y="516" width="264" height="264" '+
+      'style="fill:var(--accent);fill-opacity:.22"/>'+
+    '<path d="'+hatch+'" style="stroke:var(--ink);stroke-opacity:.5;stroke-width:1.1;'+
+      'fill:none;vector-effect:non-scaling-stroke"/>'+
+  '</g>'+
+  '<circle cx="930" cy="500" r="6" style="fill:var(--accent);fill-opacity:.9"/>'+
+  '<circle cx="930" cy="500" r="26" fill="none" '+
+    'style="stroke:var(--accent);stroke-opacity:.5"/>'+
+  '<circle cx="1236" cy="648" r="130" fill="none" '+
+    'style="stroke:var(--ochre);stroke-opacity:.7;stroke-dasharray:1 8"/>'+
+  '<ellipse cx="470" cy="720" rx="400" ry="186" fill="url(#'+id+')"/>'+
+  '<g transform="translate(1478 178)" fill="none" '+
+    'style="stroke:var(--ink);stroke-opacity:.55;vector-effect:non-scaling-stroke">'+
+    '<circle r="30"/><path d="M0-42v13M0 29v13M-42 0h13M29 0h13"/>'+
+    '<path d="M0-30 6-6 0 20-6-6z" style="fill:var(--accent);fill-opacity:.85;stroke:none"/></g>'+
+  '<text x="1120" y="470" text-anchor="middle" style="font-family:var(--font-display);'+
+    'font-size:300px;letter-spacing:-.05em;fill:var(--ink);fill-opacity:.1">05</text>'+
+  '<text transform="translate(1552 884) rotate(-90)" style="font-family:var(--font-mono);'+
+    'font-size:11px;letter-spacing:.32em;fill:var(--ink);fill-opacity:.6">'+
+    'AZUR LANE · ASSET LOG · RUNBOOK</text>'+
+  '<text x="108" y="944" style="font-family:var(--font-mono);font-size:10px;'+
+    'letter-spacing:.22em;fill:var(--ink);fill-opacity:.55">RUNBOOK 05 / 航线 · 资产更新</text>'+
+  '<path d="M108 960h148" style="stroke:var(--accent);stroke-width:2;stroke-opacity:.92"/>'+
+  '<g transform="translate(560 790)" style="fill:var(--ink);fill-opacity:.62;'+
+    'stroke:var(--ink);stroke-opacity:.62">'+
+    '<path d="M0 0h58l-7 9H7z" style="stroke:none"/>'+
+    '<path d="M21-27 35 0H13z" style="stroke:none"/>'+
+    '<path d="M41-20V0" style="stroke-width:1;fill:none"/></g>',vb);
+}
+/* ② 海图：从页外一点射出的恒向线 + 页边刻度 + 一只罗经花 + 经纬网。
+      这张最"制图"：擦开时是满屏细线扫过，线条感最强。 */
+function bgArtChart(sfx,vb){
+  const cx=300,cy=960;
+  let rays='';
+  for(let i=0;i<16;i++){ const a=-Math.PI/2+i*Math.PI/8;
+    rays+='M'+cx+' '+cy+'L'+(cx+Math.cos(a)*2600).toFixed(0)+' '+
+          (cy+Math.sin(a)*2600).toFixed(0)+' '; }
+  let ticks='';
+  for(let i=0;i<22;i++){ const y=96+i*42; ticks+='M1520 '+y+'h18 '; }
+  for(let i=0;i<15;i++){ const x=96+i*100; ticks+='M'+x+' 96v10 '; }
+  const roses=[];
+  for(let i=0;i<8;i++){ const a=i*Math.PI/4, L=(i%2?62:92);
+    roses.push('M1180 330L'+(1180+Math.cos(a)*L).toFixed(1)+' '+
+               (330+Math.sin(a)*L).toFixed(1)); }
+  return bgSvg(
+  '<g fill="none" style="stroke:var(--ink);vector-effect:non-scaling-stroke">'+
+    '<path d="'+rays+'" style="stroke-opacity:.2"/>'+
+    '<path d="M400 96V828M800 96V828M1200 96V828" style="stroke-opacity:.14"/>'+
+    '<path d="M96 300H1504M96 520H1504M96 700H1504" style="stroke-opacity:.1"/>'+
+    '<path d="'+ticks+'" style="stroke-opacity:.5"/>'+
+    '<circle cx="1180" cy="330" r="52" style="stroke-opacity:.55"/>'+
+    '<circle cx="1180" cy="330" r="150" style="stroke-opacity:.4;stroke-dasharray:1 7"/>'+
+    '<circle cx="1180" cy="330" r="210" style="stroke-opacity:.2;stroke-dasharray:4 8"/>'+
+    '<path d="'+roses.join('')+'" style="stroke-opacity:.55"/>'+
+    '<path d="M96 828H1504" style="stroke-opacity:.55"/>'+
+    '<path d="M1180 84v100M1180 476v96" style="stroke-opacity:.34"/>'+
+  '</g>'+
+  '<circle cx="1180" cy="330" r="9" style="fill:var(--accent);fill-opacity:.95"/>'+
+  '<rect x="1508" y="648" width="22" height="22" style="fill:var(--accent);fill-opacity:.85"/>'+
+  '<text x="108" y="884" style="font-family:var(--font-mono);font-size:10px;'+
+    'letter-spacing:.26em;fill:var(--ink);fill-opacity:.6">26°09′N · 119°41′E / PORTOLAN 05</text>'+
+  '<text transform="translate(1566 560) rotate(-90)" style="font-family:var(--font-mono);'+
+    'font-size:10px;letter-spacing:.3em;fill:var(--ink);fill-opacity:.5">'+
+    'CHART · 海图 · № 05</text>'+
+  '<text x="1180" y="900" text-anchor="middle" style="font-family:var(--font-display);'+
+    'font-size:120px;letter-spacing:.08em;fill:var(--ink);fill-opacity:.06">PORTOLAN</text>',vb);
+}
+/* ③ 墨迹：一团洇开的墨 + 一道朱砂细锋 + 一枚小印 + 一个极大的幽灵「墨」。
+      这张最"文艺"，擦开像在宣纸上试笔。 */
+function bgArtInk(sfx,vb){
+  const id='bgi-'+sfx;
+  return bgSvg(
+  '<defs><radialGradient id="'+id+'" cx="48%" cy="50%" r="52%">'+
+    '<stop offset="0" style="stop-color:var(--ink);stop-opacity:.3"/>'+
+    '<stop offset=".55" style="stop-color:var(--ink);stop-opacity:.12"/>'+
+    '<stop offset="1" style="stop-color:var(--ink);stop-opacity:0"/></radialGradient></defs>'+
+  '<ellipse cx="520" cy="640" rx="440" ry="250" fill="url(#'+id+')"/>'+
+  '<path d="M170 716C360 566 560 772 906 626" fill="none" '+
+    'style="stroke:var(--ink);stroke-opacity:.26;stroke-width:48;stroke-linecap:round"/>'+
+  '<path d="M210 706C380 596 560 760 840 646" fill="none" '+
+    'style="stroke:var(--ink);stroke-opacity:.1;stroke-width:16;stroke-linecap:round"/>'+
+  '<path d="M470 392C630 322 780 438 902 356" fill="none" '+
+    'style="stroke:var(--accent);stroke-opacity:.72;stroke-width:3;stroke-linecap:round"/>'+
+  '<path d="M470 412C630 348 770 452 890 378" fill="none" '+
+    'style="stroke:var(--accent);stroke-opacity:.24;stroke-width:1"/>'+
+  '<text x="1130" y="800" text-anchor="middle" style="font-family:var(--font-display);'+
+    'font-size:330px;fill:var(--ink);fill-opacity:.07">墨</text>'+
+  '<rect x="1330" y="300" width="27" height="27" style="fill:var(--accent);fill-opacity:.9"/>'+
+  '<rect x="1334" y="304" width="19" height="19" fill="none" '+
+    'style="stroke:var(--paper-3);stroke-opacity:.7"/>'+
+  '<path d="M1330 356h120" style="stroke:var(--ink);stroke-opacity:.45"/>'+
+  '<text transform="translate(1524 900) rotate(-90)" style="font-family:var(--font-mono);'+
+    'font-size:11px;letter-spacing:.34em;fill:var(--ink);fill-opacity:.55">INK · 墨 · MMXXVI</text>',vb);
+}
+const BG_ART={logbook:bgArtLogbook,chart:bgArtChart,ink:bgArtInk,paper:()=>''};
+
+function bgPaperRgb(){
+  const v=(getComputedStyle(document.body).getPropertyValue('--paper')||'').trim();
+  const m=v.match(/#([0-9a-f]{6})/i);
+  if(m){const n=parseInt(m[1],16);return [(n>>16)&255,(n>>8)&255,n&255];}
+  return [241,236,226];
+}
+function bgSprite(){
+  if(BG.sprite) return BG.sprite;
+  const S=256,c=document.createElement('canvas');c.width=c.height=S;
+  const g=c.getContext('2d'),gr=g.createRadialGradient(S/2,S/2,0,S/2,S/2,S/2);
+  gr.addColorStop(0,'rgba(0,0,0,1)');
+  gr.addColorStop(.46,'rgba(0,0,0,.98)');
+  gr.addColorStop(.74,'rgba(0,0,0,.58)');
+  gr.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=gr;g.fillRect(0,0,S,S);
+  BG.sprite=c;return c;
+}
+/* 画布只有两种合法状态：① 整张纸（静止帧）② 纸 − 若干笔迹 × 时间衰减。
+   每一帧都从 ① 重画，所以任何一帧都能由"笔迹列表 + 时间"唯一确定，
+   不会有"擦过又淡掉却和初始帧差几个像素"的漂移。 */
+function bgPaintVeil(){
+  const c=BG.ctx; if(!c) return;
+  c.setTransform(BG.dpr,0,0,BG.dpr,0,0);
+  c.globalCompositeOperation='source-over';c.globalAlpha=1;
+  c.clearRect(0,0,BG.W,BG.H);
+  const p=BG.rgb;
+  c.fillStyle='rgba('+p[0]+','+p[1]+','+p[2]+',0.94)';
+  c.fillRect(0,0,BG.W,BG.H);
+}
+function bgHeal(){
+  BG.stamps.length=0;
+  if(BG.raf){cancelAnimationFrame(BG.raf);BG.raf=0;}
+  bgPaintVeil();
+  bgResetTilt();
+}
+function bgResetTilt(){ if(BG.art) BG.art.style.transform=''; }
+function bgFrame(){
+  BG.raf=0;
+  if(!BG.ctx){return;}
+  if(!BG.stamps.length){bgHeal();return;}
+  const t=performance.now(),c=BG.ctx,sp=bgSprite(),t0=t;
+  bgPaintVeil();
+  c.setTransform(BG.dpr,0,0,BG.dpr,0,0);
+  c.globalCompositeOperation='destination-out';
+  for(let i=BG.stamps.length-1;i>=0;i--){
+    const s=BG.stamps[i],age=t-s.t;
+    if(age>=BG.LIFE){BG.stamps.splice(i,1);continue;}
+    c.globalAlpha=Math.pow(1-age/BG.LIFE,1.35);
+    c.drawImage(sp,s.x-s.r,s.y-s.r,s.r*2,s.r*2);
+  }
+  c.globalAlpha=1;c.globalCompositeOperation='source-over';
+  BG.lastMs=performance.now()-t0;
+  if(BG.stamps.length) BG.raf=requestAnimationFrame(bgFrame);
+  else bgHeal();
+}
+function bgStamp(x,y,r,t){
+  BG.stamps.push({x:x,y:y,r:r,t:t});
+  if(BG.stamps.length>160) BG.stamps.splice(0,BG.stamps.length-160);
+  if(!BG.raf) BG.raf=requestAnimationFrame(bgFrame);
+}
+function bgSwipe(x0,y0,x1,y1,t,r){
+  const d=Math.hypot(x1-x0,y1-y0);
+  const n=Math.max(1,Math.min(8,Math.ceil(d/Math.max(8,r*.34))));
+  for(let i=1;i<=n;i++){const f=i/n;
+    bgStamp(x0+(x1-x0)*f,y0+(y1-y0)*f,r,t);}
+}
+function bgResize(){
+  if(!BG.cv) return;
+  BG.rgb=bgPaperRgb();
+  BG.W=Math.max(320,innerWidth);BG.H=Math.max(240,innerHeight);
+  BG.dpr=Math.min(1.25,window.devicePixelRatio||1);
+  BG.cv.width=Math.round(BG.W*BG.dpr);
+  BG.cv.height=Math.round(BG.H*BG.dpr);
+  BG.ctx=BG.cv.getContext('2d');
+  bgHeal();
+}
+let bgResizeT=0;
+function bgResizeSoon(){clearTimeout(bgResizeT);bgResizeT=setTimeout(bgResize,140);}
+function bgActive(){
+  if(!BG.cv) return false;
+  if(document.body.classList.contains('calm')) return false;
+  if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches) return false;
+  if(document.querySelector('#detail.on,#help.on,#signmodal.on,#cleanmodal.on,#lightbox.on,#bgpick.on'))
+    return false;
+  return true;
+}
+function bgParallax(x,y){
+  if(!BG.art||BG.preset==='paper') return;
+  const px=(x/Math.max(1,BG.W)-.5)*-10, py=(y/Math.max(1,BG.H)-.5)*-6;
+  BG.art.style.transform='translate3d('+px.toFixed(2)+'px,'+py.toFixed(2)+'px,0)';
+}
+/* pointermove 只记最新坐标，**每帧处理一次**（1000Hz 鼠标下别按事件算 hypot/推图章）。
+   中间点由 bgSwipe 的插值图章补上，所以不会丢轨迹。 */
+let bgMovePend=null, bgMoveRaf=0;
+function bgPoint(x,y){
+  if(!bgActive()){
+    BG.last=null;
+    if(BG.art&&BG.art.style.transform) bgResetTilt();
+    return;
+  }
+  bgParallax(x,y);
+  const t=performance.now();
+  if(!BG.last){BG.last=[x,y];BG.lastT=t;return;}
+  const dt=Math.max(1,t-BG.lastT),dx=x-BG.last[0],dy=y-BG.last[1];
+  const d=Math.hypot(dx,dy);
+  if(d<1.2){BG.lastT=t;return;}
+  const speed=d/dt*1000;
+  const r=Math.max(26,Math.min(130,26+speed*.045));
+  bgSwipe(BG.last[0],BG.last[1],x,y,t,r);
+  BG.last=[x,y];BG.lastT=t;
+}
+window.addEventListener('pointermove',e=>{
+  if(e.pointerType==='touch') return;
+  bgMovePend=[e.clientX,e.clientY];
+  if(bgMoveRaf) return;
+  bgMoveRaf=requestAnimationFrame(()=>{
+    bgMoveRaf=0;
+    const p=bgMovePend; bgMovePend=null;
+    if(p) bgPoint(p[0],p[1]);
+  });
+},{passive:true});
+/* 离开窗口/失焦/切后台：把跟随指针的变量全部复位（视差也要回中），
+   否则"动过鼠标之后的静止帧"和"刚加载的初始帧"不是同一张。 */
+addEventListener('pointerleave',()=>{BG.last=null;bgResetTilt();});
+addEventListener('blur',()=>{BG.last=null;bgResetTilt();});
+document.addEventListener('visibilitychange',()=>{BG.last=null;bgResetTilt();});
+
+function bgApply(id,save){
+  if(id!=='custom'&&!BG_ART[id]) id='logbook';
+  if(id==='custom'&&!BG.img) id='logbook';
+  BG.preset=id;BG.photo=(id==='custom');
+  const a=BG.art; if(!a) return;
+  a.dataset.bg=id;
+  if(BG.photo){
+    a.classList.add('is-photo');
+    a.style.backgroundImage='url("'+BG.img+'")';
+    a.innerHTML='';
+  }else{
+    a.classList.remove('is-photo');
+    a.style.backgroundImage='';
+    a.innerHTML=BG_ART[id]('main');
+  }
+  if(save){try{localStorage.setItem('panel.bgpreset',id);}catch(e){}}
+  $$('#bgpresets .bgtile').forEach(t=>
+    t.setAttribute('aria-pressed',t.dataset.bg===id?'true':'false'));
+}
+function bgTiles(){
+  const box=$('#bgpresets'); if(!box) return;
+  box.innerHTML=BG_ORDER.map(id=>{
+    const nm=BG_NAME[id];
+    let th;
+    if(id==='paper') th='<span class="th"><span class="add">素纸</span></span>';
+    else if(id==='custom')
+      th=BG.img?('<span class="th"><img src="'+BG.img+'" alt=""></span>')
+               :('<span class="th"><span class="add">+ 选图片</span></span>');
+    else th='<span class="th">'+BG_ART[id]('tile-'+id,BG_CROP[id])+'</span>';
+    return '<button type="button" class="bgtile" data-bg="'+id+'" aria-pressed="false">'+
+           th+'<b>'+nm[0]+'</b><i>'+nm[1]+'</i></button>';
+  }).join('');
+  box.onclick=e=>{
+    const b=e.target.closest('.bgtile'); if(!b) return;
+    if(b.dataset.bg==='custom'&&!BG.img){ const f=$('#bgFile'); if(f) f.click(); return; }
+    bgApply(b.dataset.bg,true);
+    bgNote(BG_NAME[b.dataset.bg][0]+' 已换上（会记住）。点右上「关闭」回主屏。');
+  };
+}
+function bgNote(t){const n=$('#bgpnote'); if(n) n.textContent=t;}
+function bgPickOpen(on){
+  if(on) bgHeal();
+  const p=$('#bgpick'); if(!p) return;
+  p.classList.toggle('on',!!on);
+  p.setAttribute('aria-hidden',on?'false':'true');
+  const b=$('#bBg'); if(b) b.setAttribute('aria-expanded',on?'true':'false');
+}
+function bgPickToggle(){bgPickOpen(!$('#bgpick').classList.contains('on'));}
+
+(function bgBoot(){
+  BG.art=$('#bgart');BG.cv=$('#bgveil');
+  try{BG.img=localStorage.getItem('panel.bgimg')||'';}catch(e){BG.img='';}
+  let saved='logbook';
+  try{saved=localStorage.getItem('panel.bgpreset')||'logbook';}catch(e){}
+  BG.rgb=bgPaperRgb();
+  bgTiles();bgApply(saved,false);bgResize();
+  window.__bgRepaint=()=>{BG.rgb=bgPaperRgb();bgResize();};
+  addEventListener('resize',bgResizeSoon);
+  const file=$('#bgFile');
+  if(file) file.onchange=e=>{
+    const f=e.target.files&&e.target.files[0]; if(!f) return;
+    const rd=new FileReader();
+    rd.onload=()=>{
+      const im=new Image();
+      im.onload=()=>{
+        const enc=(max,q)=>{
+          let w=im.width,h=im.height;
+          const k=Math.min(1,max/Math.max(w,h));
+          w=Math.max(1,Math.round(w*k));h=Math.max(1,Math.round(h*k));
+          const c=document.createElement('canvas');c.width=w;c.height=h;
+          const g=c.getContext('2d');const p=bgPaperRgb();
+          g.fillStyle='rgb('+p[0]+','+p[1]+','+p[2]+')';
+          g.fillRect(0,0,w,h);g.drawImage(im,0,0,w,h);
+          return c.toDataURL('image/jpeg',q);
+        };
+        let url=enc(1920,.84);
+        if(url.length>2400000) url=enc(1400,.78);
+        BG.img=url;
+        let stored=true;
+        try{localStorage.setItem('panel.bgimg',url);}catch(err){stored=false;}
+        bgTiles();bgApply('custom',true);
+        bgNote(stored?('已换上本机图片（约 '+Math.round(url.length/1024)+' KB，只存在本机浏览器）')
+                     :'图片太大，浏览器存不下；本次会话有效，刷新会回到默认。');
+        bgPickOpen(false);
+      };
+      im.onerror=()=>bgNote('这张图读不出来，换一张试试。');
+      im.src=rd.result;
+    };
+    rd.readAsDataURL(f);
+    e.target.value='';
+  };
+  const clr=$('#bgClear');
+  if(clr) clr.onclick=()=>{
+    BG.img='';
+    try{localStorage.removeItem('panel.bgimg');}catch(e){}
+    bgTiles();bgApply('logbook',true);
+    bgNote('已恢复默认「航路版画」。');
+  };
+  const bb=$('#bBg'); if(bb) bb.onclick=()=>bgPickToggle();
+  $$('#bgpick [data-bgclose]').forEach(el=>el.onclick=()=>bgPickOpen(false));
+  document.addEventListener('click',e=>{
+    const p=$('#bgpick');
+    if(!p||!p.classList.contains('on')) return;
+    const t=e.target;
+    if(t.closest&&(t.closest('#bgpick')||t.closest('#bBg'))) return;
+    bgPickOpen(false);
+  });
+  /* 首屏落定动画：只挂 1.15 秒，之后把 boot 类摘掉 —— 不能让"已完成"的动画
+     留在 document.getAnimations() 里（探针那条静止判据量的是这个）。 */
+  document.body.classList.add('boot');
+  setTimeout(()=>document.body.classList.remove('boot'),1150);
+})();
 
 document.addEventListener('click',e=>{ if(e.target.matches('.sheets img')){
   $('#lightbox img').src=e.target.src; $('#lightbox').classList.add('on'); e.preventDefault(); } });
@@ -4409,8 +4994,44 @@ window.__probe={stop(){ if(pollT){ clearInterval(pollT); pollT=null; } },
                   return {on:d.classList.contains('on'),
                           vis:getComputedStyle(d).display!=='none',
                           cards:d.querySelectorAll('.stage').length}; },
+                /* 背景/擦除的验收口：alphaAt 读的是**遮罩画布自身**的 alpha
+                   （0=全擦开、240≈纸面 .94），所以"擦开了没有""淡回去了没有"
+                   是像素级判据，不靠截图肉眼。 */
+                bg(){ const cv=BG.cv,dpr=BG.dpr||1;
+                  const alpha=(x,y)=>{ if(!cv) return -1;
+                    const c=cv.getContext('2d');
+                    const px=Math.max(0,Math.min(cv.width-1,Math.round(x*dpr)));
+                    const py=Math.max(0,Math.min(cv.height-1,Math.round(y*dpr)));
+                    return c.getImageData(px,py,1,1).data[3]; };
+                  return {preset:BG.preset,photo:BG.photo,img:!!BG.img,
+                          raf:!!BG.raf,stamps:BG.stamps.length,
+                          lastMs:Math.round(BG.lastMs*100)/100,
+                          paper:bgPaperRgb().join(','),dpr:dpr,
+                          art:($('#bgart').dataset.bg||''),
+                          svg:!!document.querySelector('#bgart svg'),
+                          veil:(()=>{const cv2=$('#bgveil');
+                            return cv2?[cv2.width,cv2.height,getComputedStyle(cv2).display]:null;})(),
+                          open:!!($('#bgpick')&&$('#bgpick').classList.contains('on'))}; },
+                bgAlpha(x,y){ const cv=BG.cv,dpr=BG.dpr||1; if(!cv) return -1;
+                  const c=cv.getContext('2d');
+                  return c.getImageData(Math.round(x*dpr),Math.round(y*dpr),1,1).data[3]; },
+                bgPick(on){ bgPickOpen(!!on);
+                            return $('#bgpick').classList.contains('on'); },
+                bgChoose(id){ bgApply(id,true); return BG.preset; },
+                bgImg(data){ if(data){
+                               BG.img=String(data);
+                               try{localStorage.setItem('panel.bgimg',BG.img);}catch(e){}
+                             }else{
+                               BG.img='';
+                               try{localStorage.removeItem('panel.bgimg');}catch(e){}
+                             }
+                             bgTiles();
+                             bgApply(BG.img?'custom':'logbook',true);
+                             return {photo:BG.photo,img:!!BG.img,preset:BG.preset}; },
+                bgRestore(){ bgHeal(); return BG.stamps.length; },
                 avoid(){ return (ST.avoid||[]).length; }};
-window.ST=ST; window.SPR=SPR; window.SPRG=SPRG; window.panelState=()=>S;
+window.ST=ST; window.SPR=SPR; window.SPRG=SPRG; window.BG=BG;
+window.panelState=()=>S;
 </script></body></html>
 '''
 

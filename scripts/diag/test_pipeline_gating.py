@@ -11,6 +11,7 @@
 判据全部落在"产品行动那一刻"（有没有 spawn 那个会覆写 Output/ 的子进程），
 不落在文案上 —— 文案会改，行动不会说谎。
 """
+import json
 import os
 import shutil
 import subprocess
@@ -424,7 +425,7 @@ def t_fingerprint_covers_cfg():
     少了这一项，`cfg.publish` 把皮肤表刷成新行之后指纹不变 ⇒ 第 3 步七个阶段的
     "同指纹已完成"缓存全部命中 ⇒ 产物按旧表算却全判绿。
     """
-    print('\n[10] 输入指纹必须覆盖配置表（发布新表后旧结论作废）')
+    print('\n[11] 输入指纹必须覆盖配置表（发布新表后旧结论作废）')
     cfg = os.path.join(up.ROOT, 'inputs', 'gamecfg')
     if not os.path.isdir(cfg):
         print('  SKIP  没有 inputs/gamecfg，跳过')
@@ -448,18 +449,219 @@ def t_fingerprint_covers_cfg():
         ck('指纹里带 cfg= 这一段', 'cfg=' in fa, fa)
         ck('bundles_of 仍只取源包那一半（不破坏 §71 的范围清单新鲜度）',
             up.bundles_of(fa) == up.bundles_of(fb), up.bundles_of(fa))
-        # 关键不变式：配置表变 ⇒ 盘上旧结论的指纹 != 新指纹（缓存必然失效）
-        old_on_disk = None
-        try:
-            st = json.load(open(os.path.join(up.WORK, 'pipeline_state.json'), encoding='utf-8'))
-            old_on_disk = st.get('fingerprint')
-        except Exception:
-            pass
-        if old_on_disk and 'cfg=' not in old_on_disk:
-            ck('盘上旧指纹不含 cfg=（说明它是修指纹之前写的，'
-               '下次运行会被整体作废重判）', True, old_on_disk)
     finally:
         up.gamecfg_stamp = real_stamp
+
+    # ⚠️ 这里以前是 `import json` 只写在 t_stale_scope 的 body 里 ⇒ 本函数拿到的是未定义名，
+    # 而整段又包在 `except Exception: pass` 里 ⇒ NameError 被吞、这条判据**从来没跑过**。
+    # 现在把它变成"每次都真读一遍盘上状态"的显式判据（2026-10-21）。
+    path = os.path.join(up.WORK, 'pipeline_state.json')
+    st_on = {}
+    if os.path.isfile(path):
+        try:
+            st_on = json.load(open(path, encoding='utf-8'))
+            ck('盘上 pipeline_state.json 可被 json 解析（防判据自己 NameError 静默跳过）',
+               isinstance(st_on, dict))
+        except Exception as e:                       # noqa: BLE001
+            ck('盘上 pipeline_state.json 可被 json 解析（防判据自己 NameError 静默跳过）',
+               False, f'{type(e).__name__}: {e}')
+    else:
+        ck('盘上没有 pipeline_state.json（下次运行会从空状态开始）', True, path)
+    if isinstance(st_on, dict) and st_on:
+        ck('盘上状态带指纹字段（rejudge/面板靠它判新旧）',
+           isinstance(st_on.get('fingerprint'), str), str(st_on.get('fingerprint'))[:70])
+        fp_on_disk = st_on.get('fingerprint') or ''
+        print(f'       （盘上指纹 {fp_on_disk}）')
+
+
+def t_state_stamp():
+    """状态盖章必须用**逐阶段**指纹（§157 的写入端，2026-10-21 抓到）。
+
+    复现：`main()` 给 verdict 盖的是本轮开始时算的整条 `fp`，而读取端
+    （`rejudge_state` / 面板 `/api/state`）按 `stage_fp_by_key(k)` 比 ——
+      * `cfg.*` 期望的是"不含 cfg="那条 ⇒ 盖整条的每条都被清；
+      * 本轮 `cfg.publish` / `deps` / `pull` 改过输入 ⇒ 起点指纹 ≠ 当前 ⇒ 其余也被清。
+    实测完整状态（20 条 verdict + 6 条 done）下一次启动**全清**，且旧版 rejudge 要
+    walk 46 次指纹（11.25 秒）。
+    """
+    print('\n[12] 状态盖章口径必须与读取端一致（逐阶段指纹，不许用整条 fp）')
+    real = up.fingerprint
+    cur = real()
+    old = up.base_of(cur) + ' cfg=OLDCFG'         # 本轮开始时的指纹（cfg.publish 还没刷表）
+    base = up.fingerprint(include_cfg=False)
+    staged = [s for s in up.STAGES if s.tier == 'staged' and not s.check]
+    want = lambda s: base if s.produces_cfg else cur      # noqa: E731  修好后的盖章值
+
+    def build(stamp_fn):
+        st = {'fingerprint': old, 'done': {}, 'verdict': {}}
+        for s in up.STAGES:
+            st['verdict'][s.key] = {'ok': True, 'detail': 'x', 'fingerprint': stamp_fn(s), 'scope': 'sc'}
+        for s in staged:
+            st['done'][s.key] = {'ok': True, 'detail': 'x', 'fingerprint': stamp_fn(s), 'scope': 'sc'}
+        return st
+
+    st_old = build(lambda s: old)                  # 旧写法：一律盖整条起点指纹
+    _, keep_o, drop_o = up.rejudge_state(st_old, cur)
+    ck('旧写法（verdict 盖整条起点指纹）⇒ 下一轮结论全被作废（复现缺陷）',
+       len([k for k in st_old['verdict'] if k in set(drop_o)]) == len(st_old['verdict']),
+       f'keep={len(keep_o)} drop={len(drop_o)}')
+    st_new = build(want)                           # 修好后的写法：逐阶段
+    _, keep_n, drop_n = up.rejudge_state(st_new, cur)
+    ck('逐阶段盖章 ⇒ 同一批输入下一轮一条不丢',
+       not drop_n and len(keep_n) == len(st_new['verdict']) + len(st_new['done']),
+       f'keep={len(keep_n)} drop={len(drop_n)}')
+
+    # 指纹调用不得随条目数放大：cur 已给 ⇒ 最多再算一次"不含 cfg="那条
+    cnt = {'n': 0}
+
+    def counted(*a, **k):
+        cnt['n'] += 1
+        return real(*a, **k)
+    up.fingerprint = counted
+    try:
+        up.rejudge_state(st_new, cur)
+    finally:
+        up.fingerprint = real
+    ck('rejudge_state 的指纹调用不随条目数放大（20 条 + 6 done 时 ≤2 次）',
+       cnt['n'] <= 2, f'{cnt["n"]} 次')
+
+    src = open(os.path.join(ROOT, 'scripts', 'update_pipeline.py'), encoding='utf-8').read()
+    ck('main() 给 verdict/done 盖章用的是逐阶段指纹（源码断言，防回退）',
+       'fingerprint=cur_fp' in src and 'fingerprint=fp, scope=sc' not in src,
+       '找 fingerprint=cur_fp')
+
+
+def t_paintings_judge():
+    """paintings 的失败数只认每批「完成N，失败M」汇总行。
+
+    旧版数 `l.startswith('✗')`：`compose_paintings_v2` 的"没有可绘制部件"打的是
+    `"  ✗ …"`（两个前导空格）⇒ 这种真失败一条都数不到；再叠上临时区上一批残留的 png
+    （`n > 0` 恒成立），这一档就假绿了。该脚本恒 exit 0，所以"没读到汇总行"只能按
+    这一批全失败处理。
+    """
+    print('\n[13] paintings：失败数只认「完成N，失败M」汇总行（含缩进 ✗）')
+    def body(d):
+        real_fp = up.fingerprint
+        up.fingerprint = lambda: 'bundles=1 deps=test'
+        try:
+            up.write_scope(['AssetBundles/painting/2b'], 1, 0)
+            tgt = os.path.join(d, 'Paintings_v2')
+            os.makedirs(tgt)
+            open(os.path.join(tgt, 'old_stale.png'), 'wb').write(b'x')   # 上一批残留
+            ck('“  ✗ …”（两个前导空格）确实不被 startswith("✗") 数到（这就是漏数原因）',
+               not '  ✗ 2b: 没有可绘制部件'.startswith('✗'))
+            r = Rec('  ✗ 2b: 没有可绘制部件\n完成 0，失败 1 -> out')
+            old, up.run = up.run, r
+            try:
+                ok = up.st_paintings(False, set())
+            finally:
+                up.run = old
+            ck('缩进 ✗ + 汇总行失败=1 ⇒ 判红（旧版凭残留 png 判绿）', ok is False,
+               str(up.RESULTS['paintings']))
+            r = Rec('Traceback (most recent call last): boom')
+            old, up.run = up.run, r
+            try:
+                ok = up.st_paintings(False, set())
+            finally:
+                up.run = old
+            ck('没读到汇总行 ⇒ 判红（不许默认通过）', ok is False, str(up.RESULTS['paintings']))
+            r = Rec('✓ 2b: 画出 20 层\n完成 1，失败 0 -> out')
+            old, up.run = up.run, r
+            try:
+                ok = up.st_paintings(False, set())
+            finally:
+                up.run = old
+            ck('正向对照：汇总行 完成1失败0 ⇒ 判绿（判据别焊死）', ok is True,
+               str(up.RESULTS['paintings']))
+        finally:
+            up.fingerprint = real_fp
+    tmp_work(body)
+
+
+def t_spine_judge():
+    """spine 批量 rc≠0 即使没打 ✗ 也不许判绿（崩在打 ✗ 之前的那种形状）。"""
+    print('\n[14] spine：批量退出码非 0 必须进判据')
+    def body(d):
+        real_fp = up.fingerprint
+        up.fingerprint = lambda: 'bundles=1 deps=test'
+        try:
+            up.write_scope(['AssetBundles/spinepainting/2b_2'], 1, 0)
+            r = Rec(rc_of={'extract_spine_v2': 1})          # rc=1、零输出（崩在打 ✗ 之前）
+            old, up.run = up.run, r
+            try:
+                ok = up.st_spine(False, set())
+            finally:
+                up.run = old
+            # 旧版判据 nparts >= len(names)-1：1 个皮肤时 0 >= 0 恒真 ⇒ 会判绿
+            ck('批量 rc=1 且无 ✗ 行 ⇒ 判红（旧版 0 >= len-1 恒真会判绿）', ok is False,
+               str(up.RESULTS['spine']))
+            r = Rec('✓ 2b_2: 4 文件 | parts.json ✓')
+            old, up.run = up.run, r
+            try:
+                ok = up.st_spine(False, set())
+            finally:
+                up.run = old
+            ck('正向对照：rc=0 且无 ✗ ⇒ 判绿（判据别焊死）', ok is True, str(up.RESULTS['spine']))
+        finally:
+            up.fingerprint = real_fp
+    tmp_work(body)
+
+
+def t_audio_fatal_rc():
+    """`extract_cv_voice` 的致命退出码必须进结论。
+
+    它的 rc=2 只有三种含义：没有 cv 包、缺 vgmstream、抽查的台词磁盘缺文件（都是
+    "这一轮没解成"），另外 rc=1 是崩溃。旧版只把 rc 写进文案、不进判据 ⇒ 假绿。
+    """
+    print('\n[15] audio：cv_voice 致命退出码必须进判据')
+    r = Rec(rc_of={'extract_cv_voice': 2})
+    old, up.run = up.run, r
+    try:
+        ok = up.st_audio({'audio'})
+    finally:
+        up.run = old
+    ck('cv_voice rc=2 ⇒ 判红（旧版只看两道审计会判绿）', ok is False,
+       str(up.RESULTS['audio']))
+    r = Rec()
+    old, up.run = up.run, r
+    try:
+        ok = up.st_audio({'audio'})
+    finally:
+        up.run = old
+    ck('正向对照：cv_voice rc=0 + 审计绿 ⇒ 判绿（判据别焊死）', ok is True,
+       str(up.RESULTS['audio']))
+
+
+def t_derive_words():
+    """derive 必须重建台词表（e2e「台词表重生成」判据红暴露的缺口，2026-10-21）。
+
+    此前 `Output/gallery_v2/skin_words.json` 没有任何阶段重建：`cfg.publish` 刷表后
+    audio 档更新了 `skin_voice.json`，词表却还是旧的 ⇒ e2e 处理层红、阶段机全绿。
+    """
+    print('\n[16] derive：台词表必须重建，失败不许继续建索引')
+    def body(d):
+        open(os.path.join(d, 'changed_paintings.txt'), 'w').write('')
+        r = Rec('已写出 Output/gallery_v2/skin_words.json')
+        r.rc_of = {'build_skin_words': 1}
+        old, up.run = up.run, r
+        try:
+            ok = up.st_derive({'derive'})
+        finally:
+            up.run = old
+        v = up.RESULTS['derive']
+        ck('台词表重建失败 ⇒ derive 判红', ok is False and '台词表' in v['detail'], str(v))
+        ck('台词表失败后不再跑 build_gallery_index（索引会用旧词表）',
+           not r.hit('build_gallery_index'), str(r.calls))
+        r = Rec('已写出 Output/gallery_v2/skin_words.json')
+        old, up.run = up.run, r
+        try:
+            ok = up.st_derive({'derive'})
+        finally:
+            up.run = old
+        ck('台词表重建成功 ⇒ 继续建索引并跑到部署检查',
+           ok is True and r.hit('build_skin_words') and r.hit('build_gallery_index')
+           and r.hit('deploy_gallery'), str(up.RESULTS['derive']))
+    tmp_work(body)
 
 
 def main():
@@ -474,6 +676,11 @@ def main():
     t_freshness_key()
     t_device_down()
     t_fingerprint_covers_cfg()
+    t_state_stamp()
+    t_paintings_judge()
+    t_spine_judge()
+    t_audio_fatal_rc()
+    t_derive_words()
     print('\n' + ('[FAIL] ' + '；'.join(FAIL) if FAIL else '[PASS] 签字门与增量范围闸门全绿'))
     return 1 if FAIL else 0
 

@@ -11380,3 +11380,110 @@ return d+`C${xE} ${yE+2} ${x1} ${yE+11} ${x1} ${H}Z`;
 
 **涉及文件**：`gallery_src/bgm.html`（`wavePath()`、`draw()`、`#ink1/#ink2`）、
 `scripts/diag/probe_ink_edge.py`。
+
+## §167 「结论盖章」用了整条起点指纹 ⇒ 下一轮 20/20 结论全被清空（2026-10-21 实测）
+
+**症状**：一轮管线跑完，`pipeline_state.json` 里 20 条 verdict 都写着判绿；**下一轮启动/打开面板，
+全部变回「未跑」**——用户读到的就是"我的进度没了"。同时 `rejudge_state()` 一次要 11 秒。
+
+**根因（两层）**：
+1. `main()` 给每条结论盖的是 `fp` = **本轮开始时**算的整条指纹；而读取端
+   （`rejudge_state()` 与面板 `/api/state`）按**逐阶段**指纹 `stage_fp(s)` 比。
+   `pull` / `cfg.publish` / `deps` 会在跑的**过程中**改写输入（源包数 / 配置表 / 依赖表），
+   起点指纹与它们自己的阶段指纹天然不同 ⇒ 这些阶段、以及它们之后的所有阶段，下一轮全部作废。
+2. `rejudge_state()` 对每个条目调**两次** `stage_fp_by_key()`，每次 walk 7.2 万源包；
+   20 条 verdict + 6 条 done 实测 **46 次 walk / 11.25 秒**。
+
+**修法**：
+- 写端：每个阶段跑完现算 `cur_fp = stage_fp(s)`，done 与 verdict 都用它盖章
+  （与读取端口径逐字一致，见 `scripts/update_pipeline.py` 的 `main()`）。
+- 读端：`rejudge_state()` 先按"要不要带 `cfg=`"各算**一次**（最多两次），再逐条比较；
+  完整状态 46 次 walk → ≤2 次，11.25s → 0.2s。
+
+**判据（防复发）**：`scripts/diag/test_pipeline_gating.py` 的 `[12]`——构造"20 verdict + 6 done"
+的真实形状状态，断言**旧写法全部丢失、新写法全部保留**，并断言按阶段区分 `cfg.*` / 非 `cfg.*`。
+口径一句话：**写端和读端必须用同一条指纹**，拿整条起点指纹"省事"会在下一次启动时全丢。
+
+**涉及文件**：`scripts/update_pipeline.py`（`main()` 盖章、`rejudge_state()`）、
+`scripts/diag/test_pipeline_gating.py`。相关：**§157**（指纹必须覆盖配置表）、**WF-23**。
+
+## §168 判据层的四种「看起来在判、其实没判」（2026-10-21 一次修完）
+
+**症状**：阶段机全绿，但产物明明有失败。共同点：**判据读的是日志的"形状"，不是脚本的"结论"**。
+
+| # | 形状 | 为什么假绿 | 修法（判据落在哪） |
+|---|---|---|---|
+| 1 | `compose_paintings_v2` 打 `"  ✗ name: 没有可绘制部件"`（两个前导空格） | 判据写 `l.startswith('✗')`，一条都数不到；且脚本恒 exit 0；临时区还有上一批旧 png ⇒ `n>0 and fail==0` 判绿 | 只认每批收尾汇总行 `完成 N，失败 M`；**没读到汇总行 = 该批全失败**（不许默认通过） |
+| 2 | `extract_spine_v2` 崩在打 ✗ 之前 | 只数 ✗ 行；`nparts >= len(names)-1` 在 1 个皮肤时是 `0>=0` **恒真** | 批量退出码 ≠0 直接进失败项 |
+| 3 | `extract_cv_voice` rc=2 | 判据只看两道只读审计的 rc，把 cv_voice 的 rc 只写进文案 | rc 进判据；文案点名"非 0 = 致命前置/崩溃，不是单包失败" |
+| 4 | gating 测试自己 | `t_fingerprint_covers_cfg` 里 `json` 未导入，`NameError` 被 `except Exception: pass` 吞掉 ⇒ 这条判据**从未执行过**（首跑输出里没有它的 PASS 行） | 补 import；改成每次都真读盘上状态并显式断言；新增"防静默跳过"断言 |
+
+**判据（防复发）**：每条修复都配**双向分支测试**——"拦得住"（旧判据下会绿的形状现在判红）
+与"不误红"（正常形状仍判绿）。见 `test_pipeline_gating.py` 的 `[13]`~`[16]`。
+**教训**：`exit 0` 不可信时，判据要么数**收尾汇总行**，要么读**退出码的语义**；
+"没读到证据"必须算失败——默认通过是假绿灯的通用配方。
+
+**涉及文件**：`scripts/update_pipeline.py`（`st_paintings` / `st_spine` / `st_audio`）、
+`scripts/diag/test_pipeline_gating.py`（85 条判据）。相关：**WF-45**。
+
+## §169 管线里**没有任何阶段**重建 `skin_words.json` ⇒ e2e 红、阶段机全绿（2026-10-21）
+
+**症状**：`py -3 scripts/diag/verify_pipeline_e2e.py` 全量跑出
+`[process] 台词表重生成: 字段不一致：['m','w']`（FAIL），而面板 20 个阶段全绿、`--quick` 也是绿的。
+
+**取证**：盘上 `Output/gallery_v2/skin_words.json` mtime 是 **10-05**，而
+`cfg.publish` 在 **10-17 23:16** 已把皮肤表刷成 2871 行、`skin_voice.json` 次日被 audio 档更新。
+用当前输入重生成：`m` 键 4219→4221（少 `aerjiliya_4` 等）、`w` 2530→2536；
+`lingmin_alter` 语音包号 701090→9701130、`sikula_h` 202330→202338（正是 10-17 表刷新里的 6 行之一）。
+
+**根因**：`scripts/build_skin_words.py` 全仓唯一调用方是 e2e 与人工；`STAGES` 里**没有**这一段。
+而 `build_gallery_index.py` 直接读该文件（缺文件直接 SystemExit）。于是：
+**没人生产它、也没人读它（在管线里）⇒ 它可以一直烂下去**，阶段机看不见。
+
+**修法**：把重建接进 `st_derive()`：`make_thumbs` 之后、`build_gallery_index` 之前执行，
+双判据 `rc==0` **且** 输出里有「已写出」；失败**拒绝继续建索引**（不许用旧词表建新索引）。
+STAGES 里 derive 的标题/判据/writes 同步改成"缩略图 / 台词表 / 索引 / 部署"。
+
+**验证**：用户签字后实跑 `py -3 scripts/update_pipeline.py --only derive --approve derive`
+→ 4 秒完成（thumb 全 skip、词表 7.6MB、index 闸门绿、deploy 12/12 同 inode）；
+之后 e2e 全量 **21 PASS / 0 FAIL / 1 WARN**（WARN 仅基线漂移，属正常）。
+⚠️ 签名动作会写 `Output/`：**代码修复不等于产物已更新**，e2e 红着不是改判据能消的。
+
+**判据（这一类问题的通用识别）**：
+- **阶段机全绿 ≠ 管线正确**。阶段机只能看见"自己读的输入"；跨阶段的派生产物（这里：词表）
+  如果没有生产者，就没有任何判据会红。
+- 唯一能发现它的是 **e2e 的"用当前输入重生成一份、和盘上逐字段比"** 判据
+  —— 这也是为什么 `verify_pipeline_e2e.py` 必须留在收尾清单里，而不是可选项。
+
+**涉及文件**：`scripts/update_pipeline.py`（`st_derive`）、`scripts/build_skin_words.py`（无改动）、
+`scripts/diag/verify_pipeline_e2e.py`。相关：**WF-45**（端到端验证闸门）。
+
+## §170 纸面遮罩画布（悬停擦除）：确定性的一帧 + 三个「看着对其实是死的」（2026-10-21）
+
+**背景**：给资产更新控制台主页加"背景图 + 鼠标划过擦开纸面"的效果。结构是
+图 `#bgart` → 纸色遮罩 `#bgveil`（2D canvas，纸色 alpha .94）→ 网格 `#bggrid` → 纸纹 `#bggrain`。
+指针擦出洞（洞随划速长大）、约 820ms 淡回去。
+
+**根因/坑（四条，全部实测过）**：
+1. **静止帧必须由「笔迹列表 + 时间」唯一确定**：每一帧都从"整张纸色"重画、再按
+   `destination-out` 画回还活着的笔迹。收尾清空笔迹 + 整张重铺一次 ⇒ 与初始帧**逐像素相同**。
+   如果改成"只往洞上补色"，会一路漂到完全不透明（底画消失）且初始帧 ≠ 静止帧。
+2. **`.snode label::after` 会被 `label{overflow:hidden}` 裁掉**（省略号需要 hidden）。
+   屏幕上什么都没有、代码看着却对。修法：下划线画在**盒内**（`background-image:currentColor`
+   + `background-size:0 1px` → hover 拉成 `100% 1px`）。
+3. **`button:active{transform:none!important}` 会把新写的 `:active` 按压规则压死**。
+   特异性/`!important` 必须一起加（`.pact:active{...!important}`），否则是死规则。
+4. **跟指针的几何量必须复位**：视差 `#bgart.style.transform` 在 `pointerleave`/`blur`/
+   `visibilitychange` 里要清空，否则"动过鼠标之后的静止帧"和"刚加载的帧"不是同一张，
+   任何两帧比对都会红。`pointermove` 也要按 rAF 合并（1000Hz 鼠标下别逐事件算 hypot/推图章）。
+
+**判据（`scripts/diag/panel_paper_probe.py`，新增 20 条）**：
+- 静止两帧 `getImageData` alpha **完全一致**、`raf=false`、`stamps=0`、`getAnimations()==0`；
+- 划过处 alpha 显著下降（240→<90）、**没划过的角落不变**（局域性），淡净后 alpha 回到原值；
+- 暂停集合：`body.calm`（M）、系统 `prefers-reduced-motion:reduce`、以及任意弹层打开时都不擦；
+- 夜读后**画布纸色**也要重铺（读 token，不是只在 body 上变色）——只比 body 颜色会漏成 §137 型假绿；
+  探针用 `__probe.bg().paper` 断言 `'23,21,18'`；
+- 「设了 vs 没设」：切到素纸后截图必须与默认背景**不同**（防"选了名字没换图"的假接线）。
+
+**涉及文件**：`scripts/pipeline_panel.py`（`#bgstage` 五层、`BG` 引擎、`#bgpick`）、
+`scripts/diag/panel_paper_probe.py`。做法与判据模板见 **WF-54**。
