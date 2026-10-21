@@ -47,6 +47,7 @@ STATE = os.path.join(WORK, 'pipeline_state.json')
 ARCHIVE = os.path.join(PANEL, 'archive')
 BG_REVIEW_JSON = os.path.join(PANEL, 'bg_review.json')
 ANNOT = os.path.join(ROOT, 'annotations', 'bg_char_labels.json')
+BGROOT_ANNOT = os.path.join(ROOT, 'annotations', 'bg_root_names.json')
 RAW_DIR = os.path.join(ROOT, 'Output', 'Raw')
 BG_THUMBS = os.path.join(ROOT, 'Output', 'gallery_v2', 'bg_thumbs')
 PORT = 8788
@@ -202,6 +203,57 @@ def bg_review(fresh=False):
         return {'error': '读不到复核清单：%s' % e}
     _BG_REVIEW.update(at=time.time(), data=data)
     return data
+
+
+def bg_roots_save(body):
+    """人工补名词根：只接受当前复核清单里的 root 档；写 annotations 正本后重建 bg_meta。"""
+    names = body.get('names')
+    if not isinstance(names, dict) or not names:
+        return {'error': 'names 必须是非空 {root: 中文名}'}
+    if len(names) > 50:
+        return {'error': '一次最多补 50 个词根'}
+    data = bg_review()
+    if data.get('error'):
+        return data
+    allowed = {x.get('root') for x in (data.get('unnamed_roots') or []) if x.get('root')}
+    clean = {}
+    for root, cn in names.items():
+        root = str(root).strip()
+        cn = str(cn or '').strip()
+        if root not in allowed:
+            return {'error': '词根不在待命名清单里：%s（已有表内名字的词根不允许覆盖）' % root}
+        if not cn or len(cn) > 40 or any(x in cn for x in '\n\r|\\'):
+            return {'error': '中文名必须非空、≤40 字、不含换行/竖线/反斜杠：%s' % root}
+        clean[root] = cn
+    with _BG_LOCK:
+        if BGPUB.get('state') == 'running':
+            return {'error': '背景发布任务正在跑，等它结束再补名'}
+    try:
+        doc = (json.load(open(BGROOT_ANNOT, encoding='utf-8'))
+               if os.path.isfile(BGROOT_ANNOT) else
+               {'schema': 1,
+                'note': '背景词根的人工补名正本（入库）。只补 root 档；不覆盖表内证据。',
+                'labels': {}})
+    except (OSError, ValueError) as e:
+        return {'error': '读人工补名正本失败：%s' % e}
+    labels = doc.setdefault('labels', {})
+    for root, cn in clean.items():
+        labels[root] = {'cn': cn, 'why': '控制台背景标注复核台人工补名',
+                        'updated_at': time.strftime('%Y-%m-%d %H:%M')}
+    doc['schema'] = doc.get('schema', 1)
+    doc['updated_at'] = time.strftime('%Y-%m-%d')
+    tmp = BGROOT_ANNOT + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(doc, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, BGROOT_ANNOT)
+    except OSError as e:
+        return {'error': '写人工补名正本失败：%s' % e}
+    _BG_REVIEW.update(at=0.0, data=None)
+    rc, out = _run_py(['scripts/build_bg_meta.py', '--allow-unlabeled'], 300)
+    if rc != 0:
+        return {'error': '命名已保存，但重建 bg_meta 失败', 'log': out[-1600:]}
+    return {'ok': True, 'saved': len(clean), 'names': clean}
 
 
 def bg_publish_worker(job_id):
@@ -824,6 +876,8 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {'id': rid})
         if u.path == '/api/bgchars':
             return self._send(200, bg_chars_save(body))
+        if u.path == '/api/bgrootnames':
+            return self._send(200, bg_roots_save(body))
         if u.path == '/api/newround':
             return self._send(200, new_round())
         if u.path != '/api/run':
@@ -2483,6 +2537,18 @@ pre .bad{color:#E08A69!important}
 .glroot b{display:block;margin-bottom:4px;color:var(--ink)!important}
 .glroot code{font:10px/1.5 var(--font-mono)!important;color:var(--accent-d)!important;
   background:var(--paper-3);padding:1px 4px;border:1px solid var(--rule);margin:0 2px}
+.glname{display:flex;align-items:center;gap:8px;margin:7px 0;flex-wrap:wrap}
+.glname code{margin:0}
+.glname input{flex:1;min-width:160px;font:11px/1.5 var(--font-ui)!important;
+  color:var(--ink)!important;background:var(--paper-3);border:1px solid var(--rule);
+  border-radius:0;padding:5px 8px;outline:none}
+.glname input:focus{border-color:var(--accent)}
+.glname button{flex:none}
+/* 待标注红点：只报数量，不在主屏再叠一张卡。 */
+.ghost .bgdot{display:inline-grid;place-items:center;min-width:15px;height:15px;padding:0 4px;
+  margin-left:6px;border-radius:999px;background:var(--accent);color:#fff;
+  font:500 8px/1 var(--font-mono)!important;vertical-align:1px}
+.ghost .bgdot[hidden]{display:none}
 .glok{padding:22px 14px;text-align:center;font:400 12px/1.8 var(--font-ui)!important;
   color:var(--ink-2)!important}
 .glagree{display:flex;gap:8px;align-items:flex-start;margin:10px 0 0;
@@ -2793,7 +2859,7 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
   </div>
   <div class="act">
     <button id="bBg" class="ghost" title="B：背景（航路版画 / 海图 / 墨迹 / 素纸 / 自定义图片）" aria-expanded="false">背景</button>
-    <button id="bBgLabel" class="ghost" title="新背景图人工标注：有角色 / 无角色（只列场景背景）">背景标注</button>
+    <button id="bBgLabel" class="ghost" title="新背景图人工标注：有角色 / 无角色（只列场景背景）">背景标注<b id="bgLabelN" class="bgdot" hidden></b></button>
     <button id="bNew" class="ghost" title="归档本轮阶段缓存与任务记录，回到第 1 步（不动 Output）">新一轮</button>
     <button id="bDetail" class="ghost" title="D：展开证据（全部阶段 / 日志 / 对照表 / 指纹）">细节</button>
     <button id="bSea" class="ghost" title="S：夜读模式 开/关（暖墨底，非旧版紫黑）">夜读 · 关</button>
@@ -3676,6 +3742,11 @@ async function apiState(force){
   }
   SIG=ns; render();
   if(S.running && !curJob) tail(S.running.id);
+  /* 首屏只查一次待标注数量；之后由任务结束（finishReceipt）触发 fresh 重查。 */
+  if(!BGBADGE_ONCE){
+    BGBADGE_ONCE=true;
+    setTimeout(()=>refreshBgBadge(false),1000);
+  }
 }
 function stagesOf(n){ return (S.stages||[]).filter(s=>(s.step||0)===n); }
 /* 「待办」= 下一步该动手的步骤；正在跑时以 running.step 为准。
@@ -4637,6 +4708,8 @@ async function post(b, opt){
 function finishReceipt(){
   const P=PENDING; if(!P) return; PENDING=null;
   if(P.plan){ showReceipt('只看计划：已生成，展开「细节」看日志里的阶段表','good'); return; }
+  /* 任务结束后可能新增了背景图：fresh 重扫一次，红点/自动复核台才有意义。 */
+  setTimeout(()=>refreshBgBadge(true),800);
   const parts=[]; let kind='good', skipped=0;
   P.keys.forEach(k=>{
     const stt=statusOf(k);
@@ -4786,7 +4859,45 @@ $('#newGo').onclick=async()=>{
 
 /* ── 背景标注复核台 ─────────────────────────────────────────────────── */
 let GL={data:null,picks:{},busy:false,pub:null,pubTimer:null};
-function openBgLabel(){
+var BGBUSY=false, BGBADGE_ONCE=false;
+function setBgBadge(n){
+  const b=$('#bgLabelN'), v=Number(n)||0;
+  if(b){ b.textContent=v||''; b.hidden=!v; }
+  const btn=$('#bBgLabel');
+  if(btn) btn.title=v?('有 '+v+' 张新背景待判：点开逐张标有/无角色'):'新背景图人工标注：有角色 / 无角色（只列场景背景）';
+}
+function bgAutoSig(d){
+  const un=d.unlabeled||[];
+  return (d.pending||0)+'|'+un.slice(0,6).map(x=>x.key).join(',');
+}
+function anyModalOpen(){
+  return !!document.querySelector('#detail.on,#help.on,#signmodal.on,#cleanmodal.on,#newmodal.on,#bglabelmodal.on,#lightbox.on,#bgpick.on');
+}
+function maybeAutoOpenBg(d){
+  if(!d||!(d.pending>0)||!S||S.running||anyModalOpen()) return;
+  const sig=bgAutoSig(d);
+  let prev='';
+  try{ prev=sessionStorage.getItem('panel.bgAuto')||''; }catch(e){}
+  if(prev===sig) return;
+  try{ sessionStorage.setItem('panel.bgAuto',sig); }catch(e){}
+  setTimeout(function(){
+    if(!S||S.running||anyModalOpen()) return;
+    openBgLabel(d);
+  },700);
+}
+async function refreshBgBadge(fresh){
+  if(BGBUSY) return;
+  BGBUSY=true;
+  try{
+    const j=await (await fetch('/api/bg_review'+(fresh?'?fresh=1':''))).json();
+    if(j.error) return;
+    setBgBadge(j.pending||0);
+    if(j.pending>0) maybeAutoOpenBg(j);
+    else { try{ sessionStorage.removeItem('panel.bgAuto'); }catch(e){} }
+  }catch(e){ /* 网络抖动时保留旧 badge，下一次任务/刷新再试 */ }
+  finally{ BGBUSY=false; }
+}
+function openBgLabel(pre){
   bgHeal();
   GL.picks={}; GL.pub=null;
   if(GL.pubTimer){ clearInterval(GL.pubTimer); GL.pubTimer=null; }
@@ -4794,10 +4905,14 @@ function openBgLabel(){
   $('#glAgree').checked=false;
   $('#bglabelmodal').classList.add('on');
   $('#bglabelmodal').setAttribute('aria-hidden','false');
-  $('#glBody').innerHTML=inkWait('正在扫描 Output/Raw 与人工标注…（约十几秒）');
   $('#glSub').textContent='只列 group=scene 的场景背景；登录/其他类目不在这张清单里。';
-  $('#glMsg').textContent='扫描中…';
-  loadBgReview(false);
+  if(pre && !pre.error){
+    GL.data=pre; setBgBadge(pre.pending||0); renderBgReview();
+  }else{
+    $('#glBody').innerHTML=inkWait('正在扫描 Output/Raw 与人工标注…（约十几秒）');
+    $('#glMsg').textContent='扫描中…';
+    loadBgReview(false);
+  }
 }
 function closeBgLabel(){
   if(GL.pubTimer){ clearInterval(GL.pubTimer); GL.pubTimer=null; }
@@ -4806,7 +4921,7 @@ function closeBgLabel(){
   $('#bglabelmodal').setAttribute('aria-hidden','true');
   GL.busy=false;
 }
-$('#bBgLabel').onclick=openBgLabel;
+$('#bBgLabel').onclick=()=>openBgLabel();
 $$('#bglabelmodal [data-glclose]').forEach(e=>e.onclick=closeBgLabel);
 $('#glAgree').onchange=updateGlButtons;
 
@@ -4823,7 +4938,7 @@ async function loadBgReview(fresh){
         (j.log?'<pre style="white-space:pre-wrap;font:10px/1.5 var(--font-mono);color:var(--ink-3)">'+esc(j.log)+'</pre>':'');
       $('#glMsg').textContent=j.error; return;
     }
-    GL.data=j; renderBgReview();
+    GL.data=j; setBgBadge(j.pending||0); renderBgReview();
   }catch(e){
     $('#glBody').innerHTML='<div class="glok">读不到复核清单：'+esc(String(e))+'</div>';
     $('#glMsg').textContent='读不到复核清单';
@@ -4853,14 +4968,45 @@ function renderBgReview(){
   const roots=d.unnamed_roots||[];
   if(roots.length){
     html+='<div class="glroot"><b>新活动子标签已自动创建，但这些词根还没有中文名</b>'+
-      roots.map(r=>'<code>'+esc(r.root)+'</code>×'+r.n).join(' ')+
-      '<br>游戏表里查不到时保持英文，不要硬编；命名流程见 WF-48。</div>';
+      roots.map(r=>'<div class="glname" data-root="'+esc(r.root)+'"><code>'+esc(r.root)+'</code>×'+r.n+
+        '<input maxlength="40" placeholder="中文名（只补 root 档）" aria-label="'+esc(r.root)+' 的中文名">'+
+        '<button type="button" class="mini ghost" data-rootname="'+esc(r.root)+'">保存</button></div>').join('')+
+      '<div class="dim" style="margin-top:6px">只补游戏表查不到的 root 档；已有表内证据的名字不会被覆盖。'+
+      '保存后会立即重建 bg_meta，背景库的系列下拉随之更新。命名依据见 WF-48。</div></div>';
   }
   $('#glBody').innerHTML=html;
   updateGlButtons();
 }
 
+async function saveRootName(root, btn){
+  const row=btn.closest('.glname'), inp=row&&row.querySelector('input');
+  const cn=(inp&&inp.value||'').trim();
+  if(!cn){ $('#glMsg').textContent='先给 '+root+' 填一个中文名'; return; }
+  if(GL.busy) return;
+  let finalMsg='';
+  GL.busy=true; updateGlButtons(); btn.disabled=true;
+  $('#glMsg').textContent='保存词根 '+root+' → '+cn+'，并重建背景索引…';
+  try{
+    const j=await (await fetch('/api/bgrootnames',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({names:{[root]:cn}})})).json();
+    if(j.error){ finalMsg=j.error; return; }
+    /* 只从当前清单里移掉这个词根，不重新扫全表：既快，也不会把用户已经点好的
+       “有角色/无角色”选择清空。 */
+    if(GL.data && Array.isArray(GL.data.unnamed_roots)){
+      GL.data.unnamed_roots=GL.data.unnamed_roots.filter(r=>r.root!==root);
+      renderBgReview();
+    }
+    finalMsg='词根 '+root+' 已补名：'+cn;
+  }catch(e){
+    finalMsg='保存失败：'+e;
+  }finally{
+    GL.busy=false; updateGlButtons();
+    if(finalMsg) $('#glMsg').textContent=finalMsg;
+  }
+}
 $('#glBody').onclick=e=>{
+  const rb=e.target.closest('[data-rootname]');
+  if(rb){ saveRootName(rb.dataset.rootname, rb); return; }
   const b=e.target.closest('[data-gv]'); if(!b) return;
   const card=b.closest('.glcard'); if(!card) return;
   const key=card.dataset.key, v=+b.dataset.gv;
@@ -4879,6 +5025,7 @@ function updateGlButtons(){
     GL.busy||!d||left>0||!agree||(d.pending===0&&picks===0);
   if($('#glDraft')) $('#glDraft').disabled=GL.busy||!d||picks===0;
   if($('#glRefresh')) $('#glRefresh').disabled=GL.busy;
+  $$('#glBody [data-rootname]').forEach(b=>b.disabled=GL.busy);
   if($('#glMsg')) $('#glMsg').textContent=GL.busy?'处理中…':
     (!d?'—':(left?('还有 '+left+' 张未判'):
       (d.pending===0?'没有待判图':'全部已判，可以发布')));
@@ -4944,6 +5091,7 @@ async function saveBgChars(publish){
       return;
     }
     if(j.published){
+      setBgBadge(0);
       closeBgLabel();
       showReceipt('背景标注已发布 · 新增/更新 '+j.saved+' 条 · 缩略图已重建','good');
       await apiState(true);

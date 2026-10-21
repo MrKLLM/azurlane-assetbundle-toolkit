@@ -317,7 +317,8 @@ def report(cur, base, write_file=True):
         if len(unnamed) > 15:
             print('    … 其余 %d 个见 labels_report.json' % (len(unnamed) - 15))
         print('  说明：这些词根五条证据路线都没命中，按「不许编名」保留英文；')
-        print('        知道出处就补 inputs/gamecfg/bg_category_labels.json 或 bg_series_labels.json。')
+        print('        知道出处就补 inputs/gamecfg/bg_category_labels.json 或 bg_series_labels.json；')
+        print('        也可在控制台「背景标注」复核台补名（写 annotations/bg_root_names.json，只补 root 档）。')
 
     print('\n【音乐】曲目 %d 首 / 官方中文名 %d / 专辑 %d 张 / 活动回忆 %d 首'
           % (cur['total'], cur['named'], len(cur['albums']), cur['events']))

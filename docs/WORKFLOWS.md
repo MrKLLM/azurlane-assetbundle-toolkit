@@ -5210,7 +5210,15 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
   bg_char_flags.json`、`Output/gallery_v2/bg_meta.json`"；`--allow-unlabeled` 只是中间态，不是发布。
 - 四步发布走**后台任务 + 轮询**（`BGPUB` / `/api/bgchars/status`）：每完成一步才前进一格
   （1/4…4/4），当前步用墨点/流光，不用定时器假推进；失败停在失败步并显示该步输出尾部。
-- 复核台顶部固定显示 `场景 N / 已判 N / 待判 N`，并列出 `unnamed_roots`（只读；命名仍走 WF-48）。
+- 复核台顶部固定显示 `场景 N / 已判 N / 待判 N`，并列出 `unnamed_roots`。
+- **门禁化（2026-10-22）**：面板首屏与每次任务结束后查 `/api/bg_review`；`pending>0` 时页头
+  「背景标注」显示数量红点，并自动打开一次复核台（sessionStorage 用 `pending+前几个 key` 记签名，
+  用户关掉后不反复弹）；`pending=0` 不弹、红点隐藏。扫描失败只保留旧红点，不制造假 0。
+- **人工补名词根（2026-10-22）**：`annotations/bg_root_names.json`（入库正本）保存
+  `root -> {cn,why,updated_at}`；`/api/bgrootnames` 只接受当前 `unnamed_roots`，写入后跑
+  `build_bg_meta --allow-unlabeled` 重建索引。优先级 `pinyin > series > table > manual > category > root`：
+  manual 只补 root 档，**不覆盖表内证据**；冲突项和不足 2 张的 root 只 WARN，不应用。
+  背景库系列下拉把 `cn_from=manual` 标成「人工补名」。命名依据仍见 WF-48，不要硬编。
 
 **踩坑记录**
 

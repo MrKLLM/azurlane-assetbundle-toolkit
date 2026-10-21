@@ -55,6 +55,9 @@ SERIES_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_series_labels.json')
 # 词根→中文**类目名**（描述性标签，不是官方资产名）。可缺；只在上面三条证据路都拿不到时补位，
 # 页面以 cn_from='category' 与证据档区分开（2026-10-18 用户要求：英文类目也要有中文可读名）。
 CATEGORY_LABELS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_category_labels.json')
+# 人工补名（入库正本）：只给五条证据路线都拿不到的 root 档补中文名；不覆盖表内证据。
+# 正本放 annotations/ 而不是 inputs/，因为它是不可再生的人工判断，且不受 .diag 清理影响。
+MANUAL_ROOTS = os.path.join(ROOT, 'annotations', 'bg_root_names.json')
 # 场景背景「画面里有没有角色」的人工逐格标注（scripts/publish_bg_char_flags.py 发布，可缺：
 # 缺了页面就没有筛选依据，会退回「全部」并显式说明——不许静默降级）
 CHARS = os.path.join(ROOT, 'inputs', 'gamecfg', 'bg_char_flags.json')
@@ -328,6 +331,8 @@ def build(sample=None):
           if os.path.isfile(SERIES_LABELS) else {})
     CL = (json.load(open(CATEGORY_LABELS, encoding='utf-8'))['labels']
           if os.path.isfile(CATEGORY_LABELS) else {})
+    MR = (json.load(open(MANUAL_ROOTS, encoding='utf-8')).get('labels', {})
+          if os.path.isfile(MANUAL_ROOTS) else {})
     named = {}
     for k, v in roots.items():
         if v['n'] < 2:
@@ -339,6 +344,9 @@ def build(sample=None):
             named[k] = {'n': v['n'], 'cn': v['series'].most_common(1)[0][0], 'cn_from': 'series'}
         elif k in SL:
             named[k] = {'n': v['n'], 'cn': SL[k]['cn'], 'cn_from': 'table'}
+        elif k in MR:
+            named[k] = {'n': v['n'], 'cn': str((MR[k] or {}).get('cn') or '').strip(),
+                        'cn_from': 'manual'}
         elif k in CL:
             # 类目名是描述性标签（界面/拼音/舰名/联动），不是官方资产名 ⇒ 单独一档让页面能看出区别
             named[k] = {'n': v['n'], 'cn': CL[k]['cn'], 'cn_from': 'category'}
@@ -494,13 +502,28 @@ def main():
           if os.path.isfile(SERIES_LABELS) else {})
     cl = (json.load(open(CATEGORY_LABELS, encoding='utf-8'))['labels']
           if os.path.isfile(CATEGORY_LABELS) else {})
+    mr = (json.load(open(MANUAL_ROOTS, encoding='utf-8')).get('labels', {})
+          if os.path.isfile(MANUAL_ROOTS) else {})
+    manual_bad = []
+    for k, v in mr.items():
+        cn = str((v or {}).get('cn') or '').strip() if isinstance(v, dict) else ''
+        if not cn or len(cn) > 40 or any(x in cn for x in '\n\r|\\'):
+            manual_bad.append(k)
+    manual_missing = [k for k in mr if k not in roots]
+    manual_ignored = [k for k in mr if k in roots and roots[k].get('cn_from') != 'manual']
+    if manual_missing:
+        print('WARN 人工补名未应用（词根不存在或不足 2 张）：%s' % '、'.join(sorted(manual_missing)[:8]))
+    if manual_ignored:
+        print('WARN 人工补名未应用（已有表内证据优先）：%s' % '、'.join(sorted(manual_ignored)[:8]))
     for desc, passed in [
         # 下限断言：词典文件没了 / 被清空时，上面几条会**全部空转报绿**，
         # 名字会静默退回 series —— 这条负责让它响。
         ('词典在位且有 >=15 组（缺文件不许静默退回 series）', len(rl) >= 15),
-        ('词根表非空，且来源只有 pinyin/series/table/category/root 五档',
-         bool(roots) and all(v['cn_from'] in ('pinyin', 'series', 'table', 'category', 'root')
+        ('词根表非空，且来源只有 pinyin/series/table/manual/category/root 六档',
+         bool(roots) and all(v['cn_from'] in ('pinyin', 'series', 'table', 'manual', 'category', 'root')
                              for v in roots.values())),
+        ('人工补名格式合法（非空、≤40 字、无换行/竖线）',
+         not manual_bad),
         ('category 档逐字等于类目词典值，且只补位在证据档都拿不到的词根上（不许压过证据）',
          all(roots[k]['cn'] == cl[k]['cn'] and k not in rl and k not in sl
              for k in roots if roots[k]['cn_from'] == 'category')),
@@ -552,6 +575,10 @@ def main():
               % (sum(1 for i in marked if i['has_char']),
                  len(marked) - sum(1 for i in marked if i['has_char']),
                  n - len(marked)))
+    if mr:
+        print('  人工补名 %d 条：已应用 %d / 词根不足 2 张 %d / 被表内证据覆盖 %d'
+              % (len(mr), len(mr) - len(manual_missing) - len(manual_ignored),
+                 len(manual_missing), len(manual_ignored)))
     if not ok:
         print('\n闸门：红 —— 断言未全过，不写文件')
         return 1
@@ -576,7 +603,8 @@ def main():
                    'inferred 是同词根兄弟图传播（页面要标「推断」）；none 无中文名，页面显示英文原名，不得编造',
            'sources': {'exact': 'inputs/gamecfg/bg_scene_refs.json',
                        'baked': 'inputs/gamecfg/bg_tip_titles.json',
-                       'has_char': 'inputs/gamecfg/bg_char_flags.json'},
+                       'has_char': 'inputs/gamecfg/bg_char_flags.json',
+                       'manual_roots': 'annotations/bg_root_names.json'},
            'dirs': {d: {'cn': lbl, 'via': via, 'count': per[d]['total']}
                     for d, (lbl, via) in DIR_LABELS.items() if d in per},
            'counts': dict(t),
