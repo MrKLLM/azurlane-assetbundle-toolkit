@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
 description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。触发词（验收向）：点击没落地、开关无效还是探针没点到、画面改变判据全红而可逆判据全绿、取样哨兵值 None 参与比较、ES module 整块不初始化、vendor import 闭包、滑鼠标卡顿归因、帧时拆解、背景动效是不是罪魁、交替配对测量、顺序 A/B 的差不能当收益、property tree 节点数、静止不带 transform、判据放宽成恒真、绿着崩。
-version: 1.8.24
+version: 1.8.25
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -725,6 +725,22 @@ version: 1.8.24
 收尾清空笔迹再整张重铺一次；**不要只往洞上补色**（会一路漂到完全不透明）。
 跟指针的位移量（视差 transform）在 `pointerleave/blur/visibilitychange` 必须复位，
 否则"动过鼠标后的静止帧"和"刚加载的帧"不是同一张。
+
+### 页面加载遮罩/骨架：探针要等“遮罩自己消失”，页面也要能自己收
+
+`document.readyState==='complete'` 和“卡片已经在 DOM 里”都不代表用户能看到页面：
+首屏遮罩可能还在，或者 JS 在 `apply()` 抛错后再也没人收它。判据与实现都要独立：
+
+- **页面侧**：启动渲染放 `try/finally`，成功/抛错都收遮罩；兜底不依赖加载模块本身
+  （`loading.js` 404 时静态遮罩仍要能被内联定时器收起）；给用户一个“仍然进入”出口，
+  并在 12s 自动收起。遮罩只负责等待，不能掩盖错误。
+- **探针侧**：断言 `#bootveil` **不存在/已 off**，而不是只断言卡片数量；分别在图片启用/禁用
+  两档各跑一次。若页面有顶层加载模块（`window.InkLoad`），先等它和遮罩都消失再取数。
+- **CDP 连接**：先筛 `type==='page'` 且 URL 命中目标路径。本机扩展的 background 页也会给出
+  `webSocketDebuggerUrl`；连上它时 `Page.navigate` 看似成功、页面函数却全是 `undefined`，
+  是一条很贵的假红（2026-10-21 实测）。
+- **错误日志**：给新页面注入 `window.__errs` 收集 `error`/`unhandledrejection`；但要把已知的
+  第三方噪音（如 `spine-all.js` 的 `THREE is not defined`）与“首屏初始化失败”分开判。
 
 ## 验证
 

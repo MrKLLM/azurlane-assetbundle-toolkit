@@ -40,6 +40,11 @@ function css(){
       'background:linear-gradient(90deg,transparent,var(--brand-d,#3d87d4),transparent);'+
       'animation:inksweep 1.8s var(--ease-ios,ease) infinite}'+
     '@keyframes inksweep{to{transform:translateX(100%)}}'+
+    '.bv-skip{display:none;margin-top:4px;padding:5px 12px;border:1px solid var(--chip-line,#d9e2ee);'+
+      'border-radius:999px;background:transparent;color:var(--txt2,#4a5a70);'+
+      'font:11px/1.4 "Segoe UI","Microsoft YaHei",sans-serif;cursor:pointer}'+
+    '.bv-skip.on{display:inline-block}'+
+    '.bv-skip:hover{border-color:var(--brand,#5fb0ef);color:var(--brand-d,#3d87d4)}'+
     /* ── 顶部真实进度：一根墨线 + 一枚小玻璃牌。 ── */
     '#inkbar{position:fixed;top:0;left:0;right:0;height:3px;z-index:150;pointer-events:none;'+
       'opacity:0;transition:opacity .22s ease}'+
@@ -79,8 +84,23 @@ function ensureBoot(){
     bootEl=document.createElement('div'); bootEl.id='bootveil';
     bootEl.innerHTML='<div class="bv-inner"><div class="bv-ink"><i></i><i></i><i></i></div>'+
       '<p class="bv-t">正在展开资产…</p><p class="bv-s">读取索引与缩略图</p>'+
-      '<span class="bv-line"></span></div>';
+      '<span class="bv-line"></span>'+
+      '<button class="bv-skip" type="button">仍然进入</button></div>';
     (document.body||document.documentElement).appendChild(bootEl);
+  }
+  /* 5 秒后给一个显式出口：首屏再重，也不该让用户只能盯着遮罩。
+     ⚠️ 页面里的 #bootveil 是静态 HTML，不保证带 .bv-skip；必须在这里补，不能只在
+     “创建遮罩”的分支里生成（2026-10-22 实测：静态遮罩上按钮永远不出现）。 */
+  if(!bootEl.dataset.skipWired){
+    bootEl.dataset.skipWired='1';
+    var skip=bootEl.querySelector('.bv-skip');
+    if(!skip){
+      skip=document.createElement('button');
+      skip.type='button'; skip.className='bv-skip'; skip.textContent='仍然进入';
+      (bootEl.querySelector('.bv-inner')||bootEl).appendChild(skip);
+    }
+    skip.onclick=function(){ bootDone(); };
+    setTimeout(function(){ if(bootEl&&!bootEl.classList.contains('off')) skip.classList.add('on'); },5000);
   }
   return bootEl;
 }
@@ -204,7 +224,9 @@ css();
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',function(){ ensureBoot(); });
 else ensureBoot();
 /* 兜底：页面脚本真挂了也不能让遮罩永远盖住错误。 */
-bootTimer=setTimeout(function(){ if(bootEl&&!bootEl.classList.contains('off')) bootDone(); },15000);
+/* 兜底：页面脚本真挂了也不能让遮罩永远盖住错误。12 秒自动收起，另有一个 5 秒出现的
+   「仍然进入」按钮（手动更快）；两个出口都不依赖页面自己的初始化。 */
+bootTimer=setTimeout(function(){ if(bootEl&&!bootEl.classList.contains('off')) bootDone(); },12000);
 
 window.InkLoad={bootDone:bootDone,start:start,progress:progress,done:done,fail:fail,
   waitHTML:waitHTML,fetchJSON:fetchJSON,trackThumbs:trackThumbs,el:function(){return bootEl;}};

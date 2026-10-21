@@ -5237,7 +5237,8 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 **判据**
 
 - 首屏：数据与首屏渲染完成后 `#bootveil` 必须消失；成功、失败、脚本缺失三条路径都要
-  `InkLoad.bootDone()`，另有 15s 兜底；遮罩不能盖住错误信息。
+  `InkLoad.bootDone()`。`apply()` 放 `try/finally`；5s 出现「仍然进入」，12s 自动收起；
+  三页各有一段不依赖 `loading.js` 的内联兜底（脚本 404 也不能永久挡页）。遮罩不能盖住错误信息。
 - 顶部 `#inkbar`：有 `Content-Length` 时按真实字节推进；没有才退化为 indet。
   `trackThumbs` 只统计首屏附近（`1.35×视口`）的图，完成/失败/8s 兜底后收起；
   **不能拿全页 lazy 图当分母**。

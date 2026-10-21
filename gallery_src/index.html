@@ -491,6 +491,9 @@ main{position:relative;z-index:1}
     <p class="bv-t">正在展开资产…</p><p class="bv-s">读取舰船索引与缩略图</p>
     <span class="bv-line"></span></div>
 </div>
+<script>/* 不依赖 loading.js 的兜底：脚本 404/早错时也不能让遮罩永久挡住页面。 */
+setTimeout(function(){var b=document.getElementById('bootveil');if(b&&!b.classList.contains('off')){
+  b.style.opacity='0';b.style.pointerEvents='none';setTimeout(function(){try{b.remove()}catch(e){}},700);}},12000);</script>
 <div id="bgfx" aria-hidden="true"><div class="bfield"><i class="glow g1"></i><i class="glow g2"></i><i class="glow g3"></i></div></div>
 <header class="main-toolbar">
   <h1>碧蓝航线资产浏览器</h1>
@@ -2698,10 +2701,18 @@ paintClearBg();
 /* 收藏的委托监听必须在 apply() 之前挂上：apply() 一次性建出满屏卡片，而星标是拼进 innerHTML 的，
    没有委托就没人接它们的点击（也不会报错，只是点了没反应——最难查的那种）。 */
 if(window.Fav) Fav.bind();
-apply();
-if(window.InkLoad){
-  InkLoad.bootDone();
-  requestAnimationFrame(()=>InkLoad.trackThumbs(document.getElementById('main'),'铺开缩略图'));
+try{
+  apply();
+}catch(e){
+  console.error('[gallery] 首屏渲染失败', e);
+  if(window.InkLoad) InkLoad.fail('首屏渲染出错');
+  throw e;
+}finally{
+  /* 无论 apply 成功还是抛错，遮罩都必须收：它只负责等待，不负责掩盖错误。 */
+  if(window.InkLoad){
+    InkLoad.bootDone();
+    requestAnimationFrame(()=>InkLoad.trackThumbs(document.getElementById('main'),'铺开缩略图'));
+  }
 }
 </script>
 </body>

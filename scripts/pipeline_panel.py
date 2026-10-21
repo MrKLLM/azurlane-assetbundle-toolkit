@@ -4288,11 +4288,16 @@ function render(){
   if(gateEl){
     if(A.gate){
       gateEl.hidden=false;
+      /* 卡点只放"与本步主按钮不同"的动作：2026-10-22 用户截图里出现两个「先查一遍」，
+         根因是 gate.acts 和 cta.acts 各带了一份同一个 recheck。这里按 (a,t) 去重，
+         既修当前重复，也不让以后新增卡点时再复制一遍。 */
+      const gateActs=(A.gate.acts||[]).filter(c=>
+        !(A.acts||[]).some(x=>x.a===c.a&&x.t===c.t));
       gateEl.innerHTML='<span class="gt">'+esc(A.gate.t)+'</span>'+
         '<p class="gb">'+esc(A.gate.b)+'</p>'+
-        '<div class="ga">'+A.gate.acts.map(c=>
+        (gateActs.length?'<div class="ga">'+gateActs.map(c=>
           '<button class="'+c.k+'" data-a="'+c.a+'"'+(c.to?' data-to="'+c.to+'"':'')+'>'+
-          c.t+'</button>').join('')+'</div>';
+          c.t+'</button>').join('')+'</div>':'');
     }else{
       gateEl.hidden=true; gateEl.innerHTML='';
     }
