@@ -1332,6 +1332,27 @@ def st_review():
     chg, new_only, todo = [], [], []
     p_new = os.path.join(WORK, 'Paintings_v2')
     live_p = os.path.join(OUT, 'Paintings_v2')
+    # ⚠️ 每次 review 先把上一批的对照图移进 archive：面板的 `glob_sheets()` 读的是
+    #    WORK 顶层所有 png/jpg，不清理就会把 10-01 的 cmp/crop 排在新表前面
+    #    （2026-10-23 用户实测：以为这次没出表）。归档不是删除，仍可去 archive 里看。
+    arch = os.path.join(WORK, 'archive', 'sheets_' + time.strftime('%Y%m%d_%H%M%S'))
+    moved = failed = 0
+    old_sheets = glob.glob(os.path.join(WORK, '*.png')) + glob.glob(os.path.join(WORK, '*.jpg'))
+    for f in old_sheets:
+        try:
+            os.makedirs(arch, exist_ok=True)
+            shutil.move(f, arch)
+            moved += 1
+        except OSError:
+            failed += 1
+    if moved:
+        try:
+            arch_note = os.path.relpath(arch, ROOT)
+        except ValueError:          # 测试把 WORK 放到别的盘符时 relpath 会抛
+            arch_note = arch
+        lines.append(f'旧对照图归档 {moved} 张 → {arch_note}')
+    if failed:
+        lines.append(f'⚠️ {failed} 张旧图被占用，没能归档（会继续出现在列表里）')
     if os.path.isdir(p_new) and os.path.isdir(live_p):
         news = [os.path.basename(x)[:-4] for x in glob.glob(os.path.join(p_new, '*.png'))]
         same_n = 0

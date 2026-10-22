@@ -11736,3 +11736,26 @@ CG 从 00:25:13 起静默 75 秒后断电，第二天控制台仍显示 `running
 
 **涉及**：`gallery_src/_gallery_server.py`、`Output/gallery_v2/_gallery_server.py`、
 `gallery_src/启动资产浏览器.bat`、`scripts/deploy_gallery.py`、`docs/WORKFLOWS.md` WF-59。
+
+## §179 对照表「没变」：review 目录把上一批的 cmp/crop 一起列出来（2026-10-23）
+
+**现象**：第 4 步主屏写「对照表好了 9 张」，点开细节全是 10-01 的 `cmp_*`/`crop_*`/`diff_mask`；
+新生成的 `sheet_paintings.png`（12 对）排在列表底部，看起来像「这次没出表」。
+
+**根因**：`glob_sheets()` 读 `.diag/pipeline/*.png|*.jpg` 全部文件，而 `st_review` 从不清理
+上一批；`sorted()` 按文件名排，`cmp_*`/`crop_*` 排在 `sheet_*` 前面。主屏的「9 张」是
+**目录里的图片文件数**，不是「这次新增/变化的对数」。
+
+**修法**：
+- `st_review()` 先把 WORK 顶层旧 png/jpg 归档到 `.diag/pipeline/archive/sheets_<时间>/`（不删），
+  再生成本次 `sheet_paintings.png`；
+- `glob_sheets()` 按 mtime 倒序，面板不再二次按文件名排序；
+- 第 4 步主屏改用 review verdict 的「线上新增 N / 内容有变 M」，并注明对照表取前 12 对；
+- `news` 缓存 45s→10s，review 完 10s 内「这次新增了什么」表跟上。
+
+**判据**：review 后 WORK 顶层只剩本次 `sheet_paintings.png`；`/api/state.sheets` 只有 1 条
+且 mtime 为本次；主屏显示「线上新增 36 · 内容有变 0」；`/api/state.news.rows` 36 条。
+归档目录保留旧表，仍可手动查看；旧图被浏览器占用时会提示「没能归档」，不会让 review 判红。
+
+**涉及**：`scripts/update_pipeline.py`（st_review）、`scripts/pipeline_panel.py`（glob_sheets/
+askOf/newsafe）、`docs/WORKFLOWS.md` WF-59。

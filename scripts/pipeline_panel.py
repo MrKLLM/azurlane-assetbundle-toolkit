@@ -825,7 +825,7 @@ class H(BaseHTTPRequestHandler):
                 print(f'[警告] 读阶段结论失败：{type(e).__name__}: {e}')
                 err = f'读阶段结论失败：{type(e).__name__}: {e}'
             sheets = []
-            for p in sorted(glob_sheets()):
+            for p in glob_sheets():
                 sheets.append({'name': os.path.basename(p),
                                'kb': round(os.path.getsize(p) / 1024),
                                'mt': time.strftime('%m-%d %H:%M', time.localtime(
@@ -1227,12 +1227,14 @@ def newsafe():
                 'live_n': sum(1 for r in rows if r['live']),
                 'sheet': ('sheet_paintings.png'
                           if os.path.isfile(os.path.join(WORK, 'sheet_paintings.png')) else '')}
-    return _cached('news', 45.0, calc)
+    return _cached('news', 10.0, calc)
 
 
 def glob_sheets():
     import glob
-    return glob.glob(os.path.join(WORK, '*.png')) + glob.glob(os.path.join(WORK, '*.jpg'))
+    ps = glob.glob(os.path.join(WORK, '*.png')) + glob.glob(os.path.join(WORK, '*.jpg'))
+    # 最新生成的在最前：同一批可能有多张（sheet_1/2/…），旧的也不该排在前面。
+    return sorted(ps, key=os.path.getmtime, reverse=True)
 
 
 # 输入指纹要 os.walk 整个 files/AssetBundles（91,643 个文件，实测数秒）。
@@ -4289,9 +4291,14 @@ function askOf(n){
       why:'纯读，随时可以反复跑。图会放在「细节」里，点开能放大。',
       acts:[{a:'review',t:'▶ 出对照表',k:'pact mag'}]};
     const nxRv=nextStepAct(nReview);
-    return {eb, ask:'对照表好了，'+nEm((S.sheets||[]).length)+' 张，'+
+    const rd=(rv&&rv.detail)||'';
+    const mNew=/线上新增\s*(\d+)/.exec(rd), mChg=/内容有变\s*(\d+)/.exec(rd);
+    /* 主屏说"新增多少、变化多少"，不说"目录里有几张图"：后者会把上一批的 cmp/crop
+       一起算进去（2026-10-23 用户截图：写 9 张，点开全是 10-01 的旧图）。 */
+    const cnt=(mNew||mChg)?('：线上新增 '+nEm(mNew?+mNew[1]:0)+' · 内容有变 '+nEm(mChg?+mChg[1]:0)):'';
+    return {eb, ask:'对照表好了'+cnt+'，'+
         (allStagesPass()?'本轮已照过、也已换入':'看一眼再决定换不换'),
-      why:'这一步不写任何正式产物。'+nxRv.why,
+      why:'这一步不写任何正式产物。'+(mNew?('对照表取前 12 对，共 '+mNew[1]+' 张新增。'):'')+nxRv.why,
       acts:[{a:'detail',t:'打开对照表',k:'pact mag'},nxRv.act]};
   }
 

@@ -5382,6 +5382,8 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
    ⚠️ `cg`/`derive` 现在会先把本轮 **Spine / Live2D 临时区换入正式区（带备份）并重建索引**；
    旧版本没有这一步时，CG 会因旧索引只导 2/6、Live2D 两个新模型也进不了画廊。
 3. 第 4 步「看图对比」出对照表：本次预期线上新增 36、内容有变 0、逐字节相同 186。
+   对照表每轮只保留本次：旧 `cmp_*`/`crop_*` 会归档到 `.diag/pipeline/archive/sheets_*`；
+   主屏的「新增/变化」数来自 review verdict，不是目录里的图片文件数（§179）。
 4. 第 5 步「签字换入」：新增图在正式区原本不存在 ⇒ `painting_swap_in` **不备份**；只有旧文件才 `copy2`。
    本次额外空间约 36 张 PNG ≈ 175MB，不是整库 17GB 的双份。`derive` 会再生 Live2D 换入与索引。
 5. 换入后 derive（缩略图/台词表/索引/部署）、labels、regress；`asset_manifest` 滞后另点「重扫清单」。
