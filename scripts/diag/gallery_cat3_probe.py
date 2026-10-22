@@ -62,6 +62,40 @@ def click_tab(pg, c):
     time.sleep(1.2)
 
 
+def load_all(pg):
+    """用页脚的「加载更多」把当前档拉全（确定性，不赌 IO 的触发时机）。
+
+    2026-10-22 实测：`scrollTop=scrollHeight` + 250ms 轮询在 874 张的舰船档只能到 720 ——
+    每批 120 张的布局/缩略图还没稳定，滚动位置就被改掉，哨兵没进视野。按钮是产品自己的
+    兜底通路，逐批点更稳；无限滚动的触发时机由 `index_paging_probe` 单独判。
+    """
+    for _ in range(40):
+        done = pg.ev(EV("const m=document.querySelector('#main .more');"
+                        "return !m || m.classList.contains('done')"))
+        if done:
+            break
+        pg.ev(EV("const b=document.querySelector('#main .more button');"
+                 "if(b && getComputedStyle(b).display!=='none') b.click();return 1"))
+        time.sleep(0.35)
+    return int(pg.ev(EV("return document.querySelectorAll('#main .card').length")))
+
+
+def card_tags(pg, name):
+    """按名字搜出唯一一张卡并读标签；读完清空搜索。返回 '(这张卡不在舰船档)' 即未命中。"""
+    pg.ev(EV("(()=>{const s=document.getElementById('search');s.value=%s;"
+             "s.dispatchEvent(new Event('input',{bubbles:true}));return 1})()"
+             % json.dumps(name, ensure_ascii=False)))
+    time.sleep(0.7)
+    t = pg.ev(EV("const c=[...document.querySelectorAll('#main .card')]"
+                 ".find(c=>c.querySelector('.nm').textContent.trim()===%s);"
+                 "return c?c.querySelector('.tags').textContent.replace(/\\s+/g,' ').trim()"
+                 ":'(这张卡不在舰船档)'" % json.dumps(name, ensure_ascii=False)))
+    pg.ev(EV("(()=>{const s=document.getElementById('search');s.value='';"
+             "s.dispatchEvent(new Event('input',{bubbles:true}));return 1})()"))
+    time.sleep(0.7)
+    return t
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=9333)
@@ -70,7 +104,7 @@ def main():
     url = preflight(a.page)
     profile = os.path.join(ROOT, '.diag', 'chrome_cat3')
     os.makedirs(profile, exist_ok=True)
-    pg = Page(a.port, profile, url, '1440,900')
+    pg = Page(a.port, profile, url, (1440, 900))
     try:
         time.sleep(2.5)                                  # 等 index.js + 首屏渲染
         idx = json.loads(pg.ev(EV("return JSON.stringify(window.GALLERY.counts)")))
@@ -127,23 +161,17 @@ def main():
         # ---------- 2026-10-05：拿到 META 阵营才能独立成卡（`normalize()` 的 `_alter` 判据） ----------
         click_tab(pg, 'ship')
         shp = cards(pg)
-        ship_d = dict(shp)
+        chk('6 舰船档首屏只渲染一页（分页生效）', 0 < len(shp) <= 130, '%d 张' % len(shp))
         # 卡片副标题是 `<id> · N皮肤`，阵营/舰种/稀有度在 `.tags` 里 —— 判 META 阵营只能看标签。
-        tags = pg.ev(EV("const c=[...document.querySelectorAll('#main .card')]"
-                        ".find(c=>c.querySelector('.nm').textContent.trim()===%s);"
-                        "return c?c.querySelector('.tags').textContent.replace(/\\s+/g,' ').trim():'(这张卡不在舰船档)'"
-                        % json.dumps('埃塞克斯·META', ensure_ascii=False)))
+        # ⚠️ 分页后 863+ 张舰船不会同时进 DOM，必须**按名字搜出来**再读，不能假设它在首屏。
+        tags = card_tags(pg, '埃塞克斯·META')
         chk('6b 埃塞克斯·META 在「舰船」档里，标签带 META 阵营与航母/超稀有',
-            '埃塞克斯·META' in ship_d and 'META' in tags
-            and '航母' in tags and '超稀有' in tags, tags)
+            'META' in tags and '航母' in tags and '超稀有' in tags, tags)
         # 灵敏·META 走的是另一条通道（META 补桥表，§108）：表里没有她的皮肤行，
         # 阵营/舰种来自 `ship_data_group`，**稀有度表里没有 ⇒ 故意留空**，所以这条不能照抄 6b。
-        tags2 = pg.ev(EV("const c=[...document.querySelectorAll('#main .card')]"
-                         ".find(c=>c.querySelector('.nm').textContent.trim()===%s);"
-                         "return c?c.querySelector('.tags').textContent.replace(/\\s+/g,' ').trim():'(这张卡不在舰船档)'"
-                         % json.dumps('灵敏·META', ensure_ascii=False)))
+        tags2 = card_tags(pg, '灵敏·META')
         chk('6e 灵敏·META（补桥成卡）在「舰船」档里，标签带 META + 驱逐 + 声明过的稀有度',
-            '灵敏·META' in ship_d and 'META' in tags2 and '驱逐' in tags2 and '精锐' in tags2, tags2)
+            'META' in tags2 and '驱逐' in tags2 and '精锐' in tags2, tags2)
         import urllib.request
         from gallery_ui_shots import BASE
         vp2 = json.loads(pg.ev(EV("return JSON.stringify((window.GALLERY.ships||[])"
@@ -166,8 +194,9 @@ def main():
         chk('6c 她不再是宿主卡下的「· 改造」外迁条目（剧情角色档里搜不到她）',
             not any('埃塞克斯·META' in n for n in st),
             str([n for n in st if '埃塞克斯' in n]))
-        chk('6d 舰船档 DOM 卡片数与档位按钮的数一致（防止网格只渲染一部分）',
-            len(shp) == nums.get('舰船', -1), '%d 张 vs 按钮 %s' % (len(shp), nums.get('舰船')))
+        n_ship = load_all(pg)
+        chk('6d 滚到底后舰船档 DOM 卡片数与档位按钮的数一致（防止网格只渲染一部分）',
+            n_ship == nums.get('舰船', -1), '%d 张 vs 按钮 %s' % (n_ship, nums.get('舰船')))
 
         # ---------- 秘书舰语音与台词（P4b）：必须真取到字节，不是"路径写上了" ----------
         import urllib.request

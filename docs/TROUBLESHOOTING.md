@@ -11634,3 +11634,29 @@ STAGES 里 derive 的标题/判据/writes 同步改成"缩略图 / 台词表 / �
 **判据**：index/backgrounds/bgm 三页在无图/有图两档下，`#bootveil` 都消失；
 `.bv-skip` 在 5 秒后可点；控制台/页面无新增 JS 异常（`spine-all.js` 的 THREE 缺失是既有无害噪音，
 不影响页面初始化）。`panel_paper_probe.py` 与 `bg_page_probe/bgm_page_probe` 继续全绿。
+
+## §176 首屏 1,022 张卡不是遮罩卡住的全部原因：长任务要按 `bootDone` 前后拆（2026-10-22）
+
+**假设**：首页一次同步建 1,022 张卡 ⇒ 主线程被占住 ⇒ 遮罩淡出卡住。
+
+**实测（否证）**：
+- 改前 1,022 卡 / 15,399 节点，`bootDone` 在 **241ms** 就已执行；最长长任务 1,452ms。
+- 改后每批 120（窄屏 60）：2,207 节点，bootOff 181~234ms；遮罩收起前最长任务 176~241ms，
+  收起后的长任务仍有 1.0~1.7s。
+- 3s CPU 采样：`water_bg.js` 的 `bgInit` 自耗时 **1,522ms**（headless SwiftShader 下的
+  WebGL 初始化），`makeCard` 仅 **3ms**。⇒ 遮罩淡出会被它后面的长任务冻住，但那条不是建卡。
+- 结论：分批渲染该做（DOM 与滚动成本降一个量级），但“1,022 张卡是根因”在本机口径下**不成立**；
+  真机 GPU 上 `bgInit` 的量级需另量。若下一轮要连淡出一起保，可把 `bgSync()` 推迟到
+  `bootDone` 之后 / `requestIdleCallback`，属跨模块调度，不在本轮。
+
+**判据写法**：长任务按 `startTime <= bootOff` 与 `> bootOff` 分开；前者判首屏渲染，后者只打印并
+标注 `water_bg/WebGL`，不要把 GPU 噪声算成建卡成绩。
+
+**顺带暴露的既有红（本轮未修）**：`gallery_cat3_probe` 6e/6f 仍红。`inputs/gamecfg/meta_group_bridge.json`
+只有 `{}`，`ship_meta.json` 的 `lingmin_alter` 没有补桥字段，索引回到 §108 修复前的
+`ships=975 / variants=27`（应为 976/25；`灵敏·META` 现在落在 story/other，舰船档搜不到）。
+10-17 23:16 该文件被写成 2 字节；本轮只做 UI 分批渲染，未擅自重跑 48 号脚本，下一轮先查
+那次重建为何产出空补桥，再决定是否重跑。
+
+**涉及**：`gallery_src/index.html`、`scripts/diag/index_paging_probe.py`、`scripts/diag/gallery_cat3_probe.py`、
+`docs/WORKFLOWS.md` WF-57。

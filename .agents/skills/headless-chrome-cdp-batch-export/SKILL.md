@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
-description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。触发词（验收向）：点击没落地、开关无效还是探针没点到、画面改变判据全红而可逆判据全绿、取样哨兵值 None 参与比较、ES module 整块不初始化、vendor import 闭包、滑鼠标卡顿归因、帧时拆解、背景动效是不是罪魁、交替配对测量、顺序 A/B 的差不能当收益、property tree 节点数、静止不带 transform、判据放宽成恒真、绿着崩。
-version: 1.8.25
+description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。触发词（验收向）：点击没落地、开关无效还是探针没点到、画面改变判据全红而可逆判据全绿、取样哨兵值 None 参与比较、ES module 整块不初始化、vendor import 闭包、滑鼠标卡顿归因、帧时拆解、背景动效是不是罪魁、交替配对测量、顺序 A/B 的差不能当收益、property tree 节点数、静止不带 transform、判据放宽成恒真、绿着崩、首屏长列表分批渲染、分页探针、长任务按 bootDone 前后拆。
+version: 1.8.26
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -741,6 +741,25 @@ version: 1.8.25
   是一条很贵的假红（2026-10-21 实测）。
 - **错误日志**：给新页面注入 `window.__errs` 收集 `error`/`unhandledrejection`；但要把已知的
   第三方噪音（如 `spine-all.js` 的 `THREE is not defined`）与“首屏初始化失败”分开判。
+
+### 首屏长列表分批渲染：首屏上限与“全量可达”成对判（2026-10-22）
+
+- **判据成对**：首屏 DOM 卡数 ≤ 一页（桌面 120 / 窄屏 60）+ 滚到底或点“加载更多”后总数
+  == 索引三档之和。只判前者会把内容弄丢；只判后者挡不住首屏铺满。
+- **分页会推翻“全量都在 DOM”的前提**：老探针里直接 `querySelectorAll('.card')` 数全量的断言
+  必须改成“按名字搜出来读”或“先点页脚按钮拉全”；这是探针假设过期，不是产品回归。
+- **窗口尺寸传参**：`Page(..., win)` 若内部用 `win[0],win[1]` 拼 `--window-size`，传字符串
+  `'1440,900'` 会变成 1×4，媒体查询/分页档位全错（本次 3e 假红的真因）。传 tuple，并打印
+  `innerWidth` 或断言首屏卡数符合预期档位。
+- **长任务先归因再算成绩**：首屏 1s+ 的 `longtask` 不一定是建卡。用 `Profiler.start/stop` 采 3s，
+  按 callFrame 聚合自耗时；本次 1,522ms 落在 `water_bg.js` 的 `bgInit`（SwiftShader 下 WebGL
+  初始化），`makeCard` 只有 3ms。判据按 `startTime <= bootOff` 与 `> bootOff` 分开：前者判本次
+  渲染，后者只打印并标注（GPU/水面噪声），否则会把长任务总量算成建卡收益。
+- **确定性命中别赌 IO 时机**：`scrollTop=scrollHeight` + 固定 250ms 轮询在 874 张档只到 720
+  （布局/图片还在变，滚动位置被改掉后哨兵没进视野）；确定性的“拉全”用页脚按钮逐批点，
+  无限滚动另配一条探针。
+- **实现侧的四个点**：分区头不占页名额；`.grid` 跨批复用（批次边界常落在分区中间）；
+  筛选/分档/搜索重置游标并断开 observer；页脚同时给哨兵和“加载更多”按钮（IO 不可用时仍能加载）。
 
 ## 验证
 

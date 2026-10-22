@@ -183,6 +183,13 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
   background:var(--panel);box-shadow:var(--sh1);border:1px solid var(--line)}
 .b-spine{color:var(--ok-d)}.b-l2d{color:var(--pop-d)}.b-voice{color:var(--brand-d)}
 .empty{color:var(--dim);text-align:center;padding:44px;font-size:14px;font-weight:600}
+/* 分批渲染的页脚：安静的一行状态 + 一个兜底按钮（IntersectionObserver 不可用时仍能加载） */
+.more{display:flex;align-items:center;justify-content:center;gap:10px;padding:26px 8px 10px;
+  font-size:11px;color:var(--dim);font-weight:600;letter-spacing:.02em}
+.more button{font:inherit;color:var(--brand-d);background:transparent;border:1px solid var(--glass-line);
+  border-radius:999px;padding:5px 14px;cursor:pointer;transition:border-color .16s,color .16s}
+.more button:hover{border-color:var(--brand);color:var(--txt)}
+.more.done button{display:none}
 
 /* 分段控件：整颗胶囊，选中那颗由一粒会滚的胶囊承担（和弹层标签条同一套语言） */
 .seg{display:inline-flex;gap:4px;background:color-mix(in srgb,var(--panel) 56%,transparent);
@@ -675,11 +682,97 @@ function uniqCount(arr){ const m={}; arr.forEach(x=>{if(x)m[x]=(m[x]||0)+1;}); r
   opt('fFaction',fc); opt('fType',tp); opt('fRarity',rr);
 })();
 
-/* ---------- 渲染网格（按 category 分区：舰船 / 剧情角色） ---------- */
 const mainEl = document.getElementById('main');
 function catOf(s){ return s.category==='other' ? 'other' : (s.category==='story' ? 'story' : 'ship'); }
 /* 伪船（剪影 / 特殊形态）在卡片副标题上要说清"它不是皮肤"，两种一起判，别再各写一遍三元 */
 function pseudoKind(s){ return s.sil?'剧情剪影':(s.var?'特殊形态':''); }
+
+/* ---------- 渲染网格（按 category 分区：舰船 / 剧情角色 / 其他） ----------
+   ⚠️ 分批渲染（2026-10-22）：一次同步建 1,022 张卡，主线程被占住 1.4s+。首屏遮罩虽然
+   241ms 就加了 .off，但淡出/移除排在长任务后面 ⇒ 用户看到的是"遮罩卡住"。
+   现在首屏只建一页，页脚的哨兵进入预取范围再追加。筛选 / 分档 / 搜索会从第一页重来。
+   ⚠️ `#main .grid` 跨批次复用：批次边界常落在某一档中间，不能为同一档再建一个网格。
+   ⚠️ 卡片事件全是委托监听（mainEl 上），追加的卡不各挂一套；收藏的 Fav.bind() 同理。 */
+const PAGE_WIDE = 120, PAGE_NARROW = 60;
+function pageSize(){ return matchMedia('(max-width:600px)').matches ? PAGE_NARROW : PAGE_WIDE; }
+let pageState = null;
+function buildUnits(){
+  const CATL={ship:'舰船',story:'剧情角色',other:'其他'};
+  const groups = catFilter==='' ? [['ship','舰船'],['story','剧情角色'],['other','其他']]
+                                : [[catFilter, CATL[catFilter]||catFilter]];
+  const units=[]; const per={}; let total=0;
+  groups.forEach(([key,label])=>{
+    const list = view.filter(s=>catOf(s)===key);
+    per[key]=list.length;
+    if(!list.length) return;
+    units.push({hd:key,label,n:list.length});
+    list.forEach(s=>{ units.push({ship:s}); total++; });
+  });
+  return {units,per,total};
+}
+function updateMore(){
+  const st=pageState; if(!st||!st.more) return;
+  const left=st.total-st.shown;
+  st.more.classList.toggle('done',left<=0);
+  st.more.querySelector('.t').textContent = left<=0
+    ? `已显示全部 ${st.total}`
+    : `已显示 ${st.shown} / ${st.total} · 继续下滑`;
+}
+function ensureMore(){
+  const st=pageState;
+  if(!st.more){
+    const m=document.createElement('div'); m.className='more';
+    m.innerHTML='<button type="button">加载更多</button><span class="t"></span>';
+    m.querySelector('button').onclick=()=>appendPage();
+    st.more=m;
+  }
+  mainEl.appendChild(st.more);   // 始终压在最后一张卡下面（appendChild 会把它移过来）
+  updateMore();
+}
+function watchMore(){
+  const st=pageState;
+  if(st.observer){ st.observer.disconnect(); st.observer=null; }
+  if(!st.more || !window.IntersectionObserver) return;   // 老浏览器只剩「加载更多」按钮
+  const io=new IntersectionObserver(es=>{
+    if(es.some(e=>e.isIntersecting)) appendPage();
+  },{root:mainEl,rootMargin:'900px 0px'});
+  io.observe(st.more); st.observer=io;
+}
+function appendPage(){
+  const st=pageState;
+  if(!st || st.cursor>=st.units.length) return;
+  const start=st.shown, size=pageSize();
+  for(; st.cursor<st.units.length; st.cursor++){
+    const u=st.units[st.cursor];
+    if(u.hd!==undefined){
+      const hd=document.createElement('div'); hd.className='sec-hd'+(u.hd==='story'?' story':'');
+      hd.innerHTML=`${u.label} <span class="n">${u.n}</span>`;
+      mainEl.appendChild(hd);
+      st.grid=document.createElement('div'); st.grid.className='grid';
+      mainEl.appendChild(st.grid);
+    }else{
+      if(st.shown-start>=size) break;   // 页大小按**卡片**数算；分区头不占名额
+      const c=makeCard(u.ship); c.style.setProperty('--i',st.shown);
+      st.grid.appendChild(c); st.shown++;
+    }
+  }
+  ensureMore(); watchMore();
+}
+function renderGrid(){
+  if(pageState&&pageState.observer) pageState.observer.disconnect();
+  mainEl.innerHTML='';
+  mainEl.scrollTop=0;          // 换筛选/分档后不该停在上一页的滚动位置
+  const cntEl=document.getElementById('count');
+  if(!view.length){ pageState=null; mainEl.innerHTML='<div class="empty">没有匹配的内容</div>'; cntEl.textContent='共 0 项'; return; }
+  const built=buildUnits();
+  if(!built.total){ pageState=null; mainEl.innerHTML='<div class="empty">该类别下没有匹配项</div>'; cntEl.textContent='共 0 项'; return; }
+  pageState={units:built.units,per:built.per,total:built.total,
+             cursor:0,shown:0,grid:null,more:null,observer:null};
+  cntEl.textContent = catFilter===''
+    ? `共 ${built.total} 项 · 舰船 ${built.per.ship||0} / 剧情 ${built.per.story||0} / 其他 ${built.per.other||0}`
+    : `共 ${built.total} 项`;
+  appendPage();
+}
 function makeCard(s){
   const card=document.createElement('div'); card.className='card';
   const ds=defSkin(s); const th=thumbOf(ds);
@@ -699,30 +792,6 @@ function makeCard(s){
     if(im.complete) on();
     else { im.addEventListener('load',on,{once:true}); im.addEventListener('error',on,{once:true}); } }
   return card;
-}
-function renderGrid(){
-  mainEl.innerHTML='';
-  const cntEl=document.getElementById('count');
-  if(!view.length){ mainEl.innerHTML='<div class="empty">没有匹配的内容</div>'; cntEl.textContent='共 0 项'; return; }
-  const CATL={ship:'舰船',story:'剧情角色',other:'其他'};
-  const groups = catFilter==='' ? [['ship','舰船'],['story','剧情角色'],['other','其他']]
-                                : [[catFilter, CATL[catFilter]||catFilter]];
-  let shown=0; const per={};
-  groups.forEach(([key,label])=>{
-    const list = view.filter(s=>catOf(s)===key);
-    per[key]=list.length;
-    if(!list.length) return;
-    shown+=list.length;
-    const hd=document.createElement('div'); hd.className='sec-hd'+(key==='story'?' story':'');
-    hd.innerHTML=`${label} <span class="n">${list.length}</span>`;
-    mainEl.appendChild(hd);
-    const g=document.createElement('div'); g.className='grid';
-    const frag=document.createDocumentFragment();
-    list.forEach((s,i)=>{ const c=makeCard(s); c.style.setProperty('--i',i); frag.appendChild(c); });
-    g.appendChild(frag); mainEl.appendChild(g);
-  });
-  if(!shown){ mainEl.innerHTML='<div class="empty">该类别下没有匹配项</div>'; }
-  cntEl.textContent = catFilter==='' ? `共 ${shown} 项 · 舰船 ${per.ship||0} / 剧情 ${per.story||0} / 其他 ${per.other||0}` : `共 ${shown} 项`;
 }
 
 /* ---------- 卡片跟随鼠标倾斜 + 毛玻璃按需挂载 ----------

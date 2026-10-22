@@ -5277,3 +5277,47 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 `gallery_src/bgm.html`、`gallery_src/site_bg_live.js`、`gallery_src/favorites.js`、
 `scripts/deploy_gallery.py`（FILES 加 `loading.js`）、`scripts/diag/livebg_ui_probe.py`、
 `scripts/diag/shot_bgm_bar.py`。
+
+### WF-57: 首屏长列表改分批渲染——首屏上限与“全量可达”必须成对判（2026-10-22）
+
+**触发**：首页 1,022 张卡一次同步建完，首屏遮罩看起来卡住、滚动发沉；要做“根治”而不是继续加兜底。
+
+**做法**
+1. 保留两层：`view`（筛选结果）与 `pageState`（`units / cursor / shown / grid / more / observer`）。
+   把分区头与卡片展平成 `units`，`appendPage()` 按**卡片**数取一页（桌面 120、窄屏 60）。
+2. 分区头只出现一次；`.grid` 存在 `pageState.grid` 里跨批复用——批次边界常落在某一档中间，
+   每批都新建 `.grid` 会把同一档拆成多个网格（列宽/间距看着会断）。
+3. 页脚 `.more` 同时承担人看的“已显示 N / 共 M”和兜底按钮；`IntersectionObserver` 以 `#main`
+   为 root、`rootMargin:'900px 0px'` 提前一批。IO 不可用时按钮仍能加载。
+4. `renderGrid()` = 断开旧 observer + 清空 + `scrollTop=0` + 重建 units + 先渲染一页。
+   切档/筛选/搜索都走它，所以重置只写在这**一个地方**。
+5. 首屏渲染完才 `bootDone()`；追加批次不再碰遮罩/进度条（`trackThumbs` 只负责首屏附近）。
+
+**判据（必须成对，缺一半就是假绿）**
+- 首屏 DOM 卡数 ≤ 一页（桌面 120 / 窄屏 60；探针留 10 张余量）；
+- 滚到底或点“加载更多”后 DOM 卡数 == 索引三档之和（当前 1022）；
+- 分档/搜索后 `scrollTop==0`、首屏卡数回到一页、结果与关键词/档位一致；
+- 首屏缩略图 `naturalWidth>0`（DOM 有、图全空是另一种假绿）；
+- 追加出来的卡片仍能点开（事件委托与收藏绑定没有丢）；
+- 把“遮罩收起前”和“收起后”的长任务分开打印：前者才是本次渲染改动的成绩。
+
+**实测**（2026-10-22，headless SwiftShader，1440×900）
+- DOM 卡 1022→120、节点 15,399→2,207；bootOff 241→181~234ms；遮罩收起前最长任务 176~241ms。
+  总阻塞里剩下的 1.0~1.7s 在 `water_bg.js` 的 `bgInit`（CPU 采样 1,522ms；`makeCard` 3ms），
+  不是建卡——归因与判据见 §176。
+- 窄屏 390×844 首屏 60 张、无横向溢出；`gallery_cat3_probe` 的舰船档 874 张可用按钮拉全。
+
+**踩坑记录**
+- `Page(...,'1440,900')` 传字符串时 `win[0]/win[1]` 是 `'1'/'4'` ⇒ `--window-size=1,4`，
+  页面走窄屏分支（首屏 60），`_dark` 卡落在第二页，老探针 3e 假红。传 tuple，并打印 `innerWidth`
+  或断言首屏卡数符合预期档位。
+- 分页后**任何**“假设全量都在 DOM”的断言都要改：按名字搜出来读，或先点页脚按钮拉全；
+  不要为了让它绿而把产品改回一次渲染。
+- `scrollTop=scrollHeight` + 固定 250ms 轮询在 874 张档只到 720：布局/图片还在变，滚动位置
+  被改掉后哨兵没进视野。确定性场景用页脚按钮逐批点，无限滚动另配一条探针。
+- 长任务归因不能只看 `longtask` 的 attribution（`containerType:'window'` 等于没说）；
+  用 `Profiler.start/stop` 按 callFrame 聚合自耗时，才知道是 `bgInit` 还是 `makeCard`。
+- `gallery_cat3_probe` 6e/6f 在本次之前就因索引 META 补桥丢失而红（§176），不要把它当成本轮回归。
+
+**涉及文件**：`gallery_src/index.html`、`scripts/diag/index_paging_probe.py`（新增）、
+`scripts/diag/gallery_cat3_probe.py`（6b/6e/6d 改按名字搜 + 页脚拉全）、`docs/TROUBLESHOOTING.md §176`。
