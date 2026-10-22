@@ -1203,6 +1203,71 @@ def gallery_reachable(timeout=3.0):
         return False
 
 
+def _dir_fingerprint(d):
+    """目录内容的 md5（相对路径 + 逐文件字节）。只用于判断"换入是否需要动手"。"""
+    h = hashlib.md5()
+    for root, dirs, files in os.walk(d):
+        dirs.sort()
+        for f in sorted(files):
+            p = os.path.join(root, f)
+            h.update(os.path.relpath(p, d).replace(os.sep, '/').encode('utf-8'))
+            with open(p, 'rb') as fh:
+                for b in iter(lambda: fh.read(1 << 20), b''):
+                    h.update(b)
+    return h.hexdigest()
+
+
+def promote_staged(kind, stems):
+    """把临时区里**本轮范围**的目录换入正式区（带备份）。
+
+    Spine/Live2D 与立绘不同：`st_spine`/`st_live2d` 只写 `.diag/pipeline/`，
+    而 CG 页读 `Output/Spine_v2`、画廊索引读 `Output/Live2D`。没有这一步，
+    新皮肤会停在临时区：CG 只导旧目录（还能凑出「完成 N>0」的假绿），
+    新 Live2D 模型则永远不进画廊。2026-10-23 实测 4/6 Spine + 2/3 Live2D 不在正式区。
+    """
+    src_root = os.path.join(WORK, kind)
+    dst_root = os.path.join(OUT, kind)
+    bak_root = os.path.join(OUT, '_OLD_bak',
+                            f'{kind.lower()}_{time.strftime("%Y%m%d_%H%M")}')
+    copied = replaced = skipped = failed = 0
+    notes, touched = [], []
+    os.makedirs(dst_root, exist_ok=True)
+    for stem in stems or []:
+        src = os.path.join(src_root, stem)
+        dst = os.path.join(dst_root, stem)
+        if not os.path.isdir(src):
+            failed += 1
+            notes.append(f'{stem}: 临时区缺目录')
+            continue
+        try:
+            if not os.path.isdir(dst):
+                shutil.copytree(src, dst)
+                copied += 1
+                touched.append(stem)
+            elif _dir_fingerprint(src) == _dir_fingerprint(dst):
+                skipped += 1
+            else:
+                os.makedirs(bak_root, exist_ok=True)
+                shutil.copytree(dst, os.path.join(bak_root, stem))
+                shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+                replaced += 1
+                touched.append(stem)
+        except Exception as e:
+            failed += 1
+            notes.append(f'{stem}: {type(e).__name__}: {e}')
+    for stem in touched:
+        try:
+            if _dir_fingerprint(os.path.join(src_root, stem)) != \
+                    _dir_fingerprint(os.path.join(dst_root, stem)):
+                failed += 1
+                notes.append(f'{stem}: 换入后指纹不符')
+        except Exception as e:
+            failed += 1
+            notes.append(f'{stem}: 复验失败 {type(e).__name__}: {e}')
+    return copied, replaced, skipped, failed, notes, bak_root
+
+
 def st_cg(full, approved):
     # 同上：CG 导出经画廊服务器**就地覆写 Output/CG_v2**，没有暂存区可退 ⇒ 未签字不许跑。
     if 'cg' not in approved:
@@ -1222,6 +1287,21 @@ def st_cg(full, approved):
         return verdict('cg', False,
                        '画廊服务器 8777 不可达 ⇒ CG 导出页打不开，脚本只会空等到超时。'
                        '先双击 gallery_src\\启动资产浏览器.bat（确认页面能打开），再重跑本阶段。')
+    if todo is not None:
+        # CG 读正式区 Output/Spine_v2；本轮 Spine 只写临时区 ⇒ 先换入（带备份）。
+        copied, replaced, skipped, failed, notes, bak = promote_staged('Spine_v2', todo)
+        log(f'  Spine 换入正式区：新增 {copied} · 替换 {replaced} · 相同跳过 {skipped} · 失败 {failed}'
+            + (f' · 备份 {bak}' if replaced else ''))
+        if failed:
+            return verdict('cg', False, 'Spine 换入失败：' + '；'.join(notes[:4]))
+        # CG 页的候选列表来自 index.js；不重建索引，新皮肤会被 --only 过滤掉，
+        # 只导已有的几张却仍能凑出「完成 N>0」的假绿（2026-10-23 实测 2/6）。
+        rc_i, so_i, se_i = run([PY, 'scripts/build_gallery_index.py'], timeout=1800,
+                               echo=['DONE'])
+        if rc_i != 0:
+            return verdict('cg', False,
+                           f'重建索引失败 rc={rc_i} ⇒ CG 页找不到本轮 Spine：'
+                           + ((so_i + se_i).strip().splitlines() or ['没输出'])[-1][:120])
     argv = [PY, 'scripts/diag/run_cg_export.py', '--size', '2400', '--extra', 'animFrame=1', '--redo']
     if todo is not None:
         argv += ['--only', ','.join(todo)]
@@ -1233,6 +1313,13 @@ def st_cg(full, approved):
                        f'没读到「完成N 跳过N 失败N」汇总行（rc={rc}）⇒ 不能判完成'
                        + (f'：{"；".join(tail)}' if tail else '（脚本没有输出收尾行，页面可能没加载）'))
     ok, skip, bad = map(int, m.groups())
+    want = len(todo) if todo is not None else None
+    if want is not None and ok + skip != want:
+        d = want - ok - skip
+        return verdict('cg', False,
+                       f'CG 导出 完成{ok} 跳过{skip} 失败{bad}，但本轮范围 {want} 个 ⇒ '
+                       f'{"少" if d > 0 else "多"} {abs(d)} 个'
+                       '（正式区 Spine/索引仍缺这些皮肤；看上面的 Spine 换入日志）')
     return verdict('cg', bad == 0 and ok > 0,
                    f'CG 导出 完成{ok} 跳过{skip} 失败{bad}'
                    + (f'（范围 {len(todo)} 个皮肤）' if todo is not None else '（--full 全量）'))
@@ -1345,6 +1432,16 @@ def st_derive(approved):
         return verdict('derive', False,
                        f'{words_note}（{"; ".join(tail) or "没读到「已写出」行"}）'
                        ' ⇒ 索引会用旧词表，拒绝继续建索引')
+    # 画廊索引读的是正式区 Output/Live2D；本轮模型只写临时区 ⇒ 建索引前先换入（带备份）。
+    # 与 CG 的 Spine 同一个缺口：不换入，新模型永远进不了索引（2026-10-23 实测 2/3 缺）。
+    mode, payload = scope_state(False)
+    l2d_stems = stems_for('live2d', payload) if mode == 'ok' else []
+    if l2d_stems:
+        copied, replaced, skipped, failed, notes, bak = promote_staged('Live2D', l2d_stems)
+        log(f'  Live2D 换入正式区：新增 {copied} · 替换 {replaced} · 相同跳过 {skipped} · 失败 {failed}'
+            + (f' · 备份 {bak}' if replaced else ''))
+        if failed:
+            return verdict('derive', False, 'Live2D 换入失败：' + '；'.join(notes[:4]))
     rc, so, _ = run([PY, 'scripts/build_gallery_index.py'], timeout=1800, echo=['DONE'])
     new_idx = os.path.join(OUT, 'gallery_v2', 'index.json')
     rc2, so2, _ = run([PY, 'scripts/diag/gallery_index_diff_check.py', old_idx, new_idx],
@@ -1422,7 +1519,7 @@ STAGES = [
           step=3, writes='Output/Audio/BGM（无暂存通道）'),
     Stage('cg', 'Spine 全屏 CG 导出', 'live', lambda a, f: st_cg(f, a),
           '必须读到「完成N 跳过N 失败N」且失败=0',
-          step=3, writes='Output/CG_v2（无暂存通道）', rate=1.3, unit='张'),
+          step=3, writes='Output/Spine_v2（先换入本轮 Spine，带备份）+ Output/gallery_v2/index.js + Output/CG_v2', rate=1.3, unit='张'),
     Stage('review', '出改前|改后总表 + 硬链扫描', 'read', lambda a, f: st_review(),
           '只出表；看图是人工',
           step=4, writes='.diag/pipeline/*.png 对照表 + 两份清单'),
@@ -1431,7 +1528,7 @@ STAGES = [
           step=5, writes='Output/Paintings_v2（先备份到 Output/_OLD_bak/pipeline_<日期>/）'),
     Stage('derive', '缩略图 / 台词表 / 索引 / 部署', 'live', lambda a, f: st_derive(a),
           'build_skin_words 退出码与「已写出」行 + gallery_index_diff_check 绿 + deploy --check 同 inode',
-          step=5, writes='Output/gallery_v2（含 skin_words.json 台词表）'),
+          step=5, writes='Output/Live2D（先换入本轮模型，带备份）+ Output/gallery_v2（含 skin_words.json 台词表）'),
     Stage('labels', '重建背景/音乐标签 + 漂移报告', 'live', st_labels,
           'rebuild_labels 退出码 + 新增词根/未命名清单',
           step=5, writes='Output/gallery_v2/{bg_meta,bgm}.json + inputs/gamecfg/bg_series_labels.json（签字后）'),

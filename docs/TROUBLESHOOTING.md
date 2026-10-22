@@ -11689,12 +11689,21 @@ CG 从 00:25:13 起静默 75 秒后断电，第二天控制台仍显示 `running
 - `st_cg` 先探 `http://127.0.0.1:8777/gallery_v2/cg_export.html`（3 秒，读 1 字节，**不只看端口 listen**），
   不可达直接判红；面板启动含 cg 的任务前也探一次。
 - `run_cg_export.py` 连上 CDP 后 10 秒内页面没有 `#prog` ⇒ `exit 2`；超时/无收尾行 ⇒ `exit 3`。
+- **暂存产物必须显式换入正式区**：`st_spine`/`st_live2d` 只写 `.diag/pipeline/`，而 CG 页读
+  `Output/Spine_v2`、画廊索引读 `Output/Live2D`。`st_cg` 在导出前把本轮 Spine 换入
+  `Output/Spine_v2`（已有目录先备份到 `Output/_OLD_bak/spine_*`）并重建 `index.js`；
+  `st_derive` 在建索引前把本轮 Live2D 换入 `Output/Live2D`（同样带备份）。
+- `st_cg` 的汇总行必须**与本轮范围对账**（`完成+跳过 == len(todo)`）：旧判据只看 `ok>0`，
+  旧索引把 4 个新皮肤过滤掉、只导 2 个也照样报绿。
 
 **判据 / 实测**
 - `/api/state`：step 3 = `8/9`；页面 `currentStep()=3`；右栏 `待办 03`；第 1/2 步 `cnt="—"`、`data-skipped=1`。
 - `st_cg` 在 8777 未起时 **2.27 秒**判红（原 30 分 03 秒）；`run_cg_export.py` 对无 `#prog` 的桩页 **10.8 秒** `exit 2`。
-- `scripts/diag/test_pipeline_gating.py` 全绿；新增「8777 不可达 → 判红且一个子进程都没起」。
+- `scripts/diag/test_pipeline_gating.py` 全绿；新增「8777 不可达 → 判红且一个子进程都没起」、
+  「完成数与本轮范围对不上 → 判红」、以及换入的三分支（新增/相同/不同+备份）。
 - 当前 state 的 8 条 verdict + 3 条 done 的 scope/fp 全匹配；`rejudge_state` 保留 8 条 verdict、0 条 drop。
+- 只读指纹预演（本轮范围）：Spine 新增 4 / 替换 2（`antu_3`、`yueke_ger_3` 内容不同）/ 跳过 0；
+  Live2D 新增 2 / 替换 1（`shi_3`）/ 跳过 0。换入后正式区与 `index.js` 才认得这些新皮肤。
 
 **未修（潜在雷）**：`st_review` 仍用暂存区全部 `*.png` 出清单。本次 181 张 10-01/10-17 旧暂存
 与线上**逐字节相同**才没进换入；哪天旧暂存与线上不同，会被一起换进去 ⇒ 后续让 review 只认本批 scope。

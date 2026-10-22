@@ -148,8 +148,10 @@ def t_gates():
         # 造一份"当前有效"的范围清单，让 stale/missing 那条路径不干扰本项
         real = up.fingerprint
         real_gallery = up.gallery_reachable
+        real_promote = up.promote_staged
         up.fingerprint = lambda: 'bundles=1 deps=test'
         up.gallery_reachable = lambda *a, **k: True   # CG 正向用例不依赖真起 8777
+        up.promote_staged = lambda *a, **k: (0, 0, 0, 0, [], '')  # 不碰真 Output
         try:
             up.write_scope(['AssetBundles/cue/bgm-airraidalarm.b',
                             'AssetBundles/spinepainting/2b_2'], 1, 1)
@@ -176,7 +178,7 @@ def t_gates():
             # 反向对照：签了字就必须真的去写，否则门是"焊死"的、也不对
             for key, fn, writers in (('audio', lambda: up.st_audio({'audio'}), ['extract_cv_voice']),
                                      ('cg', lambda: up.st_cg(True, {'cg'}), ['run_cg_export'])):
-                r = Rec('完成3 跳过0 失败0')
+                r = Rec('完成1 跳过0 失败0')
                 old, up.run = up.run, r
                 try:
                     fn()
@@ -194,6 +196,17 @@ def t_gates():
             ck('cg: 增量只导变更的皮肤（--only 收窄）',
                only and '--only' in only[0] and only[0][only[0].index('--only') + 1] == '2b_2',
                str(only))
+
+            # 汇总行 N>0 但与本轮范围对不上 ⇒ 红（旧判据只看 ok>0，2/6 也报绿）
+            r = Rec('完成2 跳过0 失败0')
+            old, up.run = up.run, r
+            try:
+                ok = up.st_cg(False, {'cg'})
+            finally:
+                up.run = old
+            ck('cg: 完成数与本轮范围对不上 → 判红',
+               ok is False and '多 1 个' in up.RESULTS['cg']['detail'],
+               up.RESULTS['cg']['detail'])
 
             # 8777 不可达：CG 必须当场判红、不许起子进程空等（2026-10-23 实测空转 30 分钟）
             up.gallery_reachable = lambda *a, **k: False
@@ -260,6 +273,7 @@ def t_gates():
         finally:
             up.fingerprint = real
             up.gallery_reachable = real_gallery
+            up.promote_staged = real_promote
     tmp_work(body)
 
 
@@ -683,6 +697,42 @@ def t_derive_words():
     tmp_work(body)
 
 
+def t_promote_staged():
+    print('\n[17] Spine/Live2D 临时区 → 正式区：新增/相同/不同三分支')
+    def body(d):
+        real_work, real_out = up.WORK, up.OUT
+        try:
+            src = os.path.join(d, 'Spine_v2')
+            dst = os.path.join(d, 'out', 'Spine_v2')
+            os.makedirs(os.path.join(src, 'newskin'))
+            with open(os.path.join(src, 'newskin', 'newskin.skel'), 'wb') as f:
+                f.write(b'abc')
+            for base in (src, dst):
+                os.makedirs(os.path.join(base, 'sameskin'), exist_ok=True)
+                with open(os.path.join(base, 'sameskin', 'sameskin.skel'), 'wb') as f:
+                    f.write(b'same')
+            os.makedirs(os.path.join(src, 'diffskin'))
+            with open(os.path.join(src, 'diffskin', 'diffskin.skel'), 'wb') as f:
+                f.write(b'new')
+            os.makedirs(os.path.join(dst, 'diffskin'))
+            with open(os.path.join(dst, 'diffskin', 'diffskin.skel'), 'wb') as f:
+                f.write(b'old')
+            up.WORK, up.OUT = d, os.path.join(d, 'out')
+            copied, replaced, skipped, failed, notes, bak = up.promote_staged(
+                'Spine_v2', ['newskin', 'sameskin', 'diffskin'])
+            ck('新增目录被复制', copied == 1 and os.path.isfile(
+                os.path.join(dst, 'newskin', 'newskin.skel')), f'{copied} {notes}')
+            ck('相同目录跳过', skipped == 1, f'skipped={skipped}')
+            ck('不同目录先备份再替换', replaced == 1 and os.path.isfile(
+                os.path.join(bak, 'diffskin', 'diffskin.skel')), f'replaced={replaced} bak={bak}')
+            with open(os.path.join(dst, 'diffskin', 'diffskin.skel'), 'rb') as f:
+                ck('替换后正式区内容是新版', f.read() == b'new')
+            ck('无失败且换入后指纹复验通过', failed == 0, f'{notes}')
+        finally:
+            up.WORK, up.OUT = real_work, real_out
+    tmp_work(body)
+
+
 def main():
     t_stems()
     t_no_scope()
@@ -700,6 +750,7 @@ def main():
     t_spine_judge()
     t_audio_fatal_rc()
     t_derive_words()
+    t_promote_staged()
     print('\n' + ('[FAIL] ' + '；'.join(FAIL) if FAIL else '[PASS] 签字门与增量范围闸门全绿'))
     return 1 if FAIL else 0
 

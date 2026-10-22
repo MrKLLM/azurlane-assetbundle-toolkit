@@ -4732,7 +4732,8 @@ function ctaRun(a, to){
       keys:live,
       what:'第 '+stepNo('paintings',3)+' 步：重新导出',
       note:'立绘 / Spine / Live2D 只写 .diag/ 暂存区，不需要签字。'+
-           '上面这些 live 阶段在签字后会直接写正式区（audio / cg 没有暂存通道）；'+
+           'live 阶段签字后会直接写正式区（audio / cg 没有暂存通道）；cg 还会先把本轮 Spine '+
+           '临时区换入 Output/Spine_v2（带备份）并重建索引，否则新皮肤不在 CG 页候选里。'+
            '不签就按左下角「只跑到待确认」，它们只算差异，正式区一个字节不碰。',
       onOk:()=>post({stages:keys,approve:live,force:force},
                     {label:'重新导出（已签字）'}),
