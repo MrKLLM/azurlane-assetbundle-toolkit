@@ -215,7 +215,9 @@ def bg_roots_save(body):
     data = bg_review()
     if data.get('error'):
         return data
-    allowed = {x.get('root') for x in (data.get('unnamed_roots') or []) if x.get('root')}
+    allowed = {x.get('root') for x in
+               ((data.get('unnamed_roots') or []) + (data.get('manual_roots') or []))
+               if x.get('root')}
     clean = {}
     for root, cn in names.items():
         root = str(root).strip()
@@ -238,7 +240,10 @@ def bg_roots_save(body):
         return {'error': '读人工补名正本失败：%s' % e}
     labels = doc.setdefault('labels', {})
     for root, cn in clean.items():
-        labels[root] = {'cn': cn, 'why': '控制台背景标注复核台人工补名',
+        prev = labels.get(root) if isinstance(labels.get(root), dict) else {}
+        # 更新名字不应冲掉已有的人工依据；只有第一次补名才写默认 why。
+        why = str(prev.get('why') or '').strip() or '控制台背景标注复核台人工补名'
+        labels[root] = {'cn': cn, 'why': why,
                         'updated_at': time.strftime('%Y-%m-%d %H:%M')}
     doc['schema'] = doc.get('schema', 1)
     doc['updated_at'] = time.strftime('%Y-%m-%d')
@@ -4976,16 +4981,20 @@ function renderBgReview(){
         '<button type="button" data-gv="0" class="'+(p===0?'on':'')+'">无角色</button></div></div>';
     }).join('')+'</div>';
   }
-  const roots=d.unnamed_roots||[];
+  const unnamed=(d.unnamed_roots||[]).map(r=>Object.assign({},r,{manual:false}));
+  const manual=(d.manual_roots||[]).map(r=>Object.assign({},r,{manual:true}));
+  const roots=unnamed.concat(manual);
   if(roots.length){
-    html+='<div class="glroot"><b>新活动子标签已自动创建，但这些词根还没有中文名</b>'+
+    html+='<div class="glroot"><b>词根命名（只补游戏表查不到的 root 档；已有表内证据不会被覆盖）</b>'+
       roots.map(r=>'<div class="glname" data-root="'+esc(r.root)+'"><code>'+esc(r.root)+'</code>×'+r.n+
-        '<input maxlength="40" placeholder="中文名（只补 root 档）" aria-label="'+esc(r.root)+' 的中文名">'+
-        '<button type="button" class="mini ghost" data-rootname="'+esc(r.root)+'">保存</button>'+
+        '<input maxlength="40" placeholder="中文名（只补 root 档）" aria-label="'+esc(r.root)+' 的中文名"'+
+        (r.manual?' value="'+esc(r.cn||'')+'"':'')+'>'+
+        '<button type="button" class="mini ghost" data-rootname="'+esc(r.root)+'">'+(r.manual?'更新':'保存')+'</button>'+
         ((r.samples||[]).length?'<button type="button" class="mini ghost" data-rootview="'+esc(r.root)+'">看这组图</button>':'')+
+        (r.manual?'<span class="dim">人工补名，可改</span>':'')+
         '</div><div class="glrootgallery" data-gallery="'+esc(r.root)+'" hidden></div>').join('')+
-      '<div class="dim" style="margin-top:6px">只补游戏表查不到的 root 档；已有表内证据的名字不会被覆盖。'+
-      '保存后会立即重建 bg_meta，背景库的系列下拉随之更新。命名依据见 WF-48。</div></div>';
+      '<div class="dim" style="margin-top:6px">保存后会立即重建 bg_meta，背景库的系列下拉随之更新。'+
+      '命名依据见 WF-48；人工补名不会覆盖表内证据。</div></div>';
   }
   $('#glBody').innerHTML=html;
   updateGlButtons();
@@ -4996,6 +5005,7 @@ async function saveRootName(root, btn){
   const cn=(inp&&inp.value||'').trim();
   if(!cn){ $('#glMsg').textContent='先给 '+root+' 填一个中文名'; return; }
   if(GL.busy) return;
+  const isManual=(GL.data&&GL.data.manual_roots||[]).some(r=>r.root===root);
   let finalMsg='';
   GL.busy=true; updateGlButtons(); btn.disabled=true;
   $('#glMsg').textContent='保存词根 '+root+' → '+cn+'，并重建背景索引…';
@@ -5005,11 +5015,22 @@ async function saveRootName(root, btn){
     if(j.error){ finalMsg=j.error; return; }
     /* 只从当前清单里移掉这个词根，不重新扫全表：既快，也不会把用户已经点好的
        “有角色/无角色”选择清空。 */
-    if(GL.data && Array.isArray(GL.data.unnamed_roots)){
-      GL.data.unnamed_roots=GL.data.unnamed_roots.filter(r=>r.root!==root);
+    if(GL.data){
+      if(Array.isArray(GL.data.unnamed_roots)){
+        const rec=GL.data.unnamed_roots.find(r=>r.root===root);
+        GL.data.unnamed_roots=GL.data.unnamed_roots.filter(r=>r.root!==root);
+        if(rec){
+          GL.data.manual_roots=GL.data.manual_roots||[];
+          GL.data.manual_roots.push(Object.assign({},rec,{cn:cn,cn_from:'manual'}));
+        }
+      }
+      if(Array.isArray(GL.data.manual_roots)){
+        const m=GL.data.manual_roots.find(r=>r.root===root);
+        if(m) m.cn=cn;
+      }
       renderBgReview();
     }
-    finalMsg='词根 '+root+' 已补名：'+cn;
+    finalMsg='词根 '+root+(isManual?' 已更新：':' 已补名：')+cn;
   }catch(e){
     finalMsg='保存失败：'+e;
   }finally{
