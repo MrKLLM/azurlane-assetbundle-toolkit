@@ -237,6 +237,35 @@ def main():
             say(d2['ampPlay']>5 and d2['ampPause']<d2['ampPlay']*0.55,
                 f"潮水随播放状态涨落：播放中振幅 {d2['ampPlay']}px → 暂停后 {d2['ampPause']}px")
 
+        print('== 播放队列与模式 ==')
+        d3 = ev(r"""(async()=>{
+          const t=ms=>new Promise(r=>setTimeout(r,ms));
+          document.querySelector('.play').click(); await t(700);
+          document.getElementById('playlistBtn').click(); await t(250);
+          const open=document.getElementById('queue').classList.contains('on');
+          const rows=document.querySelectorAll('#qlist .qrow').length;
+          const onIdx=[...document.querySelectorAll('#qlist .qrow')].findIndex(x=>x.classList.contains('on'));
+          const mode0=document.getElementById('lp').dataset.mode;
+          document.getElementById('lp').click(); await t(120);
+          const mode1=document.getElementById('lp').dataset.mode;
+          const qm=document.getElementById('qmode').textContent;
+          document.querySelectorAll('#qlist .qrow')[5].click(); await t(500);
+          const qOn=[...document.querySelectorAll('#qlist .qrow')].findIndex(x=>x.classList.contains('on'));
+          const cur=document.getElementById('cur').textContent;
+          document.getElementById('qclose').click(); await t(200);
+          const closed=!document.getElementById('queue').classList.contains('on');
+          return {open,rows,onIdx,mode0,mode1,qm,qOn,cur,closed};
+        })()""")
+        if isinstance(d3, dict) and '__err' in d3:
+            say(False, f"队列 JS 异常: {d3['__err']}")
+        else:
+            say(d3['open'] and d3['rows']>=100, f"播放列表打开且含队列（{d3['rows']} 行）")
+            say(d3['onIdx']>=0, f"播放列表高亮当前曲（第 {d3['onIdx']+1} 行）")
+            say(d3['mode0'] != d3['mode1'] and bool(d3['qm']),
+                f"模式键可切换（{d3['mode0']} → {d3['mode1']}，{d3['qm']}）")
+            say(d3['qOn']==5, f"点播放列表第 6 行切曲 → 当前行 {d3['qOn']+1}（{d3['cur'][:24]}）")
+            say(d3['closed'], "播放列表能关闭")
+
         print('== 筛选与搜索 ==')
         d4 = ev(r"""(async()=>{
           const t=ms=>new Promise(r=>setTimeout(r,ms)); const n0=document.querySelectorAll('.row').length;

@@ -5219,6 +5219,9 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
   `build_bg_meta --allow-unlabeled` 重建索引。优先级 `pinyin > series > table > manual > category > root`：
   manual 只补 root 档，**不覆盖表内证据**；冲突项和不足 2 张的 root 只 WARN，不应用。
   背景库系列下拉把 `cn_from=manual` 标成「人工补名」。命名依据仍见 WF-48，不要硬编。
+- **命名前先给样本墙**：`--review-out` 的每个 `unnamed_roots` 带 `samples`（该词根全部场景图的
+  key/name/cn/series/has_char）；复核台「看这组图」展开缩略图，每个缩略图链到 `/bgimg?full=1`
+  的原图。只给词根字符串、不给人看画面，等于把不可判的活丢给用户。
 
 **踩坑记录**
 
@@ -5321,3 +5324,35 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 
 **涉及文件**：`gallery_src/index.html`、`scripts/diag/index_paging_probe.py`（新增）、
 `scripts/diag/gallery_cat3_probe.py`（6b/6e/6d 改按名字搜 + 页脚拉全）、`docs/TROUBLESHOOTING.md §176`。
+
+---
+
+### WF-58: 音乐库播放队列与四种播放模式（2026-10-22）
+
+**数据模型**
+- `queue` 是**开始播放那一刻的 `view` 快照**（不是每次筛选后的实时列表）；主列表点任一首 =
+  以当前筛选结果重设 queue；播放列表点行只换 queue 内索引。
+- `view` 只管筛选结果；`idx` 是 **queue 内**索引；主列表高亮按 `slug` 比对，不能再用行号
+  （筛掉后行号会错位）。
+- 四种模式：`seq` 顺序（播到末尾停）、`loop` 列表循环、`one` 单曲、`shuffle` 随机。
+  `ended` 按模式分派；手动上一首/下一首仍可操作；随机保留一小段历史供上一首返回。
+  模式写 `localStorage['gallery.bgmMode']`。
+
+**界面**
+- `#lp` 一键循环四种模式（图标/标题/`data-mode`），**不要**再拿它直接切 `A.loop`：
+  单曲循环由 `ended` 重播，跟 `<audio loop>` 叠加会变成两套语义。
+- `#playlistBtn` / `L` 打开纸面队列抽屉；`M` 切模式；当前行用左侧品牌细边 + 淡底，
+  普通行不加滤镜（本页仍是播放器/搜索框/播放行三盒）。
+- 播放器前加一枚“墨盘”，只在实际播放时旋转（`prefers-reduced-motion` 下不转），
+  不新增发光/粒子。
+
+**判据**
+- 队列打开且行数 == 当前 queue；当前行高亮；点第 N 行切到第 N 首；关闭后不残留。
+- 模式键至少能在 `seq→loop` 切换且 `qmode` 文案同步；随机下一首不能等于当前（队列 >1）。
+- `ended` 实测：单曲队列在 seq 下 `A.paused=true`；one 下继续播且回到 0 秒；
+  列表循环回绕；随机换到另一首。无头测试点击必须带 `userGesture`，否则 autoplay 被拒会把
+  “没开始播”误判成 `ended` 逻辑坏了。
+- 筛选后主列表高亮由 slug 决定；不能因为 idx 被重置而丢掉当前播放行。
+
+**涉及文件**：`gallery_src/bgm.html`、`scripts/diag/bgm_page_probe.py`（新增队列/模式五项）、
+`scripts/diag/shot_bgm_bar.py`。

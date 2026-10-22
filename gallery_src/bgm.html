@@ -512,12 +512,76 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   background:var(--brand);border:1.5px solid var(--panel);box-shadow:none}
 .bar .vol:hover::-webkit-slider-thumb{transform:scale(1.12)}
 
+/* 一枚"墨盘"：只在播放时转；它是播放器里唯一的圆形动势，不靠发光抢戏。 */
+.disc{width:30px;height:30px;border-radius:50%;flex:none;position:relative;
+  background:
+    repeating-radial-gradient(circle at 50% 50%,
+      color-mix(in srgb,var(--ink) 12%,transparent) 0 1px,
+      transparent 1px 4px),
+    radial-gradient(circle at 38% 32%,
+      color-mix(in srgb,#fff 30%,transparent),transparent 52%),
+    color-mix(in srgb,var(--ink) 8%,transparent);
+  border:1px solid color-mix(in srgb,var(--ink) 22%,transparent);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 34%,transparent);
+  animation:discspin 7s linear infinite;animation-play-state:paused}
+.disc::after{content:'';position:absolute;left:50%;top:50%;width:6px;height:6px;
+  border-radius:50%;transform:translate(-50%,-50%);
+  background:var(--brand-d);box-shadow:0 0 0 2px var(--panel)}
+.disc.on{animation-play-state:running}
+@keyframes discspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.disc{animation:none}}
+@media (max-width:760px){.disc{display:none}}
+/* 模式键：一个键循环 顺序/列表循环/单曲/随机；单曲时右下角留一枚小「1」。 */
+#lp,#playlistBtn{width:32px;height:32px}
+#lp{position:relative}
+#lp[data-mode="one"]::after{content:'1';position:absolute;right:2px;bottom:0;
+  font:700 8px/1 var(--serif);color:var(--brand-d)}
+#lp[data-mode="shuffle"]{color:var(--brand-d)}
+#playlistBtn.on{color:var(--brand-d);border-color:color-mix(in srgb,var(--brand) 50%,transparent)}
+
+/* 播放列表：纸面抽屉，不是第四块玻璃。当前行用品牌色细边和淡底，不另加滤镜。 */
+.queue{position:fixed;left:50%;bottom:124px;transform:translateX(-50%) translateY(10px);
+  width:min(520px,calc(100vw - 28px));max-height:50vh;z-index:39;display:flex;flex-direction:column;
+  background:color-mix(in srgb,var(--panel) 94%,transparent);
+  border:1px solid color-mix(in srgb,var(--line) 80%,transparent);border-radius:16px;
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 48%,transparent),0 18px 44px -18px color-mix(in srgb,var(--brand) 26%,transparent);
+  opacity:0;visibility:hidden;pointer-events:none;
+  transition:opacity .22s var(--ease-ios),transform .22s var(--ease-ios),visibility .22s}
+.queue.on{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+.qhead{display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:1px solid var(--line);flex:none}
+.qseal{width:22px;height:22px;display:grid;place-items:center;flex:none;
+  border:1px solid color-mix(in srgb,var(--brand-d) 55%,transparent);color:var(--brand-d);
+  font:500 12px/1 var(--serif,serif);background:color-mix(in srgb,var(--brand) 8%,transparent)}
+.qhead b{font:500 13px/1.4 var(--serif,serif);color:var(--txt)}
+.qcount,.qmode{font:10px/1.4 var(--font-ui,sans-serif);color:var(--dim)}
+.qmode{color:var(--brand-d);margin-left:auto}
+.qhead #qclose{width:24px;height:24px;border:0;background:transparent;color:var(--dim);
+  font:18px/1 var(--font-ui,sans-serif);cursor:pointer;padding:0}
+.qhead #qclose:hover{color:var(--brand-d)}
+.qlist{overflow:auto;padding:3px 6px 6px;min-height:44px}
+.qempty{padding:18px 10px;text-align:center;font:11px/1.7 var(--font-ui,sans-serif);color:var(--dim)}
+.qrow{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:8px;align-items:center;
+  padding:6px 7px;border-bottom:1px solid color-mix(in srgb,var(--line) 58%,transparent);
+  cursor:pointer;border-left:2px solid transparent}
+.qrow:last-child{border-bottom:0}
+.qrow:hover{background:color-mix(in srgb,var(--brand) 7%,transparent)}
+.qrow.on{background:color-mix(in srgb,var(--brand-l) 52%,transparent);
+  border-left-color:var(--brand-d)}
+.qrow .qn{text-align:right;font:10px/1.4 var(--font-ui,sans-serif);color:var(--dim);
+  font-variant-numeric:tabular-nums}
+.qrow .qt{min-width:0;font:12px/1.45 var(--font-ui,sans-serif);color:var(--txt);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qrow .qt i{display:block;font:9.5px/1.4 var(--font-ui,sans-serif);color:var(--dim);
+  font-style:normal;overflow:hidden;text-overflow:ellipsis}
+.qrow .qm{font:10px/1.4 var(--font-ui,sans-serif);color:var(--dim);font-variant-numeric:tabular-nums}
+
 /* 窄屏：把播放条从"桌面宽条"收成贴底的一行，标题让位给时间；
    宽屏的 850px 是上限，不是最小宽度。 */
 @media (max-width:760px){
   .bar{left:8px;right:8px;width:auto;border-radius:16px;padding:9px 12px 8px}
-  .bar .top{display:grid;grid-template-columns:34px 44px 34px minmax(0,1fr) 34px;gap:6px}
+  .bar .top{display:grid;grid-template-columns:34px 44px 34px minmax(0,1fr) 32px 32px;gap:6px}
   .bar .buf,.bar .vol{display:none}
+  .queue{bottom:112px;max-height:44vh}
   .seekrow{gap:6px}
   .seekrow .tm{min-width:30px;font-size:10px}
   .tide{height:16px;margin:0}
@@ -642,14 +706,23 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
     <button id="prev" title="上一首（Ctrl+←）"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7l9 7V5z"/></svg></button>
     <button id="pp" title="播放 / 暂停（空格）"><svg viewBox="0 0 24 24"><path id="ppath" d="M8 5v14l11-7z"/></svg></button>
     <button id="next" title="下一首（Ctrl+→）"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM6 19l9-7-9-7z"/></svg></button>
+    <span class="disc" id="disc" aria-hidden="true"><i></i></span>
     <span class="curwrap"><span class="cur" id="cur">—</span><span class="cmeta" id="cmeta"></span></span>
     <span class="buf" id="buf" hidden>缓冲中</span>
-    <button id="lp" title="单曲循环"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z"/></svg></button>
+    <button id="lp" title="顺序播放（M 切换）"><svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h10v2H4zm0 5h16v2H4z"/></svg></button>
+    <button id="playlistBtn" title="播放列表（L）"><svg viewBox="0 0 24 24"><path d="M4 6h13v2H4zm0 5h13v2H4zm0 5h8v2H4zM19 5h2v11a3 3 0 1 1-2-2.83V5z"/></svg></button>
     <input class="vol" id="vol" type="range" min="0" max="1" step="0.01" title="音量（↑↓）">
   </div>
-  <div class="hint" id="hint">拖动墨线就是进度 · 空格播放/暂停 · ↑↓ 音量 · / 搜索</div>
+  <div class="hint" id="hint">拖动墨线就是进度 · 空格播放/暂停 · M 模式 · L 播放列表 · / 搜索</div>
 <script src="loading.js"></script>
 <script src="site_bg_live.js"></script>  <!-- 动态网站背景：Spine / Live2D（三页共用，正本 gallery_src/site_bg_live.js） -->
+</div>
+
+<!-- 播放列表：默认不挂 backdrop-filter（本页只允许播放器/搜索框/正在播放行三盒），
+     用纸面半透 + 细边，和播放器的玻璃分工。 -->
+<div class="queue" id="queue" aria-hidden="true">
+  <div class="qhead"><span class="qseal">曲</span><b>播放列表</b><span class="qcount" id="qcount">—</span><span class="qmode" id="qmode">顺序播放</span><button id="qclose" type="button" title="关闭播放列表">×</button></div>
+  <div class="qlist" id="qlist"></div>
 </div>
 
 <script src="liquid_glass.js"></script>
@@ -657,7 +730,18 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 <script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
 <script>
 const P='';
-let T=[],view=[],idx=-1,fU='',fS='',fA='',fE='',knownDur=0,fFav=false;
+let T=[],view=[],queue=[],idx=-1,fU='',fS='',fA='',fE='',knownDur=0,fFav=false;
+let QOPEN=false, SHUF_HIST=[];
+const MODES=['seq','loop','one','shuffle'];
+const MODE_NAMES={seq:'顺序播放',loop:'列表循环',one:'单曲循环',shuffle:'随机播放'};
+const MODE_PATHS={
+  seq:'M4 6h16v2H4zm0 5h10v2H4zm0 5h16v2H4z',
+  loop:'M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z',
+  one:'M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z',
+  shuffle:'M16 3h5v5h-2V6.41l-4.29 4.3-1.42-1.42L17.59 5H16V3zM3 5h4.5l3.79 3.79-1.42 1.42L6.5 7H3V5zm13 11h2v-1.59l-4.29-4.3 1.42-1.42L19 12.59V11h2v5h-5v-2zM3 17h3.5l3.79-3.79 1.42 1.42L7.5 19H3v-2z'
+};
+let MODE='seq';
+try{ const m=localStorage.getItem('gallery.bgmMode'); if(MODES.includes(m)) MODE=m; }catch(e){}
 const A=new Audio(); A.volume=+(localStorage.getItem('gallery.vol')??0.8);
 /* 缓冲状态说人话：只在真的等数据时显示一枚小胶囊，不拿"转圈"装饰正常播放。 */
 function setBuf(on){ const b=$('buf'); if(b) b.hidden=!on; }
@@ -807,6 +891,7 @@ function render(){
     (!fFav||(window.Fav&&Fav.has('bgm',t.slug)))&&
     (!q||name(t).toLowerCase().includes(q)||t.slug.toLowerCase().includes(q)||
       (t.title_cn||'').toLowerCase().includes(q)||(t.ship||'').includes(q)));
+  const curSlug=queue[idx]&&queue[idx].slug;
   const tags=t=>{const a=[];
     /* 预算 3 个标签，其余折进 +N（全量留在 title 里）—— 归属是线索，不是把整张表搬到脸上 */
     const all=[];
@@ -823,7 +908,7 @@ function render(){
     if(hide.length)a.push(`<span class="tag" title="${esc(hide.map(h=>h[1]).join(' · '))}">+${hide.length}</span>`);
     return a.length?`<span class="tags">${a.join('')}</span>`:''};
   $('list').innerHTML=view.length?view.map((t,i)=>`
-    <div class="row${i===idx?' playing':''}" data-i="${i}">
+    <div class="row${t.slug===curSlug?' playing':''}" data-i="${i}">
       <span class="no">${i+1}</span>
       <span><span class="nm">${esc(name(t))}</span><span class="en">${esc(t.slug)}</span>${tags(t)}</span>
       <span class="mt">${mmss(t.dur)}<i>${mb(t.size)}</i></span>
@@ -846,23 +931,98 @@ function reveal(){
   rows.forEach(r=>io.observe(r));
 }
 
-function play(i){
+function ensureQueue(){ if(!queue.length) queue=view.slice(); return queue.length; }
+function randIdx(){
+  if(queue.length<2) return 0;
+  let n; do{ n=Math.floor(Math.random()*queue.length); }while(n===idx);
+  return n;
+}
+function step(d){
+  if(!ensureQueue()) return;
+  if(MODE==='shuffle'){
+    if(d<0 && SHUF_HIST.length){ playQueue(SHUF_HIST.pop()); return; }
+    if(d>0){ SHUF_HIST.push(idx); playQueue(randIdx()); return; }
+  }
+  let n=idx+d;
+  if(n<0)n=queue.length-1;
+  if(n>=queue.length)n=0;
+  playQueue(n);
+}
+function playView(i){
   if(i<0||i>=view.length)return;
-  idx=i;const t=view[i];
+  /* 从主列表点一首 = 以当前筛选结果作为新队列；随机历史也重置。 */
+  queue=view.slice(); SHUF_HIST=[];
+  playQueue(i);
+}
+function playQueue(i){
+  if(i<0||i>=queue.length)return;
+  idx=i; const t=queue[i];
   knownDur=t.dur||0;                        /* 服务器无 Range 时 A.duration 是 Infinity，先用手上的真值 */
   A.src=t.url;A.play().catch(()=>{});
   $('bar').classList.add('on');$('cur').innerHTML=esc(name(t))+(t.title_cn&&t.title!==t.title_cn?`<i>${esc(t.title)}</i>`:'');
   $('cmeta').textContent=[t.album,t.usage,(t.events||[])[0]].filter(Boolean).join(' · ');
   $('t1').textContent=mmss(knownDur);document.title=name(t)+' · 音乐库';
-  [...document.querySelectorAll('.row')].forEach(r=>r.classList.toggle('playing',+r.dataset.i===i));
+  [...document.querySelectorAll('#list .row')].forEach(r=>{
+    const it=view[+r.dataset.i];
+    r.classList.toggle('playing', !!it&&it.slug===t.slug);
+  });
+  if(QOPEN) renderQueue();
   window.glassPlaying&&glassPlaying();
   $('hint').classList.add('off');
 }
-A.addEventListener('play',()=>{$('ppath').setAttribute('d','M6 5h4v14H6zm8 0h4v14h-4z')});
-A.addEventListener('pause',()=>{$('ppath').setAttribute('d','M8 5v14l11-7z')});
-A.addEventListener('ended',()=>$('lp').classList.contains('on')?(A.currentTime=0,A.play()):play(idx+1));
+A.addEventListener('play',()=>{$('ppath').setAttribute('d','M6 5h4v14H6zm8 0h4v14h-4z');
+  const d=$('disc'); if(d) d.classList.add('on');});
+A.addEventListener('pause',()=>{$('ppath').setAttribute('d','M8 5v14l11-7z');
+  const d=$('disc'); if(d) d.classList.remove('on');});
+A.addEventListener('ended',()=>{
+  if(MODE==='one'){ A.currentTime=0; A.play(); return; }
+  if(MODE==='shuffle'){ step(1); return; }
+  if(MODE==='loop'){ if(ensureQueue()) playQueue((idx+1)%queue.length); return; }
+  /* 顺序播放：到末尾停住，不偷偷回到第一首。 */
+  if(queue.length && idx+1<queue.length) playQueue(idx+1);
+  else { A.pause(); A.currentTime=0; }
+});
 A.addEventListener('timeupdate',()=>{$('t0').textContent=mmss(A.currentTime)});
 A.addEventListener('loadedmetadata',()=>{if(isFinite(A.duration)&&A.duration>0)$('t1').textContent=mmss(A.duration)});
+
+function nextMode(m){ return MODES[(MODES.indexOf(m)+1)%MODES.length]; }
+function setMode(m,silent){
+  if(!MODES.includes(m)) m='seq';
+  MODE=m;
+  try{ localStorage.setItem('gallery.bgmMode',m); }catch(e){}
+  A.loop=false;
+  const b=$('lp');
+  if(b){
+    b.dataset.mode=m;
+    b.classList.toggle('on',m!=='seq');
+    b.title=MODE_NAMES[m]+'（M 切换）';
+    b.innerHTML='<svg viewBox="0 0 24 24"><path d="'+MODE_PATHS[m]+'"/></svg>';
+  }
+  const qm=$('qmode'); if(qm) qm.textContent=MODE_NAMES[m];
+  if(!silent){ /* 只改状态，不弹 toast 打断看列表 */ }
+}
+function renderQueue(){
+  const el=$('qlist'); if(!el) return;
+  const c=$('qcount'), m=$('qmode');
+  if(c) c.textContent=queue.length+' 首';
+  if(m) m.textContent=MODE_NAMES[MODE];
+  if(!queue.length){
+    el.innerHTML='<div class="qempty">播放列表是空的；先从曲目列表点一首。</div>';
+    return;
+  }
+  el.innerHTML=queue.map((t,i)=>'<div class="qrow'+(i===idx?' on':'')+'" data-qi="'+i+'">'+
+    '<span class="qn">'+(i+1)+'</span>'+
+    '<span class="qt">'+esc(name(t))+'<i>'+esc(t.slug)+'</i></span>'+
+    '<span class="qm">'+mmss(t.dur)+'</span></div>').join('');
+}
+function toggleQueue(force){
+  const el=$('queue'); if(!el) return;
+  QOPEN = force===undefined ? !QOPEN : !!force;
+  if(QOPEN && !queue.length) queue=view.slice();
+  el.classList.toggle('on',QOPEN);
+  el.setAttribute('aria-hidden',!QOPEN);
+  if(QOPEN) renderQueue();
+}
 
 /* 拖动水面 = 找位。松手时甩一圈涟漪，像真的碰了一下水 */
 /* 指针停在播放条上时，纸面光源跟着走一小段；离开就回右上。
@@ -898,15 +1058,23 @@ tide.onpointerup=e=>{const f=at(e),d=total();
   const rip=$('rip');rip.setAttribute('cx',(f*W).toFixed(1));
   rip.classList.remove('go');void rip.offsetWidth;rip.classList.add('go')};
 
-$('list').onclick=e=>{const b=e.target.closest('[data-i]');if(b)play(+b.dataset.i)};
-$('q').oninput=()=>{idx=-1;render()};
-$('pp').onclick=()=>A.paused?(A.src?A.play():play(idx<0?0:idx)):A.pause();
-$('prev').onclick=()=>play(idx<=0?view.length-1:idx-1);
-$('next').onclick=()=>play(idx+1>=view.length?0:idx+1);
-$('lp').onclick=()=>{$('lp').classList.toggle('on');A.loop=$('lp').classList.contains('on')};
+$('list').onclick=e=>{const b=e.target.closest('[data-i]');if(b)playView(+b.dataset.i)};
+$('q').oninput=()=>{render()};
+$('pp').onclick=()=>{
+  if(!A.paused){ A.pause(); return; }
+  if(A.src){ A.play(); return; }
+  if(!ensureQueue()) return;
+  playQueue(idx<0?0:idx);
+};
+$('prev').onclick=()=>step(-1);
+$('next').onclick=()=>step(1);
+$('lp').onclick=()=>setMode(nextMode(MODE));
+$('playlistBtn').onclick=()=>toggleQueue();
+$('qclose').onclick=()=>toggleQueue(false);
+$('qlist').onclick=e=>{ const r=e.target.closest('[data-qi]'); if(r) playQueue(+r.dataset.qi); };
 $('vol').value=A.volume;
 $('vol').oninput=e=>{A.volume=+e.target.value;localStorage.setItem('gallery.vol',e.target.value)};
-$('fEvent').onchange=e=>{ fE=e.target.value; idx=-1; render(); };
+$('fEvent').onchange=e=>{ fE=e.target.value; render(); };
 document.querySelectorAll('.grp').forEach(g=>g.onclick=e=>{
   const b=e.target.closest('.chip');if(!b)return;
   const k=b.dataset.k,v=b.dataset.v;
@@ -914,7 +1082,7 @@ document.querySelectorAll('.grp').forEach(g=>g.onclick=e=>{
   const nv=cur===v?'':v;
   if(k==='usage')fU=nv;else if(k==='scene')fS=nv;else fA=nv;
   g.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.dataset.v===nv&&c.dataset.k===k));
-  idx=-1;render()});
+  render()});
 $('gTheme').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   document.documentElement.dataset.theme=b.dataset.t;
   try{localStorage.setItem('gallery.theme',b.dataset.t)}catch(_){}});
@@ -922,7 +1090,9 @@ document.onkeydown=e=>{
   if(e.target.tagName==='INPUT'&&e.target.id!=='vol')return;
   if(e.code==='Space'){e.preventDefault();$('pp').click()}
   else if(e.key==='/'){e.preventDefault();$('q').focus()}
-  else if(e.key==='Escape'){$('q').value='';idx=-1;render()}
+  else if(e.key==='Escape'){$('q').value='';render()}
+  else if(e.key==='l'||e.key==='L'){e.preventDefault();toggleQueue()}
+  else if(e.key==='m'||e.key==='M'){e.preventDefault();setMode(nextMode(MODE))}
   else if(e.key==='ArrowUp'){e.preventDefault();$('vol').value=A.volume=Math.min(1,A.volume+.05);
     $('vol').dispatchEvent(new Event('input'))}
   else if(e.key==='ArrowDown'){e.preventDefault();$('vol').value=A.volume=Math.max(0,A.volume-.05);
@@ -930,6 +1100,7 @@ document.onkeydown=e=>{
   else if(e.ctrlKey&&e.code==='ArrowRight')$('next').click();
   else if(e.ctrlKey&&e.code==='ArrowLeft')$('prev').click();};
 
+setMode(MODE,true);
 boot();
 
 /* ───────── 液态玻璃挂载（模块见 liquid_glass.js）─────────

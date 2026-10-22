@@ -436,6 +436,20 @@ def main():
         scene = [i for i in items if i['group'] == 'scene']
         un = [i for i in scene if 'has_char' not in i]
         plain = ('key', 'root_dir', 'name', 'root', 'tier', 'series', 'w', 'h', 'img', 'thumb')
+        unnamed = []
+        for k, v in roots.items():
+            if v.get('cn_from') != 'root':
+                continue
+            samples = []
+            for it in scene:
+                if it.get('root') != k:
+                    continue
+                cn = ((it.get('cn') or [{}])[0] or {}).get('cn', '')
+                samples.append({'key': it['key'], 'name': it['name'], 'cn': cn,
+                                'series': it.get('series', ''), 'w': it['w'], 'h': it['h'],
+                                'has_char': it.get('has_char')})
+            unnamed.append({'root': k, 'n': v['n'], 'cn': v['cn'], 'cn_from': v['cn_from'],
+                            'samples': samples})
         doc = {
             'generated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
             'scene_total': len(scene),
@@ -443,8 +457,7 @@ def main():
             'pending': len(un),
             'scene_keys': sorted(i['key'] for i in scene),
             'unlabeled': [{k: i.get(k) for k in plain} | {'cn': i.get('cn') or []} for i in un],
-            'unnamed_roots': [{'root': k, 'n': v['n'], 'cn': v['cn'], 'cn_from': v['cn_from']}
-                              for k, v in roots.items() if v.get('cn_from') == 'root'],
+            'unnamed_roots': unnamed,
             'note': '只列 group=scene；登录/其他类目从没判过，不在这张清单里',
         }
         os.makedirs(os.path.dirname(os.path.abspath(a.review_out)), exist_ok=True)

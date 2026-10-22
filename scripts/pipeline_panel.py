@@ -819,7 +819,7 @@ class H(BaseHTTPRequestHandler):
             base_t = os.path.realpath(BG_THUMBS) + os.sep
             base_r = os.path.realpath(RAW_DIR) + os.sep
             src, ctype = None, 'application/octet-stream'
-            if thumb.startswith(base_t) and os.path.isfile(thumb):
+            if q.get('full') != '1' and thumb.startswith(base_t) and os.path.isfile(thumb):
                 src, ctype = thumb, 'image/webp'
             elif raw.startswith(base_r) and os.path.isfile(raw):
                 src, ctype = raw, 'image/png'
@@ -2544,6 +2544,17 @@ pre .bad{color:#E08A69!important}
   border-radius:0;padding:5px 8px;outline:none}
 .glname input:focus{border-color:var(--accent)}
 .glname button{flex:none}
+/* 词根样本墙：命名前先看这一组是什么活动/场景；点缩略图开原图。 */
+.glrootgallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;
+  margin:4px 0 12px;padding:8px;border:1px solid var(--rule);background:var(--paper-3)}
+.glrootgallery[hidden]{display:none}
+.glthumb{display:block;text-decoration:none;min-width:0}
+.glthumb img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;
+  border:1px solid var(--rule);background:var(--paper-2)}
+.glthumb:hover img{border-color:var(--accent)}
+.glthumb span{display:block;margin-top:3px;font:400 9px/1.4 var(--font-ui)!important;
+  color:var(--ink-3)!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.glgcap{grid-column:1/-1;font:400 9.5px/1.6 var(--font-mono)!important;color:var(--ink-3)!important}
 /* 待标注红点：只报数量，不在主屏再叠一张卡。 */
 .ghost .bgdot{display:inline-grid;place-items:center;min-width:15px;height:15px;padding:0 4px;
   margin-left:6px;border-radius:999px;background:var(--accent);color:#fff;
@@ -4970,7 +4981,9 @@ function renderBgReview(){
     html+='<div class="glroot"><b>新活动子标签已自动创建，但这些词根还没有中文名</b>'+
       roots.map(r=>'<div class="glname" data-root="'+esc(r.root)+'"><code>'+esc(r.root)+'</code>×'+r.n+
         '<input maxlength="40" placeholder="中文名（只补 root 档）" aria-label="'+esc(r.root)+' 的中文名">'+
-        '<button type="button" class="mini ghost" data-rootname="'+esc(r.root)+'">保存</button></div>').join('')+
+        '<button type="button" class="mini ghost" data-rootname="'+esc(r.root)+'">保存</button>'+
+        ((r.samples||[]).length?'<button type="button" class="mini ghost" data-rootview="'+esc(r.root)+'">看这组图</button>':'')+
+        '</div><div class="glrootgallery" data-gallery="'+esc(r.root)+'" hidden></div>').join('')+
       '<div class="dim" style="margin-top:6px">只补游戏表查不到的 root 档；已有表内证据的名字不会被覆盖。'+
       '保存后会立即重建 bg_meta，背景库的系列下拉随之更新。命名依据见 WF-48。</div></div>';
   }
@@ -5004,7 +5017,21 @@ async function saveRootName(root, btn){
     if(finalMsg) $('#glMsg').textContent=finalMsg;
   }
 }
+function toggleRootGallery(root){
+  const g=[...document.querySelectorAll('.glrootgallery')].find(x=>x.dataset.gallery===root);
+  if(!g) return;
+  if(!g.hidden){ g.hidden=true; return; }
+  const rec=(GL.data&&GL.data.unnamed_roots||[]).find(r=>r.root===root);
+  const ss=(rec&&rec.samples)||[];
+  g.innerHTML='<div class="glgcap">'+(rec?('共 '+rec.n+' 张，展示 '+ss.length+' 张 · 点缩略图看原图'):'没有样本')+'</div>'+
+    ss.map(s=>'<a class="glthumb" href="/bgimg?key='+encodeURIComponent(s.key)+'&full=1" target="_blank" rel="noopener" title="'+esc(s.key)+'">'+
+      '<img loading="lazy" src="/bgimg?key='+encodeURIComponent(s.key)+'" alt="">'+
+      '<span>'+esc(s.cn||s.name)+'</span></a>').join('');
+  g.hidden=false;
+}
 $('#glBody').onclick=e=>{
+  const rv=e.target.closest('[data-rootview]');
+  if(rv){ toggleRootGallery(rv.dataset.rootview); return; }
   const rb=e.target.closest('[data-rootname]');
   if(rb){ saveRootName(rb.dataset.rootname, rb); return; }
   const b=e.target.closest('[data-gv]'); if(!b) return;
