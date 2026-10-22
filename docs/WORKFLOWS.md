@@ -5358,3 +5358,41 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 
 **涉及文件**：`gallery_src/bgm.html`、`scripts/diag/bgm_page_probe.py`（新增队列/模式五项）、
 `scripts/diag/shot_bgm_bar.py`。
+
+---
+
+### WF-59: 更新台断电/中断后的续跑核对（2026-10-23）
+
+**判据（先量再跑，别重头来）**
+- 源包：`files/AssetBundles` 文件数 vs `asset_manifest.json`（清单滞后 ≠ 没拉包）；`affected.meta` 的
+  `paths/new/changed`。本次实测 73,413 包 / 833 个变更路径 / 744 新 + 89 变。
+- 已还原：`pipeline_state.json` 的 `done`/`verdict`；paintings/spine/live2d 三项是否同 `scope` + 指纹；
+  `Output/Paintings_v2` 与 `Output/CG_v2` 的最新 mtime（本次 10-17 / 10-18 ⇒ 确实没换入）。
+- 暂存区：`Paintings_v2` 按 mtime 分组，并**逐文件与线上 md5 比**：本批新增 / 本批同图 / 旧暂存同图 /
+  旧暂存不同图。只有「不同图」才会进换入清单。
+- 进程：`runs.json` 里 `state=running` 但 `pid_alive` 为假 = 僵尸；起一次控制台，`refresh_states()`
+  会把它标成 `done`（本次 000710 于 06:45:23 收口）。
+- 外部依赖：CG 必须 8777。先打开 `http://127.0.0.1:8777/gallery_v2/cg_export.html` 确认页面真能加载；
+  不要只看端口在 listen（本项目遇到过「活着但吐 0 字节」）。
+
+**续跑步骤**
+1. 起 8777（`gallery_src\启动资产浏览器.bat`），确认导出页；再起 8788 控制台。
+2. 直接进第 3 步，重跑原 `--only` 组合：staged 三项同指纹会跳过；deps/meta/bg/audio/bgm 增量重跑；
+   CG 最后跑 6 个皮肤。签字单要勾同意 + 签名（这次会批准 6 个 live 档）。
+3. 第 4 步「看图对比」出对照表：本次预期线上新增 36、内容有变 0、逐字节相同 186。
+4. 第 5 步「签字换入」：新增图在正式区原本不存在 ⇒ `painting_swap_in` **不备份**；只有旧文件才 `copy2`。
+   本次额外空间约 36 张 PNG ≈ 175MB，不是整库 17GB 的双份。
+5. 换入后 derive（缩略图/台词表/索引/部署）、labels、regress；`asset_manifest` 滞后另点「重扫清单」。
+
+**踩坑**
+- **不要因为待办写「第 1 步」就回去接模拟器**：先看 `/api/state` 的 step 3 完成度与 `runs.json` 的 `step`。
+  根因是 deps 换表后 preflight/pull/cfg.* 的结论被指纹判失效，不是真的没做（§177）。
+- 不要删 `pipeline_state.json` 或暂存区当「重置」：删了只会让全部阶段重跑，暂存区还可能被当成空。
+- 不要用 `--full` 收尾：本次 41 个 stem，全量按数十小时计。
+- CG 静默不动时看子进程命令行：`run_cg_export.py --size` 且无 `#prog` 输出 = 8777 没起，不是渲染慢。
+- 细节抽屉可能「暂停跟随」在旧阶段；看 `run_<id>.log` 尾部才是当前阶段。
+- 181 张旧暂存与线上逐字节相同，所以本次换入不会收它们；但这依赖「恰好相同」，不要当成不变式。
+
+**涉及文件**：`scripts/update_pipeline.py`、`scripts/pipeline_panel.py`、`scripts/diag/run_cg_export.py`、
+`gallery_src/_gallery_server.py`、`.diag/pipeline/pipeline_state.json`、`.diag/pipeline/affected.*`、
+`.diag/pipeline/panel/runs.json`、`docs/TROUBLESHOOTING.md §177`。

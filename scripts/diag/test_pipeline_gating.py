@@ -147,7 +147,9 @@ def t_gates():
     def body(d):
         # 造一份"当前有效"的范围清单，让 stale/missing 那条路径不干扰本项
         real = up.fingerprint
+        real_gallery = up.gallery_reachable
         up.fingerprint = lambda: 'bundles=1 deps=test'
+        up.gallery_reachable = lambda *a, **k: True   # CG 正向用例不依赖真起 8777
         try:
             up.write_scope(['AssetBundles/cue/bgm-airraidalarm.b',
                             'AssetBundles/spinepainting/2b_2'], 1, 1)
@@ -192,6 +194,22 @@ def t_gates():
             ck('cg: 增量只导变更的皮肤（--only 收窄）',
                only and '--only' in only[0] and only[0][only[0].index('--only') + 1] == '2b_2',
                str(only))
+
+            # 8777 不可达：CG 必须当场判红、不许起子进程空等（2026-10-23 实测空转 30 分钟）
+            up.gallery_reachable = lambda *a, **k: False
+            r = Rec()
+            old, up.run = up.run, r
+            try:
+                ok = up.st_cg(False, {'cg'})
+            finally:
+                up.run = old
+            ck('cg: 8777 不可达 → 判红', ok is False and up.RESULTS['cg']['ok'] is False,
+               str(up.RESULTS['cg']))
+            ck('cg: 8777 不可达 → 一个子进程都没起', not r.hit('run_cg_export'), str(r.calls))
+            ck('cg: 8777 不可达 → 结论直接说先起画廊服务器',
+               '8777' in up.RESULTS['cg']['detail'] and '启动资产浏览器' in up.RESULTS['cg']['detail'],
+               up.RESULTS['cg']['detail'])
+            up.gallery_reachable = lambda *a, **k: True
 
             # ── 降级台账接进了 audio 档（2026-10-03）：它红了，这一档就不许报绿 ──
             # 只读判据默认全 0 的桩测不出这条：上一版所有"跑了两道审计"的结论都是无条件 True，
@@ -241,6 +259,7 @@ def t_gates():
                'gap_audit 崩' in up.RESULTS['audio']['detail'], up.RESULTS['audio']['detail'])
         finally:
             up.fingerprint = real
+            up.gallery_reachable = real_gallery
     tmp_work(body)
 
 

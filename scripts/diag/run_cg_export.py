@@ -78,8 +78,24 @@ def ev(expr):
         if m.get('id') == _id:
             return m.get('result', {}).get('result', {}).get('value')
 
+# 页面来自 8777。服务器没起时 Chrome 停在错误页，下面等 #prog 会一直空转到
+# --timeout（实测 30 分 03 秒），上层只看到"仍在跑"。连上后 10 秒内没有 #prog
+# 就直接失败，把根因说出来。
+try:
+    for _ in range(10):
+        if ev("!!document.querySelector('#prog')"):
+            break
+        time.sleep(1)
+    else:
+        print('✗ cg_export.html 没有加载出 #prog（画廊服务器 8777 没起，或页面报错）', flush=True)
+        ws.close(); proc.terminate(); sys.exit(2)
+except Exception as e:
+    print(f'✗ 连上 CDP 但读不到页面（{type(e).__name__}: {e}）', flush=True)
+    ws.close(); proc.terminate(); sys.exit(2)
+
 t0 = time.time()
 last = ''
+done = False
 while time.time() - t0 < timeout:
     prog = ev("document.querySelector('#prog').textContent") or ''
     tail = ev("(function(){var l=document.querySelectorAll('#log div');return l.length?l[l.length-1].textContent:''})()") or ''
@@ -88,8 +104,14 @@ while time.time() - t0 < timeout:
         print(f'[{int(time.time()-t0):4d}s] {line}', flush=True)
         last = line
     if ('全部结束' in tail) or ('已停止' in tail):
+        done = True
         break
     time.sleep(2)
-print('DONE, rc check')
+if not done:
+    print(f'✗ {timeout}s 内没有收尾行（导出没跑完/页面卡住）', flush=True)
+    ws.close()
+    proc.terminate()
+    sys.exit(3)
+print('完成：读到收尾行', flush=True)
 ws.close()
 proc.terminate()

@@ -1189,6 +1189,20 @@ def st_bgm(approved, full):
     return verdict('bgm', True, f'音乐库已重建：待解码 {n} 首已处理 · bgm.json 已更新')
 
 
+GALLERY_URL = 'http://127.0.0.1:8777/gallery_v2/cg_export.html'
+
+
+def gallery_reachable(timeout=3.0):
+    """CG 导出页的宿主（8777）在不在。**不能只看端口 listen**：这项目遇到过
+    "端口在听但收连接吐 0 字节"的半死状态（docs/TROUBLESHOOTING.md §63 同类）。"""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(GALLERY_URL, timeout=timeout) as r:
+            return r.status == 200 and bool(r.read(1))
+    except Exception:
+        return False
+
+
 def st_cg(full, approved):
     # 同上：CG 导出经画廊服务器**就地覆写 Output/CG_v2**，没有暂存区可退 ⇒ 未签字不许跑。
     if 'cg' not in approved:
@@ -1201,13 +1215,23 @@ def st_cg(full, approved):
         return stop
     if todo is not None and not todo:
         return verdict('cg', True, '本次增量没有 Spine 皮肤包 ⇒ 跳过（Output/CG_v2 未动）')
+    # ⚠️ 前置探活：CG 导出页来自 8777，服务器没起时 Chrome 停在错误页，
+    #    run_cg_export 会空等到自己的 --timeout（实测 30 分 03 秒），界面只显示"仍在跑"。
+    #    2026-10-23 用户因此白等两轮并断电；这里 3 秒判红，把下一步直接说出来。
+    if not gallery_reachable():
+        return verdict('cg', False,
+                       '画廊服务器 8777 不可达 ⇒ CG 导出页打不开，脚本只会空等到超时。'
+                       '先双击 gallery_src\\启动资产浏览器.bat（确认页面能打开），再重跑本阶段。')
     argv = [PY, 'scripts/diag/run_cg_export.py', '--size', '2400', '--extra', 'animFrame=1', '--redo']
     if todo is not None:
         argv += ['--only', ','.join(todo)]
     rc, so, _ = run(argv, timeout=7200, echo=['全部结束', '完成', '失败'])
     m = re.search(r'完成(\d+) 跳过(\d+) 失败(\d+)', so)
     if not m:
-        return verdict('cg', False, '没读到「完成N 跳过N 失败N」汇总行 ⇒ 不能判完成（该脚本超时也 exit 0）')
+        tail = [l.strip()[:120] for l in (so or '').splitlines() if l.strip()][-2:]
+        return verdict('cg', False,
+                       f'没读到「完成N 跳过N 失败N」汇总行（rc={rc}）⇒ 不能判完成'
+                       + (f'：{"；".join(tail)}' if tail else '（脚本没有输出收尾行，页面可能没加载）'))
     ok, skip, bad = map(int, m.groups())
     return verdict('cg', bad == 0 and ok > 0,
                    f'CG 导出 完成{ok} 跳过{skip} 失败{bad}'
@@ -1477,6 +1501,24 @@ def stage_units(s, full, fp=None):
     return len(stems_for(top[0], payload, main_only=top[1]))
 
 
+def save_state(st):
+    """原子落盘阶段缓存。读端（控制台）每 8 秒轮询一次，直接 open(...,'w') 会先截断
+    再写：正好撞上就是半截 JSON ⇒ 面板把整块结论当空，五步全显示 0/N。
+    2026-10-23 用户截图里"卡片 0/9、进度台 8/9"同屏就是这一类（进度台读日志，不受影响）。
+    Windows 上目标文件可能正被读端短暂持有，os.replace 会 PermissionError ⇒ 重试。"""
+    tmp = STATE + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(st, f, ensure_ascii=False, indent=1)
+    for i in range(20):
+        try:
+            os.replace(tmp, STATE)
+            return
+        except PermissionError:
+            if i == 19:
+                raise
+            time.sleep(0.05)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--plan', action='store_true', help='只读：打印阶段表与影响面，不跑任何东西')
@@ -1502,10 +1544,14 @@ def main():
     fp = fingerprint()
     sc = scope_stamp()      # 结论的第二枚章：范围清单的身份
     st = json.load(open(STATE, encoding='utf-8')) if os.path.isfile(STATE) else {}
-    if base_of(st.get('fingerprint')) != base_of(fp):
+    if bundles_of(st.get('fingerprint')) != bundles_of(fp):
         # 换了一批源包 ⇒ 保守地全部重判（这是"大事件"，不该只挑几个阶段）。
-        log(f'输入指纹变了（{st.get("fingerprint", "无记录")} → {fp}），旧状态作废，全部重判')
-        st = {'fingerprint': fp, 'done': {}}
+        # ⚠️ 只比 `bundles=`，不比 `deps=`：deps 是本管线 `deps` 阶段自己换入的产物，
+        #    把它算成"新批"会让下一轮开头就把 preflight/pull/cfg.* 的结论整份清掉
+        #    （2026-10-23 实测：重导跑到 8/9，界面却把待办指回第 1 步）。
+        #    deps 变化该作废哪些阶段，交给下面 `rejudge_state()` 的逐阶段指纹判。
+        log(f'源包数变了（{bundles_of(st.get("fingerprint"))} → {bundles_of(fp)}），旧状态作废，全部重判')
+        st = {'fingerprint': fp, 'done': {}, 'verdict': {}}
     else:
         # 源包没变：逐阶段重判（可能是配置表刷新了，也可能指纹算法本身改过 ——
         # 2026-10-17 §157 加 `cfg=` 那次，盘上状态是按老规则盖章的，
@@ -1567,7 +1613,10 @@ def main():
         # （`rejudge_state` / 面板的 `stage_fp_by_key`）**逐阶段**一致，不能拿整条 `fp`。
         st.setdefault('verdict', {})[s.key] = dict(RESULTS[s.key], fingerprint=cur_fp, scope=sc)
         st['scope'] = sc
-        json.dump(st, open(STATE, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+        # 顶层指纹推进到**跑完这一刻**的值（不是本轮起点的 `fp`）：pull/deps/cfg.publish
+        # 会在跑的过程中改写输入，停在起点值会让下一轮开头判"换了输入"并清空全部结论。
+        st['fingerprint'] = fingerprint()
+        save_state(st)
         if not RESULTS[s.key]['ok']:
             log(f'!! {s.key} 判红 ⇒ 停在这里，不往下跑（红着继续只会把错的换进去）')
             break

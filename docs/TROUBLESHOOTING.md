@@ -11660,3 +11660,44 @@ STAGES 里 derive 的标题/判据/writes 同步改成"缩略图 / 台词表 / �
 
 **涉及**：`gallery_src/index.html`、`scripts/diag/index_paging_probe.py`、`scripts/diag/gallery_cat3_probe.py`、
 `docs/WORKFLOWS.md` WF-57。
+
+## §177 控制台跑到 8/9 却指回第 1 步；CG 空转 30 分钟（2026-10-23）
+
+**现象**（用户截图）：第 3 步进度台写「阶段 8/9 · cg 正在跑」，右栏卡片却是 `0/9`、待办「第 1 步 · 接模拟器」；
+CG 从 00:25:13 起静默 75 秒后断电，第二天控制台仍显示 `running`（PID 已死）。
+
+**根因（四处独立的静默失效，叠在一起）**
+1. **顶层指纹不推进 + `base_of` 当新批判据**：`update_pipeline.main()` 用 `base_of`（`bundles=` + `deps=`）
+   判「换了一批源包」，但 `deps` 阶段**自己**就会换入新的依赖表；顶层 `st['fingerprint']` 只在开头写一次，
+   跑完不推进。于是下一轮开头看到 deps 变了 ⇒ `st={'fingerprint':fp,'done':{}}` 把
+   preflight/pull/cfg.* 的结论整份清掉；这轮又是 `--only` 不跑它们 ⇒ `currentStep()` 永远指回第 1 步。
+2. **`runs.json` 没有 `step`**：`currentStep()` 读 `S.running.step` 永远是 `undefined`，只能退回
+   「第一个没绿的步骤」——正好是第 1 步。跑 cg 时右栏就写「正在跑 01」。
+3. **`pipeline_state.json` 非原子写**：`json.dump(st, open(STATE,'w'))` 先截断再写；8 秒轮询撞上就是半截
+   JSON ⇒ `state={}` ⇒ 五步全 `0/N`。进度台读日志，所以同一屏仍显示 8/9——两个数据源各说各的。
+4. **CG 没有前置探活**：导出页来自 8777，服务器没起时 Chrome 停在错误页；`run_cg_export.py` 只等页面里的
+   `#prog`，默认 1800 秒才退，控制台外层给 7200 秒 ⇒ 界面只显示「仍在跑」，看起来像渲染慢。
+
+**修法**
+- `save_state()`：写 `.tmp` + `os.replace`（Windows 上目标被读端短暂持有时按 50ms×20 重试）；
+  面板读端 `load_state_retry()` 再兜一次。
+- 每阶段保存时把顶层 `st['fingerprint']` 推进到**当前** `fingerprint()`，不再停在起点。
+- 「换批」判据从 `base_of` 改成 `bundles_of`（只认源包数）；deps/cfg 变化交给逐阶段指纹判。
+- `start_job` 写 `step`：从 `--only` 反查阶段的最小 step；`--plan` / `scan_assets` 写 0（不抢锚点）。
+- `currentStep()/nextWorkStep()` 跳过「整步 idle、但后面步骤已有 fail/run/await/pass」的前缀；
+  卡片计数画 `—` 并加标题「这一轮没有重新检查（上一轮已做过）」。
+- `st_cg` 先探 `http://127.0.0.1:8777/gallery_v2/cg_export.html`（3 秒，读 1 字节，**不只看端口 listen**），
+  不可达直接判红；面板启动含 cg 的任务前也探一次。
+- `run_cg_export.py` 连上 CDP 后 10 秒内页面没有 `#prog` ⇒ `exit 2`；超时/无收尾行 ⇒ `exit 3`。
+
+**判据 / 实测**
+- `/api/state`：step 3 = `8/9`；页面 `currentStep()=3`；右栏 `待办 03`；第 1/2 步 `cnt="—"`、`data-skipped=1`。
+- `st_cg` 在 8777 未起时 **2.27 秒**判红（原 30 分 03 秒）；`run_cg_export.py` 对无 `#prog` 的桩页 **10.8 秒** `exit 2`。
+- `scripts/diag/test_pipeline_gating.py` 全绿；新增「8777 不可达 → 判红且一个子进程都没起」。
+- 当前 state 的 8 条 verdict + 3 条 done 的 scope/fp 全匹配；`rejudge_state` 保留 8 条 verdict、0 条 drop。
+
+**未修（潜在雷）**：`st_review` 仍用暂存区全部 `*.png` 出清单。本次 181 张 10-01/10-17 旧暂存
+与线上**逐字节相同**才没进换入；哪天旧暂存与线上不同，会被一起换进去 ⇒ 后续让 review 只认本批 scope。
+
+**涉及**：`scripts/update_pipeline.py`、`scripts/pipeline_panel.py`、`scripts/diag/run_cg_export.py`、
+`scripts/diag/test_pipeline_gating.py`、`docs/WORKFLOWS.md` WF-59。

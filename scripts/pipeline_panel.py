@@ -355,6 +355,54 @@ def bg_chars_save(body):
             'pending': 0, 'total': len(BG_STEPS), 'steps': [x[0] for x in BG_STEPS]}
 
 
+def step_of_argv(argv):
+    """这次任务该把「正在跑 / 待办」锚到第几步。
+
+    runs.json 以前没有这个字段，`currentStep()` 读 `S.running.step` 永远是 undefined
+    ⇒ 只能退回"第一个没绿的步骤"。deps 换表后那个步骤恰好是第 1 步，
+    于是跑 cg（第 3 步）时右栏写「正在跑 01」（2026-10-23 用户截图）。
+    """
+    if '--plan' in argv:
+        return 0
+    only = None
+    for i, a in enumerate(argv):
+        if a == '--only' and i + 1 < len(argv):
+            only = {x.strip() for x in argv[i + 1].split(',') if x.strip()}
+    try:
+        stages, _ = stage_keys()
+    except Exception:
+        return 1
+    nums = [s.get('step') or 0 for s in stages if only is None or s['key'] in only]
+    nums = [n for n in nums if n]
+    return min(nums) if nums else 1
+
+
+def cg_requested(argv):
+    """这次任务是否**真的会写** CG（--only 含 cg 且 cg 被签字，或整条管线签了 cg）。"""
+    only, approved, i = None, set(), 0
+    while i < len(argv):
+        if argv[i] == '--only' and i + 1 < len(argv):
+            only = {x.strip() for x in argv[i + 1].split(',') if x.strip()}
+            i += 2
+        elif argv[i] == '--approve':
+            i += 1
+            while i < len(argv) and not argv[i].startswith('--'):
+                approved.add(argv[i]); i += 1
+        else:
+            i += 1
+    return ('cg' in approved) if only is None else ('cg' in only and 'cg' in approved)
+
+
+def gallery_ok(timeout=2.0):
+    """启动 CG 任务前的探活，与 update_pipeline.gallery_reachable 同一实现。"""
+    sys.path.insert(0, HERE)
+    try:
+        import update_pipeline as up
+        return up.gallery_reachable(timeout)
+    except Exception:
+        return False
+
+
 def start_job(label, argv, script=None):
     """起一个脱离面板的流水线子进程。重活必须串行 —— 已有在跑就拒绝。
 
@@ -367,6 +415,9 @@ def start_job(label, argv, script=None):
         if cur:
             return None, f'已经有一个任务在跑（{cur["label"]}，pid={cur["pid"]}）。' \
                          f'这台机器 15.4GB，重活只允许一次一个。'
+        if not script and cg_requested(argv) and not gallery_ok():
+            return None, ('CG 导出需要画廊服务器 8777，但它现在不可达：'
+                          '先双击 gallery_src\\启动资产浏览器.bat，确认 cg_export.html 能打开，再点重导。')
         os.makedirs(PANEL, exist_ok=True)
         rid = time.strftime('%H%M%S')
         log = os.path.join(PANEL, f'run_{rid}.log')
@@ -375,6 +426,7 @@ def start_job(label, argv, script=None):
                              env=ENV, creationflags=0x00000008 if os.name == 'nt' else 0)
         runs = load_runs()
         runs.append({'id': rid, 'label': label, 'argv': argv, 'pid': p.pid, 'log': log,
+                     'step': 0 if script else step_of_argv(argv),
                      'state': 'running', 'started': time.strftime('%Y-%m-%d %H:%M:%S')})
         save_runs(runs)
         lf.close()   # 让子进程自己持有；父进程关掉句柄，进程结束后面板仍能读文件
@@ -738,11 +790,11 @@ class H(BaseHTTPRequestHandler):
                 err = str(e)
             state = {}
             try:
-                raw = json.load(open(os.path.join(WORK, 'pipeline_state.json'), encoding='utf-8'))
-                # 外层闸只比"基础指纹"（源包数 + 依赖表）：那是"换了批输入"的大事件，
-                # 不该同批时不认任何旧结论。**不能比整条** —— 整条含 `cfg=`，
-                # 配置表一刷新就会把整块面板清空，而 `cfg.*` 四步的结论其实完全有效（§157）。
-                if base_of_fp(raw.get('fingerprint')) == base_of_fp(fingerprint_safe()):
+                raw = load_state_retry()
+                # 外层闸只比"源包数"：换了一批包是"不该认任何旧结论"的大事件；
+                # `deps=` 是本管线 deps 阶段的产物，不能拿它整块清空（2026-10-23）。
+                # 配置表/依赖表变化该作废哪些阶段，交给下面的逐阶段指纹判。
+                if bundles_of_fp(raw.get('fingerprint')) == bundles_of_fp(fingerprint_safe()):
                     # done=跳过缓存（只有暂存判绿档），verdict=上次结论（13 档全记）。
                     # 两个都要，且**指纹不同就一个都不读** —— 拿旧更新包的结论给这次的界面涂绿，
                     # 正是这条流水线最怕的那类假绿灯。
@@ -1236,10 +1288,26 @@ def fp_pair_safe():
     return _cached('fp_pair', 30.0, calc)
 
 
-def base_of_fp(fp):
-    """指纹里不含配置表的那半（`bundles=N deps=H`）。读不懂就原样返回（保守：不匹配）。"""
+def bundles_of_fp(fp):
+    """只取源包数那一半。外层闸用：deps 是本管线 `deps` 阶段自己换入的产物，
+    拿它判"换了批输入"会把刚跑完的结论整块清掉（与 update_pipeline.bundles_of 同源）。"""
     parts = (fp or '').split(' ')
-    return ' '.join(parts[:2]) if len(parts) >= 2 else (fp or '')
+    return parts[0] if parts and parts[0].startswith('bundles=') else (fp or '')
+
+
+def load_state_retry(tries=2, delay=0.15):
+    """读阶段缓存。写端已改成原子替换，这里再兜一层：一次瞬时的半截 JSON
+    不该变成"五步全 0"（2026-10-23 用户截图里 0/9 与 8/9 同屏就是这一类）。"""
+    last = None
+    for i in range(tries):
+        try:
+            with open(os.path.join(WORK, 'pipeline_state.json'), encoding='utf-8') as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            last = e
+            if i + 1 < tries:
+                time.sleep(delay)
+    raise last
 
 
 def stage_fp_by_key_safe(key):
@@ -3765,6 +3833,13 @@ async function apiState(force){
   }
 }
 function stagesOf(n){ return (S.stages||[]).filter(s=>(s.step||0)===n); }
+/* 后面的步骤已经有结论/在跑 ⇒ 前面"全 idle"的步骤只可能是上一轮做过、这一轮没复核
+   （典型：deps 换表后 preflight/pull/cfg.* 的章失效）。把它当待办会把人指回去重做；
+   2026-10-23 用户跑 cg 时被指回第 1 步"接模拟器"就是这么来的。 */
+function hasProgressAfter(n){
+  return Object.keys((S&&S.steps)||{}).map(Number).some(k=>k>n &&
+    stagesOf(k).some(s=>['fail','run','await','pass'].includes(statusOf(s.key))));
+}
 /* 「待办」= 下一步该动手的步骤；正在跑时以 running.step 为准。
    它和 `step`（用户正在看哪一步）是两件事——2026-10-17 用户点了几下步骤就迷路了，
    根因就是之前只有 `step`，没有「机器停在哪」这个锚。
@@ -3784,7 +3859,11 @@ function currentStep(){
     const list=stagesOf(n);
     if(!list.length) continue;
     const sts=list.map(s=>statusOf(s.key));
-    if(sts.some(x=>x==='fail'||x==='run'||x==='await'||x==='idle')) return n;
+    if(sts.some(x=>x==='fail'||x==='run'||x==='await'||x==='idle')){
+      /* 整步 idle + 后面已有进展 ⇒ 这一轮没复核，不是没做；别抢待办。 */
+      if(sts.every(x=>x==='idle') && hasProgressAfter(n)) continue;
+      return n;
+    }
   }
   return order.length?order[order.length-1]:1;
 }
@@ -4000,7 +4079,11 @@ function nextWorkStep(n){
     if(k<=n) continue;
     /* 表漂移算第 2 步的活：阶段结论全绿，但发布出去的表缺行（§155）。 */
     if(k===nCfg && skinGapPending()) return k;
-    if(stagesOf(k).some(s=>statusOf(s.key)!=='pass')) return k;
+    const sts=stagesOf(k).map(s=>statusOf(s.key));
+    if(sts.some(x=>x!=='pass')){
+      if(sts.every(x=>x==='idle') && hasProgressAfter(k)) continue;
+      return k;
+    }
   }
   return 0;
 }
@@ -4305,18 +4388,24 @@ function render(){
     const worst=list.map(s=>statusOf(s.key))
       .reduce((a,b)=>['fail','run','await','pass','idle'].indexOf(a)<=['fail','run','await','pass','idle'].indexOf(b)?a:b,'idle');
     const doneN=list.filter(s=>statusOf(s.key)==='pass').length;
+    /* 整步 0 个绿、却已经有后面的步骤在跑/已绿 ⇒ 这步是"上一轮做过、这一轮没复核"。
+       计数改画「—」，别用 0/N 冒充"没开始"（2026-10-23 用户截图里 01/02 全是 0）。 */
+    const skipped=list.length>0 && doneN===0 &&
+      list.every(s=>statusOf(s.key)==='idle') && hasProgressAfter(n);
     const b=document.createElement('button');
     const fresh='s'+n, first=!mounted.has(fresh); mounted.add(fresh);
     b.className='snode'+(n===step?' on':'')+(n===cur?' cur':'')+(first?' in':'')+
       (worst==='fail'?' fail':worst==='await'?' await':worst==='run'?' run':
        doneN===list.length&&list.length?' done':'');
-    b.title = n===cur ? (allStagesPass() ? '这一步也跑完了' : '待办：这一步还有没跑完的阶段')
-                      : '查看第 '+n+' 步（不改变待办，按钮照样能按）';
+    b.title = skipped ? '这一轮没有重新检查（上一轮已做过）；点进来可以重跑'
+      : n===cur ? (allStagesPass() ? '这一步也跑完了' : '待办：这一步还有没跑完的阶段')
+                : '查看第 '+n+' 步（不改变待办，按钮照样能按）';
     if(first) b.style.animationDelay=(n*70)+'ms';
     b.dataset.step=n; b.dataset.done=doneN; b.dataset.total=list.length;
+    if(skipped) b.dataset.skipped='1';
     b.innerHTML='<span class="bead"></span><label>'+esc(steps[k][0])+'</label>'+
       '<span class="sdots">'+list.map(s=>'<i class="dot '+statusOf(s.key)+'" title="'+esc(s.key)+'"></i>').join('')+'</span>'+
-      '<span class="cnt">'+doneN+'/'+list.length+'</span>'+
+      '<span class="cnt">'+(skipped?'—':doneN+'/'+list.length)+'</span>'+
       '<span class="sfill"><i style="width:'+(list.length?Math.round(doneN/list.length*100):0)+'%"></i></span>';
     b.onclick=()=>{ step=n; render(); };
     bar.appendChild(b);
