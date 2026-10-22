@@ -2,5 +2,51 @@
  "schema": 1,
  "note": "背景词根的人工补名正本（入库）。只用于游戏表 / 系列传播 / 类目词典都给不出名字的 root 档；已有表内证据的名字不会被覆盖。控制台「背景标注」复核台可写入。",
  "updated_at": "2026-10-22",
- "labels": {}
+ "labels": {
+  "bsmre": {
+   "cn": "远汇点作战",
+   "why": "画面红蓝试验场+棋子 CG（Bismarck/U-556）；memory_storyline 远汇点作战正文写红方/蓝方/棋子",
+   "updated_at": "2026-10-22 14:22"
+  },
+  "fujinwan": {
+   "cn": "浮金湾",
+   "why": "memory_template 5181 条件为「奢华！享梦！浮金湾！」；浮金湾地图与泳装 CG",
+   "updated_at": "2026-10-22 14:22"
+  },
+  "storymap_huanlujianhai": {
+   "cn": "环陆间海",
+   "why": "storymap 文件名拼音与地图形态推断为环陆间海；表内暂无中文活动名（候选）",
+   "updated_at": "2026-10-22 14:22"
+  },
+  "niceship": {
+   "cn": "Nice Ship（咖啡厅/海滩日常）",
+   "why": "画面为咖啡厅/海滩日常；仅见 BGM story-niceship-soft，表内暂无中文活动名（候选）",
+   "updated_at": "2026-10-22 14:22"
+  },
+  "zenker": {
+   "cn": "迷彩都市的寻踪者",
+   "why": "activity_template #153 openStory=MICAIDUSHIDEXUNZONGZHE1；memory_group 333「迷彩都市的寻踪者」；Zenker=曾克海军上将",
+   "updated_at": "2026-10-22 14:22"
+  },
+  "nacorearea": {
+   "cn": "梦幻的交汇（NieR:Automata 联动）",
+   "why": "2B/寄叶素材 + NieRAutomataCoreActivityUI；memory_group「梦幻的交汇」",
+   "updated_at": "2026-10-22 14:22"
+  },
+  "story_faxi": {
+   "cn": "光与影的鸢尾之华",
+   "why": "memory_template FAXI01..11 对应「光与影的鸢尾之华」；鸢尾旗帜与法系角色",
+   "updated_at": "2026-10-22 14:22"
+  },
+  "storymap_bolanhuichang": {
+   "cn": "博览会场",
+   "why": "文件名拼音=博览会场；环形展馆画面；疑属「撒丁的邀约」世界博览会（候选）",
+   "updated_at": "2026-10-22 14:22"
+  },
+  "storymap_datealane": {
+   "cn": "DATE A LANE（约会大作战联动）",
+   "why": "DATEALANEGUANQIA/RICHANG 剧情 ID；memory_group 官方标题 DATE A LANE「关卡篇/日常篇」",
+   "updated_at": "2026-10-22 14:22"
+  }
+ }
 }
