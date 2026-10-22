@@ -1286,7 +1286,7 @@ def st_cg(full, approved):
     if not gallery_reachable():
         return verdict('cg', False,
                        '画廊服务器 8777 不可达 ⇒ CG 导出页打不开，脚本只会空等到超时。'
-                       '先双击 gallery_src\\启动资产浏览器.bat（确认页面能打开），再重跑本阶段。')
+                       '先双击 Output\\gallery_v2\\启动资产浏览器.bat（确认页面能打开），再重跑本阶段。')
     if todo is not None:
         # CG 读正式区 Output/Spine_v2；本轮 Spine 只写临时区 ⇒ 先换入（带备份）。
         copied, replaced, skipped, failed, notes, bak = promote_staged('Spine_v2', todo)

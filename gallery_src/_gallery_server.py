@@ -26,7 +26,24 @@ from urllib.parse import urlparse, parse_qs
 
 PORT = 8777
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)                 # gallery_v2 的上一级 = Output/
+
+
+def _resolve_root(here):
+    """脚本与 bat 都是硬链接，两个入口的上一级不是同一个东西：
+      Output/gallery_v2/_gallery_server.py → 上一级 = Output（运行目录，正确）
+      gallery_src/_gallery_server.py       → 仓库根没有 gallery_v2/，真正的根在 ../Output
+    只按 dirname(HERE) 算，源码目录入口会把项目根当根，/gallery_v2/index.html 直接 404
+    （2026-10-23 用户双击源码目录的 bat 实测；Output 那份正常）。
+    """
+    if os.path.basename(here).lower() == 'gallery_v2':
+        return os.path.dirname(here)
+    cand = os.path.join(os.path.dirname(here), 'Output')
+    if os.path.isdir(os.path.join(cand, 'gallery_v2')):
+        return cand
+    return os.path.dirname(here)
+
+
+ROOT = _resolve_root(HERE)                   # 站点根 = Output/
 CG_DIR = os.path.join(ROOT, "CG_v2")         # Spine setup-pose CG 导出目录
 # Live2D 暂停帧的落盘目录：项目根下的 .diag/（临时产物区，已在 .gitignore 里）。
 # 不在模块级算，见 Handler._freeze_dir —— 探针从 gallery_src/ 正本 import 这个模块时，
@@ -287,8 +304,8 @@ def main():
     print("  关闭本窗口即停止服务器。")
     print("=" * 52)
 
-    if not os.path.isfile(os.path.join(HERE, "index.html")):
-        print("\n[警告] 当前目录没找到 index.html，请确认脚本与 gallery_v2 同目录。")
+    if not os.path.isfile(os.path.join(ROOT, "gallery_v2", "index.html")):
+        print("\n[警告] 找不到 gallery_v2/index.html，请确认服务器根目录:", ROOT)
 
     # 端口已被占用：多半是上一次没关掉的服务器还在跑 —— 直接复用，不再重复启动
     if port_in_use():

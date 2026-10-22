@@ -417,7 +417,7 @@ def start_job(label, argv, script=None):
                          f'这台机器 15.4GB，重活只允许一次一个。'
         if not script and cg_requested(argv) and not gallery_ok():
             return None, ('CG 导出需要画廊服务器 8777，但它现在不可达：'
-                          '先双击 gallery_src\\启动资产浏览器.bat，确认 cg_export.html 能打开，再点重导。')
+                          '先双击 Output\\gallery_v2\\启动资产浏览器.bat，确认 cg_export.html 能打开，再点重导。')
         os.makedirs(PANEL, exist_ok=True)
         rid = time.strftime('%H%M%S')
         log = os.path.join(PANEL, f'run_{rid}.log')

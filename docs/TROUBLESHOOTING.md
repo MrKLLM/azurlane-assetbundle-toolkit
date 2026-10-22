@@ -11710,3 +11710,29 @@ CG 从 00:25:13 起静默 75 秒后断电，第二天控制台仍显示 `running
 
 **涉及**：`scripts/update_pipeline.py`、`scripts/pipeline_panel.py`、`scripts/diag/run_cg_export.py`、
 `scripts/diag/test_pipeline_gating.py`、`docs/WORKFLOWS.md` WF-59。
+
+## §178 双击 `gallery_src\启动资产浏览器.bat` 得到 404（2026-10-23）
+
+**现象**：双击源码目录那份 bat，浏览器打开 `http://127.0.0.1:8777/gallery_v2/index.html` 是
+`Error code: 404 / File not found`；双击 `Output\gallery_v2\` 那份同一页面正常。
+
+**根因**：`_gallery_server.py` 与 bat 都是**硬链接**，`ROOT = os.path.dirname(HERE)`：
+- 从 `Output/gallery_v2/` 启动 → 上一级 = `Output/`（站点根，正确）
+- 从 `gallery_src/` 启动 → 上一级 = 项目根（没有 `gallery_v2/` 子目录）→ `/gallery_v2/index.html` 404
+
+不是端口、不是缓存、不是 index.html 缺失：两个入口跑的是同一份代码，只是 `dirname(__file__)` 不同。
+
+**修法**：`_resolve_root()` 先看 `basename(HERE)` 是否 `gallery_v2`（是 ⇒ 上一级）；
+否则探测 `dirname(HERE)/Output/gallery_v2`（源码目录入口 ⇒ `Output/`）；都不成立才回退旧行为。
+改的是 `gallery_src/` 正本，按 AGENTS.md 走 `deploy_gallery.py` → commit → `--relink` → `--check`。
+
+**判据**：从两个路径分别 import 模块，`ROOT` 都等于 `D:\Azur Lane Assets\Output`；
+在临时端口 `make_server(0, ROOT)` 请求 `/gallery_v2/index.html` 均 **200**（实测两个入口都是 200）。
+`deploy_gallery.py --check` 要求所有 FILES 同 inode。
+
+**踩坑**：排查时先看 8777 上跑的是哪个入口（`Get-CimInstance Win32_Process` 的 CommandLine 含
+`gallery_src` 就是旧的无根服务器）。新 bat 遇到端口被占用只会**复用旧进程**再开一个同样的 404 页；
+必须先关掉那个黑窗口（或换端口）再启动。服务器进程不热重载，改了 `_gallery_server.py` 必须重启窗口。
+
+**涉及**：`gallery_src/_gallery_server.py`、`Output/gallery_v2/_gallery_server.py`、
+`gallery_src/启动资产浏览器.bat`、`scripts/deploy_gallery.py`、`docs/WORKFLOWS.md` WF-59。

@@ -9,7 +9,7 @@ argument-hint: Path to the local page to serve (e.g. C:\proj\web\index.html) and
 argument-hint-en: Path to the local page to serve (e.g. C:\proj\web\index.html) and the port
 argument-hint-zh: 给出要服务的本地页面路径（如 C:\proj\web\index.html）和端口
 user-invocable: true
-version: 1.5.0
+version: 1.5.1
 ---
 
 # Windows Local Server Launcher
@@ -162,6 +162,7 @@ Debugging order: first prove the server itself works (`py -m http.server <port> 
 | **Two launcher instances "both work"**, and a page's data flickers between two different states | **Windows `SO_REUSEADDR` is not POSIX's**: with `allow_reuse_address = True` a second process **binds the same port successfully, no error**, and connections get split between them at random. Silent — nothing ever says "already running". | Probe before binding: `socket.connect_ex(('127.0.0.1', PORT)) == 0` → someone is already serving; reuse it or exit. Never rely on `allow_reuse_address` to give you `EADDRINUSE`. |
 | `.bat` written from a Git-Bash/MSYS shell contains `>/dev/null` where you typed `>nul` — the launcher dies instantly | MSYS auto-translates arguments that look like paths/devices | Don't let the literal token pass through the shell: build it in Python (`NUL = 'n' + 'ul'`), then **read the file back and assert `'/dev/null' not in content`** |
 | Page loads 200 but images/JSON/models all 404 | `--root` is the page's own directory while the page references `../assets` | Serve the parent (`--root "%~dp0.."`) and keep the subdir prefix in the URL |
+| Same hardlinked server script: one launcher 404s, the other works | Root derived from `dirname(__file__)`; the source-dir copy's parent is the repo root (no `gallery_v2/` subdir), the run-dir copy's parent is the site root | Resolve by role: `basename(HERE)=='gallery_v2'` → parent; else probe `dirname(HERE)/Output/gallery_v2`. Test **both** entry points by importing each copy and serving `/gallery_v2/index.html` on a free port; both must be 200. |
 | Chinese garbled only when piped | Harness decodes cp936 bytes | Ignore; assert on ASCII markers / HTTP codes |
 | Server **accepts** connections but returns 0 bytes; whole site dead while the port still listens | `ThreadingTCPServer` + `socketserver.handle_error` prints 4 traceback blocks to **stderr**, and it runs *before* `finally: shutdown_request()`. If stderr is a slow consumer (double-clicked console paused by a text selection, or an orphaned process whose parent shell is gone leaving an unread pipe), every browser-cancelled download wedges one thread **and** leaves its socket open with zero bytes flushed | Silence only client-abort exceptions in a `Server.handle_error` override (`ConnectionReset/ConnectionAborted/BrokenPipe/Timeout`); let everything else print |
 | Gate "passes" right after you add it, then a real outage slips through | The gate has never been observed red | Drive it with a stub that reproduces the exact symptom (e.g. accept + `200` + `Content-Length: 0`) and assert it goes red, attributes correctly, and prints its forensic line |
