@@ -11756,6 +11756,9 @@ CG 从 00:25:13 起静默 75 秒后断电，第二天控制台仍显示 `running
 **判据**：review 后 WORK 顶层只剩本次 `sheet_paintings.png`；`/api/state.sheets` 只有 1 条
 且 mtime 为本次；主屏显示「线上新增 36 · 内容有变 0」；`/api/state.news.rows` 36 条。
 归档目录保留旧表，仍可手动查看；旧图被浏览器占用时会提示「没能归档」，不会让 review 判红。
+**追加（同日）**：对照表不再按文件取前 12 个，而是按 `base_painting/skin_name` 归组：
+`sheet_paintings.png` = 9 个皮肤各一张代表图，`sheet_paintings_bases.png` = 5 个新船本体；
+2 个剧情黑影（`？？？`）只在 detail 标注、不入表。`_n/_hx/_hei` 变体不单独出表。
 
 **涉及**：`scripts/update_pipeline.py`（st_review）、`scripts/pipeline_panel.py`（glob_sheets/
 askOf/newsafe）、`docs/WORKFLOWS.md` WF-59。
@@ -11841,3 +11844,34 @@ askOf/newsafe）、`docs/WORKFLOWS.md` WF-59。
 `.rails` 数量 0；帮助抽屉含「运行边界」。宽屏短内容不出现滚动条，视觉与原来一致。
 
 **涉及**：`scripts/pipeline_panel.py`。
+
+## §183 语音表只扫正式区：换入前的新皮肤没声音（2026-10-23）
+
+**现象**：第 4 步「新增了什么」的语音列：4 个有 Spine 的新皮肤有 34/35/28 条，
+5 个新船本体/皮肤、2 个 Live2D、`dashan_3` 等纯皮肤行空白；而原皮 `dashan` 有 39 条。
+用户问「是这里没显示，还是直接算进原皮了」。
+
+**根因**：`extract_cv_voice.gallery_keys()` 只扫 `Output/Paintings_v2`、`Output/Live2D`、
+`Output/Spine_v2`。`audio` 阶段在 swap-in 之前跑；cg 刚把 4 个 Spine 换入正式区
+（所以它们有声音），其余新皮肤还在 `.diag/pipeline/`（Paintings/Live2D），没进 keys；
+`cv-960017/19/20/21` 四个 cue 包虽然有 4~5MB，也没解码。
+
+**修法**：`gallery_keys(extra)` 增加临时区 Paintings/Spine/Live2D；
+`extract_cv_voice --work .diag/pipeline`；`st_audio` 传 `--work WORK`。
+重跑 audio 后 960017/19/20/21 四个 CV2 包解码，5 个新船本体+`_2`、
+2 个 Live2D、`dashan_3` 都有了条目。
+
+**语义（用户问的重点）**：`skin_voice.json` 按 **painting** 键，原皮/皮肤/变体分开：
+- `tiejiaohao` 原皮 32、`tiejiaohao_2` 32（各自 `cv-960018` 的一套，`_2` 用 `_1` 后缀）；
+- `dashan` 原皮 39、`dashan_3` 39 —— 皮肤复用本体语音包（同 `cv-39907`），**不是**把原皮+皮肤相加；
+- `anninvwang_3` 34 / `qisheng_3` 35 / `yuekegongjue_5` 28 也是各自皮肤行指向对应 `cv` 包；
+- `_n/_hx/_hei` 变体通常复用基准皮肤的语音，表里按 painting 单独一行，空白表示该文件没有独立映射，
+  不代表该皮肤完全没声音（看它的基准行）。
+空白 = 该 painting 没有映射/没有可用语音，不是表藏了，也不会把原皮藏进皮肤。
+
+**判据**：`Output/Audio/CV2/cv-960017/19/20/21` 各有 42~45 个 ogg；`skin_voice` 的 5 个新船本体+`_2`、
+2 个 Live2D、`dashan_3` 都有 lines；`dashan` 与 `dashan_3` 各 39；`tiejiaohao`/`_2` 各 32。
+`news` 表的语音列 tooltip 已写明「按 painting 键，原皮/皮肤/变体分开，空白看基准行」。
+
+**涉及**：`scripts/extract_cv_voice.py`、`scripts/update_pipeline.py`（st_audio）、
+`scripts/pipeline_panel.py`（语音列 tooltip）、`docs/WORKFLOWS.md` WF-59。

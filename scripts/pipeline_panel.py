@@ -1270,11 +1270,12 @@ def newsafe():
         gkeys = {(r['base'], r['skin'] or r['ship'] or r['stem'],
                   r['ship'] or r['stem']) for r in rows}
         skins = len({(a, b) for a, b, c in gkeys if b and c and b != c})
+        sheets = [x for x in ('sheet_paintings.png', 'sheet_paintings_bases.png')
+                  if os.path.isfile(os.path.join(WORK, x))]
         return {'rows': rows,
                 'live_n': sum(1 for r in rows if r['live']),
                 'groups': len(gkeys), 'skins': skins,
-                'sheet': ('sheet_paintings.png'
-                          if os.path.isfile(os.path.join(WORK, 'sheet_paintings.png')) else '')}
+                'sheet': sheets[0] if sheets else '', 'sheets': sheets}
     return _cached('news', 10.0, calc)
 
 
@@ -4351,7 +4352,7 @@ function askOf(n){
         (mGrp?(' / '+mGrp[1]+' 组（'+mGrp[2]+' 个皮肤）'):'')+
         ' · 内容有变 '+(mChg?mChg[1]:'0')+'。'):'');
     return {eb, ask:allStagesPass()?'对照表好了，本轮也已换入':'对照表好了，看一眼再决定',
-      why:data+'这一步不写任何正式产物。'+(mNew?'对照表取前 12 对。':'')+nxRv.why,
+      why:data+'这一步不写任何正式产物。'+(mNew?'对照表按皮肤/本体分两张，不再只取前 12 个文件。':'')+nxRv.why,
       acts:[{a:'detail',t:'打开对照表',k:'pact mag'},
             {a:'review',t:'重新出对照表',k:'link2'},nxRv.act]};
   }
@@ -4613,16 +4614,16 @@ function render(){
   else if(!nw.rows.length) nt.innerHTML='<p class="dim" style="font-size:12px;margin:0">'+
       esc(nw.note||'这次更新没有新增皮肤（或还没跑第 3 步的对照表）')+'</p>';
   else nt.innerHTML='<table class="newt"><thead><tr><th>皮肤</th><th>舰名 / 阵营</th>'+
-      '<th>稀有度</th><th>语音</th><th>状态</th></tr></thead><tbody>'+nw.rows.map(r=>
+      '<th>稀有度</th><th title="skin_voice.json 按 painting 键的台词条数；原皮/皮肤/变体分开显示；带 _n/_hx/_hei 的变体通常复用基准皮肤，空白看基准行">语音</th><th>状态</th></tr></thead><tbody>'+nw.rows.map(r=>
       '<tr><td><code>'+esc(r.stem)+'</code>'+(r.skin?'<span class="dim"> · '+esc(r.skin)+'</span>':'')+
       '</td><td>'+(r.meta?esc(r.ship)+' <span class="dim">'+esc(r.faction)+'</span>'
                          :'<span class="warn">元数据缺（舰名取不到）</span>')+
       '</td><td>'+esc(r.rarity||'—')+'</td><td>'+(r.voice?r.voice+' 条':'<span class="warn">无</span>')+
       '</td><td>'+(r.live?'<span class="tag pass">已换入</span>'
                          :'<span class="tag await">待换入</span>')+'</td></tr>').join('')+
-      '</tbody></table>'+(nw.sheet?'<p class="dim" style="font-size:11.5px;margin:6px 0 0">'+
-      '<a class="link2" target="_blank" href="/file?path='+encodeURIComponent(nw.sheet)+
-      '">改前 | 改后 对照总表（新增的左侧标"线上没有这张"）</a></p>':'');
+      '</tbody></table>'+(nw.sheets&&nw.sheets.length?'<p class="dim" style="font-size:11.5px;margin:6px 0 0">'+
+      nw.sheets.map((f,i)=>'<a class="link2" target="_blank" href="/file?path='+encodeURIComponent(f)+
+      '">'+(i===0?'皮肤对照表':'新船本体对照表')+'</a>').join(' · ')+'</p>':'');
 
   $('#runs').innerHTML=(S.runs||[]).map(rr=>'<tr><td class="dim" style="white-space:nowrap">'+
     esc((rr.started||'').slice(11))+'</td><td>'+esc(rr.label||'')+

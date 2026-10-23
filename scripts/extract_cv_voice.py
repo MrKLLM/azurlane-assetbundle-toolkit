@@ -168,7 +168,7 @@ def load_skin_rows():
             for p, v in by.items()}
 
 
-def gallery_keys():
+def gallery_keys(extra=None):
     keys = set()
     if os.path.isdir(PAINT_DIR):
         for f in os.listdir(PAINT_DIR):
@@ -179,6 +179,23 @@ def gallery_keys():
             for name in os.listdir(d):
                 if not name.startswith(('_', '.')) and os.path.isdir(os.path.join(d, name)):
                     keys.add(name)
+    # 换入前的新皮肤只在临时区（.diag/pipeline）。audio 阶段跑在 swap-in 之前，
+    # 不扫这里就会出现「4 个有 Spine 的新皮肤有声音、5 个新船/3 个纯皮肤/2 个 Live2D 没声音」
+    # ——不是表藏了，是这些 painting 根本没进语音映射（2026-10-23 实测）。
+    if extra:
+        for sub, d in (('Paintings_v2', os.path.join(extra, 'Paintings_v2')),
+                       ('Spine_v2', os.path.join(extra, 'Spine_v2')),
+                       ('Live2D', os.path.join(extra, 'Live2D'))):
+            if not os.path.isdir(d):
+                continue
+            if sub == 'Paintings_v2':
+                for f in os.listdir(d):
+                    if f.lower().endswith('.png') and not f.startswith(('_', '.')):
+                        keys.add(os.path.splitext(f)[0])
+            else:
+                for name in os.listdir(d):
+                    if not name.startswith(('_', '.')) and os.path.isdir(os.path.join(d, name)):
+                        keys.add(name)
     return sorted(keys)
 
 
@@ -695,8 +712,10 @@ if __name__ == '__main__':
     ap.add_argument('--map', default='')
     ap.add_argument('--skip-done', action='store_true',
                     help='磁盘上已解过的包不再解码，只复用现有 ogg 重建映射（增量重跑）')
+    ap.add_argument('--work', default='',
+                    help='额外扫描的临时区（.diag/pipeline）：换入前的新皮肤只在这里')
     a = ap.parse_args()
-    keys = gallery_keys()
+    keys = gallery_keys(a.work or None)
     sel = [x for x in (a.probe or a.sample or a.only).split(',') if x]
     if a.probe:
         sys.exit(run([k for k in keys if k in sel], 'probe', '', None, a.jobs))

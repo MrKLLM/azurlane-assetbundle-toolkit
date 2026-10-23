@@ -1086,7 +1086,8 @@ def st_audio(approved):
                        + ('' if rcg == 0 else ' · 有新增降级，先判断再签字')
                        + ('' if rc2 == 0 else ' · gap_audit 崩了（它恒 exit 0，非 0 即故障）')
                        + ' · 未签字，请 --approve audio')
-    rc, so, _ = run([PY, 'scripts/extract_cv_voice.py', '--all', '--skip-done'],
+    rc, so, _ = run([PY, 'scripts/extract_cv_voice.py', '--all', '--skip-done',
+                     '--work', WORK],
                     timeout=7200, echo=['包', '失败', '合计', '进度'])
     rc2, so2, _ = run([PY, 'scripts/diag/voice_gap_audit.py'], timeout=1800, echo=['缺口', '合计'])
     rc3, _, _ = run([PY, 'scripts/diag/l2d_voice_inventory.py'], timeout=600)
@@ -1398,15 +1399,48 @@ def st_review():
             return (m.get('base_painting') or s,
                     m.get('skin_name') or m.get('cn') or s,
                     m.get('cn') or s)
-        gkeys = {_gk(s) for s in new_only}
-        skin_n = len({(a, b) for a, b, c in gkeys if b and c and b != c})
+        groups = {}
+        for s in todo:
+            groups.setdefault(_gk(s), []).append(s)
+
+        def _rep(k, files):
+            """一组变体里挑一张代表图：优先 base_painting 本身，其次不带 _n/_hx/_hei 的。"""
+            bp = k[0]
+            for f in sorted(files):
+                if f == bp:
+                    return f
+            for f in sorted(files):
+                if not re.search(r'_(n|hx|hei)$', f):
+                    return f
+            return sorted(files)[0]
+
+        def _unknown(k):
+            s = str(k[2] or '')
+            return (not s) or ('?' in s) or ('？' in s)
+
+        skin_groups = [(k, v) for k, v in groups.items()
+                       if k[1] and k[2] and k[1] != k[2] and not _unknown(k)]
+        base_groups = [(k, v) for k, v in groups.items()
+                       if k[1] == k[2] and not _unknown(k)]
+        sil_groups = [(k, v) for k, v in groups.items() if _unknown(k)]
         lines.append(f'立绘：临时区 {len(news)} 张 · 线上新增 {len(new_only)} 个文件'
-                     f'（{len(gkeys)} 组 / {skin_n} 个皮肤） · 内容有变 {len(chg)}'
+                     f'（{len(groups)} 组 / {len(skin_groups)} 个皮肤） · 内容有变 {len(chg)}'
                      f' · 逐字节相同 {same_n}')
-        if todo:
+
+        def _mk(items, out):
+            names = [_rep(k, fs) for k, fs in items]
+            if not names:
+                return
             run([PY, 'scripts/diag/make_pair_sheet.py', '--old', live_p, '--new', p_new,
-                 '--names', ','.join(todo[:12]), '--out', os.path.join(WORK, 'sheet_paintings.png'),
+                 '--names', ','.join(names), '--out', os.path.join(WORK, out),
                  '--cell', '260'], timeout=1800, echo=['成对', '已写出', '线上没有'])
+
+        # 一张表只放 12 对时，前 12 个文件全是同一批变体，看起来像"只有几个"（2026-10-23）。
+        # 改成按皮肤/本体各出一张：9 个皮肤一张、5 个新船本体一张；黑影只列表不入表。
+        _mk(base_groups, 'sheet_paintings_bases.png')
+        _mk(skin_groups, 'sheet_paintings.png')
+        if sil_groups:
+            lines.append(f'（另 {len(sil_groups)} 个剧情黑影未入对照表，名字是 ???）')
     else:
         lines.append(f'立绘：暂存区/正式区缺一侧（暂存 {os.path.isdir(p_new)} · 正式 {os.path.isdir(live_p)}）'
                      f'⇒ 先跑第 2 步的重导')
