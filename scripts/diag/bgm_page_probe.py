@@ -312,6 +312,71 @@ def main():
                 f"四种模式逐项可选中且 qmode 同步: {cyc}")
             say(d3['qOn']==5, f"点播放列表第 6 行切曲 → 当前行 {d3['qOn']+1}（{d3['cur'][:24]}）")
             say(d3['closed'], "播放列表能关闭")
+            # 队列自成一屏：单独留一张，检查拖动把手、删除/下一首按钮和顶部复位键是否真的在。
+            ev("document.getElementById('playlistBtn').click()")
+            time.sleep(0.45)
+            say(os.path.getsize(shot('queue')) > 20000, f"队列：{shot('queue')}")
+            d3b = ev(r"""(async()=>{
+              const t=ms=>new Promise(r=>setTimeout(r,ms));
+              const rows=()=>[...document.querySelectorAll('#qlist .qrow')];
+              const title=i=>{const r=rows()[i];return r?r.querySelector('.qt').firstChild.textContent.trim():''};
+              const before=[title(0),title(1),title(2)];
+              const dt=new DataTransfer();
+              const r0=rows()[0], r2=rows()[2], rr=r2.getBoundingClientRect();
+              r0.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:dt}));
+              r2.dispatchEvent(new DragEvent('dragover',{bubbles:true,dataTransfer:dt,
+                clientY:rr.bottom-2}));
+              r2.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:dt,
+                clientY:rr.bottom-2}));
+              await t(120);
+              const moved=[title(0),title(1),title(2)];
+              const orderBtn=!document.getElementById('qorder').hidden;
+              document.getElementById('qorder').click(); await t(120);
+              const restoredOrder=[title(0),title(1),title(2)];
+              const curIdx=rows().findIndex(r=>r.classList.contains('on'));
+              const pick=title(3);
+              rows()[3].querySelector('.qnext').click(); await t(120);
+              const afterNext=rows().map((_,i)=>title(i));
+              const idxPick=afterNext.indexOf(pick);
+              const n0=rows().length, delTitle=title(1);
+              rows()[1].querySelector('.qdel').click(); await t(120);
+              const n1=rows().length;
+              const hasDel=rows().some((_,i)=>title(i)===delTitle);
+              const list=document.getElementById('qlist');
+              list.scrollTop=140; await t(60);
+              const saved=list.scrollTop;
+              document.getElementById('qclose').click(); await t(120);
+              document.getElementById('playlistBtn').click(); await t(260);
+              const reopened=document.getElementById('qlist').scrollTop;
+              document.getElementById('qreset').click(); await t(520);
+              const reset=document.getElementById('qlist').scrollTop;
+              document.getElementById('qclose').click();
+              return {before,moved,orderBtn,restoredOrder,curIdx,pick,idxPick,n0,n1,hasDel,saved,reopened,reset,
+                handles:document.querySelectorAll('#qlist .qhandle').length,
+                nextBtns:document.querySelectorAll('#qlist .qnext').length,
+                delBtns:document.querySelectorAll('#qlist .qdel').length};
+            })()""")
+            if isinstance(d3b, dict) and '__err' in d3b:
+                say(False, f"队列交互 JS 异常: {d3b['__err']}")
+            else:
+                say(d3b.get('handles', 0) > 0 and d3b.get('nextBtns', 0) > 0
+                    and d3b.get('delBtns', 0) > 0,
+                    f"队列行有拖动把手/下一首/删除（{d3b.get('handles')} / "
+                    f"{d3b.get('nextBtns')} / {d3b.get('delBtns')}）")
+                say(d3b.get('moved') == [d3b['before'][1], d3b['before'][2], d3b['before'][0]]
+                    and d3b.get('orderBtn'),
+                    f"拖动首行到第三行后顺序变化: {d3b.get('before')} → {d3b.get('moved')}")
+                say(d3b.get('restoredOrder') == d3b.get('before'),
+                    f"「原序」恢复初始顺序: {d3b.get('restoredOrder')}")
+                want_idx = d3b.get('curIdx', 0) if 3 < d3b.get('curIdx', 0) else d3b.get('curIdx', 0) + 1
+                say(d3b.get('idxPick') == want_idx,
+                    f"「下一首播放」把第 4 行插到当前曲之后（当前 {d3b.get('curIdx')}，"
+                    f"新位置 {d3b.get('idxPick')}，期望 {want_idx}）")
+                say(d3b.get('n1') == d3b.get('n0') - 1 and not d3b.get('hasDel'),
+                    f"删除一行后队列 {d3b.get('n0')} → {d3b.get('n1')}，被删曲不再出现")
+                say(d3b.get('saved', 0) > 0 and abs(d3b.get('reopened', 0) - d3b.get('saved', 0)) <= 2,
+                    f"关闭再打开记住滚动位置（{d3b.get('saved')} → {d3b.get('reopened')}）")
+                say(d3b.get('reset') == 0, f"顶部复位键回到顶部（scrollTop={d3b.get('reset')}）")
 
         print('== 筛选与搜索 ==')
         d4 = ev(r"""(async()=>{

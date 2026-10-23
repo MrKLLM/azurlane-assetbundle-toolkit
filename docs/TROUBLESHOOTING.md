@@ -12019,3 +12019,28 @@ hover title 和队列头出现 ⇒ 用户读成「只有三种、没有循环」
 
 **涉及**：`gallery_src/bgm.html`、`gallery_src/bgm_chart.css`、`scripts/deploy_gallery.py`、
 `scripts/diag/bgm_page_probe.py`、`docs/WORKFLOWS.md` WF-60。
+
+## §189 音乐库队列：拖动排序、删除、下一首与位置记忆（2026-10-24）
+
+**需求**：用户要队列可拖动调整顺序、删除歌曲、把某首「下一首播放」；每次打开队列记住上次的
+滚动位置，并在窗口顶部有一个复位位置的小按钮；同时觉得播放器生硬、海图还要更文艺。
+
+**实现**：
+- 队列行是 `draggable`，左侧 `⋮⋮` 把手；`dragstart/dragover/drop` 按指针在目标行上半/下半
+  得到插入点。移动后按**当前曲 slug** 重定位 `idx`，不打断播放；`QREORDER` 用 `QORIG` 判断。
+- 行尾 `↳` 下一首播放：`queue.splice` 到当前 `idx+1`（不立即切换）；`×` 删除：
+  删当前曲接播下一首/最后，删到空则暂停、收播放器；删非当前曲只改队列与索引。
+- 顶部 `↺` 复位滚动位置；拖动后出现 `⇅` 按 `QORIG` 恢复原序。滚动位置存
+  `sessionStorage['gallery.bgmQueueScroll']`，关闭保存、打开恢复。
+- 播放器去硬边：纸波浪线、黄铜四角、罗盘刻度环、昏淡罗盘水印、朱砂斜针进度；
+  播放器/队列纸面不透明（早期 96.5% 会把后面曲名透出来，读作脏）。
+- 海图更满：标题卡图（cartouche）、罗盘边角、海岸等高线、深度数字（soundings）、
+  蜡封「乐」。全部用 CSS/SVG 线稿，无新图片、无滤镜。
+
+**判据**：`bgm_page_probe.py`（1280×900 + 390×844）全绿；队列七项：
+「队列行有拖动把手/下一首/删除」「拖动首行到第三行后顺序变化」「⇅ 恢复初始顺序」
+「↳ 插到当前曲之后」「删除后行数 -1 且曲名消失」「关闭再开 scrollTop 保持」「↺ 回 0」。
+测试里的拖动用 `DragEvent` + `DataTransfer` 走真实事件的同一条路径；滚动记忆用 140px 实测。
+
+**涉及**：`gallery_src/bgm.html`（队列事件/本地状态）、`gallery_src/bgm_chart.css`（把手/操作/
+卡图/播放器线稿）、`scripts/diag/bgm_page_probe.py`、`docs/WORKFLOWS.md` WF-58。

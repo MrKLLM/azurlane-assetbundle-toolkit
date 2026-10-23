@@ -31,7 +31,7 @@ html[data-theme=light] body.chart{
   --ch-red:#94443a;
   --ch-red-l:#e8d0c8;
   --ch-wash:rgba(242,233,214,.38);
-  --ch-bar:rgba(240,229,207,.94);
+  --ch-bar:rgb(240,229,207);
   --ch-shadow:0 18px 44px -30px rgba(20,38,45,.55);
   --ch-hi:rgba(255,255,255,.42);
 }
@@ -52,7 +52,7 @@ html[data-theme=dark] body.chart{
   --ch-red:#c9715e;
   --ch-red-l:#3b211d;
   --ch-wash:rgba(7,17,21,.52);
-  --ch-bar:rgba(24,38,44,.95);
+  --ch-bar:rgb(24,38,44);
   --ch-shadow:0 18px 44px -30px rgba(0,0,0,.9);
   --ch-hi:rgba(232,223,202,.18);
 }
@@ -88,19 +88,30 @@ body.chart .amb{display:none!important}
 .chartlayer .frame::after{right:-1px;bottom:-1px;border-right-width:3px;border-bottom-width:3px}
 .chart-route{position:absolute;inset:0;width:100%;height:100%;color:var(--ch-sea);opacity:.22}
 .chart-route path{fill:none;stroke:currentColor;stroke-width:1.1;stroke-dasharray:2 8;stroke-linecap:round}
-.chart-rose{position:absolute;right:max(20px,calc(50vw - 560px));top:112px;
-  width:190px;height:190px;color:var(--ch-ink-2);opacity:.16}
+.chart-coast{position:absolute;inset:0;width:100%;height:100%;color:var(--ch-sea);opacity:.16}
+.chart-coast path{fill:none;stroke:currentColor;stroke-width:1;stroke-linejoin:round}
+.soundings{position:absolute;inset:0;pointer-events:none;color:var(--ch-ink-2)}
+.soundings span{position:absolute;font:9px var(--ch-mono);letter-spacing:.16em;opacity:.2}
+.chart-rose{position:absolute;right:max(20px,calc(50vw - 620px));top:112px;
+  width:220px;height:220px;color:var(--ch-ink-2);opacity:.2}
 .chart-rose circle,.chart-rose path{fill:none;stroke:currentColor;stroke-width:1}
 .chart-rose text{font:9px var(--ch-mono);fill:currentColor;stroke:none;letter-spacing:.18em}
 
 /* ── 顶栏：纸本标题牌，不再是一条湿玻璃 ─────────────────────────────── */
 body.chart header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:16px;
   flex-wrap:wrap;padding:13px 24px;border:0;border-bottom:1px solid var(--ch-rule-2);
-  background:color-mix(in srgb,var(--ch-paper) 90%,transparent);
+  background:
+    repeating-linear-gradient(90deg,var(--ch-rule) 0 1px,transparent 1px 48px) bottom/100% 5px no-repeat,
+    color-mix(in srgb,var(--ch-paper) 90%,transparent);
   box-shadow:none;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 body.chart header::before,body.chart header::after{display:none!important}
 body.chart header>*{position:relative;z-index:1}
-body.chart .mast{display:flex;flex-direction:column;gap:2px;flex:none}
+body.chart .mast{position:relative;display:flex;flex-direction:column;gap:2px;flex:none;
+  padding:3px 14px 4px;border-top:1px solid var(--ch-rule-2);border-bottom:1px solid var(--ch-rule-2)}
+body.chart .mast::before,body.chart .mast::after{content:'';position:absolute;width:5px;height:5px;
+  border:1px solid var(--ch-brass);opacity:.75}
+body.chart .mast::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
+body.chart .mast::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
 body.chart .kicker{font:600 9px/1 var(--ch-sans);letter-spacing:.26em;color:var(--ch-brass);
   text-transform:uppercase;white-space:nowrap}
 body.chart header h1{font-family:var(--ch-serif);font-size:27px;font-weight:600;
@@ -132,10 +143,18 @@ body.chart .legend{position:sticky;top:86px;max-height:calc(100vh - 240px);overf
   scrollbar-width:thin;scrollbar-color:var(--ch-rule-2) transparent}
 body.chart .legend::-webkit-scrollbar{width:5px}
 body.chart .legend::-webkit-scrollbar-thumb{background:var(--ch-rule-2)}
-body.chart .legend-head{display:flex;flex-direction:column;gap:3px;padding-bottom:10px;
+body.chart .legend-head{position:relative;display:flex;flex-direction:column;gap:3px;padding-bottom:10px;
   margin-bottom:12px;border-bottom:1px solid var(--ch-rule-2)}
 body.chart .legend-head b{font-family:var(--ch-serif);font-size:16px;font-weight:600;
   letter-spacing:.08em;color:var(--ch-ink)}
+body.chart .waxseal{position:absolute;right:0;top:-4px;width:34px;height:34px;border-radius:50%;
+  display:grid;place-items:center;background:var(--ch-red);color:var(--ch-paper);
+  font:500 16px/1 var(--ch-serif);font-style:normal;transform:rotate(-9deg);
+  box-shadow:inset 0 0 0 3px color-mix(in srgb,var(--ch-paper) 22%,transparent),
+    inset 0 0 0 5px color-mix(in srgb,var(--ch-red) 82%,#000 18%),
+    0 3px 7px -3px color-mix(in srgb,var(--ch-red) 60%,transparent);opacity:.92}
+body.chart .waxseal::before{content:'';position:absolute;inset:4px;border:1px dashed
+  color-mix(in srgb,var(--ch-paper) 55%,transparent);border-radius:50%}
 body.chart .ledger{min-width:0;width:100%}
 body.chart .tools{position:relative;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
   margin-bottom:18px;border-bottom:1px solid var(--ch-rule-2)}
@@ -203,8 +222,11 @@ body.chart .row:hover{background:color-mix(in srgb,var(--ch-paper-2) 92%,transpa
   border-bottom-color:var(--ch-rule-2);transform:none;box-shadow:none!important}
 body.chart .row.playing{background:color-mix(in srgb,var(--ch-red) 7%,var(--ch-paper));
   border-left:3px solid var(--ch-red);padding-left:13px}
-body.chart .row .no{font-family:var(--ch-serif);font-style:italic;font-size:12.5px;line-height:1.4;
-  color:var(--ch-brass);text-align:right;font-variant-numeric:tabular-nums;letter-spacing:.04em}
+body.chart .row .no{position:relative;font-family:var(--ch-serif);font-style:italic;font-size:12.5px;
+  line-height:1.4;color:var(--ch-brass);text-align:right;font-variant-numeric:tabular-nums;
+  letter-spacing:.04em}
+body.chart .row .no::after{content:'';position:absolute;right:-9px;top:-13px;bottom:-13px;width:1px;
+  background:color-mix(in srgb,var(--ch-red) 15%,transparent);pointer-events:none}
 body.chart .row .nm{font-family:var(--ch-serif);font-size:15.5px;font-weight:600;line-height:1.35;
   color:var(--ch-ink);letter-spacing:.02em;word-break:break-word}
 body.chart .row .en{display:block;margin-top:3px;font-family:var(--ch-mono);font-size:9.5px;
@@ -250,18 +272,43 @@ body.chart .empty{padding:52px 10px;text-align:center;color:var(--ch-ink-3);
 /* ── 播放器：一张压在海图上的账台 ─────────────────────────────────────── */
 body.chart .bar{left:50%;bottom:14px;width:min(980px,calc(100vw - 28px));
   padding:0;border:1px solid var(--ch-rule-2);border-top:3px double var(--ch-ink);
-  border-radius:4px;background:var(--ch-bar);box-shadow:var(--ch-shadow);
+  border-radius:9px;
+  background:var(--ch-bar);
+  box-shadow:var(--ch-shadow),
+    inset 0 1px 0 color-mix(in srgb,var(--ch-hi) 70%,transparent),
+    inset 0 -1px 0 var(--ch-rule);
   backdrop-filter:none!important;-webkit-backdrop-filter:none!important;overflow:hidden}
 body.chart .bar::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
-  background:repeating-linear-gradient(0deg,
-    color-mix(in srgb,var(--ch-ink) 2.5%,transparent) 0 1px,transparent 1px 3px);opacity:.45}
+  background:
+    radial-gradient(120% 80% at 50% 0%,color-mix(in srgb,var(--ch-hi) 55%,transparent),transparent 62%),
+    repeating-linear-gradient(0deg,
+      color-mix(in srgb,var(--ch-ink) 2.5%,transparent) 0 1px,transparent 1px 3px);
+  opacity:.4}
 body.chart .bar::after{display:none!important}
 body.chart .bar>*{position:relative;z-index:1}
+body.chart .bar .barcompass{position:absolute;right:14px;top:10px;width:86px;height:86px;z-index:0;
+  color:var(--ch-ink);opacity:.07;pointer-events:none}
+body.chart .bar .barcompass circle,body.chart .bar .barcompass path{
+  fill:none;stroke:currentColor;stroke-width:1}
+body.chart .bar .barwave{position:absolute;left:12px;right:12px;top:3px;width:calc(100% - 24px);height:5px;
+  z-index:2;color:var(--ch-brass);opacity:.72;pointer-events:none;overflow:visible}
+body.chart .bar .barwave path{fill:none;stroke:currentColor;stroke-width:1.1;vector-effect:non-scaling-stroke}
+body.chart .bar::after{display:block!important;content:'';position:absolute;left:0;right:0;bottom:0;height:9px;
+  z-index:0;pointer-events:none;
+  background:radial-gradient(circle at 8px 9px,transparent 0 6px,
+    color-mix(in srgb,var(--ch-paper-2) 70%,transparent) 6.5px) repeat-x;
+  background-size:16px 16px;opacity:.28}
+body.chart .bar .bc{position:absolute;width:11px;height:11px;border:1px solid var(--ch-brass);
+  opacity:.55;pointer-events:none;z-index:2}
+body.chart .bar .bc.tl{left:6px;top:6px;border-right:0;border-bottom:0}
+body.chart .bar .bc.tr{right:6px;top:6px;border-left:0;border-bottom:0}
+body.chart .bar .bc.bl{left:6px;bottom:6px;border-right:0;border-top:0}
+body.chart .bar .bc.br{right:6px;bottom:6px;border-left:0;border-top:0}
 body.chart .bar.on{transform:translateX(-50%) translateY(0);opacity:1}
 
 /* 模式条：四种模式常驻、可读；当前项用朱砂下划线 */
-body.chart .bar .modes{display:flex;align-items:center;gap:0;padding:5px 16px;border-bottom:1px solid var(--ch-rule);
-  background:color-mix(in srgb,var(--ch-paper-2) 68%,transparent)}
+body.chart .bar .modes{display:flex;align-items:center;gap:0;padding:5px 16px;
+  border-bottom:1px dashed var(--ch-rule);background:color-mix(in srgb,var(--ch-paper-2) 68%,transparent)}
 body.chart .bar .modes .mlabel{font:600 8.5px/1.4 var(--ch-sans);letter-spacing:.2em;color:var(--ch-brass);
   text-transform:uppercase;margin-right:14px;white-space:nowrap}
 body.chart .bar .modes button{position:relative;border:0;border-radius:0;background:none;box-shadow:none;
@@ -297,8 +344,13 @@ body.chart .bar button.on{background:var(--ch-red);border-color:var(--ch-red);co
   box-shadow:none}
 body.chart .bar svg{width:15px;height:15px;fill:currentColor;stroke-width:0}
 body.chart #pp{width:45px;height:45px;border:0;background:var(--ch-ink);color:var(--ch-paper);
-  box-shadow:none!important}
-body.chart #pp svg{width:18px;height:18px}
+  box-shadow:none!important;position:relative}
+body.chart #pp::before{content:'';position:absolute;inset:-5px;border-radius:50%;z-index:0;
+  background:repeating-conic-gradient(var(--ch-brass) 0 1deg,transparent 1deg 30deg);
+  -webkit-mask:radial-gradient(circle,transparent 0 58%,#000 59% 100%);
+  mask:radial-gradient(circle,transparent 0 58%,#000 59% 100%);
+  opacity:.55;pointer-events:none}
+body.chart #pp svg{width:18px;height:18px;position:relative;z-index:1}
 body.chart #pp:hover{background:var(--ch-red);color:var(--ch-paper);
   box-shadow:none!important}
 body.chart .bar .vol{width:76px;height:3px;-webkit-appearance:none;appearance:none;outline:none;
@@ -323,8 +375,13 @@ body.chart .disc.on{animation-play-state:running}
 @media (prefers-reduced-motion:reduce){body.chart .disc{animation:none!important}}
 
 /* 进度：一条墨线 + 朱砂针；水波退成极淡的墨晕 */
-body.chart .tide{height:22px;margin:0;border:0;border-bottom:1px solid var(--ch-rule-2);
-  border-radius:0;background:transparent;box-shadow:none;transition:border-color .2s var(--ease-ios)}
+body.chart .tide{height:24px;margin:0;border:0;border-bottom:1px solid var(--ch-rule-2);
+  border-radius:0;
+  background:
+    repeating-linear-gradient(90deg,transparent 0 calc(10% - 1px),
+      color-mix(in srgb,var(--ch-rule) 80%,transparent) calc(10% - 1px) 10%) left bottom/100% 5px no-repeat,
+    transparent;
+  box-shadow:none;transition:border-color .2s var(--ease-ios)}
 body.chart .tide:hover{border-bottom-color:var(--ch-red)}
 body.chart .tide svg{border-radius:0;clip-path:none;overflow:visible}
 body.chart .tide::after{background:linear-gradient(90deg,transparent,
@@ -340,17 +397,22 @@ body.chart .tide .rip{stroke:var(--ch-red);stroke-width:1}
 body.chart .tide .rail{height:2px;background:var(--ch-rule)}
 body.chart .tide .rail em{background:color-mix(in srgb,var(--ch-sea) 35%,transparent);border-radius:0}
 body.chart .tide .rail i{background:var(--ch-red);box-shadow:none;border-radius:0}
-body.chart .tide .rail b{width:7px;height:7px;background:var(--ch-red);
-  border:1px solid var(--ch-paper);box-shadow:none}
-body.chart .tide:hover .rail b{width:9px;height:9px}
+body.chart .tide .rail b{width:2px;height:13px;background:var(--ch-red);border:0;border-radius:0;
+  box-shadow:none;transform:translate(-50%,-50%) rotate(18deg)}
+body.chart .tide:hover .rail b{width:2px;height:16px}
 body.chart .tide .bub{font-family:var(--ch-serif);font-style:italic;color:var(--ch-ink-2)}
 
 /* ── 播放列表：航线清单纸片 ─────────────────────────────────────────── */
-body.chart .queue{left:50%;bottom:206px;width:min(560px,calc(100vw - 28px));
+body.chart .queue{left:50%;bottom:214px;width:min(580px,calc(100vw - 28px));
   max-height:48vh;border:1px solid var(--ch-rule-2);border-top:3px double var(--ch-ink);
-  border-radius:4px;background:var(--ch-bar);box-shadow:var(--ch-shadow);
-  backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
-body.chart .qhead{display:flex;align-items:center;gap:9px;padding:8px 12px;
+  border-radius:9px;
+  background:var(--ch-bar);
+  box-shadow:var(--ch-shadow),inset 0 1px 0 color-mix(in srgb,var(--ch-hi) 65%,transparent);
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;position:fixed}
+body.chart .queue::before{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  z-index:0;background:repeating-linear-gradient(0deg,
+    color-mix(in srgb,var(--ch-ink) 2.5%,transparent) 0 1px,transparent 1px 3px);opacity:.35}
+body.chart .qhead{position:relative;z-index:1;display:flex;align-items:center;gap:9px;padding:8px 12px;
   border-bottom:1px solid var(--ch-rule-2);flex:none}
 body.chart .qseal{width:20px;height:20px;display:grid;place-items:center;flex:none;
   border:1px solid var(--ch-red);color:var(--ch-red);font:500 11px/1 var(--ch-serif);
@@ -359,17 +421,34 @@ body.chart .qhead b{font:500 13px/1.4 var(--ch-serif);color:var(--ch-ink)}
 body.chart .qcount,body.chart .qmode{font-family:var(--ch-mono);font-size:9px;line-height:1.4;
   color:var(--ch-ink-3);letter-spacing:.04em}
 body.chart .qmode{color:var(--ch-red);margin-left:auto}
-body.chart .qhead #qclose{width:22px;height:22px;border:1px solid var(--ch-rule-2);border-radius:0;
-  background:transparent;color:var(--ch-ink-3);font:16px/1 var(--ch-sans);cursor:pointer;padding:0}
-body.chart .qhead #qclose:hover{color:var(--ch-red);border-color:var(--ch-red)}
-body.chart .qlist{overflow:auto;padding:0 6px 4px;min-height:44px}
+body.chart .qhint{font:9px/1.4 var(--ch-sans);letter-spacing:.06em;color:var(--ch-ink-3);white-space:nowrap}
+body.chart .qhead #qclose,
+body.chart .qhead #qreset,
+body.chart .qhead #qorder{width:22px;height:22px;border:1px solid var(--ch-rule-2);border-radius:0;
+  background:transparent;color:var(--ch-ink-3);font:14px/1 var(--ch-sans);cursor:pointer;padding:0;
+  display:grid;place-items:center}
+body.chart .qhead #qorder[hidden]{display:none}
+body.chart .qhead #qclose:hover,
+body.chart .qhead #qreset:hover,
+body.chart .qhead #qorder:hover{color:var(--ch-red);border-color:var(--ch-red)}
+body.chart .qlist{position:relative;z-index:1;overflow:auto;padding:0 6px 4px;min-height:44px;
+  scrollbar-width:thin;scrollbar-color:var(--ch-rule-2) transparent}
+body.chart .qlist::-webkit-scrollbar{width:5px}
+body.chart .qlist::-webkit-scrollbar-thumb{background:var(--ch-rule-2)}
 body.chart .qempty{padding:18px 10px;text-align:center;font-family:var(--ch-serif);font-style:italic;
   font-size:12px;color:var(--ch-ink-3)}
-body.chart .qrow{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:8px;align-items:center;
-  padding:6px 7px;border-bottom:1px solid var(--ch-rule);cursor:pointer;border-left:2px solid transparent}
+body.chart .qrow{display:grid;grid-template-columns:16px 24px minmax(0,1fr) auto 46px;gap:6px;
+  align-items:center;padding:6px 7px;border-bottom:1px solid var(--ch-rule);cursor:pointer;
+  border-left:2px solid transparent;position:relative;transition:background .16s var(--ease-ios)}
 body.chart .qrow:last-child{border-bottom:0}
 body.chart .qrow:hover{background:color-mix(in srgb,var(--ch-brass) 8%,transparent)}
 body.chart .qrow.on{background:color-mix(in srgb,var(--ch-red) 7%,transparent);border-left-color:var(--ch-red)}
+body.chart .qrow.dragging{opacity:.35}
+body.chart .qrow.dropbefore{box-shadow:inset 0 2px 0 var(--ch-red)}
+body.chart .qrow.dropafter{box-shadow:inset 0 -2px 0 var(--ch-red)}
+body.chart .qrow .qhandle{cursor:grab;color:var(--ch-brass);font:9px/1 var(--ch-mono);letter-spacing:-2px;
+  user-select:none;opacity:.65}
+body.chart .qrow .qhandle:active{cursor:grabbing}
 body.chart .qrow .qn{text-align:right;font-family:var(--ch-serif);font-style:italic;font-size:10px;
   color:var(--ch-brass);font-variant-numeric:tabular-nums}
 body.chart .qrow .qt{min-width:0;font:12px/1.45 var(--ch-serif);color:var(--ch-ink);
@@ -378,6 +457,14 @@ body.chart .qrow .qt i{display:block;font:8.5px/1.4 var(--ch-mono);color:var(--c
   font-style:normal;letter-spacing:.04em;overflow:hidden;text-overflow:ellipsis}
 body.chart .qrow .qm{font:10px/1.4 var(--ch-serif);font-style:italic;color:var(--ch-ink-3);
   font-variant-numeric:tabular-nums}
+body.chart .qacts{display:flex;gap:1px;justify-content:flex-end;opacity:.5;
+  transition:opacity .14s var(--ease-ios)}
+body.chart .qrow:hover .qacts,body.chart .qrow:focus-within .qacts{opacity:1}
+body.chart .qact{width:20px;height:20px;border:0;border-radius:0;background:transparent;
+  color:var(--ch-ink-3);font:12px/1 var(--ch-sans);cursor:pointer;padding:0;display:grid;place-items:center}
+body.chart .qact:hover{color:var(--ch-red);background:color-mix(in srgb,var(--ch-red) 8%,transparent)}
+body.chart .qact.qdel{font-size:14px}
+@media (hover:none){body.chart .qacts{opacity:1}}
 
 /* ── 窄屏 ────────────────────────────────────────────────────────────── */
 @media (max-width:980px){
@@ -429,6 +516,7 @@ body.chart .qrow .qm{font:10px/1.4 var(--ch-serif);font-style:italic;color:var(-
   body.chart .cmeta{display:none}
   body.chart .bar .hint{display:none}
   body.chart .queue{bottom:184px;max-height:44vh}
+  body.chart .qhint{display:none}
   body.chart .tools{margin-bottom:12px}
   body.chart .grp{gap:10px;margin-bottom:11px;padding-bottom:8px}
   body.chart .grp>span:not(.chip){min-width:38px;font-size:8px}

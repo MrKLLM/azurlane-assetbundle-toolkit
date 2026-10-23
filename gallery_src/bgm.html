@@ -617,10 +617,24 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
     <path d="M-40 690 C 180 610, 260 780, 470 610 S 760 430, 920 520 S 1080 690, 1240 470"/>
     <path d="M-30 260 C 160 180, 320 330, 520 250 S 820 120, 1240 210"/>
   </svg>
+  <svg class="chart-coast" viewBox="0 0 1200 900" preserveAspectRatio="none">
+    <path d="M-40 742 C 90 690 150 726 225 690 S 345 630 425 668 S 540 754 630 706 S 780 632 890 676 S 1050 746 1240 690"/>
+    <path d="M-40 772 C 90 720 150 756 225 720 S 345 660 425 698 S 540 784 630 736 S 780 662 890 706 S 1050 776 1240 720" opacity=".55"/>
+    <path d="M-40 802 C 90 750 150 786 225 750 S 345 690 425 728 S 540 814 630 766 S 780 692 890 736 S 1050 806 1240 750" opacity=".28"/>
+  </svg>
+  <div class="soundings" aria-hidden="true">
+    <span style="left:7%;top:29%">7</span><span style="left:13%;top:42%">12</span>
+    <span style="left:4%;top:57%">21</span><span style="left:19%;top:67%">9</span>
+    <span style="left:73%;top:24%">18</span><span style="left:86%;top:38%">5</span>
+    <span style="left:78%;top:56%">31</span><span style="left:91%;top:68%">8</span>
+    <span style="left:63%;top:78%">14</span><span style="left:44%;top:85%">6</span>
+  </div>
   <svg class="chart-rose" viewBox="0 0 200 200">
     <circle cx="100" cy="100" r="80"/><circle cx="100" cy="100" r="54"/>
     <path d="M100 10 L108 92 L190 100 L108 108 L100 190 L92 108 L10 100 L92 92 Z"/>
     <path d="M100 38 L100 162 M38 100 L162 100" opacity=".55"/>
+    <path d="M100 20 L100 180 M20 100 L180 100 M43 43 L157 157 M43 157 L157 43" opacity=".38"/>
+    <path d="M100 20 L118 100 L100 180 L82 100 Z" opacity=".55"/>
     <text x="100" y="26" text-anchor="middle">N</text>
     <text x="100" y="187" text-anchor="middle">S</text>
     <text x="20" y="104" text-anchor="middle">W</text>
@@ -651,6 +665,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
     <div class="legend-head">
       <span class="kicker">CHART LEGEND</span>
       <b>航海图例</b>
+      <i class="waxseal" aria-hidden="true">乐</i>
     </div>
     <div class="tools"><input class="q" id="q" placeholder="搜曲名 / 中文 / 标识符 / 舰名   （/ 聚焦）" autocomplete="off"></div>
     <div class="grp" id="gUsage"><span>用途</span></div>
@@ -670,6 +685,16 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 </div>
 
 <div class="bar" id="bar">
+  <svg class="barcompass" viewBox="0 0 100 100" aria-hidden="true">
+    <circle cx="50" cy="50" r="38"/><circle cx="50" cy="50" r="24"/>
+    <path d="M50 6 L55 45 L94 50 L55 55 L50 94 L45 55 L6 50 L45 45 Z"/>
+    <path d="M50 14 L50 86 M14 50 L86 50 M25 25 L75 75 M25 75 L75 25" opacity=".5"/>
+  </svg>
+  <svg class="barwave" viewBox="0 0 1000 8" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0 4 C 42 0 84 8 126 4 S 210 0 252 4 S 336 8 378 4 S 462 0 504 4 S 588 8 630 4 S 714 0 756 4 S 840 8 882 4 S 966 0 1000 4"/>
+  </svg>
+  <span class="bc tl" aria-hidden="true"></span><span class="bc tr" aria-hidden="true"></span>
+  <span class="bc bl" aria-hidden="true"></span><span class="bc br" aria-hidden="true"></span>
   <div class="modes" role="group" aria-label="播放模式">
     <span class="mlabel">播放模式</span>
     <button type="button" data-mode="seq" aria-pressed="false">顺序</button>
@@ -750,7 +775,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 <!-- 播放列表：默认不挂 backdrop-filter（本页只允许播放器/搜索框/正在播放行三盒），
      用纸面半透 + 细边，和播放器的玻璃分工。 -->
 <div class="queue" id="queue" aria-hidden="true">
-  <div class="qhead"><span class="qseal">曲</span><b>播放列表</b><span class="qcount" id="qcount">—</span><span class="qmode" id="qmode">顺序播放</span><button id="qclose" type="button" title="关闭播放列表">×</button></div>
+  <div class="qhead" title="拖动行排序；悬停行可「下一首播放」或「删除」"><span class="qseal">曲</span><b>播放列表</b><span class="qcount" id="qcount">—</span><span class="qmode" id="qmode">顺序播放</span><span class="qhint">拖动排序 · 悬停行可操作</span><button id="qorder" type="button" title="恢复原始顺序" aria-label="恢复原始顺序" hidden>⇅</button><button id="qreset" type="button" title="复位列表位置（回到顶部）" aria-label="复位列表位置">↺</button><button id="qclose" type="button" title="关闭播放列表">×</button></div>
   <div class="qlist" id="qlist"></div>
 </div>
 
@@ -760,6 +785,10 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 const P='';
 let T=[],view=[],queue=[],idx=-1,fU='',fS='',fA='',fE='',knownDur=0,fFav=false;
 let QOPEN=false, SHUF_HIST=[];
+/* 队列的“位置”有两层：滚动位置（弹出自恢复）与拖动后的顺序（可恢复原序）。
+   QSCROLL 走 sessionStorage：同一标签页关了再开，回到上次看到的那一段。 */
+let QSCROLL=0, QORIG=null, QREORDER=false, QDRAG=-1, QDROP=-1;
+const QSCROLL_KEY='gallery.bgmQueueScroll';
 const MODES=['seq','loop','one','shuffle'];
 const MODE_NAMES={seq:'顺序播放',loop:'列表循环',one:'单曲循环',shuffle:'随机播放'};
 let MODE='seq';
@@ -952,7 +981,7 @@ function reveal(){
   rows.forEach(r=>io.observe(r));
 }
 
-function ensureQueue(){ if(!queue.length) queue=view.slice(); return queue.length; }
+function ensureQueue(){ if(!queue.length){ queue=view.slice(); markQueueOrigin(); } return queue.length; }
 function randIdx(){
   if(queue.length<2) return 0;
   let n; do{ n=Math.floor(Math.random()*queue.length); }while(n===idx);
@@ -973,6 +1002,7 @@ function playView(i){
   if(i<0||i>=view.length)return;
   /* 从主列表点一首 = 以当前筛选结果作为新队列；随机历史也重置。 */
   queue=view.slice(); SHUF_HIST=[];
+  markQueueOrigin();
   playQueue(i);
 }
 function playQueue(i){
@@ -1022,6 +1052,35 @@ function setMode(m,silent){
   const qm=$('qmode'); if(qm) qm.textContent=MODE_NAMES[m];
   if(!silent){ /* 只改状态，不弹 toast 打断看列表 */ }
 }
+function markQueueOrigin(){
+  QORIG=queue.map(t=>t.slug);
+  QREORDER=false;
+  updateQOrderBtn();
+}
+function queueOrderDirty(){
+  if(!QORIG) return false;
+  const orig=QORIG.filter(s=>queue.some(t=>t.slug===s));
+  return queue.some((t,i)=>t.slug!==orig[i]);
+}
+function updateQOrderBtn(){ const b=$('qorder'); if(b) b.hidden=!QREORDER; }
+function syncPlayingRow(){
+  const curSlug=queue[idx]&&queue[idx].slug;
+  [...document.querySelectorAll('#list .row')].forEach(r=>{
+    const it=view[+r.dataset.i];
+    r.classList.toggle('playing', !!it&&it.slug===curSlug);
+  });
+}
+function queueScrollSave(){
+  const el=$('qlist'); if(!el) return;
+  QSCROLL=el.scrollTop;
+  try{ sessionStorage.setItem(QSCROLL_KEY,String(QSCROLL)); }catch(e){}
+}
+function queueScrollRestore(){
+  const el=$('qlist'); if(!el) return;
+  let v=QSCROLL;
+  try{ const s=sessionStorage.getItem(QSCROLL_KEY); if(s!=null) v=+s||0; }catch(e){}
+  requestAnimationFrame(()=>{ el.scrollTop=Math.max(0,v||0); });
+}
 function renderQueue(){
   const el=$('qlist'); if(!el) return;
   const c=$('qcount'), m=$('qmode');
@@ -1029,20 +1088,85 @@ function renderQueue(){
   if(m) m.textContent=MODE_NAMES[MODE];
   if(!queue.length){
     el.innerHTML='<div class="qempty">播放列表是空的；先从曲目列表点一首。</div>';
+    updateQOrderBtn();
     return;
   }
-  el.innerHTML=queue.map((t,i)=>'<div class="qrow'+(i===idx?' on':'')+'" data-qi="'+i+'">'+
+  const keep=el.scrollTop;
+  el.innerHTML=queue.map((t,i)=>'<div class="qrow'+(i===idx?' on':'')+
+    (i===QDRAG?' dragging':'')+'" data-qi="'+i+'" draggable="true">'+
+    '<span class="qhandle" aria-hidden="true">⋮⋮</span>'+
     '<span class="qn">'+(i+1)+'</span>'+
     '<span class="qt">'+esc(name(t))+'<i>'+esc(t.slug)+'</i></span>'+
-    '<span class="qm">'+mmss(t.dur)+'</span></div>').join('');
+    '<span class="qm">'+mmss(t.dur)+'</span>'+
+    '<span class="qacts"><button type="button" class="qact qnext" data-act="next" title="下一首播放" aria-label="下一首播放">↳</button>'+
+    '<button type="button" class="qact qdel" data-act="del" title="从播放列表移除" aria-label="从播放列表移除">×</button></span>'+
+    '</div>').join('');
+  el.scrollTop=keep;
+  updateQOrderBtn();
+}
+function moveQueue(from,to){
+  if(from<0||to<0||from===to||from>=queue.length) return;
+  const curSlug=queue[idx]&&queue[idx].slug;
+  const [item]=queue.splice(from,1);
+  if(from<to) to--;
+  to=Math.max(0,Math.min(queue.length,to));
+  queue.splice(to,0,item);
+  idx=curSlug?queue.findIndex(t=>t.slug===curSlug):-1;
+  QREORDER=queueOrderDirty();
+  updateQOrderBtn(); renderQueue(); syncPlayingRow(); queueScrollSave();
+}
+function queuePlayNext(from){
+  if(from<0||from>=queue.length||from===idx) return;
+  const curSlug=queue[idx]&&queue[idx].slug;
+  const [item]=queue.splice(from,1);
+  if(from<idx) idx--;
+  const at=idx<0?0:Math.min(queue.length,idx+1);
+  queue.splice(at,0,item);
+  idx=curSlug?queue.findIndex(t=>t.slug===curSlug):-1;
+  QREORDER=queueOrderDirty();
+  updateQOrderBtn(); renderQueue(); syncPlayingRow(); queueScrollSave();
+}
+function queueRemove(from){
+  if(from<0||from>=queue.length) return;
+  const wasCur=from===idx;
+  const curSlug=queue[idx]&&queue[idx].slug;
+  const [item]=queue.splice(from,1);
+  if(from<idx) idx--;
+  if(QORIG) QORIG=QORIG.filter(s=>s!==item.slug);
+  if(!queue.length){
+    A.pause(); A.removeAttribute('src'); A.load(); idx=-1;
+    $('bar').classList.remove('on'); $('cur').textContent='—'; $('cmeta').textContent='';
+    document.title='音乐库 · 碧蓝航线资产浏览器';
+    renderQueue(); syncPlayingRow(); return;
+  }
+  if(wasCur){
+    idx=Math.min(from,queue.length-1);
+    playQueue(idx);
+  }else{
+    idx=curSlug?queue.findIndex(t=>t.slug===curSlug):-1;
+    QREORDER=queueOrderDirty();
+    updateQOrderBtn(); renderQueue(); syncPlayingRow(); queueScrollSave();
+  }
+}
+function resetQueueOrder(){
+  if(!QORIG) return;
+  const curSlug=queue[idx]&&queue[idx].slug;
+  const order=new Map(QORIG.map((s,i)=>[s,i]));
+  queue.sort((a,b)=>(order.has(a.slug)?order.get(a.slug):1e9)-
+                     (order.has(b.slug)?order.get(b.slug):1e9));
+  idx=curSlug?queue.findIndex(t=>t.slug===curSlug):-1;
+  QREORDER=false;
+  updateQOrderBtn(); renderQueue(); syncPlayingRow(); queueScrollSave();
 }
 function toggleQueue(force){
   const el=$('queue'); if(!el) return;
+  const was=QOPEN;
   QOPEN = force===undefined ? !QOPEN : !!force;
-  if(QOPEN && !queue.length) queue=view.slice();
+  if(was && !QOPEN) queueScrollSave();
+  if(QOPEN && !queue.length){ queue=view.slice(); markQueueOrigin(); }
   el.classList.toggle('on',QOPEN);
   el.setAttribute('aria-hidden',!QOPEN);
-  if(QOPEN) renderQueue();
+  if(QOPEN){ renderQueue(); queueScrollRestore(); }
 }
 
 /* 拖动水面 = 找位。松手时甩一圈涟漪，像真的碰了一下水 */
@@ -1094,7 +1218,56 @@ document.querySelectorAll('.modes [data-mode]').forEach(b=>{
 });
 $('playlistBtn').onclick=()=>toggleQueue();
 $('qclose').onclick=()=>toggleQueue(false);
-$('qlist').onclick=e=>{ const r=e.target.closest('[data-qi]'); if(r) playQueue(+r.dataset.qi); };
+$('qreset').onclick=()=>{
+  QSCROLL=0;
+  try{ sessionStorage.removeItem(QSCROLL_KEY); }catch(e){}
+  const l=$('qlist'); if(l) l.scrollTo({top:0,behavior:'smooth'});
+};
+$('qorder').onclick=()=>resetQueueOrder();
+$('qlist').onclick=e=>{
+  const r=e.target.closest('[data-qi]'); if(!r) return;
+  const act=e.target.closest('.qact'); const i=+r.dataset.qi;
+  if(act){
+    e.stopPropagation();
+    if(act.dataset.act==='del') queueRemove(i);
+    else if(act.dataset.act==='next') queuePlayNext(i);
+    return;
+  }
+  playQueue(i);
+};
+/* 行拖动换位：HTML5 drag 在桌面够用；触屏用左右两侧的“下一首/删除”兜底。 */
+$('qlist').addEventListener('dragstart',e=>{
+  const r=e.target.closest('.qrow'); if(!r) return;
+  if(e.target.closest('button')){ e.preventDefault(); return; }
+  QDRAG=+r.dataset.qi; QDROP=QDRAG;
+  r.classList.add('dragging');
+  try{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',String(QDRAG)); }catch(_){}
+});
+$('qlist').addEventListener('dragover',e=>{
+  if(QDRAG<0) return;
+  e.preventDefault();
+  try{ e.dataTransfer.dropEffect='move'; }catch(_){}
+  document.querySelectorAll('.qrow.dropbefore,.qrow.dropafter').forEach(x=>x.classList.remove('dropbefore','dropafter'));
+  const r=e.target.closest('.qrow');
+  if(!r){ QDROP=queue.length; return; }
+  const b=r.getBoundingClientRect(), after=e.clientY>b.top+b.height/2;
+  r.classList.add(after?'dropafter':'dropbefore');
+  QDROP=+r.dataset.qi+(after?1:0);
+});
+$('qlist').addEventListener('drop',e=>{
+  if(QDRAG<0) return;
+  e.preventDefault();
+  const from=QDRAG, to=QDROP;
+  QDRAG=-1; QDROP=-1;
+  document.querySelectorAll('.qrow.dragging,.qrow.dropbefore,.qrow.dropafter')
+    .forEach(x=>x.classList.remove('dragging','dropbefore','dropafter'));
+  if(to>=0) moveQueue(from,to);
+});
+$('qlist').addEventListener('dragend',()=>{
+  QDRAG=-1; QDROP=-1;
+  document.querySelectorAll('.qrow.dragging,.qrow.dropbefore,.qrow.dropafter')
+    .forEach(x=>x.classList.remove('dragging','dropbefore','dropafter'));
+});
 $('vol').value=A.volume;
 $('vol').oninput=e=>{A.volume=+e.target.value;localStorage.setItem('gallery.vol',e.target.value)};
 $('fEvent').onchange=e=>{ fE=e.target.value; render(); };
