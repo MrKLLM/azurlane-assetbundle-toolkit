@@ -363,7 +363,7 @@ def main():
         # 标签行特写：整页图里那几个小 chip 糊成一片，"是不是重复了"根本判不了
         say(os.path.getsize(shot('row', '.row')) > 8000, f"首行特写：{shot('row', '.row')}")
         # 上一组筛选可能把正在播的曲子筛出列表（`.row.playing` 就不存在了），
-        # 所以量材质前先就地重播当前视图的第一行——也让夜主题截图里能看到播放行的玻璃。
+        # 所以量材质前先就地重播当前视图的第一行——也让夜主题截图里能看到在播行。
         ev("""(()=>{document.querySelector('.row .play').click();return 1})()""")
         time.sleep(0.8)
         ev("""(()=>{document.querySelector('#gTheme [data-t=dark]').click();return 1})()""")

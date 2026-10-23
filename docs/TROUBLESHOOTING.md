@@ -12012,6 +12012,8 @@ hover title 和队列头出现 ⇒ 用户读成「只有三种、没有循环」
 与 `pressed==1`；`#qmode` 全名；搜索/筛选/收藏/队列/拖进度仍通过；全页
 `backdrop-filter:none` 且 `.bglg` 数为 0；`has-sitebg` 下 chip/搜索/header/行/播放器仍零玻璃；
 390px `scrollWidth == innerWidth`（无横向溢出）；昼/夜截图 `.diag/bgm_shot_{light,dark,row,bar}.png`。
+8777 实机复核：四个模式键、575 行、`bar/header/chip` 的 `backdropFilter` 均为 `none`，
+530px 视口 `scrollWidth 515 < innerWidth 530`。
 ⚠️ 窄屏验收必须走 CDP `Emulation.setDeviceMetricsOverride`：Windows Chrome 有最小窗口宽度，
 只用 `--window-size=390,844` 会在布局仍是 500px 的情况下裁右边缘，看起来像页面溢出。
 
