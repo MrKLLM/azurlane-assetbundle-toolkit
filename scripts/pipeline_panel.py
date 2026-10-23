@@ -403,6 +403,47 @@ def gallery_ok(timeout=2.0):
         return False
 
 
+def port_listening(port=8777):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(('127.0.0.1', port)) == 0
+
+
+def ensure_gallery(timeout=10.0):
+    """CG 前置：8777 不在就**自己起**运行目录那份服务器，不再把双击 bat 甩给用户。
+
+    - 已可达 → 直接过；
+    - 端口被占但页面不对（旧的无根启动器/别的服务）→ 不盲目起第二个：
+      新进程会走 port_in_use 复用旧进程，等于继续打开 404；让用户关掉那个窗口；
+    - 端口空 → detached 启动 Output/gallery_v2/_gallery_server.py --export，轮询到可达。
+    失败才回退到手动提示（并给出日志路径）。
+    """
+    if gallery_ok():
+        return True, '8777 已就绪'
+    if port_listening(8777):
+        return False, ('8777 被另一个进程占用，但它没有 gallery_v2/index.html'
+                       '（多半是旧的无根启动器）。关掉那个黑窗口后再点重导；'
+                       '端口空闲时控制台会自己启动。')
+    srv = os.path.join(ROOT, 'Output', 'gallery_v2', '_gallery_server.py')
+    if not os.path.isfile(srv):
+        return False, f'找不到 {srv}（先双击一次 Output\\gallery_v2\\启动资产浏览器.bat）'
+    os.makedirs(PANEL, exist_ok=True)
+    log = os.path.join(PANEL, 'gallery_server.log')
+    lf = open(log, 'w', encoding='utf-8', errors='replace')
+    try:
+        p = subprocess.Popen([PY, srv, '--export'], cwd=os.path.dirname(srv),
+                             stdout=lf, stderr=subprocess.STDOUT, env=ENV,
+                             creationflags=0x00000008 if os.name == 'nt' else 0)
+    finally:
+        lf.close()
+    for _ in range(max(1, int(timeout * 2))):
+        if gallery_ok(1.0):
+            return True, f'已自动启动画廊服务器 8777（pid={p.pid}；日志 {log}）'
+        time.sleep(0.5)
+    return False, (f'已尝试启动画廊服务器 8777，但 {timeout:.0f} 秒内仍不可达：'
+                   f'看 {log}；或手动双击 Output\\gallery_v2\\启动资产浏览器.bat')
+
+
 def start_job(label, argv, script=None):
     """起一个脱离面板的流水线子进程。重活必须串行 —— 已有在跑就拒绝。
 
@@ -415,9 +456,11 @@ def start_job(label, argv, script=None):
         if cur:
             return None, f'已经有一个任务在跑（{cur["label"]}，pid={cur["pid"]}）。' \
                          f'这台机器 15.4GB，重活只允许一次一个。'
-        if not script and cg_requested(argv) and not gallery_ok():
-            return None, ('CG 导出需要画廊服务器 8777，但它现在不可达：'
-                          '先双击 Output\\gallery_v2\\启动资产浏览器.bat，确认 cg_export.html 能打开，再点重导。')
+        if not script and cg_requested(argv):
+            ok, why = ensure_gallery()
+            if not ok:
+                return None, why
+            print(f'[控制台] {why}')
         os.makedirs(PANEL, exist_ok=True)
         rid = time.strftime('%H%M%S')
         log = os.path.join(PANEL, f'run_{rid}.log')

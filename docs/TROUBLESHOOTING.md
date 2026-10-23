@@ -11794,3 +11794,25 @@ askOf/newsafe）、`docs/WORKFLOWS.md` WF-59。
 **涉及**：`scripts/build_ship_meta.py`、`scripts/diag/ship_meta_authority_diff.py`、
 `tools/sharecfg_re/42_publish_gamecfg.py`、`scripts/update_pipeline.py`、`scripts/pipeline_panel.py`、
 `docs/WORKFLOWS.md` WF-59。
+
+## §181 CG 前置服务器 8777 要手动双击：控制台只探活、不启动（2026-10-23）
+
+**现象**：点「重导」，顶部红条让先双击 `Output\gallery_v2\启动资产浏览器.bat`；
+用户问「为什么它不能自己打开，要我手动开」。
+
+**根因**：`start_job` 的 cg 前置只调 `gallery_ok()`，失败就 `return 409`，没有启动能力。
+服务器本身就在运行目录里、控制台完全能拉起，让用户手动是多余的一步。
+
+**修法**：`ensure_gallery()`：
+- 已可达 → 直接过；
+- 8777 被占但 `gallery_v2/index.html` 拿不到（旧的无根启动器/别的服务）→ **不**起第二个
+  （新进程会走 `port_in_use` 复用旧进程、继续 404），提示关掉那个窗口；
+- 端口空 → detached 启动 `Output/gallery_v2/_gallery_server.py --export`，轮询 10 秒到可达；
+  失败才回退手动提示 + 日志路径。
+`start_job` 在含 cg 的任务前调用它；CLI 仍保留手动提示（没有面板进程可托管服务器）。
+
+**判据**：8777 空闲时点重导，控制台日志出现「已自动启动画廊服务器 8777（pid=…）」，
+`/gallery_v2/cg_export.html` 200，管线继续；端口被旧服务占用时返回「关掉那个黑窗口」而不是假启动。
+**实测**：`ensure_gallery` 从 `gallery_ok=False / port=False` 起，返回 pid 36008，2 秒内 cg_export 200。
+
+**涉及**：`scripts/pipeline_panel.py`、`docs/WORKFLOWS.md` WF-59、§177。
