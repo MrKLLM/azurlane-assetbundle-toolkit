@@ -91,6 +91,25 @@ def load():
     # 皮肤表走唯一读取口：设备侧权威表能补出 azdata 快照缺的行（如 aierdeliqi_9 / mile_3）
     skin = skin_table.load()
     stats = json.load(open(os.path.join(AZDATA, 'azdata_ship_data_statistics.json'), encoding='utf-8'))
+    # 舰船统计也走设备侧优先：社区快照对新船滞后（2026-10-23 实测 960017~960021 五组不在快照里），
+    # 设备侧 4146 行含这些行；缺少时自动退回快照，不影响旧机器。
+    dev_stats = os.path.join(GAMECFG, 'ship_data_statistics.json')
+    if os.path.isfile(dev_stats):
+        dv = json.load(open(dev_stats, encoding='utf-8'))
+        skin_by_id = {int(v['id']): v for v in skin.values()
+                      if isinstance(v, dict) and v.get('id') is not None}
+        for k, v in dv.items():
+            # 已有 azdata 行的一律保留旧值：stats 只补「社区快照完全没有」的新行，
+            # 避免把受保护档的旧字段（尤其 META）改掉、让权威闸门判红。
+            if k in stats:
+                continue
+            sid = v.get('skin_id')
+            sk = skin_by_id.get(int(sid)) if sid is not None else None
+            grp = int((sk or {}).get('ship_group') or 0)
+            # META 组（970xxx）由 meta_group_bridge 负责；stats 不补，保持旧行为（§108/§176）。
+            if 970000 <= grp <= 979999:
+                continue
+            stats[k] = v
     wpath = os.path.join(OUT, 'WikiData', 'ship_data.json')
     wiki = json.load(open(wpath, encoding='utf-8')) if os.path.exists(wpath) else []
     return skin, stats, wiki
@@ -301,8 +320,12 @@ def resolve_story_fallback(stem, painting_ci):
     return None, None, None, None
 
 
-def bundle_ids():
-    """画廊用到的全部磁盘 bundleID（立绘目录名为主，含 spine/live2d/cg 目录）。"""
+def bundle_ids(work=None):
+    """画廊用到的全部磁盘 bundleID（立绘目录名为主，含 spine/live2d/cg 目录）。
+
+    `work` = `.diag/pipeline`：本轮新皮肤在换入前只存在于临时区，不扫它就会漏掉
+    （2026-10-23 实测：meta 跑在 paintings 换入之前，36 个新 stem 一个都没进 ship_meta）。
+    """
     ids = set()
     for p in glob.glob(os.path.join(OUT, 'Paintings_v2', '*.png')):
         ids.add(os.path.splitext(os.path.basename(p))[0])
@@ -310,14 +333,21 @@ def bundle_ids():
         for d in glob.glob(os.path.join(OUT, sub, '*')):
             if os.path.isdir(d):
                 ids.add(os.path.basename(d))
+    if work:
+        for p in glob.glob(os.path.join(work, 'Paintings_v2', '*.png')):
+            ids.add(os.path.splitext(os.path.basename(p))[0])
+        for sub in ('Spine_v2', 'Live2D'):
+            for d in glob.glob(os.path.join(work, sub, '*')):
+                if os.path.isdir(d):
+                    ids.add(os.path.basename(d))
     return ids
 
 
-def build_meta(skin, stats, wiki, verbose=False):
+def build_meta(skin, stats, wiki, verbose=False, work=None):
     painting2skin, painting_ci, stats_by_group, stats_by_skinid = build_indexes(skin, stats)
     wiki_by_name = {x['name']: x for x in wiki if x.get('name')}
     meta = {}
-    for stem in sorted(bundle_ids()):
+    for stem in sorted(bundle_ids(work)):
         base, source, sk_row = resolve_base(stem, painting2skin, painting_ci, stats_by_group,
                                             META_BRIDGE)
         entry = {'cn': stem, 'en': '', 'faction': '', 'type': '', 'rarity': '',
@@ -348,6 +378,13 @@ def build_meta(skin, stats, wiki, verbose=False):
             # 不能当舰名；另存 skin_name 备用。舰名取自 statistics.name(0 占位符，实测 4119/4119 皆真名)。
             entry['skin_name'] = sk.get('name') or stem
             sv = stats_by_group.get(sk.get('ship_group')) or stats_by_skinid.get(sk.get('id'))
+            # 新船的 stats 行常常只有 `_2` 皮肤那一行（skin_id 指向本体），本体行不在表里；
+            # 直接查 sk.id 会落空。补一次「按基 painting 的本体 id 查」。
+            if sv is None and base:
+                base_row = painting2skin.get(base) or {}
+                base_id = base_row.get('id')
+                if base_id is not None:
+                    sv = stats_by_skinid.get(base_id)
             if sv is not None and sk.get('ship_group') not in stats_by_group:
                 # 走的是「stats.id == 皮肤行 id 且同名」配对救援，记下来源便于逐条回查
                 entry['stats_via'] = 'id_pair:%s' % sv.get('id')
@@ -459,10 +496,13 @@ def main():
     ap.add_argument('--write', action='store_true', help='产出 Output/ship_meta.json（默认只读诊断）')
     ap.add_argument('--out', default=None,
                     help='配合 --write 指定落盘目录（临时目录比对用），默认 Output/')
+    ap.add_argument('--work', default=None,
+                    help='额外扫描的临时区（如 .diag/pipeline；换入前的新皮肤只在这里）')
     args = ap.parse_args()
 
     skin, stats, wiki = load()
-    meta, painting2skin, stats_by_group, wiki_by_name = build_meta(skin, stats, wiki)
+    meta, painting2skin, stats_by_group, wiki_by_name = build_meta(
+        skin, stats, wiki, work=args.work)
     print_diag(meta, wiki_by_name)
 
     if args.write:

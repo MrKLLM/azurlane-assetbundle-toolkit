@@ -1,193 +1,204 @@
 {
- "schema_version": 1,
- "purpose": "从游戏本体 sharecfg 容器直接解出的权威映射，管线以此为准（优于社区快照与语义推断）",
- "provenance": {
-  "game_version_local_assets": "9.7.385",
-  "container_grammar": "docs/TROUBLESHOOTING.md §33/§34",
-  "regenerate_via": [
-   "tools/sharecfg_re/34_www_four_modes.py",
-   "tools/sharecfg_re/35_export_sharecfg_lua.py",
-   "tools/sharecfg_re/41_export_lua_tables.py",
-   "tools/sharecfg_re/37_parse_sharecfgdata.py --scalar-all",
-   "tools/sharecfg_re/42_publish_gamecfg.py",
-   "tools/sharecfg_re/45_publish_npc_painting.py",
-   "tools/sharecfg_re/46_publish_name_code.py",
-   "tools/sharecfg_re/47_publish_npc_voice.py",
-   "tools/sharecfg_re/48_publish_meta_group_bridge.py",
-   "tools/sharecfg_re/49_publish_bg_scene.py",
-   "scripts/ocr_bg_tip_titles.py",
-   "scripts/publish_bg_char_flags.py",
-   "tools/sharecfg_re/51_publish_bg_series.py"
-  ],
-  "landed_at": "2026-10-21"
- },
- "files": [
-  {
-   "path": "bg_category_labels.json",
-   "bytes": 4926,
-   "sha256": "409458c37faae5ff06bf5abfa3de43f9e21b4f72bec06f319b6e55f7d28a2a96",
-   "rows": 44,
-   "role": "背景词根 → **描述性类目名**（「装备」「加载图」「星级卡底纹」这类界面/场景归类）。⚠️ **不是游戏官方资产名**：只在五条表内证据路线（memory/story/re_map/perform/child2）都拿不到词根时才补位，消费端以 `cn_from='category'` 与证据档区分",
-   "consumers": [
-    "scripts/build_bg_meta.py"
-   ],
-   "source": "人工整理；每条带 `kind` 依据（界面/场景/拼音/舰名/联动）。仓库内无生成器——词典本身就是正本，改动须在此同步 bytes/sha256",
-   "produced_by": "手工维护（无脚本）",
-   "coverage": "44 个类目 / 195 张 png；补位后英文显示词根只剩 9 个 / 58 张（全表零引用、语义不可判，保留英文不硬凑，见 TROUBLESHOOTING §159）"
+  "schema_version": 1,
+  "purpose": "从游戏本体 sharecfg 容器直接解出的权威映射，管线以此为准（优于社区快照与语义推断）",
+  "provenance": {
+    "game_version_local_assets": "9.7.385",
+    "container_grammar": "docs/TROUBLESHOOTING.md §33/§34",
+    "regenerate_via": [
+      "tools/sharecfg_re/34_www_four_modes.py",
+      "tools/sharecfg_re/35_export_sharecfg_lua.py",
+      "tools/sharecfg_re/41_export_lua_tables.py",
+      "tools/sharecfg_re/37_parse_sharecfgdata.py --scalar-all",
+      "tools/sharecfg_re/42_publish_gamecfg.py",
+      "tools/sharecfg_re/45_publish_npc_painting.py",
+      "tools/sharecfg_re/46_publish_name_code.py",
+      "tools/sharecfg_re/47_publish_npc_voice.py",
+      "tools/sharecfg_re/48_publish_meta_group_bridge.py",
+      "tools/sharecfg_re/49_publish_bg_scene.py",
+      "scripts/ocr_bg_tip_titles.py",
+      "scripts/publish_bg_char_flags.py",
+      "tools/sharecfg_re/51_publish_bg_series.py"
+    ],
+    "landed_at": "2026-10-23"
   },
-  {
-   "path": "bg_char_flags.json",
-   "bytes": 31701,
-   "sha256": "61e2a2bead6853e106106c253a1d24a2bb4223ba36ee3896e71158d76cef53be",
-   "rows": 1305,
-   "role": "场景背景「画面里有没有角色」的人工视觉标注结论（1=有角色形象 / 0=没有）—— 背景页**默认视图**的筛选依据；文件名规则（含 `_cg`）精确率 86%/召回率 79%，不够当默认视图，故逐格目视标注",
-   "consumers": [
-    "scripts/build_bg_meta.py"
-   ],
-   "source": "annotations/bg_char_labels.json（= .diag/bglabels 5×5 拼板逐格标注 + annotations/bg_char_adjudications.json 的 17 格全分辨率裁定；两份裁定正本入库，拼板可重生成）",
-   "produced_by": "scripts/publish_bg_char_flags.py",
-   "coverage": "1305/1305 场景背景全覆盖（有角色 535 / 无角色 770）；登录与其他类目未标注，消费方不得把它们当「无角色」隐藏"
-  },
-  {
-   "path": "bg_root_labels.json",
-   "bytes": 4512,
-   "sha256": "7e1af3517d4b036f25022addad6aede25fed80f4a58a9f30e2a1592b57bc3388",
-   "rows": 18,
-   "role": "场景背景**词根** → 中文名（lazy_pinyin 整值匹配 773 张 lua 表的中文短名，只发布唯一命中；多义如 yujin=余烬/浴巾 一律不发）",
-   "consumers": [
-    "scripts/build_bg_meta.py"
-   ],
-   "source": ".diag/sharecfg_re/lua_json/*.json（tools/sharecfg_re/41_export_lua_tables.py 产出）",
-   "produced_by": "tools/sharecfg_re/50_publish_bg_roots.py",
-   "coverage": "18/213 词根、150/1268 张 —— 英文与缩写词根（star_level/project_tb/bsmre/worldcruise）无自动路；已否证「词根作字段整值反查同行中文名」这条路（命中多为错配）"
-  },
-  {
-   "path": "bg_scene_refs.json",
-   "bytes": 139362,
-   "sha256": "e4a7cb434b6ee7c51e45146c5fc08d9d042d88892d1ba058129facb301e131ed",
-   "rows": 406,
-   "role": "背景图（Output/Raw/*.png 的资源名）→ 逐张的中文关卡名/章节名 + 出处(表/字段/行标识)，只认\"某表背景语义字段整值 == png 名\"这种精确引用；同组兄弟图的推断由 build_bg_meta.py 负责",
-   "consumers": [
-    "scripts/build_bg_meta.py"
-   ],
-   "source": ".diag/sharecfg_re/lua_json/*.json（773 张表全扫，只收背景语义字段的整值引用）",
-   "coverage": "精确中文名 284/1875 png (15.1%)"
-  },
-  {
-   "path": "bg_series_labels.json",
-   "bytes": 21169,
-   "sha256": "5a4c519ca84de0712da455d9cbbd2e87fe4329dbef999e5267b66752487c3f9d",
-   "rows": 54,
-   "role": "背景图词根（Output/Raw png 的 root）→ 系列中文名，来源只有三条游戏表内路线：memory_template.mask+condition / re_map_template.bg+name / child2_data.name_background+name",
-   "consumers": [
-    "scripts/build_bg_meta.py"
-   ],
-   "source": ".diag/sharecfg_re/lua_json/{memory_template,re_map_template,child2_data}.json",
-   "coverage": "词根中文名 54 组 / 591 张 png"
-  },
-  {
-   "path": "bg_tip_titles.json",
-   "bytes": 4467,
-   "sha256": "69dbe5528156152079885c4f4738669fe9f0dbe049142f91ed0f6cb2c01eb0ff",
-   "rows": 6,
-   "role": "背景横幅图（Output/Raw/**/*_tip.png）里烤进像素的中文活动名 —— 图内文字证据，与\"配置表字段整值引用\"是两条独立命名源，页面必须分档显示，不许混",
-   "consumers": [
-    "scripts/build_bg_meta.py"
-   ],
-   "source": "Output/Raw/**/*_tip.png 像素（rapidocr_onnxruntime）+ 目视核对",
-   "note": "舰名段不发布：6 条里 3 条在 ship_meta 的 cn 集合查不到，无法判读错还是译名口径"
-  },
-  {
-   "path": "character_voice.json",
-   "bytes": 12505,
-   "sha256": "fa0eb8408358813407681f8acacb6c9133df4fafc055b491f00010ad9c488276",
-   "rows": 85,
-   "role": "台词字段 key ↔ Live2D 动作组 l2d_action ↔ ACB 资源名 resource_key ↔ Spine 动作 ↔ 中文语音名（85 条）",
-   "consumers": [
-    "scripts/extract_live2d_voice.py"
-   ],
-   "source": ".diag/sharecfg_re/lua_json/character_voice.json"
-  },
-  {
-   "path": "meta_group_bridge.json",
-   "bytes": 2,
-   "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-   "rows": 0,
-   "role": "META 实体的「有船行、无皮肤行」补桥：自机立绘资源名（小写）→ 语音包组号/阵营/舰种/实体名/剧情行 id + prefab 出处（游戏本体 ship_data_group + fleet_tech_ship_class + ship_skin_template.prefab）",
-   "consumers": [
-    "scripts/build_ship_meta.py",
-    "scripts/extract_cv_voice.py"
-   ],
-   "source": ".diag/sharecfg_re/lua_json/{ship_data_group,fleet_tech_ship_class}.json + inputs/gamecfg/ship_skin_template.json"
-  },
-  {
-   "path": "name_code.json",
-   "bytes": 26951,
-   "sha256": "aae0123b3dec92fcbf9b4dbf163c523304921e63f72f73210608764b224150d3",
-   "rows": 456,
-   "role": "台词正文里 `{namecode:NN}` 占位符的权威展开表：id → 中文实体名 + 单字代号（456 行，游戏本体 9.7.385 的 name_code 表）",
-   "consumers": [
-    "scripts/build_skin_words.py"
-   ],
-   "source": ".diag/sharecfg_re/lua_json/name_code.json",
-   "alignment_proof": "tools/sharecfg_re/43_check_namecode_alignment.py（带零假设）"
-  },
-  {
-   "path": "npc_painting_name.json",
-   "bytes": 4670,
-   "sha256": "e5973aeadc14be4d1b901661d163252844d67b0de0937f7eb0cd3ce31dbda513",
-   "rows": 42,
-   "role": "指挥室秘书舰 NPC 的立绘/头像资源名（小写）→ 中文显示名 + character_id，41 行 3 个实体（游戏本体 9.7.385 的 secretary_special_ship 表）",
-   "consumers": [
-    "scripts/build_ship_meta.py"
-   ]
-  },
-  {
-   "path": "npc_voice.json",
-   "bytes": 202178,
-   "sha256": "7823cacfe92d5abe8929d193d816d97354134029dd3e5ddddad38a69fe0920dd",
-   "rows": 41,
-   "role": "秘书舰 NPC 立绘（小写）→ 语音包号 cv-<id> + 逐条台词正文（占位符已展开）+ group/type/unlock_desc，41 行 3 个实体（游戏本体 9.7.385 的 secretary_special_ship 表）",
-   "consumers": [
-    "scripts/extract_secretary_voice.py",
-    "scripts/build_gallery_index.py"
-   ],
-   "source": ".diag/sharecfg_re/lua_json/secretary_special_ship.json"
-  },
-  {
-   "path": "ship_skin_template.json",
-   "bytes": 3444941,
-   "sha256": "f198e7f499aeb7173647b418e055b9612351cd3592636410a1cffc80f6f99674",
-   "rows": 2871,
-   "role": "皮肤行 id → painting / name / ship_group / voice_actor 等（2865 行，与 azdata 同构，只留消费字段）",
-   "consumers": [
-    "scripts/skin_table.py",
-    "scripts/extract_cv_voice.py",
-    "scripts/build_ship_meta.py"
-   ],
-   "source": ".diag/sharecfg_re/cfg_json_scalar/ship_skin_template.json"
-  },
-  {
-   "path": "ship_skin_words.json",
-   "bytes": 4973454,
-   "sha256": "5db395e7b8c92c4faae245e59317780f00b83731b5a192e1955db3896c636457",
-   "rows": 2575,
-   "role": "皮肤行 id → 各台词字段的中文正文（只保留非空标量字段；嵌套字段尚未装配，见 §36 B 段）",
-   "consumers": [
-    "scripts/build_skin_words.py"
-   ],
-   "source": ".diag/sharecfg_re/cfg_json/ship_skin_words.json"
-  },
-  {
-   "path": "voice_actor_cn.json",
-   "bytes": 10827,
-   "sha256": "6d7db92c70a4626fc33f765185cd508c59559cd504ca7236f41463bed64e5cf1",
-   "rows": 525,
-   "role": "声优 code → 中文姓名（游戏本体 9.7.385，525 条）",
-   "consumers": [
-    "scripts/build_ship_meta.py"
-   ],
-   "source": ".diag/sharecfg_re/lua_json/voice_actor_cn.json"
-  }
- ]
+  "files": [
+    {
+      "path": "bg_category_labels.json",
+      "bytes": 4926,
+      "sha256": "409458c37faae5ff06bf5abfa3de43f9e21b4f72bec06f319b6e55f7d28a2a96",
+      "rows": 44,
+      "role": "背景词根 → **描述性类目名**（「装备」「加载图」「星级卡底纹」这类界面/场景归类）。⚠️ **不是游戏官方资产名**：只在五条表内证据路线（memory/story/re_map/perform/child2）都拿不到词根时才补位，消费端以 `cn_from='category'` 与证据档区分",
+      "consumers": [
+        "scripts/build_bg_meta.py"
+      ],
+      "source": "人工整理；每条带 `kind` 依据（界面/场景/拼音/舰名/联动）。仓库内无生成器——词典本身就是正本，改动须在此同步 bytes/sha256",
+      "produced_by": "手工维护（无脚本）",
+      "coverage": "44 个类目 / 195 张 png；补位后英文显示词根只剩 9 个 / 58 张（全表零引用、语义不可判，保留英文不硬凑，见 TROUBLESHOOTING §159）"
+    },
+    {
+      "path": "bg_char_flags.json",
+      "bytes": 31851,
+      "sha256": "0809b977a6a97c1a4532d6312393c4d03883fba00c886356fd42b991bd7ff391",
+      "rows": 1311,
+      "role": "场景背景「画面里有没有角色」的人工视觉标注结论（1=有角色形象 / 0=没有）—— 背景页**默认视图**的筛选依据；文件名规则（含 `_cg`）精确率 86%/召回率 79%，不够当默认视图，故逐格目视标注",
+      "consumers": [
+        "scripts/build_bg_meta.py"
+      ],
+      "source": "annotations/bg_char_labels.json（= .diag/bglabels 5×5 拼板逐格标注 + annotations/bg_char_adjudications.json 的 17 格全分辨率裁定；两份裁定正本入库，拼板可重生成）",
+      "produced_by": "scripts/publish_bg_char_flags.py",
+      "coverage": "1311/1311 场景背景全覆盖（有角色 538 / 无角色 773）；登录与其他类目未标注，消费方不得把它们当「无角色」隐藏"
+    },
+    {
+      "path": "bg_root_labels.json",
+      "bytes": 4512,
+      "sha256": "7e1af3517d4b036f25022addad6aede25fed80f4a58a9f30e2a1592b57bc3388",
+      "rows": 18,
+      "role": "场景背景**词根** → 中文名（lazy_pinyin 整值匹配 773 张 lua 表的中文短名，只发布唯一命中；多义如 yujin=余烬/浴巾 一律不发）",
+      "consumers": [
+        "scripts/build_bg_meta.py"
+      ],
+      "source": ".diag/sharecfg_re/lua_json/*.json（tools/sharecfg_re/41_export_lua_tables.py 产出）",
+      "produced_by": "tools/sharecfg_re/50_publish_bg_roots.py",
+      "coverage": "18/213 词根、150/1268 张 —— 英文与缩写词根（star_level/project_tb/bsmre/worldcruise）无自动路；已否证「词根作字段整值反查同行中文名」这条路（命中多为错配）"
+    },
+    {
+      "path": "bg_scene_refs.json",
+      "bytes": 139362,
+      "sha256": "e4a7cb434b6ee7c51e45146c5fc08d9d042d88892d1ba058129facb301e131ed",
+      "rows": 406,
+      "role": "背景图（Output/Raw/*.png 的资源名）→ 逐张的中文关卡名/章节名 + 出处(表/字段/行标识)，只认\"某表背景语义字段整值 == png 名\"这种精确引用；同组兄弟图的推断由 build_bg_meta.py 负责",
+      "consumers": [
+        "scripts/build_bg_meta.py"
+      ],
+      "source": ".diag/sharecfg_re/lua_json/*.json（773 张表全扫，只收背景语义字段的整值引用）",
+      "coverage": "精确中文名 284/1875 png (15.1%)"
+    },
+    {
+      "path": "bg_series_labels.json",
+      "bytes": 21169,
+      "sha256": "5a4c519ca84de0712da455d9cbbd2e87fe4329dbef999e5267b66752487c3f9d",
+      "rows": 54,
+      "role": "背景图词根（Output/Raw png 的 root）→ 系列中文名，来源只有三条游戏表内路线：memory_template.mask+condition / re_map_template.bg+name / child2_data.name_background+name",
+      "consumers": [
+        "scripts/build_bg_meta.py"
+      ],
+      "source": ".diag/sharecfg_re/lua_json/{memory_template,re_map_template,child2_data}.json",
+      "coverage": "词根中文名 54 组 / 591 张 png"
+    },
+    {
+      "path": "bg_tip_titles.json",
+      "bytes": 4467,
+      "sha256": "69dbe5528156152079885c4f4738669fe9f0dbe049142f91ed0f6cb2c01eb0ff",
+      "rows": 6,
+      "role": "背景横幅图（Output/Raw/**/*_tip.png）里烤进像素的中文活动名 —— 图内文字证据，与\"配置表字段整值引用\"是两条独立命名源，页面必须分档显示，不许混",
+      "consumers": [
+        "scripts/build_bg_meta.py"
+      ],
+      "source": "Output/Raw/**/*_tip.png 像素（rapidocr_onnxruntime）+ 目视核对",
+      "note": "舰名段不发布：6 条里 3 条在 ship_meta 的 cn 集合查不到，无法判读错还是译名口径"
+    },
+    {
+      "path": "character_voice.json",
+      "bytes": 12505,
+      "sha256": "fa0eb8408358813407681f8acacb6c9133df4fafc055b491f00010ad9c488276",
+      "rows": 85,
+      "role": "台词字段 key ↔ Live2D 动作组 l2d_action ↔ ACB 资源名 resource_key ↔ Spine 动作 ↔ 中文语音名（85 条）",
+      "consumers": [
+        "scripts/extract_live2d_voice.py"
+      ],
+      "source": ".diag/sharecfg_re/lua_json/character_voice.json"
+    },
+    {
+      "path": "meta_group_bridge.json",
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "rows": 0,
+      "role": "META 实体的「有船行、无皮肤行」补桥：自机立绘资源名（小写）→ 语音包组号/阵营/舰种/实体名/剧情行 id + prefab 出处（游戏本体 ship_data_group + fleet_tech_ship_class + ship_skin_template.prefab）",
+      "consumers": [
+        "scripts/build_ship_meta.py",
+        "scripts/extract_cv_voice.py"
+      ],
+      "source": ".diag/sharecfg_re/lua_json/{ship_data_group,fleet_tech_ship_class}.json + inputs/gamecfg/ship_skin_template.json"
+    },
+    {
+      "path": "name_code.json",
+      "bytes": 26951,
+      "sha256": "aae0123b3dec92fcbf9b4dbf163c523304921e63f72f73210608764b224150d3",
+      "rows": 456,
+      "role": "台词正文里 `{namecode:NN}` 占位符的权威展开表：id → 中文实体名 + 单字代号（456 行，游戏本体 9.7.385 的 name_code 表）",
+      "consumers": [
+        "scripts/build_skin_words.py"
+      ],
+      "source": ".diag/sharecfg_re/lua_json/name_code.json",
+      "alignment_proof": "tools/sharecfg_re/43_check_namecode_alignment.py（带零假设）"
+    },
+    {
+      "path": "npc_painting_name.json",
+      "bytes": 4670,
+      "sha256": "e5973aeadc14be4d1b901661d163252844d67b0de0937f7eb0cd3ce31dbda513",
+      "rows": 42,
+      "role": "指挥室秘书舰 NPC 的立绘/头像资源名（小写）→ 中文显示名 + character_id，41 行 3 个实体（游戏本体 9.7.385 的 secretary_special_ship 表）",
+      "consumers": [
+        "scripts/build_ship_meta.py"
+      ]
+    },
+    {
+      "path": "npc_voice.json",
+      "bytes": 202178,
+      "sha256": "7823cacfe92d5abe8929d193d816d97354134029dd3e5ddddad38a69fe0920dd",
+      "rows": 41,
+      "role": "秘书舰 NPC 立绘（小写）→ 语音包号 cv-<id> + 逐条台词正文（占位符已展开）+ group/type/unlock_desc，41 行 3 个实体（游戏本体 9.7.385 的 secretary_special_ship 表）",
+      "consumers": [
+        "scripts/extract_secretary_voice.py",
+        "scripts/build_gallery_index.py"
+      ],
+      "source": ".diag/sharecfg_re/lua_json/secretary_special_ship.json"
+    },
+    {
+      "path": "ship_data_statistics.json",
+      "bytes": 677319,
+      "sha256": "79b9db80b3f4dcf5384f7d3a0a5a382340b0d043690eb0378896f2b0927edb8a",
+      "rows": 4146,
+      "role": "舰船行 id → name/english_name/nationality/rarity/type/skin_id（4146 行，设备侧；新船比社区快照全）",
+      "consumers": [
+        "scripts/build_ship_meta.py"
+      ],
+      "source": ".diag/sharecfg_re/cfg_json_scalar/ship_data_statistics.json"
+    },
+    {
+      "path": "ship_skin_template.json",
+      "bytes": 3464103,
+      "sha256": "602193a2e271a542951bb4a4276ec4e6ce2447136054b67a22e8f0ffa7830df1",
+      "rows": 2887,
+      "role": "皮肤行 id → painting / name / ship_group / voice_actor 等（2865 行，与 azdata 同构，只留消费字段）",
+      "consumers": [
+        "scripts/skin_table.py",
+        "scripts/extract_cv_voice.py",
+        "scripts/build_ship_meta.py"
+      ],
+      "source": ".diag/sharecfg_re/cfg_json_scalar/ship_skin_template.json"
+    },
+    {
+      "path": "ship_skin_words.json",
+      "bytes": 5007587,
+      "sha256": "2ca35e188d86d1e28be03e434f0e7c7e414731b08c653e39ab52e9b2c480cb1d",
+      "rows": 2589,
+      "role": "皮肤行 id → 各台词字段的中文正文（只保留非空标量字段；嵌套字段尚未装配，见 §36 B 段）",
+      "consumers": [
+        "scripts/build_skin_words.py"
+      ],
+      "source": ".diag/sharecfg_re/cfg_json/ship_skin_words.json"
+    },
+    {
+      "path": "voice_actor_cn.json",
+      "bytes": 10929,
+      "sha256": "9bd8ffb5a45090fa0c6016355cb0230d27ecc3a2563298a6f9f2e720f020bd11",
+      "rows": 530,
+      "role": "声优 code → 中文姓名（游戏本体 9.7.385，525 条）",
+      "consumers": [
+        "scripts/build_ship_meta.py"
+      ],
+      "source": ".diag/sharecfg_re/lua_json/voice_actor_cn.json"
+    }
+  ]
 }

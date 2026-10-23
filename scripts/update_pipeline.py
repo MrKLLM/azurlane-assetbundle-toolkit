@@ -349,7 +349,7 @@ def verdict(key, ok, detail):
 # **不证明"它跟游戏一样"**（2026-10-04 实测：包是 10-01 拉的、表还是 09-24 那份，
 # 于是新自机的皮肤行/台词/CV 全查不到，label 回落 + 语音接不上，见 §82）。
 CFG_DIR = os.path.join(ROOT, '.diag', 'sharecfg_re')
-CFG_PUBLISH = [('tools/sharecfg_re/42_publish_gamecfg.py', '皮肤表 / 声优 / 台词 / 语音类别'),
+CFG_PUBLISH = [('tools/sharecfg_re/42_publish_gamecfg.py', '皮肤表 / 声优 / 台词 / 语音类别 / 舰船统计'),
                ('tools/sharecfg_re/45_publish_npc_painting.py', '秘书舰 NPC 立绘名'),
                ('tools/sharecfg_re/46_publish_name_code.py', '{namecode} 占位符展开表'),
                ('tools/sharecfg_re/47_publish_npc_voice.py', '秘书舰语音包号与台词正文'),
@@ -516,7 +516,7 @@ def st_cfg_disk(full, approved):
 
 
 def st_cfg_publish(approved):
-    """42/45/46/47：把解出来的表发布成 `inputs/gamecfg/*.json` + 台账。**live 档**（写权威输入）。
+    """42/45/46/47/48：把解出来的表发布成 `inputs/gamecfg/*.json` + 台账。**live 档**（写权威输入）。
 
     未签字时只跑各脚本的 `--check`（只读断言），签字后才真写盘——`inputs/` 是整条线的
     唯一起点，写坏了下游全部跟着错，所以这一档的确认权必须留在人那里。
@@ -554,11 +554,11 @@ def st_cfg_publish(approved):
                       echo=['PASS', 'FAIL', '漂移'])
     if mode == 'check':
         return verdict('cfg.publish', not bad,
-                       f'未签字 ⇒ 只跑 4 个发布脚本的 --check（只读断言）：'
+                       f'未签字 ⇒ 只跑 5 个发布脚本的 --check（只读断言）：'
                        f'{"全过" if not bad else "红: " + "; ".join(bad)}'
                        f' ⇒ 看过差分再 --approve cfg.publish')
     return verdict('cfg.publish', (not bad) and rc2 == 0,
-                   f'已发布 4 张表；台账校验 check_inputs {"绿" if rc2 == 0 else "红"}'
+                   f'已发布 5 张表；台账校验 check_inputs {"绿" if rc2 == 0 else "红"}'
                    + (f'：{(so2 or "").strip().splitlines()[-1][:70]}' if rc2 else '')
                    + (f'｜红项 {"; ".join(bad)}' if bad else ''))
 
@@ -730,24 +730,21 @@ def st_deps(approved):
 
 # ---------------------------------------------------------- 4 meta
 def st_meta(approved):
-    rc, so, se = run([PY, 'scripts/build_ship_meta.py'], timeout=1800, echo=['条目', '无源', 'source'])
+    rc, so, se = run([PY, 'scripts/build_ship_meta.py', '--work', WORK],
+                     timeout=1800, echo=['条目', '无源', 'source'])
     if rc:
         return verdict('meta', False, f'--diag 失败 rc={rc}')
     tmpdir = os.path.join(WORK, 'meta')
     os.makedirs(tmpdir, exist_ok=True)
-    rc, so, _ = run([PY, 'scripts/build_ship_meta.py', '--write', '--out', tmpdir],
+    rc, so, _ = run([PY, 'scripts/build_ship_meta.py', '--write', '--out', tmpdir, '--work', WORK],
                     timeout=1800, echo=['写入', '条目'])
     if rc or not os.path.isfile(os.path.join(tmpdir, 'ship_meta.json')):
         return verdict('meta', False, f'--write --out 失败 rc={rc}')
     if not ('meta' in approved):
         return verdict('meta', True, '新 ship_meta 已产到临时区'
                                      '· 未签字，请 --approve meta')
-    bak = os.path.join(WORK, 'ship_meta.prev.json')
-    if os.path.isfile(os.path.join(OUT, 'ship_meta.json')):
-        shutil.copy2(os.path.join(OUT, 'ship_meta.json'), bak)
-    shutil.copy2(os.path.join(tmpdir, 'ship_meta.json'), os.path.join(OUT, 'ship_meta.json'))
-    # 期望新增数取自 `cfg.disk` 报的差分：那条闸门的"条目增删必须为 0"**天生拒绝新角色**——
-    # 游戏新出一艘自机就会加行，硬要求 0 等于把"更新"这件事本身判成回退（2026-10-05 修）。
+    # 期望新增数取自 `cfg.disk` 报的差分；但换入前的新皮肤在临时区，变体文件数通常大于
+    # 皮肤行数（36 文件 / 16 行），所以再用「临时区新 stem」抬一次下界。
     delta = 0
     dp = os.path.join(WORK, 'cfg_delta.json')
     if os.path.isfile(dp):
@@ -755,11 +752,29 @@ def st_meta(approved):
             delta = int(json.load(open(dp, encoding='utf-8')).get('added') or 0)
         except Exception:
             delta = 0
+    live = {os.path.splitext(os.path.basename(p))[0]
+            for p in glob.glob(os.path.join(OUT, 'Paintings_v2', '*.png'))}
+    stage = {os.path.splitext(os.path.basename(p))[0]
+             for p in glob.glob(os.path.join(WORK, 'Paintings_v2', '*.png'))}
+    new_stems = len(stage - live)
+    expect_added = max(delta, new_stems)
+    # ⚠️ 闸门必须在**换入之前**跑：old = 当前正式区 ship_meta，new = 带 --work 的重算。
+    #    旧版先 copy 到正式区再跑，等于拿新文件跟它自己比 —— 临时区新增的皮肤永远漏检。
     rc2, so2, _ = run([PY, 'scripts/diag/ship_meta_authority_diff.py',
-                       '--expect-added', str(delta)], echo=['闸门', '改动'])
-    return verdict('meta', rc2 == 0,
-                   f'已换入并跑权威闸门 ship_meta_authority_diff → {"绿" if rc2 == 0 else "红"}'
-                   + (f'：{(so2.strip().splitlines() or ["?"])[-1][:80]}' if rc2 else ''))
+                       '--expect-added', str(expect_added), '--work', WORK],
+                      echo=['闸门', '改动'])
+    if rc2 != 0:
+        return verdict('meta', False,
+                       f'权威闸门红，未换入（期望新增 ≤{expect_added}）：'
+                       + ((so2.strip().splitlines() or ['?'])[-1][:120]))
+    bak = os.path.join(WORK, 'ship_meta.prev.json')
+    if os.path.isfile(os.path.join(OUT, 'ship_meta.json')):
+        shutil.copy2(os.path.join(OUT, 'ship_meta.json'), bak)
+    shutil.copy2(os.path.join(tmpdir, 'ship_meta.json'), os.path.join(OUT, 'ship_meta.json'))
+    return verdict('meta', True,
+                   f'已换入并跑权威闸门 ship_meta_authority_diff → 绿（期望新增 ≤{expect_added}，'
+                   f'临时区新增 {new_stems} 个 stem）'
+                   + (f'：{(so2.strip().splitlines() or ["?"])[-1][:80]}' if so2.strip() else ''))
 
 
 # ---------------------------------------------------------- 5 导出类（全部 staged 到临时区）
@@ -1372,7 +1387,21 @@ def st_review():
             .write('\n'.join(todo))
         open(os.path.join(WORK, 'new_paintings.txt'), 'w', encoding='utf-8') \
             .write('\n'.join(sorted(new_only)))
-        lines.append(f'立绘：临时区 {len(news)} 张 · 线上新增 {len(new_only)} · 内容有变 {len(chg)}'
+        # 36 个文件不是 36 个皮肤：按 ship_meta 的 base_painting/skin_name 归组，
+        # 主屏和 detail 直接说「N 个文件 / G 组 / S 个皮肤」（2026-10-23 用户对不上 4 角色/9 皮肤）。
+        try:
+            smeta = json.load(open(os.path.join(OUT, 'ship_meta.json'), encoding='utf-8'))
+        except Exception:
+            smeta = {}
+        def _gk(s):
+            m = smeta.get(s) or {}
+            return (m.get('base_painting') or s,
+                    m.get('skin_name') or m.get('cn') or s,
+                    m.get('cn') or s)
+        gkeys = {_gk(s) for s in new_only}
+        skin_n = len({(a, b) for a, b, c in gkeys if b and c and b != c})
+        lines.append(f'立绘：临时区 {len(news)} 张 · 线上新增 {len(new_only)} 个文件'
+                     f'（{len(gkeys)} 组 / {skin_n} 个皮肤） · 内容有变 {len(chg)}'
                      f' · 逐字节相同 {same_n}')
         if todo:
             run([PY, 'scripts/diag/make_pair_sheet.py', '--old', live_p, '--new', p_new,

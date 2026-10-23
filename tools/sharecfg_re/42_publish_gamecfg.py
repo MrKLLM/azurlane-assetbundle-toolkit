@@ -42,6 +42,11 @@ SPECS = [
      '皮肤行 id → painting / name / ship_group / voice_actor 等（2865 行，与 azdata 同构，只留消费字段）',
      ['scripts/skin_table.py', 'scripts/extract_cv_voice.py', 'scripts/build_ship_meta.py'],
      'cfg_json_scalar'),
+    # 舰船统计：社区快照（inputs/azdata）对新船滞后，设备侧这份 4146 行才含新船组；
+    # build_ship_meta 用它补 name/nationality/rarity/type/skin_id，否则新船会被归成 story。
+    ('ship_data_statistics.json', 'ship_data_statistics',
+     '舰船行 id → name/english_name/nationality/rarity/type/skin_id（4146 行，设备侧；新船比社区快照全）',
+     ['scripts/build_ship_meta.py'], 'cfg_json_scalar'),
 ]
 
 
@@ -83,6 +88,20 @@ def reshape(name, rows):
             out[str(int(rid))] = {k: v for k, v in r.items()
                                   if not isinstance(v, (dict, list))}
             out[str(int(rid))]['id'] = int(rid)
+        return out
+    if name == 'ship_data_statistics':
+        # 与 azdata_ship_data_statistics.json 同构：键=id、值=标量行。
+        # 只留 build_ship_meta 消费的字段；id 统一 int。
+        out = {}
+        for r in rows:
+            rid = r.get('id')
+            if rid is None:
+                continue
+            keep = {k: r.get(k) for k in
+                    ('name', 'english_name', 'nationality', 'rarity', 'type', 'skin_id',
+                     'group_type', 'ship_group')}
+            keep['id'] = int(rid)
+            out[str(int(rid))] = keep
         return out
     return {str(i): r for i, r in enumerate(rows)}
 

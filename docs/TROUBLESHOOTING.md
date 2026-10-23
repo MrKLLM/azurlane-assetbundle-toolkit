@@ -11759,3 +11759,38 @@ CG 从 00:25:13 起静默 75 秒后断电，第二天控制台仍显示 `running
 
 **涉及**：`scripts/update_pipeline.py`（st_review）、`scripts/pipeline_panel.py`（glob_sheets/
 askOf/newsafe）、`docs/WORKFLOWS.md` WF-59。
+
+## §180 36 个新文件 ≠ 36 个皮肤：meta 漏了新船/新皮肤（2026-10-23）
+
+**现象**：第 4 步写「线上新增 36」，对照表里出现 `anninvwang_3`、`changshehao`、`dashan_3` …
+用户按更新公告只预期 4 个角色 / 9 个皮肤；`ship_meta` 里这 36 个 stem 全部没有条目
+（「元数据缺」），画廊拿不到舰名/阵营/稀有度。
+
+**根因（三条叠加）**：
+1. `build_ship_meta.bundle_ids()` 只扫正式区 `Output/Paintings_v2`；`meta` 在换入前跑，
+   本轮 36 个新立绘只在 `.diag/pipeline/Paintings_v2` ⇒ 一个都没进 `ship_meta`。
+2. `ship_data_statistics` 只读社区快照 `inputs/azdata/`（对新船滞后）：960017~960021 五组
+   在快照里没有；设备侧 `.diag/sharecfg_re/cfg_json_scalar/ship_data_statistics.json`
+   （4146 行）才有。新船因此会被归成 story。
+3. 旧 `st_meta` 先覆盖正式区再跑权威闸门，闸门读到的 `old` 已是新文件 —— 等于拿新文件跟它自己比，
+   临时区新增的皮肤永远不会被闸门看见。
+
+**修法**：
+- `build_ship_meta.py --work .diag/pipeline`：`bundle_ids()` 同时扫临时区 Paintings/Spine/Live2D；
+- `42_publish_gamecfg.py` 增加 `ship_data_statistics.json`（设备侧 4146 行，MANIFEST 入库）；
+  `build_ship_meta.load()` 只补 azdata 里没有的新行，且跳过 970xxx（META 走补桥表）；
+- `ship_meta_authority_diff.py --work`：闸门重算也带临时区；
+- `st_meta` 改为**先跑闸门、绿了才换入**；`--expect-added` 取 max(cfg_delta, 临时区新 stem 数)；
+- `st_review`/`newsafe` 按 `base_painting/skin_name` 归组，detail 写「36 个文件（16 组 / 9 个皮肤）」。
+
+**判据**：36 个新 stem 归成 **16 组**：9 个 `skin_type=4` 皮肤、5 个新船本体、2 个剧情黑影；
+`newsafe.groups=16 / skins=9`；`ship_meta` 4545 条；权威闸门「新增 36（≤36）丢失 0」绿。
+9 个皮肤是：安妮女王复仇号·堕翼之诱、长蛇号·纯白的捕食者、大山·恶魔少女天使心、
+雷伊尔·贝号·偶像天使☆闪耀练习中！、七省·秽翼天使、塞利米耶号·自投罗网的预言家？、
+水星号·天使降临之日、铁角号·迷惘的堕天使、约克公爵·魅惑的夜之猎手。
+5 个新船本体：长蛇号、雷伊尔·贝号、塞利米耶号、水星号、铁角号（用户记的「4 角色」可能少算其一，
+或其中一个不在公告的角色位；数据里是 5 个 base）。
+
+**涉及**：`scripts/build_ship_meta.py`、`scripts/diag/ship_meta_authority_diff.py`、
+`tools/sharecfg_re/42_publish_gamecfg.py`、`scripts/update_pipeline.py`、`scripts/pipeline_panel.py`、
+`docs/WORKFLOWS.md` WF-59。

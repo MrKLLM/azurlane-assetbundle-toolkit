@@ -1219,12 +1219,17 @@ def newsafe():
         for s in names:
             m = meta.get(s) or {}
             v = voice.get(s) or {}
-            rows.append({'stem': s, 'ship': m.get('cn') or '', 'skin': m.get('skin_name') or '',
+            rows.append({'stem': s, 'base': m.get('base_painting') or s,
+                         'ship': m.get('cn') or '', 'skin': m.get('skin_name') or '',
                          'faction': m.get('faction') or '', 'rarity': m.get('rarity') or '',
                          'voice': len(v.get('lines') or []), 'meta': bool(m),
                          'live': os.path.isfile(os.path.join(out, 'Paintings_v2', s + '.png'))})
+        gkeys = {(r['base'], r['skin'] or r['ship'] or r['stem'],
+                  r['ship'] or r['stem']) for r in rows}
+        skins = len({(a, b) for a, b, c in gkeys if b and c and b != c})
         return {'rows': rows,
                 'live_n': sum(1 for r in rows if r['live']),
+                'groups': len(gkeys), 'skins': skins,
                 'sheet': ('sheet_paintings.png'
                           if os.path.isfile(os.path.join(WORK, 'sheet_paintings.png')) else '')}
     return _cached('news', 10.0, calc)
@@ -4293,12 +4298,16 @@ function askOf(n){
     const nxRv=nextStepAct(nReview);
     const rd=(rv&&rv.detail)||'';
     const mNew=/线上新增\s*(\d+)/.exec(rd), mChg=/内容有变\s*(\d+)/.exec(rd);
-    /* 主屏说"新增多少、变化多少"，不说"目录里有几张图"：后者会把上一批的 cmp/crop
-       一起算进去（2026-10-23 用户截图：写 9 张，点开全是 10-01 的旧图）。 */
-    const cnt=(mNew||mChg)?('：线上新增 '+nEm(mNew?+mNew[1]:0)+' · 内容有变 '+nEm(mChg?+mChg[1]:0)):'';
+    const mGrp=/线上新增\s*\d+\s*个文件（(\d+)\s*组\s*\/\s*(\d+)\s*个皮肤）/.exec(rd);
+    /* 主屏说「新增多少文件 / 多少组 / 多少皮肤」，不说"目录里有几张图"：后者会把上一批的
+       cmp/crop 一起算进去（2026-10-23 用户截图：写 9 张，点开全是 10-01 的旧图）。 */
+    const cnt=(mNew||mChg)?('：线上新增 '+nEm(mNew?+mNew[1]:0)+' 个文件'+
+        (mGrp?(' / '+mGrp[1]+' 组（'+mGrp[2]+' 个皮肤）'):'')+
+        ' · 内容有变 '+nEm(mChg?+mChg[1]:0)):'';
     return {eb, ask:'对照表好了'+cnt+'，'+
         (allStagesPass()?'本轮已照过、也已换入':'看一眼再决定换不换'),
-      why:'这一步不写任何正式产物。'+(mNew?('对照表取前 12 对，共 '+mNew[1]+' 张新增。'):'')+nxRv.why,
+      why:'这一步不写任何正式产物。'+(mNew?('对照表取前 12 对，共 '+mNew[1]+' 个文件'
+        +(mGrp?(' / '+mGrp[1]+' 组 / '+mGrp[2]+' 个皮肤'):'')+'。'):'')+nxRv.why,
       acts:[{a:'detail',t:'打开对照表',k:'pact mag'},nxRv.act]};
   }
 
@@ -4551,7 +4560,9 @@ function render(){
      图不重复贴 —— 点表头那个链接看对照总表（图片路由仍只从 .diag/pipeline 出）。 */
   const nw=S.news||{rows:[]}, nt=$('#newtbl'), ns=$('#newsum');
   if(ns) ns.textContent = nw.rows.length
-      ? ('新增 '+nw.rows.length+' 张 · 已在正式区 '+nw.live_n+' · 待换入 '+(nw.rows.length-nw.live_n))
+      ? ('新增 '+nw.rows.length+' 个文件 / '+(nw.groups||nw.rows.length)+' 组'
+         +(nw.skins?('（'+nw.skins+' 个皮肤）'):'')+' · 已在正式区 '+nw.live_n
+         +' · 待换入 '+(nw.rows.length-nw.live_n))
       : '';
   if(!nt) { /* 节点没插进来就是接线断了，宁可哑掉也不留半截表 */ }
   else if(!nw.rows.length) nt.innerHTML='<p class="dim" style="font-size:12px;margin:0">'+

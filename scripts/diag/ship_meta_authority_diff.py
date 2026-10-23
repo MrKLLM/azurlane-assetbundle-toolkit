@@ -123,7 +123,7 @@ def dup_row_fix(t, bp, rows_by_paint, picked, groups_with_stats):
     return (a, b) != ('ship', 'story') if f == 'category' else True
 
 
-def load_new():
+def load_new(work=None):
     path = os.path.join(ROOT, 'scripts', 'build_ship_meta.py')
     spec = importlib.util.spec_from_file_location('bsm', path)
     mod = importlib.util.module_from_spec(spec)
@@ -135,7 +135,7 @@ def load_new():
         sys.path.insert(0, d)
     spec.loader.exec_module(mod)
     skin, stats, wiki = mod.load()
-    meta, _, _, _ = mod.build_meta(skin, stats, wiki)
+    meta, _, _, _ = mod.build_meta(skin, stats, wiki, work=work)
     return meta, wiki, mod, skin, stats
 
 
@@ -266,10 +266,12 @@ def main():
                     help='允许的新增条目数，取自 cfg.disk 报出的皮肤表新增行数'
                          '（默认 0 = 不允许任何新增，与旧行为一致）')
     ap.add_argument('--out', default=os.path.join(ROOT, '.diag', 'ship_meta_authority_diff.tsv'))
+    ap.add_argument('--work', default=None,
+                    help='额外扫描的临时区（.diag/pipeline）；换入前的新皮肤只在临时区')
     a = ap.parse_args()
 
     old = json.load(open(os.path.join(ROOT, 'Output', 'ship_meta.json'), encoding='utf-8'))
-    new, wiki, mod, skin, stats = load_new()
+    new, wiki, mod, skin, stats = load_new(a.work)
     fails = []
     painting2skin, _pci, _sbg, _sbid = mod.build_indexes(skin, stats)
     # 「同一 painting 多行」的原始候选集 + 「哪些 ship_group 查得到 stats 行」，供 dup_row_fix 回查
