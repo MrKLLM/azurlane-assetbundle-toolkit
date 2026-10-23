@@ -170,7 +170,11 @@ def gamecfg_stamp():
     parts = []
     try:
         for fn in sorted(os.listdir(d)):
-            if not fn.endswith('.json') or fn == 'MANIFEST.json':
+            # ⚠️ `bg_*` 是 labels / 背景标注阶段的**产物**（bg_series_labels / bg_char_flags…），
+            # 不是 meta/立绘/索引链的输入。把它们算进 `cfg=` 会让 labels 跑在最后时
+            # **反向作废**前面的 swap-in/derive：2026-10-23 实测日志 4/4、面板 2/4。
+            if (not fn.endswith('.json') or fn == 'MANIFEST.json'
+                    or fn.startswith('bg_')):
                 continue
             p = os.path.join(d, fn)
             stt = os.stat(p)

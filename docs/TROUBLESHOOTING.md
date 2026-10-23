@@ -11925,3 +11925,34 @@ CTA「⚑ 换入正式区」、why 列出 swap-in/derive/labels/regress 并注�
 
 **涉及**：`scripts/diag/gallery_index_diff_check.py`、`scripts/pipeline_panel.py`、
 `docs/WORKFLOWS.md` WF-59。
+
+## §186 日志 4/4、面板 2/4：labels 写 `inputs/gamecfg/bg_*` 反向作废前两步（2026-10-23）
+
+**现象**：13:15 的日志里 `swap-in` / `derive` / `labels` / `regress` 四条全绿、`deploy --check 4/4`，
+但控制台第 5 步仍写「还没换完：有 2 项（swap-in / derive）」，右栏 05 只有 2/4；连 03 的 9/9、
+04 的 1/1 也一起消失。产物与画廊都在，没有任何阶段真的需要重跑。
+
+**根因**：`gamecfg_stamp()` 把 `inputs/gamecfg/*.json` **全部**算进 `cfg=`。`labels` 是第 5 步最后
+一个阶段，签字后会写 `inputs/gamecfg/bg_series_labels.json`（以及 `bg_char_flags` 等 `bg_*`），
+时间在 `swap-in` / `derive` 之后 ⇒ `cfg=` 变了；`rejudge_state()` 与面板的 `stage_fp_by_key()`
+逐阶段比指纹，前两步的结论是按旧 `cfg=` 盖的章，于是被过滤成「没跑」。**下游产物写进了上游输入
+目录，反过来作废了先跑完的结论**——不是状态写坏，也不是漏跑。
+
+**修法**：`gamecfg_stamp()` 跳过 `bg_*`（与原有的 `MANIFEST.json` 一样）。这些文件是背景标注 /
+标签阶段的产物，不是 meta / 立绘 / 索引链的输入；`labels` 是 live 档、每次都会重跑，不靠 `cfg=`
+判缓存。其余配置表仍计入，表刷新照常作废下游。
+
+**旧状态迁移**：按旧规则已被清掉的结论用 `scripts/diag/restamp_pipeline_state.py` 补回。它从
+`panel/run_*.log` 找最后一轮含 `✅ paintings` + `✅ cg` 的日志补 03、找含 `✅ review` 的日志补 04，
+再用当前 `stage_fp_by_key()` / `scope_stamp()` 重盖 `done` / `verdict`；写前备份、写后 `--verify`。
+本次用 `run_105532.log` + `run_121708.log`，结果 `4 done / 14 verdict`，状态为
+`03 9/9 / 04 1/1 / 05 4/4 / 01·02 —`。⚠️ 这是一次性迁移工具，不是日常流水；只有“指纹规则改过、
+盘上旧结论按老规则盖章”时才用。回滚点 `pipeline_state.json.bak_20261023_132342`。
+
+**判据**：`restamp_pipeline_state.py --verify` 退出 0 且「未对齐: 无」；`/api/state` 里
+`swap-in` / `derive` / `labels` / `regress` 的 `fingerprint` 都等于当前顶层 `cfg=d935c8a0f5`；
+控制台实测 `allStagesPass()===true`、`currentStep()===5`、`askOf(5).ask` 为「这次更新已经换完了」。
+**不要**为了消 2/4 再点换入：那会多一份备份并重跑 derive。
+
+**涉及**：`scripts/update_pipeline.py`（`gamecfg_stamp`）、`scripts/diag/restamp_pipeline_state.py`、
+`docs/WORKFLOWS.md` WF-59。
