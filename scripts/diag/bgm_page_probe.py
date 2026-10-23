@@ -9,6 +9,7 @@
 ⚠️ 服务器自己起一份（`make_server`），不复用 8777：那台可能跑着改动前的代码，
    而且另一个会话的探针可能正在用它（端口/profile 走 `cdp_slot`，写死会让两个会话灌进同一个页面）。
 """
+import argparse
 import json
 import os
 import subprocess
@@ -68,6 +69,15 @@ def serve_up():
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--win', default='1280,900',
+                    help='视口宽高，例如 390,844 做窄屏验收（走 CDP Emulation，不受 Chrome 最小窗口宽度影响）')
+    a = ap.parse_args()
+    try:
+        win_w, win_h = [int(x) for x in a.win.split(',')]
+    except ValueError:
+        print('[FAIL] --win 需要 WIDTH,HEIGHT')
+        return 2
     if not CHROME:
         print('[FAIL] 找不到 Chrome/Edge（设 AL_CHROME）')
         return 2
@@ -80,7 +90,7 @@ def main():
                              '--no-first-run', '--no-default-browser-check',
                              '--autoplay-policy=no-user-gesture-required',
                              '--disable-background-timer-throttling',
-                             '--use-angle=swiftshader', '--window-size=1280,900',
+                             '--use-angle=swiftshader', f'--window-size={win_w},{win_h}',
                              base() + 'bgm.html'],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     chrome_tree.install(proc)
@@ -131,7 +141,10 @@ def main():
                     'expression': '(function(){var e=document.querySelector('
                                   + json.dumps(sel) + ');if(!e)return "";'
                                   'var b=e.getBoundingClientRect();'
-                                  'return JSON.stringify({x:b.x,y:b.y,width:b.width,height:b.height});})()',
+                                  # 固定层（.bar）的 rect 是视口坐标；clip 要的是页面坐标，
+                                  # 页面滚动过之后再加 scrollY，否则会裁到页面顶部（实测）。
+                                  'return JSON.stringify({x:b.x+(window.scrollX||0),'
+                                  'y:b.y+(window.scrollY||0),width:b.width,height:b.height});})()',
                     'returnByValue': True})
                 try:
                     r = json.loads(box['result']['value'])
@@ -149,6 +162,14 @@ def main():
                 f.write(_b.b64decode(b64))
             return fp
 
+        # 用 CDP 强制视口，而不是只靠 --window-size：Windows 上 Chrome 有最小窗口宽度，
+        # 390px 截图会在布局仍是 500px 的情况下被裁掉右边，看起来像"横向溢出"。
+        cmd('Page.enable')
+        cmd('Emulation.setDeviceMetricsOverride',
+            {'width': win_w, 'height': win_h, 'deviceScaleFactor': 1, 'mobile': win_w <= 600})
+        cmd('Page.reload', {'ignoreCache': True})
+        time.sleep(1.5)
+
         print('== 数据与样式 ==')
         d = ev(r"""(async()=>{
           const t=ms=>new Promise(r=>setTimeout(r,ms));
@@ -158,10 +179,13 @@ def main():
                   brand:getComputedStyle(document.documentElement).getPropertyValue('--brand').trim(),
                   ease:getComputedStyle(document.documentElement).getPropertyValue('--ease-ios').trim(),
                   bodyBg:getComputedStyle(document.body).backgroundImage,
+                  paper:getComputedStyle(document.body).getPropertyValue('--ch-paper').trim(),
+                  chartBg:getComputedStyle(document.querySelector('.chartlayer')||document.body).backgroundImage,
                   glass:getComputedStyle(document.querySelector('.bar')||document.body)
                           .backdropFilter||getComputedStyle(document.querySelector('.row')||document.body).backdropFilter,
                   tagRows:document.querySelectorAll('.row .tag').length,
                   chips:document.querySelectorAll('.chip').length,
+                  vw:innerWidth, sw:document.documentElement.scrollWidth,
                   err:(document.getElementById('list')||{}).textContent||''};
         })()""")
         if isinstance(d, dict) and '__err' in d:
@@ -171,9 +195,11 @@ def main():
             say('小时' in d['sub'] and '有出处' in d['sub'], f"计数条文案: {d['sub'][:72]}")
             say(bool(d['brand']) and bool(d['ease']),
                 f"theme.css 生效：--brand={d['brand']!r} --ease-ios={d['ease'][:20]!r}")
-            say('gradient' in d['bodyBg'], f"body 渐变背景由 token 渲染: {d['bodyBg'][:58]}")
+            say(bool(d.get('paper')) and 'gradient' in str(d.get('chartBg', '')),
+                f"海图纸色 token + 海图层渐变生效: {d.get('paper')!r} / {str(d.get('chartBg'))[:52]}")
             say(d['tagRows'] >= 200, f"带归属徽章的行 {d['tagRows']} 个（出处/专辑/舰名）")
             say(d['chips'] >= 15, f"筛选 chip {d['chips']} 个（用途/出处/专辑三组）")
+            say(d['sw'] <= d['vw'] + 1, f"无横向溢出（scrollWidth {d['sw']} / viewport {d['vw']}）")
 
         print('== 播放与潮水 ==')
         d2 = ev(r"""(async()=>{
@@ -245,24 +271,45 @@ def main():
           const open=document.getElementById('queue').classList.contains('on');
           const rows=document.querySelectorAll('#qlist .qrow').length;
           const onIdx=[...document.querySelectorAll('#qlist .qrow')].findIndex(x=>x.classList.contains('on'));
-          const mode0=document.getElementById('lp').dataset.mode;
-          document.getElementById('lp').click(); await t(120);
-          const mode1=document.getElementById('lp').dataset.mode;
+          const mbs=[...document.querySelectorAll('.modes [data-mode]')];
+          const labels=mbs.map(b=>b.textContent.trim());
+          const mode0=(mbs.find(b=>b.classList.contains('on'))||{}).dataset?.mode;
+          const lp=mbs.find(b=>b.dataset.mode==='loop');
+          lp.click(); await t(120);
+          const mode1=(mbs.find(b=>b.classList.contains('on'))||{}).dataset?.mode;
+          const pressed=mbs.filter(b=>b.getAttribute('aria-pressed')==='true').length;
           const qm=document.getElementById('qmode').textContent;
+          /* 四种模式逐一点一遍：每次只能有一个 on / aria-pressed，qmode 必须同步全名。 */
+          const cycle=[];
+          for(const m of ['seq','loop','one','shuffle']){
+            mbs.find(b=>b.dataset.mode===m).click(); await t(60);
+            cycle.push({m, on:mbs.filter(x=>x.classList.contains('on')).map(x=>x.dataset.mode),
+              pressed:mbs.filter(x=>x.getAttribute('aria-pressed')==='true').length,
+              qm:document.getElementById('qmode').textContent});
+          }
           document.querySelectorAll('#qlist .qrow')[5].click(); await t(500);
           const qOn=[...document.querySelectorAll('#qlist .qrow')].findIndex(x=>x.classList.contains('on'));
           const cur=document.getElementById('cur').textContent;
           document.getElementById('qclose').click(); await t(200);
           const closed=!document.getElementById('queue').classList.contains('on');
-          return {open,rows,onIdx,mode0,mode1,qm,qOn,cur,closed};
+          return {open,rows,onIdx,labels,mode0,mode1,pressed,cycle,qm,qOn,cur,closed};
         })()""")
         if isinstance(d3, dict) and '__err' in d3:
             say(False, f"队列 JS 异常: {d3['__err']}")
         else:
             say(d3['open'] and d3['rows']>=100, f"播放列表打开且含队列（{d3['rows']} 行）")
             say(d3['onIdx']>=0, f"播放列表高亮当前曲（第 {d3['onIdx']+1} 行）")
-            say(d3['mode0'] != d3['mode1'] and bool(d3['qm']),
-                f"模式键可切换（{d3['mode0']} → {d3['mode1']}，{d3['qm']}）")
+            say(d3.get('labels') == ['顺序', '列表循环', '单曲循环', '随机'],
+                f"四种播放模式以文字常驻显示：{d3.get('labels')}")
+            say(d3['mode0'] != d3['mode1'] and d3.get('pressed') == 1 and bool(d3['qm']),
+                f"模式键可切换且只有一项按下（{d3['mode0']} → {d3['mode1']}，"
+                f"pressed={d3.get('pressed')}，{d3['qm']}）")
+            want = {'seq': '顺序播放', 'loop': '列表循环',
+                    'one': '单曲循环', 'shuffle': '随机播放'}
+            cyc = d3.get('cycle') or []
+            say(len(cyc) == 4 and all(c.get('on') == [c.get('m')] and c.get('pressed') == 1
+                                      and c.get('qm') == want.get(c.get('m')) for c in cyc),
+                f"四种模式逐项可选中且 qmode 同步: {cyc}")
             say(d3['qOn']==5, f"点播放列表第 6 行切曲 → 当前行 {d3['qOn']+1}（{d3['cur'][:24]}）")
             say(d3['closed'], "播放列表能关闭")
 
@@ -274,7 +321,8 @@ def main():
           q.value=''; q.dispatchEvent(new Event('input')); await t(300);
           const cu=[...document.querySelectorAll('.chip[data-k=usage]')][0]; cu.click(); await t(300);
           const n2=document.querySelectorAll('.row').length; const on1=cu.classList.contains('on');
-          const cs0=getComputedStyle(cu), fg=cs0.color, bg=cs0.backgroundColor;
+          const cs0=getComputedStyle(cu), fg=cs0.color;
+          const bg=getComputedStyle(document.querySelector('.row')||document.body).backgroundColor;
           const rgb=s=>{let m=s.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
             if(m)return [+m[1],+m[2],+m[3]];m=s.match(/rgba?\(([^)]+)\)/i);
             if(m)return m[1].replace(/\//g,' ').split(/[ ,]+/).filter(Boolean).slice(0,3).map(Number);
@@ -322,12 +370,14 @@ def main():
         time.sleep(1.2)
         say(os.path.getsize(shot('dark')) > 20000, f"夜：{shot('dark')}")
         d5 = ev(r"""(()=>{const el=document.querySelector('.row.playing');
-            const p=el?getComputedStyle(el).backdropFilter:'(无播放行)';
-            const q=getComputedStyle(document.querySelector('input.q')).backdropFilter;
-            const n=[...document.querySelectorAll('.row:not(.playing)')].slice(0,40)
+            const bf=x=>x?getComputedStyle(x).backdropFilter:'(无元素)';
+            const p=bf(el), q=bf(document.querySelector('input.q')), bar=bf(document.querySelector('.bar')),
+              hd=bf(document.querySelector('header')), qu=bf(document.querySelector('.queue'));
+            const n=[...document.querySelectorAll('.row')].slice(0,40)
               .every(r=>(getComputedStyle(r).backdropFilter||'none')==='none');
             const chip=document.querySelector('.chip[data-k=usage]');chip.click();
-            const s=getComputedStyle(chip), fg=s.color, bg=s.backgroundColor;
+            const rowbg=getComputedStyle(document.querySelector('.row')||document.body).backgroundColor;
+            const s=getComputedStyle(chip), fg=s.color, bg=rowbg;
             const rgb=v=>{let m=v.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
               if(m)return [+m[1],+m[2],+m[3]];m=v.match(/rgba?\(([^)]+)\)/i);
               if(m)return m[1].replace(/\//g,' ').split(/[ ,]+/).filter(Boolean).slice(0,3).map(Number);
@@ -340,16 +390,31 @@ def main():
             const lum=a=>{if(!a)return NaN;const x=a.map(v=>v>1?v/255:v).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
               return .2126*x[0]+.7152*x[1]+.0722*x[2]};
             const l1=lum(rgb(fg)),l2=lum(rgb(bg)),contrast=Number.isFinite(l1+l2)?(Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05):0;
-            return {play:p,search:q.slice(0,36),plainZero:n,fg,bg,contrast}})()""")
-        # 2026-10-12 改判据：普通行**故意不挂** backdrop-filter（§134/§136，见 bgm.html .row 注释），
-        # 旧判据"行卡有 blur"与该决定直接矛盾，是探针过期而非页面缺陷。
-        # 新口径：玻璃材质只认三处结构件——播放器、搜索框、正在播放的行；普通行必须零盒。
-        say(isinstance(d5, dict) and 'url(' in str(d5.get('play', ''))
-            and 'url(' in str(d5.get('search', '')) and d5.get('plainZero'),
-            f"夜主题：播放行+搜索框挂折射、普通行零 backdrop-filter: {d5}")
+            return {play:p,search:q,bar,header:hd,queue:qu,bglg:document.querySelectorAll('.bglg').length,
+              plainZero:n,fg,bg,contrast}})()""")
+        # 2026-10-23：整页改海图纸本语言，玻璃/折射全部退役。
+        # 判据反转：header / 搜索 / 播放器 / 正在播放行 / 队列 / 普通行都必须是 backdrop-filter:none，
+        # 且页面里不再有任何 .bglg 挂载点。
+        say(isinstance(d5, dict) and all(d5.get(k) == 'none' for k in ('play','search','bar','header','queue'))
+            and d5.get('bglg') == 0 and d5.get('plainZero'),
+            f"夜主题：全页零 backdrop-filter、零 .bglg 挂载: {d5}")
         say(isinstance(d5, dict) and d5.get('contrast', 0) >= 4.5,
             f"夜主题选中 chip 字/底对比度 ≥4.5:1（{d5.get('contrast', 0):.2f}:1，"
             f"{d5.get('fg')} / {d5.get('bg')}）")
+
+        # 用户明确要保留动态站用背景。favorites.js 会在 has-sitebg 下给控件补玻璃底/模糊，
+        # 本页必须用更高的特异性把那些规则压回海图纸面；这里直接量最终计算样式。
+        d5b = ev(r"""(()=>{const r=document.documentElement;
+            r.classList.add('has-sitebg');
+            r.style.setProperty('--site-bg','url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%2710%27%3E%3Crect width=%2710%27 height=%2710%27 fill=%27%23d8a24a%27/%3E%3C/svg%3E")');
+            const bf=s=>getComputedStyle(document.querySelector(s)).backdropFilter;
+            const bg=s=>getComputedStyle(document.querySelector(s)).backgroundColor;
+            return {chip:bf('.chip'),q:bf('input.q'),header:bf('header'),row:bf('.row'),bar:bf('.bar'),
+              chipBg:bg('.chip'),chipBlur:bf('.chip'),
+              bodyImg:getComputedStyle(document.body).backgroundImage.startsWith('url("data:')}})()""")
+        say(isinstance(d5b, dict) and all(d5b.get(k) == 'none' for k in ('chip','q','header','row','bar'))
+            and d5b.get('chipBg') in ('rgba(0, 0, 0, 0)', 'transparent') and d5b.get('bodyImg') is True,
+            f"保留站用背景时仍为零玻璃（favorites.js 的 has-sitebg 规则已被压回）: {d5b}")
 
         print('== 主页入口 ==')
         d6 = ev("""(async()=>{ const r=await fetch('index.html'); const b=await r.text();

@@ -10,6 +10,9 @@
         这样「昼/夜」两套主题会一起动，不会只有一边对。 -->
 <link rel="stylesheet" href="theme.css">
 <style>
+/* ⚠️ 2026-10-23：页面最终视觉由 bgm_chart.css 接管（海图纸本，零玻璃）。
+   本块保留布局/交互与旧皮肤作为回退；新的颜色、材质、排版请加到 bgm_chart.css，
+   不要再在这里新增 backdrop-filter。 */
 *{margin:0;padding:0;box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{font-family:'Segoe UI',"Microsoft YaHei",system-ui,sans-serif;color:var(--txt);
@@ -72,8 +75,6 @@ input.q:focus{border-color:var(--brand);background:color-mix(in srgb,var(--panel
   box-shadow:0 0 0 4px var(--on-bg),inset 0 1px 2px color-mix(in srgb,var(--dim) 12%,transparent)}
 /* 搜索框与播放器同一材质：结构件玻璃化只占两个盒（这个 + 正在播放的那一行），
    与 §134 的"成本单位是盒数"不冲突；普通行仍然零 backdrop-filter。 */
-html.lg input.q.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(--lgf,blur(0px));
-  backdrop-filter:blur(26px) saturate(1.6) var(--lgf,blur(0px))}
 .grp{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:2px 0 10px}
 /* 分组标签（用途 / 出处 / 专辑 / 收藏）：它是"这一排在筛什么"的名字，**不是又一个可点项**。
    原来它是裸字（--dim，11.5px）：纯色页面上 #93a3bd 压 #eef4fb ≈ 2.5:1，11.5px 中文笔画密 ⇒ 用户报
@@ -121,7 +122,7 @@ html.lg input.q.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(--lgf,
    ⚠️ **普通行**不挂 backdrop-filter（与首页卡片同一决定，§134/§136）：本页筛得动就是 500+ 行，
       而背景模糊的成本单位就是"挂着的盒子个数"（半径/面积/链长都不要钱）⇒ 一整列模糊换不来
       看得出的差别，只换来滚动掉帧。玻璃感靠：半透面板底 + 上沿内高光 + 描边。
-      唯一的例外是**正在播放的那一行**（恒 1 个盒），见下面 .row.playing.bglg。 */
+      2026-10-23 起本页改海图纸本皮肤，玻璃规则整体退役；见 bgm_chart.css。 */
 .row{display:grid;grid-template-columns:38px 1fr auto auto 40px;gap:13px;align-items:center;
   padding:11px 14px;margin-bottom:8px;border-radius:var(--r-card);
   background:color-mix(in srgb,var(--panel) 58%,transparent);
@@ -138,10 +139,6 @@ html.lg input.q.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(--lgf,
 .row.playing{border-color:color-mix(in srgb,var(--brand) 72%,transparent);
   background:color-mix(in srgb,var(--brand-l) 62%,transparent);
   box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 60%,transparent),0 0 0 3px var(--on-bg),var(--sh2)}
-/* 正在播放的行是全页唯一的"活行"，给它和播放器同一圈折射边——永远只挂 1 个盒：
-   换曲时旧行必须走 LiquidGlass.unmount 摘干净（含从 targets 删除），否则 resize 重挂会复活。 */
-html.lg .row.playing.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(--lgf,blur(0px));
-  backdrop-filter:blur(26px) saturate(1.6) var(--lgf,blur(0px))}
 .row .no{font-size:12px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
 .row .nm{font-size:14.5px;font-weight:650;line-height:1.35;word-break:break-word}
 .row .en{display:block;font-size:11.5px;color:var(--dim);font-weight:400;margin-top:3px;word-break:break-all}
@@ -193,8 +190,6 @@ html.lg .row.playing.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) var(-
    只有贴边那一圈有坡度，所以"整盒挂滤镜"天然就等于"只折射边墙"。
    这条同时绕开了 §136 那个坑：遮罩 + 背景模糊的组合一旦落在会被 3D 旋转的盒子上就失效，
    而这里根本没用遮罩。板子自己的 transform 只有 2D translate（实测 2D 不触发那条失效）。 */
-html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.05) var(--lgf,blur(0px));
-  backdrop-filter:blur(26px) saturate(1.6) brightness(1.05) var(--lgf,blur(0px))}
 /* gap 12px：38/52px 的钮之间需要比原来 30px 时代多一口呼吸 */
 .bar .top{display:flex;align-items:center;gap:12px}
 .bar .cur{font-size:13.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
@@ -231,7 +226,6 @@ html.lg .bar.bglg{-webkit-backdrop-filter:blur(26px) saturate(1.6) brightness(1.
   box-shadow:var(--sh3),inset 0 1px 0 color-mix(in srgb,#fff 48%,transparent),
     0 8px 20px color-mix(in srgb,var(--brand) 40%,transparent)}
 #pp:active{transform:translateY(0) scale(.96)}
-#lp{width:34px;height:34px}
 .bar .vol{width:80px;height:5px;-webkit-appearance:none;appearance:none;outline:none;cursor:pointer;
   background:color-mix(in srgb,var(--line) 80%,transparent);border-radius:var(--r-chip)}
 .bar .vol::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
@@ -303,7 +297,6 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   .bar .top{display:grid;grid-template-columns:34px 44px 34px minmax(0,1fr) minmax(30px,auto) minmax(30px,auto) 34px;gap:6px}
   .bar button{width:34px;height:34px}
   .bar #pp{width:44px;height:44px}
-  .bar #lp{width:30px;height:30px}
   .bar .tm{font-size:10px;min-width:0}
   .bar .cur{font-size:12px}
   .bar .vol{display:none}
@@ -414,7 +407,6 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   background:color-mix(in srgb,var(--ink) 86%,var(--brand));
   box-shadow:0 8px 20px -8px color-mix(in srgb,var(--ink) 76%,transparent)}
 #pp:active{transform:none;background:var(--txt)}
-#lp{width:32px;height:32px}
 
 /* ── 字：衬线 + 轻字重 ── */
 .bar .cur{font-family:var(--serif);font-size:14px;font-weight:500;letter-spacing:.01em;
@@ -531,12 +523,8 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 @keyframes discspin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.disc{animation:none}}
 @media (max-width:760px){.disc{display:none}}
-/* 模式键：一个键循环 顺序/列表循环/单曲/随机；单曲时右下角留一枚小「1」。 */
-#lp,#playlistBtn{width:32px;height:32px}
-#lp{position:relative}
-#lp[data-mode="one"]::after{content:'1';position:absolute;right:2px;bottom:0;
-  font:700 8px/1 var(--serif);color:var(--brand-d)}
-#lp[data-mode="shuffle"]{color:var(--brand-d)}
+/* 模式键已改成 .modes 四段文字控件（bgm_chart.css）；这里只留队列键尺寸。 */
+#playlistBtn{width:32px;height:32px}
 #playlistBtn.on{color:var(--brand-d);border-color:color-mix(in srgb,var(--brand) 50%,transparent)}
 
 /* 播放列表：纸面抽屉，不是第四块玻璃。当前行用品牌色细边和淡底，不另加滤镜。 */
@@ -613,8 +601,9 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   .amb i{animation:none}.row{transition:opacity .2s linear,transform .2s linear}
   .row.playing .eq u{animation:none;height:60%}}
 </style>
+<link rel="stylesheet" href="bgm_chart.css">
 </head>
-<body>
+<body class="chart">
 <div id="bootveil" aria-hidden="true">
   <div class="bv-inner"><div class="bv-ink"><i></i><i></i><i></i></div>
     <p class="bv-t">正在整理音乐库…</p><p class="bv-s">读取曲目、专辑与活动回忆</p>
@@ -622,32 +611,73 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 </div>
 <script>setTimeout(function(){var b=document.getElementById('bootveil');if(b&&!b.classList.contains('off')){
   b.style.opacity='0';b.style.pointerEvents='none';setTimeout(function(){try{b.remove()}catch(e){}},700);}},12000);</script>
-<div class="amb"><i></i><i></i><i></i></div>
+<div class="chartlayer" aria-hidden="true">
+  <div class="grid"></div>
+  <svg class="chart-route" viewBox="0 0 1200 900" preserveAspectRatio="none">
+    <path d="M-40 690 C 180 610, 260 780, 470 610 S 760 430, 920 520 S 1080 690, 1240 470"/>
+    <path d="M-30 260 C 160 180, 320 330, 520 250 S 820 120, 1240 210"/>
+  </svg>
+  <svg class="chart-rose" viewBox="0 0 200 200">
+    <circle cx="100" cy="100" r="80"/><circle cx="100" cy="100" r="54"/>
+    <path d="M100 10 L108 92 L190 100 L108 108 L100 190 L92 108 L10 100 L92 92 Z"/>
+    <path d="M100 38 L100 162 M38 100 L162 100" opacity=".55"/>
+    <text x="100" y="26" text-anchor="middle">N</text>
+    <text x="100" y="187" text-anchor="middle">S</text>
+    <text x="20" y="104" text-anchor="middle">W</text>
+    <text x="180" y="104" text-anchor="middle">E</text>
+  </svg>
+  <div class="frame"></div>
+</div>
 <header>
   <a class="back" href="index.html">← 资产浏览器</a>
-  <h1>音乐库</h1>
+  <div class="mast">
+    <span class="kicker">SHIP'S LOG · MUSIC LIBRARY</span>
+    <h1>音乐库</h1>
+  </div>
   <span class="sub" id="sub">载入中…</span>
+  <span class="coord" aria-hidden="true">31°14′N · 122°48′E</span>
   <span class="sp"></span>
+  <svg class="chartmark" viewBox="0 0 64 64" aria-hidden="true">
+    <circle cx="32" cy="32" r="25"/><circle cx="32" cy="32" r="15"/>
+    <path d="M32 7 L35 29 L57 32 L35 35 L32 57 L29 35 L7 32 L29 29 Z"/>
+  </svg>
   <div class="opt" id="gTheme" title="昼 / 夜配色（状态会记住）">
     <button data-t="light">昼</button><button data-t="dark">夜</button>
   </div>
 </header>
 
 <div class="wrap">
-  <div class="tools"><input class="q" id="q" placeholder="搜曲名 / 中文 / 标识符 / 舰名   （/ 聚焦）" autocomplete="off"></div>
-  <div class="grp" id="gUsage"><span>用途</span></div>
-  <div class="grp" id="gScene"><span>出处</span></div>
-  <div class="grp" id="gEvent"><span>活动回忆</span>
-    <select id="fEvent" title="来自 memory_storyline 的回忆章节名；只覆盖部分曲目，不是全量活动目录">
-      <option value="">全部活动</option>
-    </select>
-  </div>
-  <div class="grp" id="gAlbum"><span>专辑</span></div>
-  <div class="grp"><span>收藏</span><span class="chip" id="cFav" title="只看已收藏的曲子">★ 只看收藏<b id="favN">0</b></span></div>
-  <div id="list"></div>
+  <aside class="legend">
+    <div class="legend-head">
+      <span class="kicker">CHART LEGEND</span>
+      <b>航海图例</b>
+    </div>
+    <div class="tools"><input class="q" id="q" placeholder="搜曲名 / 中文 / 标识符 / 舰名   （/ 聚焦）" autocomplete="off"></div>
+    <div class="grp" id="gUsage"><span>用途</span></div>
+    <div class="grp" id="gScene"><span>出处</span></div>
+    <div class="grp" id="gEvent"><span>活动回忆</span>
+      <select id="fEvent" title="来自 memory_storyline 的回忆章节名；只覆盖部分曲目，不是全量活动目录">
+        <option value="">全部活动</option>
+      </select>
+    </div>
+    <div class="grp" id="gAlbum"><span>专辑</span></div>
+    <div class="grp"><span>收藏</span><span class="chip" id="cFav" title="只看已收藏的曲子">★ 只看收藏<b id="favN">0</b></span></div>
+  </aside>
+  <section class="ledger">
+    <div class="ledger-head" aria-hidden="true"><span>No.</span><span>曲目 / 标识</span><span>时长</span><span>大小</span><span></span></div>
+    <div id="list"></div>
+  </section>
 </div>
 
 <div class="bar" id="bar">
+  <div class="modes" role="group" aria-label="播放模式">
+    <span class="mlabel">播放模式</span>
+    <button type="button" data-mode="seq" aria-pressed="false">顺序</button>
+    <button type="button" data-mode="loop" aria-pressed="false">列表循环</button>
+    <button type="button" data-mode="one" aria-pressed="false">单曲循环</button>
+    <button type="button" data-mode="shuffle" aria-pressed="false">随机</button>
+    <span class="mhint">M 切换</span>
+  </div>
   <div class="seekrow">
     <span class="tm" id="t0">0:00</span>
   <div class="tide" id="tide">
@@ -709,7 +739,6 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
     <span class="disc" id="disc" aria-hidden="true"><i></i></span>
     <span class="curwrap"><span class="cur" id="cur">—</span><span class="cmeta" id="cmeta"></span></span>
     <span class="buf" id="buf" hidden>缓冲中</span>
-    <button id="lp" title="顺序播放（M 切换）"><svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h10v2H4zm0 5h16v2H4z"/></svg></button>
     <button id="playlistBtn" title="播放列表（L）"><svg viewBox="0 0 24 24"><path d="M4 6h13v2H4zm0 5h13v2H4zm0 5h8v2H4zM19 5h2v11a3 3 0 1 1-2-2.83V5z"/></svg></button>
     <input class="vol" id="vol" type="range" min="0" max="1" step="0.01" title="音量（↑↓）">
   </div>
@@ -725,7 +754,6 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   <div class="qlist" id="qlist"></div>
 </div>
 
-<script src="liquid_glass.js"></script>
 <script src="favorites.js"></script>
 <script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
 <script>
@@ -734,12 +762,6 @@ let T=[],view=[],queue=[],idx=-1,fU='',fS='',fA='',fE='',knownDur=0,fFav=false;
 let QOPEN=false, SHUF_HIST=[];
 const MODES=['seq','loop','one','shuffle'];
 const MODE_NAMES={seq:'顺序播放',loop:'列表循环',one:'单曲循环',shuffle:'随机播放'};
-const MODE_PATHS={
-  seq:'M4 6h16v2H4zm0 5h10v2H4zm0 5h16v2H4z',
-  loop:'M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z',
-  one:'M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z',
-  shuffle:'M16 3h5v5h-2V6.41l-4.29 4.3-1.42-1.42L17.59 5H16V3zM3 5h4.5l3.79 3.79-1.42 1.42L6.5 7H3V5zm13 11h2v-1.59l-4.29-4.3 1.42-1.42L19 12.59V11h2v5h-5v-2zM3 17h3.5l3.79-3.79 1.42 1.42L7.5 19H3v-2z'
-};
 let MODE='seq';
 try{ const m=localStorage.getItem('gallery.bgmMode'); if(MODES.includes(m)) MODE=m; }catch(e){}
 const A=new Audio(); A.volume=+(localStorage.getItem('gallery.vol')??0.8);
@@ -909,7 +931,7 @@ function render(){
     return a.length?`<span class="tags">${a.join('')}</span>`:''};
   $('list').innerHTML=view.length?view.map((t,i)=>`
     <div class="row${t.slug===curSlug?' playing':''}" data-i="${i}">
-      <span class="no">${i+1}</span>
+      <span class="no">${String(i+1).padStart(3,'0')}</span>
       <span><span class="nm">${esc(name(t))}</span><span class="en">${esc(t.slug)}</span>${tags(t)}</span>
       <span class="mt">${mmss(t.dur)}<i>${mb(t.size)}</i></span>
       <span class="favc">${window.Fav?Fav.btn('bgm',t.slug,name(t)):''}</span>
@@ -917,7 +939,6 @@ function render(){
         <span class="eq"><u></u><u></u><u></u></span></button>
     </div>`).join(''):'<div class="empty">没有匹配的曲子</div>';
   reveal();
-  window.glassPlaying&&glassPlaying();   /* innerHTML 重建过，播放行的玻璃要迁到新节点 */
 }
 /* 进场浮现：只给新进入视口的行加 .in，滚回去不再重播 */
 let io=null;
@@ -967,7 +988,6 @@ function playQueue(i){
     r.classList.toggle('playing', !!it&&it.slug===t.slug);
   });
   if(QOPEN) renderQueue();
-  window.glassPlaying&&glassPlaying();
   $('hint').classList.add('off');
 }
 A.addEventListener('play',()=>{$('ppath').setAttribute('d','M6 5h4v14H6zm8 0h4v14h-4z');
@@ -991,13 +1011,14 @@ function setMode(m,silent){
   MODE=m;
   try{ localStorage.setItem('gallery.bgmMode',m); }catch(e){}
   A.loop=false;
-  const b=$('lp');
-  if(b){
-    b.dataset.mode=m;
-    b.classList.toggle('on',m!=='seq');
-    b.title=MODE_NAMES[m]+'（M 切换）';
-    b.innerHTML='<svg viewBox="0 0 24 24"><path d="'+MODE_PATHS[m]+'"/></svg>';
-  }
+  /* 四种模式是四个常驻文字键：当前项朱砂下划线，旁边始终写全名。
+     旧版把四个模式藏在一个 32px 图标键里，loop/one 图标几乎一样，用户读成"只有三种、没有循环"。 */
+  document.querySelectorAll('.modes [data-mode]').forEach(b=>{
+    const on=b.dataset.mode===m;
+    b.classList.toggle('on',on);
+    b.setAttribute('aria-pressed',on?'true':'false');
+    b.title=MODE_NAMES[b.dataset.mode]+'（M 切换）';
+  });
   const qm=$('qmode'); if(qm) qm.textContent=MODE_NAMES[m];
   if(!silent){ /* 只改状态，不弹 toast 打断看列表 */ }
 }
@@ -1068,7 +1089,9 @@ $('pp').onclick=()=>{
 };
 $('prev').onclick=()=>step(-1);
 $('next').onclick=()=>step(1);
-$('lp').onclick=()=>setMode(nextMode(MODE));
+document.querySelectorAll('.modes [data-mode]').forEach(b=>{
+  b.onclick=()=>setMode(b.dataset.mode);
+});
 $('playlistBtn').onclick=()=>toggleQueue();
 $('qclose').onclick=()=>toggleQueue(false);
 $('qlist').onclick=e=>{ const r=e.target.closest('[data-qi]'); if(r) playQueue(+r.dataset.qi); };
@@ -1103,35 +1126,8 @@ document.onkeydown=e=>{
 setMode(MODE,true);
 boot();
 
-/* ───────── 液态玻璃挂载（模块见 liquid_glass.js）─────────
-   本页挂三处：播放器面板、搜索框、正在播放的那一行（恒 1 个盒）。
-   共同点：都是**从不被 3D 旋转**的元素 —— §136 那条失效模式（转角非 0 ⇒ Chrome 丢掉
-   子元素遮罩、模糊铺满整盒）就是这么避开的；而且折射不需要遮罩（法线图中间是平的）。
-   页头那条边墙已撤（理由见上面 header 那段注释：在照片背景前它读作"一条杠"）。
-   普通曲目行仍然故意不挂：本页可以筛出几百行，backdrop-filter 的成本单位就是
-   "挂着的盒子个数"（§134），为装饰付这笔钱不划算。 */
-if(window.LiquidGlass&&LiquidGlass.on){
-  const bar=$('bar'), cs=getComputedStyle(bar);
-  LiquidGlass.auto(bar,{cls:'bglg',kind:'panel',ring:16,
-    radius:parseFloat(cs.borderTopLeftRadius)||16});
-  const qc=getComputedStyle($('q'));
-  LiquidGlass.auto($('q'),{cls:'bglg',kind:'panel',ring:12,
-    radius:parseFloat(qc.borderTopLeftRadius)||12});
-  /* 播放行的玻璃跟着 .playing 走：换曲/重渲染都先摘旧的再挂新的。
-     重渲染（render 里 innerHTML 整段重建）会留下"已脱离文档树"的旧元素，
-     refresh() 会自己跳过 not connected 的，但摘掉更干净，也防 targets 无界增长。 */
-  let playGlass=null;
-  window.glassPlaying=function(){
-    if(playGlass){LiquidGlass.unmount(playGlass,{cls:'bglg'});playGlass=null;}
-    const r=document.querySelector('.row.playing');
-    if(r&&r.isConnected){
-      LiquidGlass.auto(r,{cls:'bglg',kind:'panel',ring:14,
-        radius:parseFloat(getComputedStyle(r).borderTopLeftRadius)||16});
-      playGlass=r;
-    }
-  };
-  glassPlaying();   /* boot() 早于本块：若开机时已有播放行，这里补挂一次 */
-}
+/* 本页已改为纸本海图皮肤：不再挂 LiquidGlass。
+   动态站用背景仍由 site_bg_live.js 提供；海图层只压纸色与经纬网，不做模糊。 */
 </script>
 </body>
 </html>

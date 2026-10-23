@@ -1,0 +1,461 @@
+/* ══════════════════════════════════════════════════════════════════════
+   音乐库 · 航海日志 / 海图皮肤（2026-10-23）
+
+   这是 bgm.html 的最终视觉层：它叠在 theme.css 与页面基础布局之上，
+   只改「看起来是什么」，不改搜索 / 筛选 / 队列 / 播放逻辑。
+
+   为什么换掉拟态玻璃：
+     · 玻璃靠模糊与半透明，背后是动态立绘时文字永远在跟背景抢对比度；
+     · 本页有 575 行，曲目行不能挂 backdrop-filter（成本按盒子数算）。
+   新语言：海图纸、墨线、黄铜、朱砂。动态站用背景保留，但被一层
+   **纸色薄雾 + 经纬网**压住；内容落在纸片/账页上，不再靠玻璃。
+
+   ⚠️ 本文件不出现 backdrop-filter / blur；组件颜色全部走 --ch-* token。
+   ⚠️ 选择器统一带 body.chart，用来稳定压过 bgm.html 里的旧皮肤层。
+   ══════════════════════════════════════════════════════════════════════ */
+
+html[data-theme=light] body.chart{
+  --ch-deep:#c8d5d2;
+  --ch-paper:#f0e5cf;
+  --ch-paper-2:#e7d8bb;
+  --ch-paper-3:#dcc7a2;
+  --ch-ink:#24333b;
+  --ch-ink-2:#42565c;
+  --ch-ink-3:#5d6b6b;
+  --ch-rule:rgba(36,51,59,.16);
+  --ch-rule-2:rgba(36,51,59,.30);
+  --ch-sea:#3f6670;
+  --ch-sea-l:#d8e5e2;
+  --ch-brass:#8a5f2f;
+  --ch-brass-2:#b4864b;
+  --ch-red:#94443a;
+  --ch-red-l:#e8d0c8;
+  --ch-wash:rgba(242,233,214,.38);
+  --ch-bar:rgba(240,229,207,.94);
+  --ch-shadow:0 18px 44px -30px rgba(20,38,45,.55);
+  --ch-hi:rgba(255,255,255,.42);
+}
+html[data-theme=dark] body.chart{
+  --ch-deep:#0a1418;
+  --ch-paper:#18262c;
+  --ch-paper-2:#1d2f34;
+  --ch-paper-3:#263b3e;
+  --ch-ink:#e8dfca;
+  --ch-ink-2:#c3cbbf;
+  --ch-ink-3:#94a19b;
+  --ch-rule:rgba(232,223,202,.14);
+  --ch-rule-2:rgba(232,223,202,.28);
+  --ch-sea:#84b0b2;
+  --ch-sea-l:#203639;
+  --ch-brass:#d1aa6d;
+  --ch-brass-2:#8e6c3c;
+  --ch-red:#c9715e;
+  --ch-red-l:#3b211d;
+  --ch-wash:rgba(7,17,21,.52);
+  --ch-bar:rgba(24,38,44,.95);
+  --ch-shadow:0 18px 44px -30px rgba(0,0,0,.9);
+  --ch-hi:rgba(232,223,202,.18);
+}
+body.chart{
+  --ch-serif:'Songti SC','STSong','Source Han Serif SC','Noto Serif SC','Iowan Old Style',Georgia,'Times New Roman',serif;
+  --ch-sans:'Segoe UI','Microsoft YaHei',system-ui,sans-serif;
+  --ch-mono:'Cascadia Mono',Consolas,'Courier New',monospace;
+  background:var(--ch-deep) fixed;
+  color:var(--ch-ink);
+  font-family:var(--ch-sans);
+  padding-bottom:180px;
+}
+body.chart .amb{display:none!important}
+
+/* ── 海图层：动态背景仍在下面，这一层只压纸色与经纬网 ───────────────── */
+.chartlayer{position:fixed;inset:0;z-index:1;pointer-events:none;overflow:hidden;
+  background:
+    radial-gradient(120% 88% at 50% -10%,
+      color-mix(in srgb,var(--ch-paper) 28%,transparent),transparent 64%),
+    linear-gradient(180deg,var(--ch-wash),
+      color-mix(in srgb,var(--ch-wash) 82%,transparent) 52%,var(--ch-wash))}
+.chartlayer .grid{position:absolute;inset:0;
+  background-image:
+    repeating-linear-gradient(0deg,transparent 0 63px,var(--ch-rule) 63px 64px),
+    repeating-linear-gradient(90deg,transparent 0 63px,var(--ch-rule) 63px 64px);
+  opacity:.55;
+  -webkit-mask-image:linear-gradient(180deg,transparent,#000 10%,#000 90%,transparent);
+  mask-image:linear-gradient(180deg,transparent,#000 10%,#000 90%,transparent)}
+.chartlayer .frame{position:absolute;inset:16px;border:1px solid var(--ch-rule-2)}
+.chartlayer .frame::before,.chartlayer .frame::after{content:'';position:absolute;
+  width:26px;height:26px;border:0 solid var(--ch-brass);opacity:.72}
+.chartlayer .frame::before{left:-1px;top:-1px;border-left-width:3px;border-top-width:3px}
+.chartlayer .frame::after{right:-1px;bottom:-1px;border-right-width:3px;border-bottom-width:3px}
+.chart-route{position:absolute;inset:0;width:100%;height:100%;color:var(--ch-sea);opacity:.22}
+.chart-route path{fill:none;stroke:currentColor;stroke-width:1.1;stroke-dasharray:2 8;stroke-linecap:round}
+.chart-rose{position:absolute;right:max(20px,calc(50vw - 560px));top:112px;
+  width:190px;height:190px;color:var(--ch-ink-2);opacity:.16}
+.chart-rose circle,.chart-rose path{fill:none;stroke:currentColor;stroke-width:1}
+.chart-rose text{font:9px var(--ch-mono);fill:currentColor;stroke:none;letter-spacing:.18em}
+
+/* ── 顶栏：纸本标题牌，不再是一条湿玻璃 ─────────────────────────────── */
+body.chart header{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:16px;
+  flex-wrap:wrap;padding:13px 24px;border:0;border-bottom:1px solid var(--ch-rule-2);
+  background:color-mix(in srgb,var(--ch-paper) 90%,transparent);
+  box-shadow:none;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+body.chart header::before,body.chart header::after{display:none!important}
+body.chart header>*{position:relative;z-index:1}
+body.chart .mast{display:flex;flex-direction:column;gap:2px;flex:none}
+body.chart .kicker{font:600 9px/1 var(--ch-sans);letter-spacing:.26em;color:var(--ch-brass);
+  text-transform:uppercase;white-space:nowrap}
+body.chart header h1{font-family:var(--ch-serif);font-size:27px;font-weight:600;
+  line-height:1.05;letter-spacing:.08em;color:var(--ch-ink);white-space:nowrap}
+body.chart header .sub{font-family:var(--ch-mono);font-size:10px;line-height:1.5;
+  letter-spacing:.05em;color:var(--ch-ink-3);white-space:nowrap;margin-left:4px}
+body.chart .coord{font-family:var(--ch-mono);font-size:9px;letter-spacing:.14em;
+  color:var(--ch-brass);white-space:nowrap;opacity:.9}
+body.chart .chartmark{width:34px;height:34px;color:var(--ch-brass);opacity:.8;flex:none}
+body.chart .chartmark circle,body.chart .chartmark path{fill:none;stroke:currentColor;stroke-width:1.2}
+body.chart a.back{font-size:11px;letter-spacing:.06em;color:var(--ch-ink-2);text-decoration:none;
+  padding:5px 0;border:0;border-bottom:1px solid transparent;border-radius:0;
+  background:none;box-shadow:none;transition:color .2s var(--ease-ios),border-color .2s var(--ease-ios)}
+body.chart a.back:hover{color:var(--ch-red);border-bottom-color:var(--ch-red);
+  transform:none;box-shadow:none}
+body.chart .opt{display:flex;gap:0;border:1px solid var(--ch-rule-2);border-radius:0;overflow:hidden;
+  background:transparent}
+body.chart .opt button{font:11px/1.4 var(--ch-sans);letter-spacing:.08em;border:0;cursor:pointer;
+  padding:5px 12px;background:transparent;color:var(--ch-ink-3)}
+body.chart .opt button+button{border-left:1px solid var(--ch-rule)}
+body.chart .opt button:hover{background:color-mix(in srgb,var(--ch-brass) 10%,transparent);color:var(--ch-ink)}
+body.chart .opt button.on{background:var(--ch-ink);color:var(--ch-paper);box-shadow:none}
+
+/* ── 页面 ────────────────────────────────────────────────────────────── */
+body.chart .wrap{position:relative;z-index:2;max-width:1240px;margin:0 auto;padding:26px 24px 0;
+  display:grid;grid-template-columns:268px minmax(0,1fr);gap:38px;align-items:start}
+body.chart .legend{position:sticky;top:86px;max-height:calc(100vh - 240px);overflow:auto;
+  padding-right:20px;border-right:1px solid var(--ch-rule);
+  scrollbar-width:thin;scrollbar-color:var(--ch-rule-2) transparent}
+body.chart .legend::-webkit-scrollbar{width:5px}
+body.chart .legend::-webkit-scrollbar-thumb{background:var(--ch-rule-2)}
+body.chart .legend-head{display:flex;flex-direction:column;gap:3px;padding-bottom:10px;
+  margin-bottom:12px;border-bottom:1px solid var(--ch-rule-2)}
+body.chart .legend-head b{font-family:var(--ch-serif);font-size:16px;font-weight:600;
+  letter-spacing:.08em;color:var(--ch-ink)}
+body.chart .ledger{min-width:0;width:100%}
+body.chart .tools{position:relative;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-bottom:18px;border-bottom:1px solid var(--ch-rule-2)}
+body.chart .tools::before{content:'⌕';position:absolute;left:3px;top:8px;z-index:1;
+  font:400 21px/1 var(--ch-serif);color:var(--ch-brass);pointer-events:none}
+body.chart input.q{flex:1;min-width:230px;font-family:var(--ch-serif);font-size:15px;color:var(--ch-ink);
+  background:transparent!important;border:0!important;border-radius:0!important;padding:10px 8px 9px 32px;
+  outline:none;box-shadow:none!important;transition:color .2s var(--ease-ios)}
+body.chart input.q::placeholder{color:var(--ch-ink-3);font-style:italic}
+body.chart input.q:focus{background:transparent!important;border:0!important;box-shadow:none!important;
+  color:var(--ch-ink)}
+body.chart .tools:focus-within{border-bottom-color:var(--ch-red)}
+
+/* 筛选图例：文字 + 细线，不再是一排玻璃胶囊 */
+body.chart .grp{display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;margin:0 0 15px;
+  padding-bottom:10px;border-bottom:1px dotted var(--ch-rule)}
+body.chart .grp>span:not(.chip){flex:none;min-width:44px;padding:0;border:0;border-radius:0;
+  background:none!important;font:600 9px/1.7 var(--ch-sans);letter-spacing:.2em;
+  color:var(--ch-brass);text-transform:uppercase;white-space:nowrap}
+body.chart .chip{position:relative;padding:2px 0;border:0!important;border-radius:0!important;
+  background:none!important;box-shadow:none!important;color:var(--ch-ink-2);
+  font:400 13px/1.6 var(--ch-serif);white-space:nowrap;user-select:none;cursor:pointer;
+  transition:color .2s var(--ease-ios)}
+body.chart .chip::before{content:'·';margin-right:5px;color:var(--ch-brass)}
+body.chart .chip:hover{color:var(--ch-ink);transform:none;border:0!important}
+body.chart .chip.on{color:var(--ch-red);background:none!important}
+body.chart .chip.on::after{content:'';position:absolute;left:0;right:0;bottom:-2px;height:1px;
+  background:var(--ch-red)}
+body.chart .chip b{font-family:var(--ch-mono);font-size:9px;font-weight:400;opacity:.68;
+  margin-left:4px;font-variant-numeric:tabular-nums}
+body.chart #fEvent{font-family:var(--ch-serif);font-size:13px;color:var(--ch-ink-2);cursor:pointer;
+  background-color:transparent!important;border:0;border-bottom:1px solid var(--ch-rule-2);
+  border-radius:0;padding:3px 24px 3px 2px;max-width:min(300px,58vw);
+  appearance:none;-webkit-appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--ch-brass) 50%),
+    linear-gradient(135deg,var(--ch-brass) 50%,transparent 50%);
+  background-position:calc(100% - 12px) 55%,calc(100% - 7px) 55%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;transition:border-color .2s var(--ease-ios)}
+body.chart #fEvent:hover{border-bottom-color:var(--ch-red);color:var(--ch-ink)}
+body.chart #fEvent:focus{outline:none;border-bottom-color:var(--ch-red)}
+body.chart #fEvent:disabled{opacity:.45;cursor:default}
+
+/* 图例竖排：左栏是一张海图边注，账页从右上开始 */
+body.chart .legend .tools{margin-bottom:14px}
+body.chart .legend .grp{display:block;margin:0 0 14px;padding-bottom:10px;
+  border-bottom:1px dotted var(--ch-rule)}
+body.chart .legend .grp>span:not(.chip){display:block;margin-bottom:5px;padding-bottom:3px;
+  min-width:0;border-bottom:1px solid var(--ch-rule)}
+body.chart .legend .chip{display:inline-block;margin:2px 8px 2px 0;font-size:12.5px}
+body.chart .legend #fEvent{width:100%;max-width:none;margin-top:3px}
+
+/* ── 账页表头与曲目行 ───────────────────────────────────────────────── */
+body.chart .ledger-head{display:grid;grid-template-columns:44px 1fr 72px 92px 44px;gap:18px;
+  align-items:end;padding:0 16px 7px;border-bottom:1px solid var(--ch-rule-2);
+  font:600 8.5px/1 var(--ch-sans);letter-spacing:.2em;color:var(--ch-brass);text-transform:uppercase}
+body.chart .ledger-head span:nth-child(3),body.chart .ledger-head span:nth-child(4){text-align:right}
+body.chart .row{display:grid;grid-template-columns:44px 1fr 72px 92px 44px;gap:18px;align-items:center;
+  margin:0;padding:13px 16px;border:0;border-bottom:1px solid var(--ch-rule);
+  border-radius:0;background:color-mix(in srgb,var(--ch-paper) 92%,transparent);
+  box-shadow:none!important;opacity:0;transform:translateY(6px);
+  transition:opacity .42s var(--ease-ios),transform .42s var(--ease-ios),
+    background .2s var(--ease-ios),border-color .2s var(--ease-ios)}
+body.chart .row.in{opacity:1;transform:none}
+body.chart .row:hover{background:color-mix(in srgb,var(--ch-paper-2) 92%,transparent);
+  border-bottom-color:var(--ch-rule-2);transform:none;box-shadow:none!important}
+body.chart .row.playing{background:color-mix(in srgb,var(--ch-red) 7%,var(--ch-paper));
+  border-left:3px solid var(--ch-red);padding-left:13px}
+body.chart .row .no{font-family:var(--ch-serif);font-style:italic;font-size:12.5px;line-height:1.4;
+  color:var(--ch-brass);text-align:right;font-variant-numeric:tabular-nums;letter-spacing:.04em}
+body.chart .row .nm{font-family:var(--ch-serif);font-size:15.5px;font-weight:600;line-height:1.35;
+  color:var(--ch-ink);letter-spacing:.02em;word-break:break-word}
+body.chart .row .en{display:block;margin-top:3px;font-family:var(--ch-mono);font-size:9.5px;
+  line-height:1.4;letter-spacing:.07em;color:var(--ch-ink-3);font-weight:400;word-break:break-all;
+  text-transform:lowercase}
+body.chart .row .tags{display:flex;gap:0;flex-wrap:wrap;margin-top:5px}
+body.chart .tag{display:inline;padding:0;border:0!important;border-radius:0!important;
+  background:none!important;font:400 10.5px/1.5 var(--ch-sans);color:var(--ch-ink-3);
+  white-space:nowrap}
+body.chart .tag::before{content:'[';color:var(--ch-brass)}
+body.chart .tag::after{content:']';color:var(--ch-brass)}
+body.chart .tag+.tag{margin-left:7px}
+body.chart .tag+.tag::before{content:'· ['}
+body.chart .tag.al{color:var(--ch-brass)}
+body.chart .tag.sh{color:var(--ch-sea)}
+body.chart .tag.ev{color:var(--ch-red)}
+body.chart .row .mt{font-family:var(--ch-serif);font-style:italic;font-size:11.5px;line-height:1.2;
+  color:var(--ch-ink-2);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+body.chart .row .mt i{display:block;margin-top:3px;font-family:var(--ch-mono);font-style:normal;
+  font-size:9px;color:var(--ch-ink-3);opacity:.85}
+body.chart .row.playing .nm::before{content:'在播';display:inline-block;margin-right:8px;
+  padding:1px 4px;border:1px solid var(--ch-red);color:var(--ch-red);
+  font:600 8px/1.5 var(--ch-sans);letter-spacing:.12em;vertical-align:2px}
+body.chart .play{width:30px;height:30px;border:1px solid var(--ch-rule-2);border-radius:50%;
+  background:transparent;color:var(--ch-ink);box-shadow:none!important;
+  display:grid;place-items:center;overflow:hidden;cursor:pointer;
+  transition:background .2s var(--ease-ios),color .2s var(--ease-ios),border-color .2s var(--ease-ios)}
+body.chart .play:hover{background:var(--ch-ink);color:var(--ch-paper);border-color:var(--ch-ink);
+  transform:none;box-shadow:none!important}
+body.chart .play:active{transform:none}
+body.chart .play svg{width:13px;height:13px;fill:currentColor}
+body.chart .row.playing .play{background:var(--ch-red);border-color:var(--ch-red);color:var(--ch-paper)}
+body.chart .row.playing .eq{display:flex;color:var(--ch-paper)}
+body.chart .eq u{width:2px;background:currentColor}
+body.chart .favc .favbtn{width:23px;height:23px;border:1px solid var(--ch-rule-2);border-radius:0;
+  background:transparent;color:var(--ch-brass);box-shadow:none;transition:none}
+body.chart .favc .favbtn:hover{transform:none;color:var(--ch-red);border-color:var(--ch-red)}
+body.chart .favc .favbtn.on{background:var(--ch-brass);border-color:var(--ch-brass);color:var(--ch-paper)}
+body.chart .favc .favbtn svg{width:11px;height:11px}
+body.chart .empty{padding:52px 10px;text-align:center;color:var(--ch-ink-3);
+  font-family:var(--ch-serif);font-style:italic;font-size:14px;line-height:1.9}
+
+/* ── 播放器：一张压在海图上的账台 ─────────────────────────────────────── */
+body.chart .bar{left:50%;bottom:14px;width:min(980px,calc(100vw - 28px));
+  padding:0;border:1px solid var(--ch-rule-2);border-top:3px double var(--ch-ink);
+  border-radius:4px;background:var(--ch-bar);box-shadow:var(--ch-shadow);
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;overflow:hidden}
+body.chart .bar::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+  background:repeating-linear-gradient(0deg,
+    color-mix(in srgb,var(--ch-ink) 2.5%,transparent) 0 1px,transparent 1px 3px);opacity:.45}
+body.chart .bar::after{display:none!important}
+body.chart .bar>*{position:relative;z-index:1}
+body.chart .bar.on{transform:translateX(-50%) translateY(0);opacity:1}
+
+/* 模式条：四种模式常驻、可读；当前项用朱砂下划线 */
+body.chart .bar .modes{display:flex;align-items:center;gap:0;padding:5px 16px;border-bottom:1px solid var(--ch-rule);
+  background:color-mix(in srgb,var(--ch-paper-2) 68%,transparent)}
+body.chart .bar .modes .mlabel{font:600 8.5px/1.4 var(--ch-sans);letter-spacing:.2em;color:var(--ch-brass);
+  text-transform:uppercase;margin-right:14px;white-space:nowrap}
+body.chart .bar .modes button{position:relative;border:0;border-radius:0;background:none;box-shadow:none;
+  color:var(--ch-ink-3);font:400 11px/1.4 var(--ch-sans);letter-spacing:.04em;padding:4px 9px;
+  width:auto;height:auto;min-width:0;cursor:pointer;transition:color .2s var(--ease-ios)}
+body.chart .bar .modes button:hover{color:var(--ch-ink);background:none;transform:none;box-shadow:none}
+body.chart .bar .modes button.on{color:var(--ch-ink);background:none;border:0;box-shadow:none}
+body.chart .bar .modes button.on::after{content:'';position:absolute;left:9px;right:9px;bottom:0;
+  height:2px;background:var(--ch-red)}
+body.chart .bar .modes .mhint{margin-left:auto;font-family:var(--ch-serif);font-style:italic;
+  font-size:10px;color:var(--ch-ink-3);white-space:nowrap}
+body.chart .seekrow{display:flex;align-items:center;gap:10px;margin:0;padding:8px 18px 0}
+body.chart .seekrow .tm{flex:none;min-width:38px;text-align:left;font-family:var(--ch-serif);
+  font-style:italic;font-size:11px;color:var(--ch-ink-2);letter-spacing:.03em}
+body.chart .seekrow #t1{text-align:right}
+body.chart .seekrow .tide{flex:1;margin:0}
+body.chart .bar .top{display:flex;align-items:center;gap:11px;padding:5px 18px 9px}
+body.chart .bar .curwrap{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
+body.chart .bar .cur{display:block;flex:none;font-family:var(--ch-serif);font-size:14px;font-weight:600;
+  letter-spacing:.02em;color:var(--ch-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.chart .bar .cur i{font-family:var(--ch-serif);font-size:11px;font-weight:400;font-style:italic;
+  letter-spacing:.04em;color:var(--ch-ink-3);margin-left:9px}
+body.chart .cmeta{font-family:var(--ch-mono);font-size:9px;line-height:1.5;letter-spacing:.04em;
+  color:var(--ch-ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.chart .bar button{width:33px;height:33px;border:1px solid var(--ch-rule-2);border-radius:50%;
+  background:transparent;color:var(--ch-ink-2);box-shadow:none!important;
+  display:grid;place-items:center;cursor:pointer;
+  transition:background .2s var(--ease-ios),color .2s var(--ease-ios),border-color .2s var(--ease-ios)}
+body.chart .bar button:hover{background:var(--ch-ink);color:var(--ch-paper);border-color:var(--ch-ink);
+  transform:none;box-shadow:none!important}
+body.chart .bar button:active{transform:none}
+body.chart .bar button.on{background:var(--ch-red);border-color:var(--ch-red);color:var(--ch-paper);
+  box-shadow:none}
+body.chart .bar svg{width:15px;height:15px;fill:currentColor;stroke-width:0}
+body.chart #pp{width:45px;height:45px;border:0;background:var(--ch-ink);color:var(--ch-paper);
+  box-shadow:none!important}
+body.chart #pp svg{width:18px;height:18px}
+body.chart #pp:hover{background:var(--ch-red);color:var(--ch-paper);
+  box-shadow:none!important}
+body.chart .bar .vol{width:76px;height:3px;-webkit-appearance:none;appearance:none;outline:none;
+  cursor:pointer;background:var(--ch-rule-2);border-radius:0}
+body.chart .bar .vol::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;
+  border-radius:0;background:var(--ch-brass);border:1px solid var(--ch-paper);
+  box-shadow:none;cursor:pointer;transition:none}
+body.chart .bar .vol::-moz-range-thumb{width:10px;height:10px;border-radius:0;
+  background:var(--ch-brass);border:1px solid var(--ch-paper);cursor:pointer}
+body.chart .bar .buf{font-family:var(--ch-mono);font-size:9px;color:var(--ch-red);
+  border:1px solid var(--ch-red);padding:1px 5px;border-radius:0;white-space:nowrap}
+body.chart .bar .hint{font-family:var(--ch-serif);font-style:italic;font-size:10.5px;
+  letter-spacing:.03em;color:var(--ch-ink-3);text-align:left;margin:0;padding:0 18px 6px}
+body.chart .disc{width:26px;height:26px;border-radius:50%;flex:none;
+  border:1px solid var(--ch-rule-2);
+  background:
+    radial-gradient(circle at 50% 50%,var(--ch-red) 0 2px,transparent 2.5px),
+    repeating-radial-gradient(circle at 50% 50%,transparent 0 3px,var(--ch-rule) 3px 4px);
+  animation:discspin 9s linear infinite;animation-play-state:paused}
+body.chart .disc::after{display:none}
+body.chart .disc.on{animation-play-state:running}
+@media (prefers-reduced-motion:reduce){body.chart .disc{animation:none!important}}
+
+/* 进度：一条墨线 + 朱砂针；水波退成极淡的墨晕 */
+body.chart .tide{height:22px;margin:0;border:0;border-bottom:1px solid var(--ch-rule-2);
+  border-radius:0;background:transparent;box-shadow:none;transition:border-color .2s var(--ease-ios)}
+body.chart .tide:hover{border-bottom-color:var(--ch-red)}
+body.chart .tide svg{border-radius:0;clip-path:none;overflow:visible}
+body.chart .tide::after{background:linear-gradient(90deg,transparent,
+  color-mix(in srgb,var(--ch-red) 38%,transparent) 12%,
+  color-mix(in srgb,var(--ch-red) 38%,transparent) 88%,transparent)}
+body.chart .tide .trough{fill:transparent}
+body.chart .tide .w1{fill:var(--ch-sea);opacity:.34}
+body.chart .tide .w2{fill:var(--ch-brass);opacity:.12}
+body.chart .tide .crest{stroke:var(--ch-red);stroke-width:1;fill:none;filter:none;opacity:.8}
+body.chart .tide .spec{display:none}
+body.chart .tide .bead{display:none}
+body.chart .tide .rip{stroke:var(--ch-red);stroke-width:1}
+body.chart .tide .rail{height:2px;background:var(--ch-rule)}
+body.chart .tide .rail em{background:color-mix(in srgb,var(--ch-sea) 35%,transparent);border-radius:0}
+body.chart .tide .rail i{background:var(--ch-red);box-shadow:none;border-radius:0}
+body.chart .tide .rail b{width:7px;height:7px;background:var(--ch-red);
+  border:1px solid var(--ch-paper);box-shadow:none}
+body.chart .tide:hover .rail b{width:9px;height:9px}
+body.chart .tide .bub{font-family:var(--ch-serif);font-style:italic;color:var(--ch-ink-2)}
+
+/* ── 播放列表：航线清单纸片 ─────────────────────────────────────────── */
+body.chart .queue{left:50%;bottom:206px;width:min(560px,calc(100vw - 28px));
+  max-height:48vh;border:1px solid var(--ch-rule-2);border-top:3px double var(--ch-ink);
+  border-radius:4px;background:var(--ch-bar);box-shadow:var(--ch-shadow);
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+body.chart .qhead{display:flex;align-items:center;gap:9px;padding:8px 12px;
+  border-bottom:1px solid var(--ch-rule-2);flex:none}
+body.chart .qseal{width:20px;height:20px;display:grid;place-items:center;flex:none;
+  border:1px solid var(--ch-red);color:var(--ch-red);font:500 11px/1 var(--ch-serif);
+  background:transparent;border-radius:0}
+body.chart .qhead b{font:500 13px/1.4 var(--ch-serif);color:var(--ch-ink)}
+body.chart .qcount,body.chart .qmode{font-family:var(--ch-mono);font-size:9px;line-height:1.4;
+  color:var(--ch-ink-3);letter-spacing:.04em}
+body.chart .qmode{color:var(--ch-red);margin-left:auto}
+body.chart .qhead #qclose{width:22px;height:22px;border:1px solid var(--ch-rule-2);border-radius:0;
+  background:transparent;color:var(--ch-ink-3);font:16px/1 var(--ch-sans);cursor:pointer;padding:0}
+body.chart .qhead #qclose:hover{color:var(--ch-red);border-color:var(--ch-red)}
+body.chart .qlist{overflow:auto;padding:0 6px 4px;min-height:44px}
+body.chart .qempty{padding:18px 10px;text-align:center;font-family:var(--ch-serif);font-style:italic;
+  font-size:12px;color:var(--ch-ink-3)}
+body.chart .qrow{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:8px;align-items:center;
+  padding:6px 7px;border-bottom:1px solid var(--ch-rule);cursor:pointer;border-left:2px solid transparent}
+body.chart .qrow:last-child{border-bottom:0}
+body.chart .qrow:hover{background:color-mix(in srgb,var(--ch-brass) 8%,transparent)}
+body.chart .qrow.on{background:color-mix(in srgb,var(--ch-red) 7%,transparent);border-left-color:var(--ch-red)}
+body.chart .qrow .qn{text-align:right;font-family:var(--ch-serif);font-style:italic;font-size:10px;
+  color:var(--ch-brass);font-variant-numeric:tabular-nums}
+body.chart .qrow .qt{min-width:0;font:12px/1.45 var(--ch-serif);color:var(--ch-ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.chart .qrow .qt i{display:block;font:8.5px/1.4 var(--ch-mono);color:var(--ch-ink-3);
+  font-style:normal;letter-spacing:.04em;overflow:hidden;text-overflow:ellipsis}
+body.chart .qrow .qm{font:10px/1.4 var(--ch-serif);font-style:italic;color:var(--ch-ink-3);
+  font-variant-numeric:tabular-nums}
+
+/* ── 窄屏 ────────────────────────────────────────────────────────────── */
+@media (max-width:980px){
+  body.chart .wrap{display:block;max-width:1120px;padding:18px 16px 0}
+  body.chart .legend{position:static;max-height:none;overflow:visible;padding:0;margin-bottom:10px;
+    border-right:0}
+  body.chart .legend-head{display:none}
+  body.chart .legend .grp{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;
+    margin:0 0 11px;padding-bottom:8px}
+  body.chart .legend .grp>span:not(.chip){display:inline;min-width:38px;border:0;padding:0;margin:0}
+  body.chart .legend .chip{display:inline-block;margin:2px 0}
+  body.chart .legend #fEvent{width:auto;max-width:min(300px,58vw)}
+}
+@media (max-width:860px){
+  body.chart{padding-bottom:196px}
+  body.chart header{padding:10px 14px;gap:10px}
+  body.chart header h1{font-size:22px}
+  body.chart .kicker,body.chart .coord,body.chart .chartmark{display:none}
+  body.chart header .sub{margin-left:0;flex:1 1 100%;min-width:0;font-size:9px;
+    white-space:normal;overflow-wrap:anywhere;line-height:1.45}
+  body.chart .wrap{padding:16px 12px 0}
+  body.chart .legend{min-width:0}
+  body.chart .legend .grp{min-width:0;gap:8px}
+  body.chart .legend .chip{white-space:normal;overflow-wrap:anywhere}
+  body.chart .ledger-head{display:none}
+  body.chart .row{grid-template-columns:28px minmax(0,1fr) 52px 22px 28px;gap:6px;padding:10px 8px}
+  body.chart .row .en,body.chart .tag{overflow-wrap:anywhere;white-space:normal}
+  body.chart .row.playing{padding-left:7px}
+  body.chart .row .nm{font-size:14px}
+  body.chart .row .en{font-size:8.5px}
+  body.chart .row .tags{margin-top:4px}
+  body.chart .tag{font-size:9.5px}
+  body.chart .row .mt{font-size:10.5px}
+  body.chart .row .mt i{font-size:8.5px}
+  body.chart .play{width:27px;height:27px}
+  body.chart .favc .favbtn{width:21px;height:21px}
+  body.chart .chart-rose,body.chart .chart-route{display:none}
+  body.chart .bar{left:8px;right:8px;width:auto;bottom:8px;padding:0}
+  body.chart .bar .modes{padding:4px 8px;overflow-x:auto}
+  body.chart .bar .modes .mlabel,body.chart .bar .modes .mhint{display:none}
+  body.chart .bar .modes button{font-size:10px;padding:4px 7px}
+  body.chart .bar .modes button.on::after{left:7px;right:7px}
+  body.chart .seekrow{padding:6px 10px 0}
+  body.chart .seekrow .tm{min-width:30px;font-size:9.5px}
+  body.chart .bar .top{display:grid;grid-template-columns:32px 42px 32px minmax(0,1fr) 30px;
+    gap:6px;padding:3px 10px 7px}
+  body.chart .bar .vol,body.chart .bar .disc{display:none}
+  body.chart .bar .cur{font-size:12px}
+  body.chart .cmeta{display:none}
+  body.chart .bar .hint{display:none}
+  body.chart .queue{bottom:184px;max-height:44vh}
+  body.chart .tools{margin-bottom:12px}
+  body.chart .grp{gap:10px;margin-bottom:11px;padding-bottom:8px}
+  body.chart .grp>span:not(.chip){min-width:38px;font-size:8px}
+  body.chart .chip{font-size:12px}
+}
+@media (prefers-reduced-motion:reduce){
+  body.chart .row{transition:opacity .18s linear}
+  body.chart .row.playing .eq u{animation:none;height:60%}
+}
+
+/* ── 站用背景（has-sitebg）下的覆盖 ───────────────────────────────────
+   favorites.js 会在注入的 <style> 里给所有页面加"照片背景可读性"规则：
+   控件补玻璃底、搜索框 blur(24px)、header 提亮、行卡换 --panel 底。
+   本页已经决定不用玻璃，且纸张/墨色比照片更稳；这里用更高特异度 + !important
+   把那些规则压回海图纸面。只保留 body 的背景图本身（用户明确要保留动态背景）。 */
+html.has-sitebg body.chart .row{background:color-mix(in srgb,var(--ch-paper) 92%,transparent)!important}
+html.has-sitebg body.chart .grp .chip,
+html.has-sitebg body.chart header .opt,
+html.has-sitebg body.chart .tools input.q{
+  background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+  box-shadow:none!important;border:0!important}
+html.has-sitebg body.chart .grp .chip.on{
+  background:transparent!important;color:var(--ch-red)!important;border:0!important;
+  box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+html.has-sitebg body.chart header{
+  background:color-mix(in srgb,var(--ch-paper) 90%,transparent)!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+html.has-sitebg body.chart :is(.sub,.en,.mt,.dim){color:var(--ch-ink-3)!important;opacity:1!important}
+html.has-sitebg body.chart .hint{text-shadow:none!important}
+

@@ -11987,3 +11987,33 @@ CTA「⚑ 换入正式区」、why 列出 swap-in/derive/labels/regress 并注�
 
 **涉及**：`scripts/pipeline_panel.py`（FIRSTVIEW / askOf / nextStepAct / bBackCur / viewnote）、
 `scripts/diag/test_pipeline_gating.py`、`scripts/diag/panel_paper_probe.py`、`docs/WORKFLOWS.md` WF-59。
+
+## §188 音乐库从拟态玻璃改海图：四种模式必须是“看得见的文字”（2026-10-23）
+
+**现象/需求**：用户截图问「怎么有三种模式，可是没有循环播放？而且标识不明显，拟态玻璃还是不行，
+做成文艺航海风吧」。页面代码里模式实际是四个（`MODES=['seq','loop','one','shuffle']`），
+`ended` 分支也分别处理了单曲重复、列表循环、顺序停住和随机；但 UI 把它们塞进播放器右下角一个
+32px 的无文字图标键里，列表循环与单曲循环的图标几乎一样（只多一个 8px 的「1」），全名只在
+hover title 和队列头出现 ⇒ 用户读成「只有三种、没有循环」。**这不是播放逻辑缺失，是标识不可见。**
+
+**修法**：
+- `bgm.html` 播放器顶部加 `.modes` 条：四个常驻文字键「顺序 / 列表循环 / 单曲循环 / 随机」，
+  带 `aria-pressed`，当前项朱砂下划线；`setMode()` 同步四键与队列 `#qmode`；`M` 键仍循环切换。
+- 新增 `gallery_src/bgm_chart.css` 作为页面最终视觉层：海图纸、墨线、黄铜、朱砂；
+  `.chartlayer` 在**保留的动态站用背景**上压一层纸色薄雾 + 经纬网 + 航线 + 罗盘；
+  左侧「航海图例」、右侧账页；曲目行不再用玻璃卡片；播放器改成纸本账台。
+- 全页零 `backdrop-filter`：本页移除 `liquid_glass.js` 与 LiquidGlass 挂载；
+  `site_bg_live.js` / `water_bg.js` 保留（用户明确要保留背景）。
+- `favorites.js` 会给 `html.has-sitebg` 注入「照片背景可读性」规则（chip/搜索框 `blur(16/24px)`、
+  header 提亮、行卡换 `--panel` 底）。新皮肤用更高特异度 + `!important`
+  （`.grp .chip` / `.tools input.q` / `header .opt`）把这些规则压回纸面，背景图本身不动。
+
+**判据**：`bgm_page_probe.py` 在 **1280×900** 与 **390×844** 两档全绿：575 行；四个模式文字
+与 `pressed==1`；`#qmode` 全名；搜索/筛选/收藏/队列/拖进度仍通过；全页
+`backdrop-filter:none` 且 `.bglg` 数为 0；`has-sitebg` 下 chip/搜索/header/行/播放器仍零玻璃；
+390px `scrollWidth == innerWidth`（无横向溢出）；昼/夜截图 `.diag/bgm_shot_{light,dark,row,bar}.png`。
+⚠️ 窄屏验收必须走 CDP `Emulation.setDeviceMetricsOverride`：Windows Chrome 有最小窗口宽度，
+只用 `--window-size=390,844` 会在布局仍是 500px 的情况下裁右边缘，看起来像页面溢出。
+
+**涉及**：`gallery_src/bgm.html`、`gallery_src/bgm_chart.css`、`scripts/deploy_gallery.py`、
+`scripts/diag/bgm_page_probe.py`、`docs/WORKFLOWS.md` WF-60。

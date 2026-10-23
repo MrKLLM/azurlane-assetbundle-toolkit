@@ -5341,16 +5341,20 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
   模式写 `localStorage['gallery.bgmMode']`。
 
 **界面**
-- `#lp` 一键循环四种模式（图标/标题/`data-mode`），**不要**再拿它直接切 `A.loop`：
-  单曲循环由 `ended` 重播，跟 `<audio loop>` 叠加会变成两套语义。
-- `#playlistBtn` / `L` 打开纸面队列抽屉；`M` 切模式；当前行用左侧品牌细边 + 淡底，
-  普通行不加滤镜（本页仍是播放器/搜索框/播放行三盒）。
+- 播放器 `.modes` 条常驻四个**文字键**：顺序 / 列表循环 / 单曲循环 / 随机；
+  `aria-pressed` 只有一项 `true`，`#qmode` 同步全名，`M` 仍循环切换。
+  **不要**把四个模式塞回一个 32px 无文字图标键：`loop` 与 `one` 图标几乎一样（只差一个
+  8px 的「1」），用户会读成「只有三种、没有循环」（2026-10-23 §188）。
+- **不要**拿模式键直接切 `A.loop`：单曲循环由 `ended` 重播，跟 `<audio loop>` 叠加会变成两套语义。
+- `#playlistBtn` / `L` 打开纸面队列抽屉；`M` 切模式；当前行用左侧朱砂细边 + 淡底。
 - 播放器前加一枚“墨盘”，只在实际播放时旋转（`prefers-reduced-motion` 下不转），
   不新增发光/粒子。
+- 2026-10-23 起本页是海图纸本皮肤（§188 / WF-60）：播放器、搜索框、播放行也**不再挂玻璃**，
+  全页零 `backdrop-filter`；动态站用背景保留。
 
 **判据**
 - 队列打开且行数 == 当前 queue；当前行高亮；点第 N 行切到第 N 首；关闭后不残留。
-- 模式键至少能在 `seq→loop` 切换且 `qmode` 文案同步；随机下一首不能等于当前（队列 >1）。
+- 四个文字键都在，且 `aria-pressed=true` 恰好一个；`qmode` 文案同步；随机下一首不能等于当前（队列 >1）。
 - `ended` 实测：单曲队列在 seq 下 `A.paused=true`；one 下继续播且回到 0 秒；
   列表循环回绕；随机换到另一首。无头测试点击必须带 `userGesture`，否则 autoplay 被拒会把
   “没开始播”误判成 `ended` 逻辑坏了。
@@ -5430,3 +5434,43 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 `scripts/diag/restamp_pipeline_state.py`、`scripts/diag/test_pipeline_gating.py`、
 `scripts/diag/panel_paper_probe.py`、`gallery_src/_gallery_server.py`、`.diag/pipeline/pipeline_state.json`、
 `.diag/pipeline/affected.*`、`.diag/pipeline/panel/runs.json`、`docs/TROUBLESHOOTING.md §177 / §186 / §187`。
+
+---
+
+### WF-60: 画廊页面换视觉语言（去玻璃 / 海图）的验收（2026-10-23）
+
+**判据（先量后改）**
+- 新皮肤走独立 `gallery_src/<page>_<skin>.css`，用 `body.<skin>` 作用域压旧层；HTML 只加
+  `<link>`、新控件和图表装饰，不改搜索/筛选/队列/播放入口。
+- **全页 `backdrop-filter` 必须为 0**，包括 `header` / 搜索框 / 行 / 播放器 / 队列；
+  页面里不再有 `.bglg` 挂载点（本页已移除 LiquidGlass）。
+- `favorites.js` 的 `html.has-sitebg` 会注入 `blur(16/24px)` 与玻璃底，必须用更高特异度 +
+  `!important` 压回纸面：`.grp .chip`（不能只写 `.chip`，`:is()` 的权重会打平）、
+  `.tools input.q`、`header .opt`。**只压控件，不压 `body` 的背景图**——用户要保留动态背景。
+- 两档视口都验：`bgm_page_probe.py` 默认 1280×900 + `--win 390,844`（走 CDP
+  `Emulation.setDeviceMetricsOverride`）。Windows Chrome 有最小窗口宽度，只写
+  `--window-size=390,844` 会把布局仍是 500px 的页面裁掉右边，看起来像横向溢出。
+- 窄屏判据：`scrollWidth <= innerWidth + 1`；模式条四个文字键仍在一行可读；播放器不遮住
+  最后一个可点控件（body 底部留白 ≥ 播放器高度）。
+- 昼/夜对比度：选中 chip 的字/底 ≥4.5:1；模式当前项有非颜色冗余（下划线 + `aria-pressed`）。
+- 截图留 `.diag/bgm_shot_{light,dark,row,bar}.png`，由人眼过一遍；脚本只判可测量的量。
+
+**步骤**
+1. 先写皮肤 CSS，再在 HTML 里加 link / `body class`；把新 CSS 加进 `deploy_gallery.py` 的 FILES。
+2. `py -3 scripts/deploy_gallery.py` 同步运行目录 → 跑 `bgm_page_probe.py` 两档 → 看截图。
+3. 改完正本按 AGENTS 收尾顺序：deploy → commit → `--relink` → `--check`。
+4. 文档：新皮肤/验收写 §188，播放器模式 UI 的改动同步回 WF-58；`PROJECT_STATUS` 就地更新。
+
+**踩坑**
+- 旧皮肤层里的 `.bar button{width:33px;height:33px}` 会在同特异度下压过 `.modes button` 的
+  `width:auto` ⇒ 模式文字被挤成竖排。给 `.modes` 的按钮规则加一层 `.bar`：
+  `body.chart .bar .modes button`。
+- `favorites.js` 的 `:is(.chip:not(.on), .ctl input[type=text])` 权重会到 (0,3,2)；
+  `body.chart .chip` 只有 (0,2,0) ⇒ 压不住。用 `.grp .chip` 把权重提到 (0,4,2)。
+- 固定层 `.bar` 的 `getBoundingClientRect()` 是视口坐标，`shot(sel)` 的 clip 要加
+  `scrollX/scrollY` 才是页面坐标；否则滚动后特写会裁到页首。
+- 保留动态背景时，海图薄雾只是**平涂纸色**（无 blur），不是把玻璃换个名字；动态背景在
+  行间、页边和纸面 6–8% 的透明度里仍可见。
+
+**涉及文件**：`gallery_src/bgm.html`、`gallery_src/bgm_chart.css`、`scripts/deploy_gallery.py`、
+`scripts/diag/bgm_page_probe.py`、`docs/TROUBLESHOOTING.md §188`。
