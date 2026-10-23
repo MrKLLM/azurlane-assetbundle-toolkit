@@ -5388,6 +5388,7 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
    `.diag/pipeline/archive/sheets_*`；主屏的数量来自 review verdict，不是目录里的图片文件数（§179）。
    ⚠️ 若「新增了什么」表显示元数据缺，先跑 `meta`：现在它会扫临时区并用设备侧
    `ship_data_statistics` 补新船（§180）。36 个文件是 9 个皮肤 + 5 个新船本体 + 2 个剧情黑影的变体。
+   第 4 步随时可点「重新出对照表」（只读，旧图先归档）；主屏只留一句决策，计数在小字 `why` 里（§182）。
 4. 第 5 步「签字换入」：新增图在正式区原本不存在 ⇒ `painting_swap_in` **不备份**；只有旧文件才 `copy2`。
    本次额外空间约 36 张 PNG ≈ 175MB，不是整库 17GB 的双份。`derive` 会再生 Live2D 换入与索引。
 5. 换入后 derive（缩略图/台词表/索引/部署）、labels、regress；`asset_manifest` 滞后另点「重扫清单」。

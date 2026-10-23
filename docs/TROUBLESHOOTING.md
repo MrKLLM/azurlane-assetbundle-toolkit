@@ -11816,3 +11816,28 @@ askOf/newsafe）、`docs/WORKFLOWS.md` WF-59。
 **实测**：`ensure_gallery` 从 `gallery_ok=False / port=False` 起，返回 pid 36008，2 秒内 cg_export 200。
 
 **涉及**：`scripts/pipeline_panel.py`、`docs/WORKFLOWS.md` WF-59、§177。
+
+## §182 主屏长标题把上下边界顶出画布；底部三列说明常驻无意义（2026-10-23）
+
+**现象**：第 4 步大字写「线上新增 36 个文件 / 16 组（9 个皮肤） · 内容有变 0，看一眼再决定换不换」，
+在 2560×1408 下折成四行，把 header 与底部状态顶出可视区；底部三列「先验证 / 范围由指纹裁定 /
+写正式区要留后路」常驻首页。
+
+**根因**：
+- 宽屏 `.now` 仍是 `justify-content:center` 且无 `overflow`；内容高过 1fr 行时，flex center
+  把两端同时推出可视区，滚动条也没有（窄屏 CSS 早已改成 `flex-start + overflow:auto`，宽屏没跟）。
+- 三列是「为什么敢点」的背景知识（设计辩护文案）；按本项目规则，常驻界面只留决策，
+  这类文案应进「怎么用」抽屉。
+
+**修法**：
+- `.now` 改 `justify-content:flex-start + overflow-y:auto + scrollbar-gutter:stable`；
+  首元素 `margin-top:auto`、`.foot` `margin-bottom:auto`：内容短时仍居中，长时从顶部滚。
+- 第 4 步大字只留「对照表好了，看一眼再决定」；36 文件/16 组/9 皮肤移到 `why` 小字。
+- 移除首页 `.rails` 三列，全文进「怎么用」的「运行边界」；`.foot` 改静态流内，保留一行动态状态。
+- 第 4 步加「重新出对照表」链接（review 只读，随时可重跑；会先归档旧图）。
+
+**判据**：530×552 下注入 2025px 长文，`.now.scrollTop > 0` 且 header 仍在 0–64；
+短标题「对照表好了，看一眼再决定」；CTA 三项（打开 / 重新出 / 去第 5 步）；
+`.rails` 数量 0；帮助抽屉含「运行边界」。宽屏短内容不出现滚动条，视觉与原来一致。
+
+**涉及**：`scripts/pipeline_panel.py`。

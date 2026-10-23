@@ -2096,11 +2096,16 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
 
 /* ── 主屏：一句话 + 一个行动 ─────────────────────────────────────── */
 .now{
-  display:flex!important;flex-direction:column!important;justify-content:center!important;
+  display:flex!important;flex-direction:column!important;justify-content:flex-start!important;
   align-self:stretch!important;height:100%;min-height:0;position:relative;
   max-width:920px!important;width:auto!important;margin:0!important;
-  padding:24px 44px 76px var(--gutter)!important;
+  padding:24px 44px 24px var(--gutter)!important;
+  /* 内容高过一屏时从顶部滚，不再用 flex center 把上下边界顶出画布；
+     内容短时靠首尾 auto 边距保持原来的居中观感。 */
+  overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable;
 }
+.now > .eyebrow{margin-top:auto!important}
+.now > .foot{margin-bottom:auto!important}
 .rails{
   display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;
   margin:38px 0 0!important;border-top:1px solid var(--rule)!important;
@@ -2124,9 +2129,9 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
   color:var(--ink-2)!important;
 }
 .foot{
-  position:absolute!important;left:var(--gutter)!important;right:44px!important;bottom:0!important;
-  margin:0!important;min-height:0!important;
-  padding:13px 0 18px!important;width:auto!important;max-width:none!important;
+  position:static!important;left:auto!important;right:auto!important;bottom:auto!important;
+  margin:24px 0 auto!important;min-height:0!important;
+  padding:13px 0 0!important;width:auto!important;max-width:none!important;
   border-top:1px solid var(--rule);
   font:400 9.5px/1.8 var(--font-mono)!important;letter-spacing:.03em;
   color:var(--ochre)!important;
@@ -3023,16 +3028,6 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
   <!-- 回执：每个动作跑完都留一行结论（判绿/判红/待签字 + 用时）。
        以前点了「再查一次」界面一声不响，用户只能猜它到底跑没跑。 -->
   <p class="receipt" id="receipt" hidden></p>
-  <!-- 三道硬边界：不是装饰，是这套工具**为什么敢让你点**的三条理由。
-       文案与 AGENTS.md / update_pipeline 的实现一一对应；改实现时这三句要一起改。 -->
-  <div class="rails" aria-label="运行边界">
-    <div class="rail"><span>01 / 只读</span><b>先验证，再动手</b>
-      <p>权威输入与源包清单逐份核对；预检不写盘，红了就停。</p></div>
-    <div class="rail"><span>02 / 增量</span><b>范围由指纹裁定</b>
-      <p>affected.txt 必须配 affected.meta；过期判红，不退化成全量。</p></div>
-    <div class="rail"><span>03 / 签字</span><b>写正式区要留后路</b>
-      <p>换入前整批备份；索引零回退、部署同 inode 两道闸门。</p></div>
-  </div>
   <p class="foot" id="scopeNote"></p>
 </main>
 
@@ -3278,6 +3273,14 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
       第 1 步的 <code>preflight</code> 就是查这三样，红了别往下走。</li>
     <li>一次只跑一个重活（本机 15.4GB）。已有任务在跑时按钮会锁住，不是坏了。</li>
     <li>画廊服务器要先活着或让它自己起；回归那件会去连它。</li>
+  </ul>
+
+  <h3>运行边界（为什么敢让你点）</h3>
+  <ul>
+    <li><b>只读先行</b>：权威输入与源包清单逐份核对；预检不写盘，红了就停。</li>
+    <li><b>范围由指纹裁定</b>：<code>affected.txt</code> 必须配 <code>affected.meta</code>；
+      过期判红，不退化成全量。</li>
+    <li><b>写正式区要留后路</b>：换入前整批备份；索引零回退、部署同 inode 两道闸门。</li>
   </ul>
 
   <h3>五步分别动什么</h3>
@@ -4342,16 +4345,15 @@ function askOf(n){
     const rd=(rv&&rv.detail)||'';
     const mNew=/线上新增\s*(\d+)/.exec(rd), mChg=/内容有变\s*(\d+)/.exec(rd);
     const mGrp=/线上新增\s*\d+\s*个文件（(\d+)\s*组\s*\/\s*(\d+)\s*个皮肤）/.exec(rd);
-    /* 主屏说「新增多少文件 / 多少组 / 多少皮肤」，不说"目录里有几张图"：后者会把上一批的
-       cmp/crop 一起算进去（2026-10-23 用户截图：写 9 张，点开全是 10-01 的旧图）。 */
-    const cnt=(mNew||mChg)?('：线上新增 '+nEm(mNew?+mNew[1]:0)+' 个文件'+
+    /* 大字只留决策；36 个文件/16 组/9 个皮肤放进 why 的小字。
+       长标题会把上下边界顶出画布（2026-10-23 用户截图）。 */
+    const data=(mNew?('线上新增 '+mNew[1]+' 个文件'+
         (mGrp?(' / '+mGrp[1]+' 组（'+mGrp[2]+' 个皮肤）'):'')+
-        ' · 内容有变 '+nEm(mChg?+mChg[1]:0)):'';
-    return {eb, ask:'对照表好了'+cnt+'，'+
-        (allStagesPass()?'本轮已照过、也已换入':'看一眼再决定换不换'),
-      why:'这一步不写任何正式产物。'+(mNew?('对照表取前 12 对，共 '+mNew[1]+' 个文件'
-        +(mGrp?(' / '+mGrp[1]+' 组 / '+mGrp[2]+' 个皮肤'):'')+'。'):'')+nxRv.why,
-      acts:[{a:'detail',t:'打开对照表',k:'pact mag'},nxRv.act]};
+        ' · 内容有变 '+(mChg?mChg[1]:'0')+'。'):'');
+    return {eb, ask:allStagesPass()?'对照表好了，本轮也已换入':'对照表好了，看一眼再决定',
+      why:data+'这一步不写任何正式产物。'+(mNew?'对照表取前 12 对。':'')+nxRv.why,
+      acts:[{a:'detail',t:'打开对照表',k:'pact mag'},
+            {a:'review',t:'重新出对照表',k:'link2'},nxRv.act]};
   }
 
   const live5=list.filter(s=>s.tier==='live'), aw5=live5.filter(s=>stn(s.key)==='await');
