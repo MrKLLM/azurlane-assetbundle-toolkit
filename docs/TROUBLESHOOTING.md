@@ -11901,3 +11901,27 @@ CTA「⚑ 换入正式区」、why 列出 swap-in/derive/labels/regress 并注�
 
 **涉及**：`scripts/pipeline_panel.py`（stepSkipped / firstGapStep / 第 5 步 CTA）、
 `docs/WORKFLOWS.md` WF-59。
+
+## §185 第一次 derive 红在「剪影清单两边都不认识」；背景标注的保存并发布为什么灰（2026-10-23）
+
+**A. derive 假红**：本轮新增 `changshehao_hei` / `nichao_hei`（§183 的 2 个剧情黑影）。
+`gallery_index_diff_check` 的 ghost 判据是「不在旧剪影区、也不在两边皮肤区」⇒ 新增剪影被当幽灵；
+第一次 derive 必红，第二次因为 `index.prev.json` 已经带上它们才绿 —— 判据依赖运行次数，是假回退。
+旧 20 / 新 22 剪影、`lost_sil=0`、新增 2。
+
+**修法**：新增剪影算**增量**；只有 `old_sil - new_sil`（旧剪影丢失）才拦。已用旧/新 index 复跑 PASS；
+随后重跑 `derive,labels,regress` 全绿（index 闸门绿 / deploy 4/4 / WF-16 五件全绿）。
+
+**B. 背景标注「保存并发布」灰**：`glPublish.disabled = busy || !d || left>0 || !agree ||
+(d.pending===0 && picks===0)`。场景 1311/1311 全判、待判 0、picks 0 ⇒ 灰；它发布的是**角色标注**；
+词根命名是每行「保存/更新」写 `annotations/bg_root_names.json`，不是同一个按钮。
+
+**修法**：`glMsg` 在 pending 0 写「场景已全部判过，无需再发布；词根命名请逐行点「保存/更新」」；
+根名标题加同一句。`labels` 阶段已绿（新增词根 1 / 曲目 575），10 个根名已进 `bg_meta`；
+底部按钮灰是**正确状态**，不需要再点。
+
+**判据**：`gallery_index_diff_check` 旧/新 PASS；`derive` index 绿 / deploy 4/4；`labels` 绿；
+`regress` WF-16 五件绿；`glMsg` 文案；`glPublish` 在 pending 0 / picks 0 仍 disabled。
+
+**涉及**：`scripts/diag/gallery_index_diff_check.py`、`scripts/pipeline_panel.py`、
+`docs/WORKFLOWS.md` WF-59。

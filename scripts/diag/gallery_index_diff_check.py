@@ -142,10 +142,13 @@ def diff(old, new, allow_ship, allow_skin, packs, expect=None, meta=None):
     # （如 aerjiliya_hei）每轮都报 ghost——实测剪影数 16→16 零变化，它却红了。
     # 判据必须是「两边皮肤区都没有、**且旧剪影区也没有**」才是真幽灵。
     old_sil = {s.get('key') for s in (old.get('silhouettes') or []) if s.get('key')}
-    ghost = sorted(k for k in sil
-                   if k not in o_k and k not in {x for x in n_k} and k not in old_sil)
-    if ghost:
-        bad.append('剪影清单里有两边都不认识的条目: %s' % ghost[:5])
+    # 新增剪影（本批新 `_hei` / 新剧情剪影）是**增量**，不是零回退。旧版把「不在旧剪影区、
+    # 也不在两边皮肤区」的条目当 ghost：第一次 derive 必红，第二次因为 index.prev 已带上它才绿
+    # ——判据依赖运行次数，是假回退（2026-10-23 changshehao_hei / nichao_hei 实测）。
+    # 真正的零回退是「旧剪影区有、新版没有」⇒ lost_sil。
+    lost_sil = sorted(old_sil - sil)
+    if lost_sil:
+        bad.append('剪影清单里丢了旧条目: %s' % lost_sil[:5])
 
     for gone in sorted(set(o_s) - set(n_s)):
         if gone in sil:

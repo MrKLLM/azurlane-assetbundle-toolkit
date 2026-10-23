@@ -4411,6 +4411,13 @@ function askOf(n){
         '点「打开背景标注」按缩略图逐张判；判完发布会自动重建 bg_meta 与缩略图。'+tail,
     acts:[{a:'bglabel',t:'⚑ 打开背景标注',k:'pact mag'},
           {a:'detail',t:'看日志',k:'link2'}]};
+  if(fail && fail.key==='derive') return {eb, red:1,
+    ask:'derive 没过：索引闸门',
+    why:(detailOf('derive')||'')+' 换入已经完成；索引闸门若报「剪影清单两边都不认识」，'+
+        '是本批新增的 _hei 黑影被当成未知条目（已改为：新增剪影算增量，只有旧剪影丢失才拦）。'+
+        '点「再试一次换入」会重跑 swap-in+derive+labels+regress；swap-in 会多一份备份。',
+    acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},
+          {a:'detail',t:'看日志',k:'link2'}]};
   if(fail) return {eb, red:1, ask:fail.key+' 这一步没过',
     why:'闸门判红说明这次换入会丢东西——别绕，先查源包。'+tail,
     acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},
@@ -5163,6 +5170,7 @@ function renderBgReview(){
   const roots=unnamed.concat(manual);
   if(roots.length){
     html+='<div class="glroot"><b>词根命名（只补游戏表查不到的 root 档；已有表内证据不会被覆盖）</b>'+
+    '<span class="dim">逐行点「保存/更新」立即写入；底部的「保存并发布」只用于场景角色标注。</span>'+
       roots.map(r=>'<div class="glname" data-root="'+esc(r.root)+'"><code>'+esc(r.root)+'</code>×'+r.n+
         '<input maxlength="40" placeholder="中文名（只补 root 档）" aria-label="'+esc(r.root)+' 的中文名"'+
         (r.manual?' value="'+esc(r.cn||'')+'"':'')+'>'+
@@ -5253,7 +5261,10 @@ function updateGlButtons(){
   $$('#glBody [data-rootname]').forEach(b=>b.disabled=GL.busy);
   if($('#glMsg')) $('#glMsg').textContent=GL.busy?'处理中…':
     (!d?'—':(left?('还有 '+left+' 张未判'):
-      (d.pending===0?'没有待判图':'全部已判，可以发布')));
+      (d.pending===0
+        ? (picks?('全部已判，有 '+picks+' 个新选择待保存/发布')
+                 :'场景已全部判过，无需再发布；词根命名请逐行点「保存/更新」')
+        :'全部已判，可以发布')));
 }
 
 function renderPubProgress(step,total,title,state){
