@@ -5393,6 +5393,8 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
    变体不单独出表，2 个黑影只在 detail 标注。
    ⚠️ 语音列空白先看 `audio` 是否跑在 swap-in 之前：`extract_cv_voice` 现在会带 `--work .diag/pipeline`
    扫临时区；只扫正式区会漏掉 5 个新船/3 个纯皮肤/2 个 Live2D（§183）。
+   ⚠️ 第 5 步右栏 01/02 的 `—` 是「上一轮已做、这一轮未复核」，**不挡换入**；
+   主 CTA 应直接是「⚑ 换入正式区」，不应指回第 1 步（§184）。
 4. 第 5 步「签字换入」：新增图在正式区原本不存在 ⇒ `painting_swap_in` **不备份**；只有旧文件才 `copy2`。
    本次额外空间约 36 张 PNG ≈ 175MB，不是整库 17GB 的双份。`derive` 会再生 Live2D 换入与索引。
 5. 换入后 derive（缩略图/台词表/索引/部署）、labels、regress；`asset_manifest` 滞后另点「重扫清单」。

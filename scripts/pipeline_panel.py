@@ -3894,6 +3894,13 @@ function hasProgressAfter(n){
   return Object.keys((S&&S.steps)||{}).map(Number).some(k=>k>n &&
     stagesOf(k).some(s=>['fail','run','await','pass'].includes(statusOf(s.key))));
 }
+/* 这一整步都是 idle、但后面已有进展 ⇒ 上一轮做过、这一轮没复核，不算缺口。
+   currentStep / nextWorkStep / firstGapStep / allStagesPass 必须共用这一条，
+   否则修了一处、另一处仍会把用户指回去（2026-10-23 第 5 步 → 第 1 步）。 */
+function stepSkipped(n){
+  const list=stagesOf(n);
+  return list.length>0 && list.every(s=>statusOf(s.key)==='idle') && hasProgressAfter(n);
+}
 /* 「待办」= 下一步该动手的步骤；正在跑时以 running.step 为准。
    它和 `step`（用户正在看哪一步）是两件事——2026-10-17 用户点了几下步骤就迷路了，
    根因就是之前只有 `step`，没有「机器停在哪」这个锚。
@@ -4155,7 +4162,7 @@ function stepHint(n){
 }
 function allStagesPass(){
   const a=(S&&S.stages)||[];
-  return a.length>0 && a.every(s=>statusOf(s.key)==='pass') && !skinGapPending();
+  return a.length>0 && a.every(s=>statusOf(s.key)==='pass'||stepSkipped(s.step)) && !skinGapPending();
 }
 /* 「去下一步」按钮 + 配套那句正文：同一个 nw 算出来，杜绝"正文说第 3 步、按钮去第 5 步"。 */
 function nextStepAct(n){
@@ -4169,8 +4176,19 @@ function nextStepAct(n){
    该往前跳还是就在本步开跑，不能再一律写死"去第 3 步"。 */
 function firstGapStep(){
   if(skinGapPending()) return stepNo('cfg.publish',2);
-  const g=((S&&S.stages)||[]).filter(s=>statusOf(s.key)!=='pass').map(s=>s.step).filter(Boolean);
-  return g.length?Math.min.apply(null,g):0;
+  /* 与 currentStep 同一条跳过规则：整步 idle、但后面已有进展 ⇒ 上一轮做过、本轮未复核，
+     不能当成"第一个缺口"（2026-10-23 第 5 步因此把用户指回第 1 步）。 */
+  const order=Object.keys((S&&S.steps)||{}).map(Number).sort((a,b)=>a-b);
+  for(const n of order){
+    const list=stagesOf(n);
+    if(!list.length) continue;
+    const sts=list.map(s=>statusOf(s.key));
+    if(sts.some(x=>x==='fail'||x==='run'||x==='await'||x==='idle')){
+      if(sts.every(x=>x==='idle') && hasProgressAfter(n)) continue;
+      return n;
+    }
+  }
+  return order.length?order[order.length-1]:0;
 }
 function askOf(n){
   const all=(S&&S.stages)||[], st=(S&&S.state)||{}, stn=statusOf;
@@ -4361,7 +4379,10 @@ function askOf(n){
   /* 「换完了」这句必须看**全部阶段**，其余几句也要带上"这轮还有哪几档没跑"。
      2026-10-01 实测的假绿灯：用户只跑了 swap-in/derive/regress，第 2 步的立绘一张没重导，
      主屏却大字写「这次更新已经换完了」。 */
-  const allSt=S.stages||[], notYet=allSt.filter(s=>stn(s.key)==='idle');
+  const allSt=S.stages||[];
+  const notYet=allSt.filter(s=>stn(s.key)==='idle' && !stepSkipped(s.step));
+  const upIdle=[...new Set(allSt.filter(s=>stn(s.key)==='idle' && s.step<n &&
+      stepSkipped(s.step)).map(s=>s.step))];
   const whereNot=notYet.map(s=>'第 '+s.step+' 步 '+s.key).join('、');
   const tail=notYet.length?(' 这轮还有 '+notYet.length+' 项没跑过：'+whereNot+'。'):'';
   /* 「还没换完」时该干什么，看**第一个缺口在哪一步**：
@@ -4380,7 +4401,9 @@ function askOf(n){
     : {a:'swap',t:'⚑ 换入正式区',k:'pact sign mag'};
   if(notYet.length && !aw5.length && !fail && !live5.some(s=>stn(s.key)==='pass'))
     return {eb, red:1, ask:'还没换完：有 '+nEm(notYet.length)+' 项这轮根本没跑',
-      why:'没跑过的项不算完成。差在：'+whereNot+'。'+staleWarn,
+      why:'没跑过的项不算完成。差在：'+whereNot+'。'+
+          (upIdle.length?('第 '+upIdle.join('、')+' 步是上一轮已做、这一轮未复核（—），不挡换入。'):'')+
+          staleWarn,
       acts:[goGap,{a:'detail',t:'看是哪几项',k:'link2'}]};
   if(fail && fail.key==='labels') return {eb, red:1,
     ask:'标签重建没过：先看有没有新背景图没判「有没有角色」',

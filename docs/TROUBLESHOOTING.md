@@ -11875,3 +11875,29 @@ askOf/newsafe）、`docs/WORKFLOWS.md` WF-59。
 
 **涉及**：`scripts/extract_cv_voice.py`、`scripts/update_pipeline.py`（st_audio）、
 `scripts/pipeline_panel.py`（语音列 tooltip）、`docs/WORKFLOWS.md` WF-59。
+
+## §184 第 5 步仍指回第 1 步：firstGapStep 没跳过「本轮未复核」前缀（2026-10-23）
+
+**现象**：第 5 步主屏写「还没换完：有 10 项这轮根本没跑」，CTA「去第 1 步 接模拟器」；
+右栏 01/02 是 `—`、03/04 已 9/9、1/1、05 0/4。用户问「照它做吗？是中断重开所以要吗」。
+
+**根因**：`currentStep`/`nextWorkStep` 已跳过「整步 idle、但后面已有进展」的前缀，但第 5 步 CTA
+用的 `firstGapStep()` 仍是「所有非 pass 阶段的最小 step」⇒ 第 1/2 步的 `—` 被当成缺口；
+`notYet` 也把 01/02 的 6 项算进「10 项」。这不是真的缺前置：第 1/2 步是**上一轮已做、
+这一轮 `--only` 没重跑**（preflight/cfg 的结论在 00:07 被旧代码清掉后显示 `—`），
+而本轮 03/04 的产物、元数据、语音、暂存区都是新的。
+
+**修法**：抽 `stepSkipped(n)`（整步 idle + 后面有进展）作为唯一判据，
+`allStagesPass`/`firstGapStep`/`currentStep`/`nextWorkStep` 共用；
+第 5 步的 `notYet` 排除 `stepSkipped`，`upIdle` 单独注明「上一轮已做、这一轮未复核（—），不挡换入」；
+第 5 步有缺口时 CTA 直接是「⚑ 换入正式区」，不再用 `goGap` 指回第 1 步。
+
+**判据**：当前状态 `firstGapStep()=5`、`currentStep()=5`、`askOf(5).ask`「有 4 项」、
+CTA「⚑ 换入正式区」、why 列出 swap-in/derive/labels/regress 并注明「第 1、2 步…不挡换入」。
+换入全绿后 `allStagesPass()` 为 true（01/02 的 `—` 不算缺口）。
+
+**用户该怎么做**：不要回第 1 步。01/02 不是这次换入的前置；直接第 5 步签字换入。
+若想把这行 `—` 消掉，可只跑 preflight（2 秒）/ pull 的只读 diff；cfg 不需要重跑（已发布）。
+
+**涉及**：`scripts/pipeline_panel.py`（stepSkipped / firstGapStep / 第 5 步 CTA）、
+`docs/WORKFLOWS.md` WF-59。
