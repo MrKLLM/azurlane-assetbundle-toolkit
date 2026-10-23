@@ -11926,15 +11926,15 @@ CTA「⚑ 换入正式区」、why 列出 swap-in/derive/labels/regress 并注�
 **涉及**：`scripts/diag/gallery_index_diff_check.py`、`scripts/pipeline_panel.py`、
 `docs/WORKFLOWS.md` WF-59。
 
-## §186 日志 4/4、面板 2/4：labels 写 `inputs/gamecfg/bg_*` 反向作废前两步（2026-10-23）
+## §186 日志 4/4、面板 2/4：labels / 背景标注写 `inputs/gamecfg/bg_*` 反向作废前两步（2026-10-23）
 
 **现象**：13:15 的日志里 `swap-in` / `derive` / `labels` / `regress` 四条全绿、`deploy --check 4/4`，
 但控制台第 5 步仍写「还没换完：有 2 项（swap-in / derive）」，右栏 05 只有 2/4；连 03 的 9/9、
 04 的 1/1 也一起消失。产物与画廊都在，没有任何阶段真的需要重跑。
 
 **根因**：`gamecfg_stamp()` 把 `inputs/gamecfg/*.json` **全部**算进 `cfg=`。`labels` 是第 5 步最后
-一个阶段，签字后会写 `inputs/gamecfg/bg_series_labels.json`（以及 `bg_char_flags` 等 `bg_*`），
-时间在 `swap-in` / `derive` 之后 ⇒ `cfg=` 变了；`rejudge_state()` 与面板的 `stage_fp_by_key()`
+一个阶段，签字后会写 `inputs/gamecfg/bg_series_labels.json`（同目录的 `bg_char_flags` 等则是背景
+标注侧的产物），时间在 `swap-in` / `derive` 之后 ⇒ `cfg=` 变了；`rejudge_state()` 与面板的 `stage_fp_by_key()`
 逐阶段比指纹，前两步的结论是按旧 `cfg=` 盖的章，于是被过滤成「没跑」。**下游产物写进了上游输入
 目录，反过来作废了先跑完的结论**——不是状态写坏，也不是漏跑。
 

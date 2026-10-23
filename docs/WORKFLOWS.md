@@ -5414,8 +5414,9 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 - CG 静默不动时看子进程命令行：`run_cg_export.py --size` 且无 `#prog` 输出 = 8777 没起，不是渲染慢。
 - 细节抽屉可能「暂停跟随」在旧阶段；看 `run_<id>.log` 尾部才是当前阶段。
 - 181 张旧暂存与线上逐字节相同，所以本次换入不会收它们；但这依赖「恰好相同」，不要当成不变式。
-- **日志 4/4、面板 2/4：先查指纹章，不要重跑换入**。`labels` 会写 `inputs/gamecfg/bg_*`，
-  这些是**下游产物**；若它们进了上游 `cfg=`，swap-in/derive 的结论会被反向作废（§186）。
+- **日志 4/4、面板 2/4：先查指纹章，不要重跑换入**。`labels` / 背景标注阶段会写
+  `inputs/gamecfg/bg_*`（如 `bg_series_labels`），这些是**下游产物**；若它们进了上游 `cfg=`，
+  swap-in/derive 的结论会被反向作废（§186）。
   判据：`/api/state` 里每条 verdict 的 `fingerprint` 与顶层是否一致；不一致=被过滤，不是没跑。
   修法是 `gamecfg_stamp` 跳过 `bg_*`；已被清掉的旧结论用
   `py -3 scripts/diag/restamp_pipeline_state.py`（干跑）→ `--apply`（自动备份）→ `--verify`
