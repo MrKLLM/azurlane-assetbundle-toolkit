@@ -603,7 +603,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 </style>
 <link rel="stylesheet" href="bgm_chart.css">
 </head>
-<body class="chart">
+<body class="chart force-water">
 <div id="bootveil" aria-hidden="true">
   <div class="bv-inner"><div class="bv-ink"><i></i><i></i><i></i></div>
     <p class="bv-t">正在整理音乐库…</p><p class="bv-s">读取曲目、专辑与活动回忆</p>
@@ -611,6 +611,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 </div>
 <script>setTimeout(function(){var b=document.getElementById('bootveil');if(b&&!b.classList.contains('off')){
   b.style.opacity='0';b.style.pointerEvents='none';setTimeout(function(){try{b.remove()}catch(e){}},700);}},12000);</script>
+<div class="chartbg" aria-hidden="true"></div>
 <div class="chartlayer" aria-hidden="true">
   <div class="grid"></div>
   <svg class="chart-route" viewBox="0 0 1200 900" preserveAspectRatio="none">
@@ -645,11 +646,9 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 <header>
   <a class="back" href="index.html">← 资产浏览器</a>
   <div class="mast">
-    <span class="kicker">SHIP'S LOG · MUSIC LIBRARY</span>
     <h1>音乐库</h1>
   </div>
   <span class="sub" id="sub">载入中…</span>
-  <span class="coord" aria-hidden="true">31°14′N · 122°48′E</span>
   <span class="sp"></span>
   <svg class="chartmark" viewBox="0 0 64 64" aria-hidden="true">
     <circle cx="32" cy="32" r="25"/><circle cx="32" cy="32" r="15"/>
@@ -663,9 +662,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 <div class="wrap">
   <aside class="legend">
     <div class="legend-head">
-      <span class="kicker">CHART LEGEND</span>
       <b>航海图例</b>
-      <i class="waxseal" aria-hidden="true">乐</i>
     </div>
     <div class="tools"><input class="q" id="q" placeholder="搜曲名 / 中文 / 标识符 / 舰名   （/ 聚焦）" autocomplete="off"></div>
     <div class="grp" id="gUsage"><span>用途</span></div>
@@ -685,6 +682,11 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 </div>
 
 <div class="bar" id="bar">
+  <svg class="barwater" viewBox="0 0 1200 28" preserveAspectRatio="none" aria-hidden="true">
+    <path class="bw1" d="M0 15 C 40 6 80 24 120 15 S 200 6 240 15 S 320 24 360 15 S 440 6 480 15 S 560 24 600 15 S 680 6 720 15 S 800 24 840 15 S 920 6 960 15 S 1040 24 1080 15 S 1160 6 1200 15 L1200 28 L0 28 Z"/>
+    <path class="bw2" d="M0 20 C 50 12 100 27 150 20 S 250 12 300 20 S 400 27 450 20 S 550 12 600 20 S 700 27 750 20 S 850 12 900 20 S 1000 27 1050 20 S 1150 12 1200 20 L1200 28 L0 28 Z"/>
+    <path class="bwcrest" d="M0 15 C 40 6 80 24 120 15 S 200 6 240 15 S 320 24 360 15 S 440 6 480 15 S 560 24 600 15 S 680 6 720 15 S 800 24 840 15 S 920 6 960 15 S 1040 24 1080 15 S 1160 6 1200 15"/>
+  </svg>
   <svg class="barcompass" viewBox="0 0 100 100" aria-hidden="true">
     <circle cx="50" cy="50" r="38"/><circle cx="50" cy="50" r="24"/>
     <path d="M50 6 L55 45 L94 50 L55 55 L50 94 L45 55 L6 50 L45 45 Z"/>
@@ -769,8 +771,8 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
   </div>
   <div class="hint" id="hint">拖动墨线就是进度 · 空格播放/暂停 · M 模式 · L 播放列表 · / 搜索</div>
 <script src="loading.js"></script>
-<script src="site_bg_live.js"></script>  <!-- 动态网站背景：Spine / Live2D（三页共用，正本 gallery_src/site_bg_live.js） -->
 </div>
+<!-- 音乐库页使用自己的海图背景（bgm_chart_bg.webp）；站点动态/水面背景只在其它页加载。 -->
 
 <!-- 播放列表：默认不挂 backdrop-filter（本页只允许播放器/搜索框/正在播放行三盒），
      用纸面半透 + 细边，和播放器的玻璃分工。 -->
@@ -780,7 +782,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
 </div>
 
 <script src="favorites.js"></script>
-<script src="water_bg.js"></script>   <!-- 水面背景（三页共用，正本 gallery_src/water_bg.js） -->
+<script src="water_bg.js"></script>
 <script>
 const P='';
 let T=[],view=[],queue=[],idx=-1,fU='',fS='',fA='',fE='',knownDur=0,fFav=false;
@@ -963,7 +965,7 @@ function render(){
       <span class="no">${String(i+1).padStart(3,'0')}</span>
       <span><span class="nm">${esc(name(t))}</span><span class="en">${esc(t.slug)}</span>${tags(t)}</span>
       <span class="mt">${mmss(t.dur)}<i>${mb(t.size)}</i></span>
-      <span class="favc">${window.Fav?Fav.btn('bgm',t.slug,name(t)):''}</span>
+      <span class="favc"><button class="rownext" data-i="${i}" type="button" title="下一首播放" aria-label="下一首播放">↳</button>${window.Fav?Fav.btn('bgm',t.slug,name(t)):''}</span>
       <button class="play" data-i="${i}" title="播放"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         <span class="eq"><u></u><u></u><u></u></span></button>
     </div>`).join(''):'<div class="empty">没有匹配的曲子</div>';
@@ -1069,6 +1071,27 @@ function syncPlayingRow(){
     const it=view[+r.dataset.i];
     r.classList.toggle('playing', !!it&&it.slug===curSlug);
   });
+}
+function flashRow(row){
+  if(!row) return;
+  row.classList.add('nextflash');
+  setTimeout(()=>row.classList.remove('nextflash'),650);
+}
+/* 主列表的「下一首播放」：没有队列就从这首开始；已有队列就插到当前曲之后。 */
+function addNextFromMain(i){
+  const t=view[i]; if(!t) return;
+  const row=document.querySelector('#list .row[data-i="'+i+'"]');
+  if(!queue.length){ queue=[t]; markQueueOrigin(); playQueue(0); flashRow(row); return; }
+  const curSlug=queue[idx]&&queue[idx].slug;
+  if(t.slug===curSlug){ flashRow(row); return; }
+  const at=queue.findIndex(x=>x.slug===t.slug);
+  if(at>=0){ queue.splice(at,1); if(at<idx) idx--; }
+  const insert=idx<0?0:idx+1;
+  queue.splice(insert,0,t);
+  idx=curSlug?queue.findIndex(x=>x.slug===curSlug):-1;
+  QREORDER=queueOrderDirty();
+  updateQOrderBtn(); renderQueue(); syncPlayingRow(); queueScrollSave();
+  flashRow(row);
 }
 function queueScrollSave(){
   const el=$('qlist'); if(!el) return;
@@ -1203,7 +1226,11 @@ tide.onpointerup=e=>{const f=at(e),d=total();
   const rip=$('rip');rip.setAttribute('cx',(f*W).toFixed(1));
   rip.classList.remove('go');void rip.offsetWidth;rip.classList.add('go')};
 
-$('list').onclick=e=>{const b=e.target.closest('[data-i]');if(b)playView(+b.dataset.i)};
+$('list').onclick=e=>{
+  const nb=e.target.closest('.rownext');
+  if(nb){ e.stopPropagation(); addNextFromMain(+nb.dataset.i); return; }
+  const b=e.target.closest('[data-i]'); if(b) playView(+b.dataset.i);
+};
 $('q').oninput=()=>{render()};
 $('pp').onclick=()=>{
   if(!A.paused){ A.pause(); return; }

@@ -40,6 +40,8 @@ ERRORS.log
 *.jpg
 *.jpeg
 *.webp
+# 例外：音乐库页的设计背景是前端资产，不是游戏导出（289KB WebP，出处见 TROUBLESHOOTING §190）
+!gallery_src/bgm_chart_bg.webp
 *.mp3
 *.wav
 *.ogg

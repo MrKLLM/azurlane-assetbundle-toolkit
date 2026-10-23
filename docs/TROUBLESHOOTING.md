@@ -12044,3 +12044,60 @@ hover title 和队列头出现 ⇒ 用户读成「只有三种、没有循环」
 
 **涉及**：`gallery_src/bgm.html`（队列事件/本地状态）、`gallery_src/bgm_chart.css`（把手/操作/
 卡图/播放器线稿）、`scripts/diag/bgm_page_probe.py`、`docs/WORKFLOWS.md` WF-58。
+
+## §190 音乐库二轮收敛：删装饰、专属海图背景、主列表下一首（2026-10-24）
+
+**需求**：用户圈掉页头的英文小标、坐标和左侧蜡封，要求「去掉一些元素」；背景换一张；
+主列表行也要能「下一首播放」；同时希望海图更文艺、播放器别那么生硬。
+
+**修法**：
+- 删除 `.kicker`（页头 SHIP'S LOG / 侧栏 CHART LEGEND）、`.coord`、`.waxseal` 三处装饰；
+  保留标题卡图、小罗盘和船账结构。`bgm_page_probe` 新增 `deco==0` 断言，防止又长回来。
+- 新增页面专属背景 `gallery_src/bgm_chart_bg.webp`（ImageGen 生成后裁掉底部水印，289KB）：
+  `.chartbg` 固定层 `center/cover`，3px 模糊 + 压暗/降饱和；音乐库页不再加载
+  `site_bg_live.js` / `water_bg.js`（其它页不受影响）。背景图是整页唯一图片，不加
+  backdrop-filter。
+- 背景上仍保留 `.chartlayer` 纸色薄雾、经纬网、海岸/深度数字/罗盘；左侧图例加一层 86%
+  纸面，账页表头也加 90% 纸条 —— 否则模糊海图上的小字会读不清。
+- 主列表每行在收藏星左侧新增 `↳`「下一首播放」：`addNextFromMain(i)` 把该曲插到当前
+  `idx+1`（已有则先摘掉再插，插前后按 slug 重定位当前曲）；队列为空时以该曲开始播放。
+  点击有 `.nextflash` 朱砂左边闪一下。
+
+**判据**：`bgm_page_probe.py`（1280×900 + 390×844）全绿，新增：
+专属背景 `fetch('bgm_chart_bg.webp')==200` 且 `.chartbg` 计算样式含该文件名；
+`deco==0`；`#list .rownext` 数 == 行数；点第 8 行 `↳` 后该曲在队列里位于当前曲之后且
+行有 `nextflash`。`deploy_gallery.py --check` 同 inode 15/15。
+
+**涉及**：`gallery_src/bgm.html`、`gallery_src/bgm_chart.css`、`gallery_src/bgm_chart_bg.webp`、
+`scripts/deploy_gallery.py`、`scripts/diag/bgm_page_probe.py`、`docs/WORKFLOWS.md` WF-58 / WF-60。
+
+## §191 水波回到音乐库：背景层 + 播放条水带，时间字号放大（2026-10-24）
+
+**现象**：换专属海图背景时把 `water_bg.js` 从音乐库页移除了，用户问「水波哪去了」；
+同时觉得播放条的数字太小，希望播放条里也能看到水的元素。
+
+**根因**：
+- 音乐库页不再引 `water_bg.js`；即使引回来，它的 `siteBgOn()` 也会因为用户设过站用背景
+  而把水面停掉。
+- `water_bg.js` 的水色从 `documentElement` 读 token；音乐库需要在浅色纸面上用墨绿浪花
+  （白色泡沫在米色纸上等于看不见），body 级覆盖传不到它。
+- 播放条时间只有 11px；纸面里只有墨线，没有水的形状。
+
+**修法**：
+- 音乐库页 `<body class="chart force-water">` 并重新引 `water_bg.js`；`water_bg.js` 增加
+  `forceWater` 例外（站用背景在**这一页**不藏水面），`bgColors()` 改读 `document.body`
+  以允许页面自定义水色。
+- 分层：`.chartbg`（z0）→ `#bgfx` 水面（z1，普通混合）→ `.chartlayer` 纸雾（z2）
+  → 内容（z3）；不加任何 backdrop-filter。浅色水色 = 墨绿/青灰，深色 = 浅青。
+- 播放器新增 `.barwater` 底部浪带（两层半透明波 + 白青波峰，16s 缓慢往返，减少动效时停），
+  进度条水面加厚、波峰/泡沫显形，播放针外套一圈青色涟漪；时间字号 15px（窄屏 12.5px）。
+- `water_bg_check.py` 支持 `force-water` 例外：音乐库设站用背景后仍断言 `raf=true`、canvas 不藏；
+  其它两页维持「设背景即停」的旧判据。
+
+**判据**：`bgm_page_probe.py` 2549×1403 / 390×844 全绿，含「水波层真的在跑」「划过海面后
+水波真的起浪（strokes>0, peak>0, frames>1）」；`water_bg_check.py --pages bgm.html,index.html,backgrounds.html`
+三页 PASS；`deploy_gallery.py --check` 15/15。
+
+**涉及**：`gallery_src/bgm.html`、`gallery_src/bgm_chart.css`、`gallery_src/bgm_chart_bg.webp`、
+`gallery_src/water_bg.js`、`scripts/diag/bgm_page_probe.py`、`scripts/diag/water_bg_check.py`、
+`.gitignore`、`docs/WORKFLOWS.md` WF-60。

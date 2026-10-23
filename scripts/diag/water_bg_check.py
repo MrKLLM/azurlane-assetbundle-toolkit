@@ -12,7 +12,8 @@
 四条判据（每页都跑一遍）：
   ① `WaterBg.stats().mode === 'gl'` 且 `host` 与 `hasCanvas` 都为真；
   ② 发可信鼠标移动后 `frames` 增加、`strokes>0`、`peak>0`（证明循环真的在画）；
-  ③ 设了站用背景 ⇒ 循环停（`raf=false`）且 canvas 被 CSS 藏掉（`display:none`）；
+  ③ 设了站用背景 ⇒ 普通页循环停（`raf=false`）且 canvas 被 CSS 藏掉（`display:none`）；
+     ⚠️ 音乐库页 `body.force-water` 例外：它有自己的海图背景，设站用背景后水面仍要跑；
   ④ 取消站用背景 ⇒ 循环自己回来（`raf=true`）—— 这条正是"取消背景之后海面不回来"那个老 bug 的判据。
      ⚠️ 取消这一步**走产品按钮**（`#clearBg`，2026-10-15 加的「去掉背景图」），没有该按钮的页才回落
      `SiteBg.clear()`；顺带查 ⑤ 按钮的置灰语义（设了背景必须可点、取消后必须置灰）。
@@ -140,17 +141,29 @@ def check_page(page, httpd_port, win):
             fails.append('② 划动后 strokes 没涨 ⇒ 指针没注进水场')
         if not st2['peak'] > 0:
             fails.append('② peak=0 ⇒ 场是平的，画不出东西')
-        # ③ 设站用背景 ⇒ 停循环 + canvas 被藏
+        # ③ 设站用背景：普通页让位（停循环 + 藏 canvas）；
+        #    音乐库（force-water）例外——它有自己的海图背景，水面要留在上面。
+        force = bool(ev("document.body.classList.contains('force-water')"))
         ev("window.SiteBg&&SiteBg.set({url:'/probe-not-exist.png',kind:'bg',key:'probe',label:'probe'})")
         time.sleep(0.6)
         st3 = json.loads(ev(STATS))
         disp = ev("(()=>{const c=document.querySelector('#bgfx canvas');"
                   "return c?getComputedStyle(c).display:'none';})()")
-        print(f'  设背景后: raf={st3["raf"]} · siteBg={st3["siteBg"]} · canvas display={disp}')
-        if st3['raf']:
-            fails.append('③ 设了站用背景但水面循环还在跑 ⇒ 白烧帧')
-        if disp != 'none':
-            fails.append(f'③ 设了站用背景但 canvas 没被藏（display={disp}）')
+        site_set = bool(ev("!!(window.SiteBg&&SiteBg.get())"))
+        print(f'  设背景后: raf={st3["raf"]} · siteBg={st3["siteBg"]} · '
+              f'force={force} · canvas display={disp}')
+        if not site_set:
+            fails.append('③ 站用背景没设成功（探针前置失败）')
+        if force:
+            if not st3['raf']:
+                fails.append('③ force-water 页设背景后水面不该停')
+            if disp == 'none':
+                fails.append('③ force-water 页设背景后 canvas 不该被藏')
+        else:
+            if st3['raf']:
+                fails.append('③ 设了站用背景但水面循环还在跑 ⇒ 白烧帧')
+            if disp != 'none':
+                fails.append(f'③ 设了站用背景但 canvas 没被藏（display={disp}）')
         # ④ 取消背景 ⇒ 循环自己回来。**优先走产品按钮**（有 #clearBg 的页），没有才回落 API ——
         #    直接调 SiteBg.clear() 验不到"按钮点了到底有没有用"这条。
         has_btn = bool(ev("!!document.getElementById('clearBg')"))
@@ -166,7 +179,9 @@ def check_page(page, httpd_port, win):
               f'raf={st4["raf"]} · siteBg={st4["siteBg"]}')
         if st4['siteBg']:
             fails.append('④ 取消背景没生效')
-        if not st4['raf']:
+        # force-water 页水面从头到尾都没停；取消后理应处于"平静"的 raf=false，
+        # 不能拿"已经停了"当失败。普通页才检查"停过的循环要自己回来"。
+        if not force and not st4['raf']:
             fails.append('④ 取消背景后水面没自己回来（老 bug：循环停在那不重启）')
         if has_btn and not ev("document.getElementById('clearBg').disabled"):
             fails.append('⑤ 取消后「去掉背景图」按钮没置灰（会让人以为还能再点）')

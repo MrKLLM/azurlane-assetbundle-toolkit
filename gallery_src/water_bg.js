@@ -69,7 +69,9 @@ function bgHex(h){ h=(h||'').trim();
   return [parseInt(s.slice(0,2),16)/255, parseInt(s.slice(2,4),16)/255, parseInt(s.slice(4,6),16)/255]; }
 function bgColors(){
   /* 颜色全部从 token 读 ⇒ 切主题只要重取一次，着色器不写死任何字面色。 */
-  const cs=getComputedStyle(document.documentElement);
+  /* 读到 body：主题 token 仍然从 :root 继承过来，但页面可以有自己的一套水色
+     （音乐库的海图纸面需要墨绿浪花，白泡沫在浅纸上等于看不见）。 */
+  const cs=getComputedStyle(document.body);
   BG.P = { foam:bgHex(cs.getPropertyValue('--w-foam')), glint:bgHex(cs.getPropertyValue('--w-glint')),
            deep:bgHex(cs.getPropertyValue('--w-deep')),
            gain:+(cs.getPropertyValue('--w-gain')||8), foamT:+(cs.getPropertyValue('--w-foamth')||0.010),
@@ -262,7 +264,10 @@ window.addEventListener('pointermove',e=>{
 },{passive:true});
 window.addEventListener('pointerdown',e=>{ bgWake(e.clientX,e.clientY,true); },{passive:true});
 window.addEventListener('blur',()=>{ BG.last=null; });
-const siteBgOn=()=>!!(window.SiteBg&&SiteBg.get());
+/* 音乐库页有自己的海图背景，要在这层上面保留水波；给它一个显式开关，
+   其它页仍然遵守「设了站用背景就让位」的既有规则。 */
+const forceWater=()=>document.body.classList.contains('force-water');
+const siteBgOn=()=>!forceWater()&&!!(window.SiteBg&&SiteBg.get());
 function bgSync(){
   const h=document.getElementById('bgfx'); if(!h) return;
   /* 「减少动效」与「设了站用背景」是同一种状态：水面不是当前的背景 ⇒ 停循环 + 清屏。

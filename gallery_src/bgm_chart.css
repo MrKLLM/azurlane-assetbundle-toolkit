@@ -30,10 +30,13 @@ html[data-theme=light] body.chart{
   --ch-brass-2:#b4864b;
   --ch-red:#94443a;
   --ch-red-l:#e8d0c8;
-  --ch-wash:rgba(242,233,214,.38);
+  --ch-wash:rgba(242,233,214,.3);
   --ch-bar:rgb(240,229,207);
   --ch-shadow:0 18px 44px -30px rgba(20,38,45,.55);
   --ch-hi:rgba(255,255,255,.42);
+  /* 浅色纸面上的水波改成墨绿，不用白泡沫（白浪在米色纸上等于看不见） */
+  --w-foam:#3e6d74; --w-glint:#7aa6a2; --w-deep:#2a4f5a;
+  --w-alpha:1; --w-gain:14; --w-foamth:.005;
 }
 html[data-theme=dark] body.chart{
   --ch-deep:#0a1418;
@@ -51,10 +54,12 @@ html[data-theme=dark] body.chart{
   --ch-brass-2:#8e6c3c;
   --ch-red:#c9715e;
   --ch-red-l:#3b211d;
-  --ch-wash:rgba(7,17,21,.52);
+  --ch-wash:rgba(7,17,21,.42);
   --ch-bar:rgb(24,38,44);
   --ch-shadow:0 18px 44px -30px rgba(0,0,0,.9);
   --ch-hi:rgba(232,223,202,.18);
+  --w-foam:#9ed3d8; --w-glint:#d7f2ef; --w-deep:#2a6470;
+  --w-alpha:1; --w-gain:13; --w-foamth:.006;
 }
 body.chart{
   --ch-serif:'Songti SC','STSong','Source Han Serif SC','Noto Serif SC','Iowan Old Style',Georgia,'Times New Roman',serif;
@@ -67,8 +72,20 @@ body.chart{
 }
 body.chart .amb{display:none!important}
 
-/* ── 海图层：动态背景仍在下面，这一层只压纸色与经纬网 ───────────────── */
-.chartlayer{position:fixed;inset:0;z-index:1;pointer-events:none;overflow:hidden;
+/* ── 海图背景：音乐库页自己的图，不依赖站点背景设置 ───────────────────── */
+.chartbg{position:fixed;inset:-10px;z-index:0;pointer-events:none;opacity:.68;
+  background:url('bgm_chart_bg.webp') center/cover no-repeat #0b1418;
+  filter:blur(3px) brightness(.62) saturate(.9);transform:scale(1.03)}
+html[data-theme=light] .chartbg{opacity:.6;filter:blur(3px) brightness(.62) saturate(.8)}
+
+/* 水波回到音乐库：水面层在背景图之上，用 screen 混合只加浪花/高光，
+   不把下面的海图盖死。站用背景的隐藏规则在这里被本页显式放行。 */
+body.chart #bgfx{z-index:1;mix-blend-mode:normal;opacity:1}
+body.chart #bgfx .glow{opacity:.22!important}
+html.has-sitebg body.chart #bgfx canvas{display:block!important}
+
+/* ── 海图层：压在背景图上的纸色薄雾与经纬网 ─────────────────────────── */
+.chartlayer{position:fixed;inset:0;z-index:2;pointer-events:none;overflow:hidden;
   background:
     radial-gradient(120% 88% at 50% -10%,
       color-mix(in srgb,var(--ch-paper) 28%,transparent),transparent 64%),
@@ -78,7 +95,7 @@ body.chart .amb{display:none!important}
   background-image:
     repeating-linear-gradient(0deg,transparent 0 63px,var(--ch-rule) 63px 64px),
     repeating-linear-gradient(90deg,transparent 0 63px,var(--ch-rule) 63px 64px);
-  opacity:.55;
+  opacity:.38;
   -webkit-mask-image:linear-gradient(180deg,transparent,#000 10%,#000 90%,transparent);
   mask-image:linear-gradient(180deg,transparent,#000 10%,#000 90%,transparent)}
 .chartlayer .frame{position:absolute;inset:16px;border:1px solid var(--ch-rule-2)}
@@ -102,7 +119,7 @@ body.chart header{position:sticky;top:0;z-index:30;display:flex;align-items:cent
   flex-wrap:wrap;padding:13px 24px;border:0;border-bottom:1px solid var(--ch-rule-2);
   background:
     repeating-linear-gradient(90deg,var(--ch-rule) 0 1px,transparent 1px 48px) bottom/100% 5px no-repeat,
-    color-mix(in srgb,var(--ch-paper) 90%,transparent);
+    color-mix(in srgb,var(--ch-paper) 96%,transparent);
   box-shadow:none;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 body.chart header::before,body.chart header::after{display:none!important}
 body.chart header>*{position:relative;z-index:1}
@@ -112,14 +129,10 @@ body.chart .mast::before,body.chart .mast::after{content:'';position:absolute;wi
   border:1px solid var(--ch-brass);opacity:.75}
 body.chart .mast::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
 body.chart .mast::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
-body.chart .kicker{font:600 9px/1 var(--ch-sans);letter-spacing:.26em;color:var(--ch-brass);
-  text-transform:uppercase;white-space:nowrap}
 body.chart header h1{font-family:var(--ch-serif);font-size:27px;font-weight:600;
   line-height:1.05;letter-spacing:.08em;color:var(--ch-ink);white-space:nowrap}
 body.chart header .sub{font-family:var(--ch-mono);font-size:10px;line-height:1.5;
   letter-spacing:.05em;color:var(--ch-ink-3);white-space:nowrap;margin-left:4px}
-body.chart .coord{font-family:var(--ch-mono);font-size:9px;letter-spacing:.14em;
-  color:var(--ch-brass);white-space:nowrap;opacity:.9}
 body.chart .chartmark{width:34px;height:34px;color:var(--ch-brass);opacity:.8;flex:none}
 body.chart .chartmark circle,body.chart .chartmark path{fill:none;stroke:currentColor;stroke-width:1.2}
 body.chart a.back{font-size:11px;letter-spacing:.06em;color:var(--ch-ink-2);text-decoration:none;
@@ -136,10 +149,12 @@ body.chart .opt button:hover{background:color-mix(in srgb,var(--ch-brass) 10%,tr
 body.chart .opt button.on{background:var(--ch-ink);color:var(--ch-paper);box-shadow:none}
 
 /* ── 页面 ────────────────────────────────────────────────────────────── */
-body.chart .wrap{position:relative;z-index:2;max-width:1240px;margin:0 auto;padding:26px 24px 0;
+body.chart .wrap{position:relative;z-index:3;max-width:1240px;margin:0 auto;padding:26px 24px 0;
   display:grid;grid-template-columns:268px minmax(0,1fr);gap:38px;align-items:start}
 body.chart .legend{position:sticky;top:86px;max-height:calc(100vh - 240px);overflow:auto;
-  padding-right:20px;border-right:1px solid var(--ch-rule);
+  padding:14px 16px 12px;border:1px solid var(--ch-rule);border-radius:4px;
+  background:color-mix(in srgb,var(--ch-paper) 86%,transparent);
+  box-shadow:0 16px 34px -30px color-mix(in srgb,var(--ch-ink) 55%,transparent);
   scrollbar-width:thin;scrollbar-color:var(--ch-rule-2) transparent}
 body.chart .legend::-webkit-scrollbar{width:5px}
 body.chart .legend::-webkit-scrollbar-thumb{background:var(--ch-rule-2)}
@@ -147,14 +162,6 @@ body.chart .legend-head{position:relative;display:flex;flex-direction:column;gap
   margin-bottom:12px;border-bottom:1px solid var(--ch-rule-2)}
 body.chart .legend-head b{font-family:var(--ch-serif);font-size:16px;font-weight:600;
   letter-spacing:.08em;color:var(--ch-ink)}
-body.chart .waxseal{position:absolute;right:0;top:-4px;width:34px;height:34px;border-radius:50%;
-  display:grid;place-items:center;background:var(--ch-red);color:var(--ch-paper);
-  font:500 16px/1 var(--ch-serif);font-style:normal;transform:rotate(-9deg);
-  box-shadow:inset 0 0 0 3px color-mix(in srgb,var(--ch-paper) 22%,transparent),
-    inset 0 0 0 5px color-mix(in srgb,var(--ch-red) 82%,#000 18%),
-    0 3px 7px -3px color-mix(in srgb,var(--ch-red) 60%,transparent);opacity:.92}
-body.chart .waxseal::before{content:'';position:absolute;inset:4px;border:1px dashed
-  color-mix(in srgb,var(--ch-paper) 55%,transparent);border-radius:50%}
 body.chart .ledger{min-width:0;width:100%}
 body.chart .tools{position:relative;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
   margin-bottom:18px;border-bottom:1px solid var(--ch-rule-2)}
@@ -208,8 +215,10 @@ body.chart .legend #fEvent{width:100%;max-width:none;margin-top:3px}
 
 /* ── 账页表头与曲目行 ───────────────────────────────────────────────── */
 body.chart .ledger-head{display:grid;grid-template-columns:44px 1fr 72px 92px 44px;gap:18px;
-  align-items:end;padding:0 16px 7px;border-bottom:1px solid var(--ch-rule-2);
-  font:600 8.5px/1 var(--ch-sans);letter-spacing:.2em;color:var(--ch-brass);text-transform:uppercase}
+  align-items:end;padding:8px 16px 7px;border:1px solid var(--ch-rule);
+  border-bottom:1px solid var(--ch-rule-2);border-radius:2px 2px 0 0;
+  background:color-mix(in srgb,var(--ch-paper) 90%,transparent);
+  font:600 8.5px/1 var(--ch-sans);letter-spacing:.2em;color:var(--ch-ink-2);text-transform:uppercase}
 body.chart .ledger-head span:nth-child(3),body.chart .ledger-head span:nth-child(4){text-align:right}
 body.chart .row{display:grid;grid-template-columns:44px 1fr 72px 92px 44px;gap:18px;align-items:center;
   margin:0;padding:13px 16px;border:0;border-bottom:1px solid var(--ch-rule);
@@ -261,11 +270,19 @@ body.chart .play svg{width:13px;height:13px;fill:currentColor}
 body.chart .row.playing .play{background:var(--ch-red);border-color:var(--ch-red);color:var(--ch-paper)}
 body.chart .row.playing .eq{display:flex;color:var(--ch-paper)}
 body.chart .eq u{width:2px;background:currentColor}
+body.chart .row .favc{display:flex;align-items:center;justify-content:flex-end;gap:4px}
 body.chart .favc .favbtn{width:23px;height:23px;border:1px solid var(--ch-rule-2);border-radius:0;
   background:transparent;color:var(--ch-brass);box-shadow:none;transition:none}
 body.chart .favc .favbtn:hover{transform:none;color:var(--ch-red);border-color:var(--ch-red)}
 body.chart .favc .favbtn.on{background:var(--ch-brass);border-color:var(--ch-brass);color:var(--ch-paper)}
 body.chart .favc .favbtn svg{width:11px;height:11px}
+body.chart .rownext{width:20px;height:20px;border:1px solid transparent;border-radius:0;
+  background:transparent;color:var(--ch-ink-3);font:12px/1 var(--ch-sans);cursor:pointer;padding:0;
+  display:grid;place-items:center;opacity:.5;transition:opacity .14s var(--ease-ios),
+    color .14s var(--ease-ios),border-color .14s var(--ease-ios)}
+body.chart .row:hover .rownext,body.chart .row:focus-within .rownext{opacity:1;color:var(--ch-red);
+  border-color:var(--ch-rule-2)}
+body.chart .row.nextflash{box-shadow:inset 3px 0 0 var(--ch-red)!important}
 body.chart .empty{padding:52px 10px;text-align:center;color:var(--ch-ink-3);
   font-family:var(--ch-serif);font-style:italic;font-size:14px;line-height:1.9}
 
@@ -293,6 +310,14 @@ body.chart .bar .barcompass circle,body.chart .bar .barcompass path{
 body.chart .bar .barwave{position:absolute;left:12px;right:12px;top:3px;width:calc(100% - 24px);height:5px;
   z-index:2;color:var(--ch-brass);opacity:.72;pointer-events:none;overflow:visible}
 body.chart .bar .barwave path{fill:none;stroke:currentColor;stroke-width:1.1;vector-effect:non-scaling-stroke}
+body.chart .bar .barwater{position:absolute;left:-1%;bottom:0;width:102%;height:18px;z-index:0;
+  opacity:.62;pointer-events:none;animation:barTide 16s ease-in-out infinite alternate}
+body.chart .bar .barwater .bw1{fill:color-mix(in srgb,var(--ch-sea) 24%,transparent)}
+body.chart .bar .barwater .bw2{fill:color-mix(in srgb,var(--ch-sea) 12%,transparent)}
+body.chart .bar .barwater .bwcrest{fill:none;stroke:color-mix(in srgb,var(--ch-sea) 58%,#fff);
+  stroke-width:1;opacity:.5;vector-effect:non-scaling-stroke}
+@keyframes barTide{from{transform:translateX(-1.2%)}to{transform:translateX(1.2%)}}
+@media (prefers-reduced-motion:reduce){body.chart .bar .barwater{animation:none!important}}
 body.chart .bar::after{display:block!important;content:'';position:absolute;left:0;right:0;bottom:0;height:9px;
   z-index:0;pointer-events:none;
   background:radial-gradient(circle at 8px 9px,transparent 0 6px,
@@ -321,8 +346,9 @@ body.chart .bar .modes button.on::after{content:'';position:absolute;left:9px;ri
 body.chart .bar .modes .mhint{margin-left:auto;font-family:var(--ch-serif);font-style:italic;
   font-size:10px;color:var(--ch-ink-3);white-space:nowrap}
 body.chart .seekrow{display:flex;align-items:center;gap:10px;margin:0;padding:8px 18px 0}
-body.chart .seekrow .tm{flex:none;min-width:38px;text-align:left;font-family:var(--ch-serif);
-  font-style:italic;font-size:11px;color:var(--ch-ink-2);letter-spacing:.03em}
+body.chart .seekrow .tm{flex:none;min-width:54px;text-align:left;font-family:var(--ch-serif);
+  font-size:15px;font-weight:600;color:var(--ch-ink);letter-spacing:.04em;
+  font-variant-numeric:tabular-nums}
 body.chart .seekrow #t1{text-align:right}
 body.chart .seekrow .tide{flex:1;margin:0}
 body.chart .bar .top{display:flex;align-items:center;gap:11px;padding:5px 18px 9px}
@@ -375,9 +401,10 @@ body.chart .disc.on{animation-play-state:running}
 @media (prefers-reduced-motion:reduce){body.chart .disc{animation:none!important}}
 
 /* 进度：一条墨线 + 朱砂针；水波退成极淡的墨晕 */
-body.chart .tide{height:24px;margin:0;border:0;border-bottom:1px solid var(--ch-rule-2);
-  border-radius:0;
+body.chart .tide{height:30px;margin:0;border:0;border-bottom:1px solid var(--ch-rule-2);
+  border-radius:2px;
   background:
+    linear-gradient(180deg,transparent 0 42%,color-mix(in srgb,var(--ch-sea) 16%,transparent)),
     repeating-linear-gradient(90deg,transparent 0 calc(10% - 1px),
       color-mix(in srgb,var(--ch-rule) 80%,transparent) calc(10% - 1px) 10%) left bottom/100% 5px no-repeat,
     transparent;
@@ -387,18 +414,23 @@ body.chart .tide svg{border-radius:0;clip-path:none;overflow:visible}
 body.chart .tide::after{background:linear-gradient(90deg,transparent,
   color-mix(in srgb,var(--ch-red) 38%,transparent) 12%,
   color-mix(in srgb,var(--ch-red) 38%,transparent) 88%,transparent)}
-body.chart .tide .trough{fill:transparent}
-body.chart .tide .w1{fill:var(--ch-sea);opacity:.34}
-body.chart .tide .w2{fill:var(--ch-brass);opacity:.12}
-body.chart .tide .crest{stroke:var(--ch-red);stroke-width:1;fill:none;filter:none;opacity:.8}
-body.chart .tide .spec{display:none}
+body.chart .tide .trough{fill:color-mix(in srgb,var(--ch-sea) 9%,transparent)}
+body.chart .tide .w1{fill:color-mix(in srgb,var(--ch-sea) 70%,transparent);opacity:.58}
+body.chart .tide .w2{fill:color-mix(in srgb,var(--ch-sea) 38%,transparent);opacity:.38}
+body.chart .tide .crest{stroke:color-mix(in srgb,var(--ch-sea) 82%,var(--ch-paper));
+  stroke-width:1.5;fill:none;filter:none;opacity:.9}
+body.chart .tide .spec{display:block;stroke:color-mix(in srgb,#fff 65%,transparent);
+  stroke-width:.8;fill:none;opacity:.5}
 body.chart .tide .bead{display:none}
-body.chart .tide .rip{stroke:var(--ch-red);stroke-width:1}
+body.chart .tide .rip{stroke:var(--ch-sea);stroke-width:1.4;opacity:.8}
 body.chart .tide .rail{height:2px;background:var(--ch-rule)}
-body.chart .tide .rail em{background:color-mix(in srgb,var(--ch-sea) 35%,transparent);border-radius:0}
+body.chart .tide .rail em{background:color-mix(in srgb,var(--ch-sea) 45%,transparent);border-radius:0}
 body.chart .tide .rail i{background:var(--ch-red);box-shadow:none;border-radius:0}
-body.chart .tide .rail b{width:2px;height:13px;background:var(--ch-red);border:0;border-radius:0;
-  box-shadow:none;transform:translate(-50%,-50%) rotate(18deg)}
+body.chart .tide .rail b{position:relative;width:2px;height:14px;background:var(--ch-red);border:0;
+  border-radius:0;box-shadow:none;transform:translate(-50%,-50%) rotate(18deg)}
+body.chart .tide .rail b::after{content:'';position:absolute;left:50%;top:50%;width:15px;height:15px;
+  border:1px solid var(--ch-sea);border-radius:50%;transform:translate(-50%,-50%);
+  opacity:.65;pointer-events:none}
 body.chart .tide:hover .rail b{width:2px;height:16px}
 body.chart .tide .bub{font-family:var(--ch-serif);font-style:italic;color:var(--ch-ink-2)}
 
@@ -469,8 +501,9 @@ body.chart .qact.qdel{font-size:14px}
 /* ── 窄屏 ────────────────────────────────────────────────────────────── */
 @media (max-width:980px){
   body.chart .wrap{display:block;max-width:1120px;padding:18px 16px 0}
-  body.chart .legend{position:static;max-height:none;overflow:visible;padding:0;margin-bottom:10px;
-    border-right:0}
+  body.chart .legend{position:static;max-height:none;overflow:visible;padding:12px;
+    margin-bottom:10px;border:1px solid var(--ch-rule);border-radius:4px;
+    background:color-mix(in srgb,var(--ch-paper) 88%,transparent)}
   body.chart .legend-head{display:none}
   body.chart .legend .grp{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;
     margin:0 0 11px;padding-bottom:8px}
@@ -482,7 +515,7 @@ body.chart .qact.qdel{font-size:14px}
   body.chart{padding-bottom:196px}
   body.chart header{padding:10px 14px;gap:10px}
   body.chart header h1{font-size:22px}
-  body.chart .kicker,body.chart .coord,body.chart .chartmark{display:none}
+  body.chart .chartmark{display:none}
   body.chart header .sub{margin-left:0;flex:1 1 100%;min-width:0;font-size:9px;
     white-space:normal;overflow-wrap:anywhere;line-height:1.45}
   body.chart .wrap{padding:16px 12px 0}
@@ -490,7 +523,7 @@ body.chart .qact.qdel{font-size:14px}
   body.chart .legend .grp{min-width:0;gap:8px}
   body.chart .legend .chip{white-space:normal;overflow-wrap:anywhere}
   body.chart .ledger-head{display:none}
-  body.chart .row{grid-template-columns:28px minmax(0,1fr) 52px 22px 28px;gap:6px;padding:10px 8px}
+  body.chart .row{grid-template-columns:28px minmax(0,1fr) 52px 46px 28px;gap:6px;padding:10px 8px}
   body.chart .row .en,body.chart .tag{overflow-wrap:anywhere;white-space:normal}
   body.chart .row.playing{padding-left:7px}
   body.chart .row .nm{font-size:14px}
@@ -508,7 +541,7 @@ body.chart .qact.qdel{font-size:14px}
   body.chart .bar .modes button{font-size:10px;padding:4px 7px}
   body.chart .bar .modes button.on::after{left:7px;right:7px}
   body.chart .seekrow{padding:6px 10px 0}
-  body.chart .seekrow .tm{min-width:30px;font-size:9.5px}
+  body.chart .seekrow .tm{min-width:42px;font-size:12.5px}
   body.chart .bar .top{display:grid;grid-template-columns:32px 42px 32px minmax(0,1fr) 30px;
     gap:6px;padding:3px 10px 7px}
   body.chart .bar .vol,body.chart .bar .disc{display:none}

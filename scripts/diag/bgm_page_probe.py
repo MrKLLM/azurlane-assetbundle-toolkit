@@ -174,7 +174,9 @@ def main():
         d = ev(r"""(async()=>{
           const t=ms=>new Promise(r=>setTimeout(r,ms));
           for(let i=0;i<80 && !document.querySelector('.row');i++) await t(250);
-          return {rows:document.querySelectorAll('.row').length,
+          await t(1100);
+          const water=window.WaterBg?WaterBg.stats():null;
+          return {rows:document.querySelectorAll('.row').length, water,
                   sub:(document.getElementById('sub')||{}).textContent||'',
                   brand:getComputedStyle(document.documentElement).getPropertyValue('--brand').trim(),
                   ease:getComputedStyle(document.documentElement).getPropertyValue('--ease-ios').trim(),
@@ -185,6 +187,10 @@ def main():
                           .backdropFilter||getComputedStyle(document.querySelector('.row')||document.body).backdropFilter,
                   tagRows:document.querySelectorAll('.row .tag').length,
                   chips:document.querySelectorAll('.chip').length,
+                  rowNext:document.querySelectorAll('#list .rownext').length,
+                  deco:document.querySelectorAll('.kicker,.coord,.waxseal').length,
+                  bgImg:getComputedStyle(document.querySelector('.chartbg')||document.body).backgroundImage,
+                  bgStatus:(await fetch('bgm_chart_bg.webp')).status,
                   vw:innerWidth, sw:document.documentElement.scrollWidth,
                   err:(document.getElementById('list')||{}).textContent||''};
         })()""")
@@ -197,6 +203,13 @@ def main():
                 f"theme.css 生效：--brand={d['brand']!r} --ease-ios={d['ease'][:20]!r}")
             say(bool(d.get('paper')) and 'gradient' in str(d.get('chartBg', '')),
                 f"海图纸色 token + 海图层渐变生效: {d.get('paper')!r} / {str(d.get('chartBg'))[:52]}")
+            say(d.get('bgStatus') == 200 and 'bgm_chart_bg.webp' in str(d.get('bgImg', '')),
+                f"专属海图背景已加载: {d.get('bgStatus')} / {str(d.get('bgImg'))[:64]}")
+            say(d.get('deco') == 0, f"页头英文小标/坐标/蜡封已移除（残留 {d.get('deco')}）")
+            say(d.get('rowNext') == d.get('rows'), f"主列表每行都有下一首播放（{d.get('rowNext')}）")
+            say(isinstance(d.get('water'), dict) and d['water'].get('hasCanvas')
+                and d['water'].get('frames', 0) > 0 and d['water'].get('siteBg') is False,
+                f"水波层真的在跑（force-water 覆盖站用背景）: {d.get('water')}")
             say(d['tagRows'] >= 200, f"带归属徽章的行 {d['tagRows']} 个（出处/专辑/舰名）")
             say(d['chips'] >= 15, f"筛选 chip {d['chips']} 个（用途/出处/专辑三组）")
             say(d['sw'] <= d['vw'] + 1, f"无横向溢出（scrollWidth {d['sw']} / viewport {d['vw']}）")
@@ -377,6 +390,26 @@ def main():
                 say(d3b.get('saved', 0) > 0 and abs(d3b.get('reopened', 0) - d3b.get('saved', 0)) <= 2,
                     f"关闭再打开记住滚动位置（{d3b.get('saved')} → {d3b.get('reopened')}）")
                 say(d3b.get('reset') == 0, f"顶部复位键回到顶部（scrollTop={d3b.get('reset')}）")
+                d3c = ev(r"""(async()=>{
+                  const t=ms=>new Promise(r=>setTimeout(r,ms));
+                  const rows=[...document.querySelectorAll('#list .row')];
+                  const pick=rows[7].querySelector('.nm').textContent.trim();
+                  rows[7].querySelector('.rownext').click(); await t(80);
+                  const flash=rows[7].classList.contains('nextflash');
+                  document.getElementById('playlistBtn').click(); await t(240);
+                  const q=[...document.querySelectorAll('#qlist .qrow')];
+                  const on=q.findIndex(r=>r.classList.contains('on'));
+                  const idx=q.findIndex(r=>r.querySelector('.qt').firstChild.textContent.trim()===pick);
+                  document.getElementById('qclose').click();
+                  return {pick,flash,on,idx};
+                })()""")
+                if isinstance(d3c, dict) and '__err' in d3c:
+                    say(False, f"主列表下一首 JS 异常: {d3c['__err']}")
+                else:
+                    say(d3c.get('flash'), f"主列表「下一首播放」有落点反馈（{d3c.get('pick')}）")
+                    say(d3c.get('idx') == d3c.get('on', -1) + 1,
+                        f"主列表曲目插到当前曲之后（当前 {d3c.get('on')}，"
+                        f"新位置 {d3c.get('idx')}）")
 
         print('== 筛选与搜索 ==')
         d4 = ev(r"""(async()=>{
@@ -416,6 +449,19 @@ def main():
             say(False, f"筛选 JS 异常: {d4}")
 
         print('== 两套主题截图（交人看，不由脚本判审美）==')
+        # 水波只在指针划过时起浪；先真的划两笔，再截昼图，才能证明"水波回来了"。
+        w = ev(r"""(async()=>{
+          const t=ms=>new Promise(r=>setTimeout(r,ms));
+          const fire=(ty,x,y)=>window.dispatchEvent(new PointerEvent(ty,{bubbles:true,
+            clientX:x,clientY:y,pointerId:9,isPrimary:true}));
+          fire('pointerdown',140,360);
+          for(let i=0;i<24;i++){ fire('pointermove',140+i*34,360+Math.sin(i/2)*26); await t(22); }
+          fire('pointerup',970,360); await t(220);
+          return window.WaterBg?WaterBg.stats():null;
+        })()""")
+        say(isinstance(w, dict) and w.get('strokes', 0) > 0 and w.get('peak', 0) > 0
+            and w.get('frames', 0) > 1,
+            f"划过海面后水波真的起浪: {w}")
         say(os.path.getsize(shot('light')) > 20000, f"昼：{shot('light')}")
         # 潮水特写：拖到 42% 再裁 #bar，2.2 倍放大 —— 全页图里那条只有 46px 高，看不出波
         ev("""(()=>{const el=document.getElementById('tide'),r=el.getBoundingClientRect();

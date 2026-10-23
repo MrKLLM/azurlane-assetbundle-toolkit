@@ -5361,6 +5361,9 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
   顶部 `↺` 复位到顶；拖动后顶部出现 `⇅`，按 `QORIG` 恢复原始顺序（不是“回第 1 首”）。
 - 行尾操作按钮默认 50% 可见、悬停/聚焦 100%；`qhead` 提示「拖动排序 · 悬停行可操作」。
   这些动作不进入 `queue`/`idx` 之外的持久层，刷新页面后队列仍按播放时的快照重建。
+- **主列表**每行收藏星左侧也有 `↳`「下一首播放」：`addNextFromMain(i)` 把该曲插到当前
+  `idx+1`；已有则先摘再插，插前后按当前曲 slug 重定位；队列空时以该曲开始播放。
+  点击有 `.nextflash` 左边闪一下。`bgm_page_probe` 的 d3c 直接点主列表第 8 行验证。
 
 **判据**
 - 队列打开且行数 == 当前 queue；当前行高亮；点第 N 行切到第 N 首；关闭后不残留。
@@ -5460,6 +5463,12 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 - `favorites.js` 的 `html.has-sitebg` 会注入 `blur(16/24px)` 与玻璃底，必须用更高特异度 +
   `!important` 压回纸面：`.grp .chip`（不能只写 `.chip`，`:is()` 的权重会打平）、
   `.tools input.q`、`header .opt`。**只压控件，不压 `body` 的背景图**——用户要保留动态背景。
+- 页面专属背景走 `gallery_src/<page>_bg.webp` + `deploy_gallery.py` 的 FILES；
+  背景层 `filter:blur()` 只作用于图片本身（不是 backdrop-filter），内容区仍零玻璃。
+  音乐库页不再加载 `site_bg_live.js`，但**保留 `water_bg.js`**：`body.force-water`
+  让水面在站用背景之上继续跑；水色改由 body token 控制（浅色纸面用墨绿浪花）。
+  分层固定为 `.chartbg(z0) < #bgfx(z1) < .chartlayer(z2) < 内容(z3)`，
+  `water_bg_check.py` 对 force-water 页按“设背景后仍 raf=true、canvas 不藏”判。
 - 两档视口都验：`bgm_page_probe.py` 默认 1280×900 + `--win 390,844`（走 CDP
   `Emulation.setDeviceMetricsOverride`）。Windows Chrome 有最小窗口宽度，只写
   `--window-size=390,844` 会把布局仍是 500px 的页面裁掉右边，看起来像横向溢出。
