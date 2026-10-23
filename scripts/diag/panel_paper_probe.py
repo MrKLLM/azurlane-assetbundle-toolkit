@@ -159,6 +159,12 @@ def main():
             if (pg.ev("typeof LOADED!=='undefined'&&LOADED") or False):
                 break
             time.sleep(0.5)
+        # 首屏必须落到机器真正停的那一步；固定从第 1 步打开会让全部完成的人
+        # 先看到"先确认权威输入还在位"（2026-10-23 §187）。这里必须在下面
+        # 五步点击循环之前量，否则量到的是探针自己切过去的步骤。
+        chk('首屏落在当前步（不是固定第 1 步）',
+            (pg.ev("step") or 0) == (pg.ev("__probe.work()") or 0),
+            f'step={pg.ev("step")} work={pg.ev("__probe.work()")}')
 
         print('\n── 骨架与文案 ─────────────────────────────────')
         nstep = pg.ev("document.querySelectorAll('.snode').length")
@@ -554,14 +560,11 @@ def main():
         # 全绿时没有"待办"，界面改说「已跑完」——判据要同时接受两种状态，
         # 否则一轮跑完后探针全红（2026-10-17 实测）。
         view = 5 if work != 5 else 1
-        # “真跑完”= 阶段全绿 **且** 已发布皮肤表不比源旧（后者是第 2 步的活，
-        # 2026-10-17 §155：17/17 全绿但发布早于解析刷新，面板必须仍说“待办”）。
-        allpass = bool(pg.ev("(()=>{const st=window.__probe.state();"
-                             "const s=st.stages||[];"
-                             "if(!(s.length>0)) return false;"
-                             "if((st.skin_gap||{}).gap>0) return false;"
-                             "return s.every(x=>{const r=(st.state||{})[x.key];"
-                             "return !!r && r.ok && !/未签字|--approve/.test(r.detail||'')})})()"))
+        # “真跑完”直接问页面自己的判据，别在探针里重写一份：
+        # `allStagesPass()` 会把「整步 idle、后面已有进展」的前缀算作已完成（§184），
+        # 探针旧版按原始 verdict 逐条要求 ok ⇒ 01/02 为 — 时误判成"没跑完"，
+        # 于是拿"待办"文案去量一个"已跑完"的界面（2026-10-23 §187 当场抓到）。
+        allpass = bool(pg.ev("allStagesPass()"))
         pg.ev(f"document.querySelectorAll('.snode')[{view-1}].click()")
         time.sleep(0.45)
         vn = pg.ev("!document.getElementById('viewnote').hidden")
@@ -579,6 +582,19 @@ def main():
             bool(pg.ev("/^(待办|已跑完) \\d\\d$/"
                        ".test(document.getElementById('railCur').textContent.trim())")),
             pg.ev("document.getElementById('railCur').textContent"))
+        if allpass:
+            # 全绿时四个入口必须都指向结果步：不能再让人去重查/重解，也不能把
+            # "回第 1 步"伪装成"再来一轮"（2026-10-23 §187）。
+            a1 = pg.ev("askOf(1).ask") or ''
+            a2 = pg.ev("askOf(2).ask") or ''
+            chk('全绿时第 1/2 步说明这一轮没重新检查',
+                '没重新检查' in a1 and '没重新检查' in a2, f'{a1} / {a2}')
+            chk('全绿时下一步 CTA 指向第 5 步',
+                pg.ev("nextStepAct(4).act.to") == 5,
+                str(pg.ev("nextStepAct(4).act.to")))
+            chk('右栏按钮文案与真实目标一致',
+                '去看第 5 步' in (pg.ev(
+                    "document.getElementById('bBackCur').textContent") or ''))
         pg.shot('preview.png')
         pg.ev("document.getElementById('bBackCur').click()")
         time.sleep(0.4)

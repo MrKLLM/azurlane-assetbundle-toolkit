@@ -507,6 +507,41 @@ def t_fingerprint_covers_cfg():
         print(f'       （盘上指纹 {fp_on_disk}）')
 
 
+def t_gamecfg_stamp_excludes_bg():
+    """`bg_*` 是 labels / 背景标注侧的产物，不得进入上游 `cfg=` 指纹（§186）。
+
+    真实事故：`labels` 在 `swap-in`/`derive` 之后写 `bg_series_labels.json`，
+    旧 `gamecfg_stamp()` 把它算进 `cfg=` ⇒ 日志 4/4、面板 2/4，前两步的结论被
+    自己的下游产物反向作废。这里用临时目录锁住两头：bg_* 改动**不**动指纹，
+    真正的配置表改动**必须**动指纹。
+    """
+    print('\n[11b] bg_* 产物不得进入 cfg= 指纹（§186）')
+    real_root = up.ROOT
+    d = tempfile.mkdtemp(prefix='stamp_')
+    cfg = os.path.join(d, 'inputs', 'gamecfg')
+    os.makedirs(cfg)
+
+    def write(name, body):
+        with open(os.path.join(cfg, name), 'w', encoding='utf-8') as f:
+            f.write(body)
+
+    write('ship_skin_template.json', 'a')
+    write('bg_series_labels.json', 'b')
+    write('MANIFEST.json', 'c')
+    try:
+        up.ROOT = d
+        a = up.gamecfg_stamp()
+        write('bg_series_labels.json', 'changed')
+        b = up.gamecfg_stamp()
+        ck('bg_* 改动不改变 cfg= 指纹', a == b, f'{a} vs {b}')
+        write('ship_skin_template.json', 'changed')
+        c = up.gamecfg_stamp()
+        ck('真正的配置表改动仍会改变 cfg= 指纹', b != c, f'{b} vs {c}')
+    finally:
+        up.ROOT = real_root
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def t_state_stamp():
     """状态盖章必须用**逐阶段**指纹（§157 的写入端，2026-10-21 抓到）。
 
@@ -745,6 +780,7 @@ def main():
     t_freshness_key()
     t_device_down()
     t_fingerprint_covers_cfg()
+    t_gamecfg_stamp_excludes_bg()
     t_state_stamp()
     t_paintings_judge()
     t_spine_judge()

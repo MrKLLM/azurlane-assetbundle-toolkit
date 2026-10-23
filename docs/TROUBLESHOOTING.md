@@ -11956,3 +11956,34 @@ CTA「⚑ 换入正式区」、why 列出 swap-in/derive/labels/regress 并注�
 
 **涉及**：`scripts/update_pipeline.py`（`gamecfg_stamp`）、`scripts/diag/restamp_pipeline_state.py`、
 `docs/WORKFLOWS.md` WF-59。
+
+## §187 全部判绿后，四个入口仍把人指去重做（2026-10-23）
+
+**现象**：§186 修完后所有阶段判绿、第 5 步已显示「这次更新已经换完了」，但从别的入口看：
+打开控制台永远落在第 1 步，主屏写「先确认权威输入还在位」；第 2 步写「从源包重解配置表」
+（点下去约 7 分钟）；第 1~4 步的 CTA 都是「← 从第 1 步再来一轮」，实际只回到第 1 步；
+查看非当前步时右栏按钮写「去第 1 步」，onclick 却跳 `currentStep()`（全绿时是第 5 步）——
+文案与行为相反。这些都不是缺阶段，而是「完成态」没有共用同一个结果步。
+
+**根因**：`step`（正在看哪步）固定从 1 初始化；`askOf(1/2)` 的 idle 分支只看本步，不看
+`stepSkipped`；`nextStepAct()` 在 `nextWorkStep()==0` 时兜底成 `goto 1`；`bBackCur` 的文案
+全绿时写「去第 1 步」。四个入口各写一份「下一步」，修一个还剩三个。
+
+**修法**：
+- `FIRSTVIEW`：第一份有效状态到达时 `step=currentStep()`（全绿=5，正在跑=运行步），只做一次；
+- `askOf`：`!S.running && allStagesPass() && stepSkipped(n)` 时返回「第 n 步这一轮没重新检查」，
+  第 1 步保留只读「重查前置条件」，其余主按钮「去看第 5 步结果」；第 2 步明说不用再花 7 分钟；
+- `nextStepAct(nw==0)`：返回 `goto` 第 5 步（`stepNo('swap-in')`），不再「从第 1 步再来一轮」；
+- `bBackCur` 文案改为「去看第 5 步结果」，与 onclick 的 `currentStep()` 一致。
+**只有第 5 步的「开始新一轮」才回第 1 步**（它会归档状态），别把「回第 1 步」伪装成新一轮。
+
+**判据**：8796 探针（全部判绿的盘上状态）实测首屏 `step===5`、headline「这次更新已经换完了」；
+`askOf(1).ask` / `askOf(2).ask` 均为「第 N 步…这一轮没重新检查」；`nextStepAct(1..4).act.to===5`；
+第 1/2 步右栏按钮为「去看第 5 步结果」且点击后 `step===5`；等一个 8 秒轮询后手动点第 1 步仍停在
+第 1 步（自动定位只做一次）。8788 重启后同一组检查通过。`test_pipeline_gating.py` 新增 `[11b]`
+两条断言（`bg_*` 不改指纹 / 真表改指纹）全绿；`panel_paper_probe.py` 新增首屏定位 + 完成态
+三条断言，**96 PASS / 2 SKIP / 0 FAIL**（探针旧版自己按原始 verdict 判“跑完”，在 01/02 为 — 时会误红，
+已改为直接调用页面的 `allStagesPass()`）。
+
+**涉及**：`scripts/pipeline_panel.py`（FIRSTVIEW / askOf / nextStepAct / bBackCur / viewnote）、
+`scripts/diag/test_pipeline_gating.py`、`scripts/diag/panel_paper_probe.py`、`docs/WORKFLOWS.md` WF-59。

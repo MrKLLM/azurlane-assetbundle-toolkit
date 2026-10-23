@@ -3380,6 +3380,9 @@ let MY_BUILD='__BUILD__';   // 服务端把 PAGE 的哈希内联进来；改了�
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const inkWait=t=>'<span class="inkwait"><i></i><i></i><i></i><em>'+esc(t)+'</em></span>';
 let S=null, step=1, curJob=null, off=0, follow=true, timer=null, force=false;
+/* 首屏定位只做一次：以前固定从第 1 步打开，全部判绿后仍显示"先确认权威输入还在位"，
+   用户得自己找第 5 步（2026-10-23 实测）。拿到第一份有效状态后落到 currentStep()。 */
+let FIRSTVIEW=true;
 let SEA = false;   // 星野背景已退役（2026-10-17 纸本控制台）；变量保留只为不拆旧调用点
 let NIGHT = localStorage.getItem('panel.night')==='1';
 let RELOADED=false;   // 同一个 build 自刷新过一次就认输，别陷入 reload 循环
@@ -3872,6 +3875,13 @@ async function apiState(force){
     setTimeout(()=>location.replace('/'),350);
     return;
   }
+  /* 第一份有效状态到了：把视图落到机器真正停的那一步。全部完成 ⇒ 第 5 步的结果页；
+     正在跑 ⇒ 正在跑的那一步。只做一次，之后用户点哪步就看哪步。 */
+  if(FIRSTVIEW && !S.error && (S.stages||[]).length){
+    FIRSTVIEW=false;
+    const n=currentStep();
+    if(n && n!==step) step=n;
+  }
   gaugeSet(j.gauge);
   const ns=sigOf(j);
   if(!force && RENDERED && ns===SIG){          // 内容一个字节没变 ⇒ 一个节点都不碰
@@ -4167,8 +4177,14 @@ function allStagesPass(){
 /* 「去下一步」按钮 + 配套那句正文：同一个 nw 算出来，杜绝"正文说第 3 步、按钮去第 5 步"。 */
 function nextStepAct(n){
   const nw=nextWorkStep(n);
-  if(!nw) return {to:0, act:{a:'goto',to:1,t:'← 从第 1 步再来一轮',k:'pact mag'},
-    why:'这一轮的阶段已全部判绿。'};
+  if(!nw){
+    /* 后面没有活了 ⇒ 这一轮已经做完。下一步是**去看结果**（第 5 步），
+       不是从第 1 步再来一轮：那个 CTA 点下去只会回到第 1 步，并不是新一轮
+       （真正的"开始新一轮"在第 5 步，会先归档状态）。2026-10-23 实测。 */
+    const last=stepNo('swap-in', stepMax());
+    return {to:last, act:{a:'goto',to:last,t:'去看第 '+last+' 步结果',k:'pact mag'},
+      why:'这一轮的阶段已全部判绿。'};
+  }
   return {to:nw, act:{a:'goto',to:nw,t:'去第 '+nw+' 步 '+stepName(nw)+' →',k:'pact mag'},
     why:'下一步：'+stepName(nw)+'（第 '+nw+' 步）'+stepHint(nw)+'。'};
 }
@@ -4235,6 +4251,22 @@ function askOf(n){
     b:'inputs/azdata、inputs/gamecfg 与画廊 vendor 是重导的唯一起点。先只读地查一遍，不写任何东西。',
     acts:[{a:'recheck',t:'▶ 先查一遍',k:'pact mag'},{a:'detail',t:'看检查项',k:'link2'}]
   }:null);
+
+  /* 全部判绿时，第 1/2 步常常是"上一轮已做、这一轮没复核"（右栏显示 —）。
+     以前主屏仍写"先确认权威输入还在位 / 从源包重解配置表"，会让人白跑一遍；
+     这里直接说明没重查，并把主按钮指向结果页。 */
+  if(!S.running && allStagesPass() && stepSkipped(n)){
+    const nm=(S.steps&&S.steps[String(n)]&&S.steps[String(n)][0])||'';
+    const acts=[];
+    if(n===nConnect) acts.push({a:'recheck',t:'重查前置条件',k:'link2'});
+    acts.push({a:'goto',to:nSwap,t:'去看第 '+nSwap+' 步结果',k:'pact mag'},
+              {a:'detail',t:'看这 '+list.length+' 个阶段',k:'link2'});
+    return {eb,
+      ask:'第 '+n+' 步「'+nm+'」这一轮没重新检查',
+      why:'上一轮已经做过这一步；这一轮直接沿用了那批输入，阶段已全部判绿。'+
+          (n===nCfg?'不用再花约 7 分钟重解配置表。':''),
+      acts};
+  }
 
   if(n===nConnect){
     const pl=st.pull||{}, ps=stn('pull');
@@ -4519,9 +4551,11 @@ function render(){
          那一步的按钮仍然能按（第 1 步在配置表过期时也能拉包）。 */
       vtx.innerHTML = '你在看第 '+step+' 步 · <b>'+esc((steps[String(step)]||[])[0]||'')+
         '</b>（按钮照样能按）　'+
-        (allStagesPass() ? '这一轮的阶段已全部判绿'
+        (allStagesPass() ? ('这一轮的阶段已全部判绿；结果在第 '+cur+' 步')
                          : ('待办是第 '+cur+' 步 · <b>'+esc((steps[String(cur)]||[])[0]||'')+'</b>'));
-      if(bb) bb.textContent = allStagesPass() ? '去第 1 步' : ('去第 '+cur+' 步');
+      /* 文案必须跟 onclick 的真实目标一致：onclick 跳的是 currentStep()（全绿时 = 第 5 步），
+         以前这里写"去第 1 步"，点了却到第 5 步（2026-10-23 实测）。 */
+      if(bb) bb.textContent = '去看第 '+cur+' 步'+(allStagesPass()?'结果':'');
     }
   }
   /* 节点是刚重建出来的 —— "哪一步在跑"这个标记必须**重建之后再打一次**，

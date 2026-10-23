@@ -5421,7 +5421,12 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
   修法是 `gamecfg_stamp` 跳过 `bg_*`；已被清掉的旧结论用
   `py -3 scripts/diag/restamp_pipeline_state.py`（干跑）→ `--apply`（自动备份）→ `--verify`
   （要求「未对齐: 无」）。它从 `panel/run_*.log` 找最后一轮 03/04 的 ✅；找不到就别硬补。
+- **完成态的每个入口必须指向同一个结果步**：全部判绿后，第 1~4 步 CTA 仍写「从第 1 步再来一轮」、
+  第 1/2 步写「先确认 / 重解配置表」、非当前步按钮写「去第 1 步」（实际跳第 5 步）——都会把人指去重做。
+  修法：首屏落 `currentStep()`；`stepSkipped` 的步骤用「这一轮没重新检查」+ 结果链接；
+  `nextStepAct` / `bBackCur` 统一指向第 5 步；只有第 5 步的「开始新一轮」回第 1 步（§187）。
 
 **涉及文件**：`scripts/update_pipeline.py`、`scripts/pipeline_panel.py`、`scripts/diag/run_cg_export.py`、
-`scripts/diag/restamp_pipeline_state.py`、`gallery_src/_gallery_server.py`、`.diag/pipeline/pipeline_state.json`、
-`.diag/pipeline/affected.*`、`.diag/pipeline/panel/runs.json`、`docs/TROUBLESHOOTING.md §177 / §186`。
+`scripts/diag/restamp_pipeline_state.py`、`scripts/diag/test_pipeline_gating.py`、
+`scripts/diag/panel_paper_probe.py`、`gallery_src/_gallery_server.py`、`.diag/pipeline/pipeline_state.json`、
+`.diag/pipeline/affected.*`、`.diag/pipeline/panel/runs.json`、`docs/TROUBLESHOOTING.md §177 / §186 / §187`。
