@@ -818,9 +818,9 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 
 #### WF-16 追加五（2026-10-30）：精确原版动作换入与判定翻盘留痕
 
-- **判据**：只允许换入 `paired=exact` 的参考动作；先查目标 `st_nlink==1`，备份 before sha256，再复制并断言 after sha256。换入后逐曲线偏差与关键帧不一致均为 0，并复跑真实起播画面、互动链、环境层、部位点击和 WF-16。closest 配对不得当同版本文件。
+- **判据**：`paired=exact` 只取得临时 A/B 资格，不构成换入依据。每个 clip 必须先在临时模型中按真实入口验收关键时段；任何错位都整批退回。获准后才查目标 `st_nlink==1`、备份 before sha256、复制并断言 after sha256，再复跑互动链、环境层、部位点击和 WF-16。closest 配对不得当同版本文件。
 - **踩坑记录**：A/B 必须等 `currentGroup==clip` 后再计时，否则“原版还没起播”会伪装成动作更慢。默认 Override 若无画面收益应回退；原版本身的黑屏/出画镜头不能当 bug。结论翻盘时旧文档就地标注，不静默改写。资产更新台重导会覆盖手工原版，交接必须写明。
-- **涉及文件**：`Output/Live2D/gezi_2/motion/`（18 条，产物不入库）、`Output/_OLD_bak/l2d_gezi_ref_20261030/manifest.json`、`gallery_src/index.html`、`docs/TROUBLESHOOTING.md` §195。
+- **涉及文件**：`Output/Live2D/gezi_2/motion/`（18 条，产物不入库）、`Output/_OLD_bak/l2d_gezi_ref_20261030/manifest.json`、`gallery_src/index.html`、`docs/TROUBLESHOOTING.md` §195–196。
 
 #### WF-16 追加四（2026-10-30）：单模型恢复官方环境层与色差取证
 
