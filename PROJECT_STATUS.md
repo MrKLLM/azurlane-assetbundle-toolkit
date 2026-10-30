@@ -329,6 +329,7 @@ C. ✅ **背景库命名+完整性已闭环（10-17 晚，10-19 补命名）**�
        探针 `scripts/diag/l2d_part_flicker_probe.py` 臂 ⑤ `--mapall` / ⑨ `--deform` / ⑩ `--snapab` /
        ⑪ `--partcheck` / ⑫ `--gatefind`；台账 `.diag/l2d_opacity_map_gezi_2.json`；
        时间轴 `.diag/l2d_snapab_gezi_2_{off,on}.txt`。
+38. ⏳ **gezi touch_idle 抽搐/做不完**：`5e9e859` 修常量回绕仍复现；数据/叠加层已排除，留待后续，见 §199。
 
 ---
 
