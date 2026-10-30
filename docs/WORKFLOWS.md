@@ -816,6 +816,12 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 
 ### WF-16: Live2D 画廊前端交互改动与回归验证（改哪里 → 怎么验证才算过）
 
+#### WF-16 追加五（2026-10-30）：精确原版动作换入与判定翻盘留痕
+
+- **判据**：只允许换入 `paired=exact` 的参考动作；先查目标 `st_nlink==1`，备份 before sha256，再复制并断言 after sha256。换入后逐曲线偏差与关键帧不一致均为 0，并复跑真实起播画面、互动链、环境层、部位点击和 WF-16。closest 配对不得当同版本文件。
+- **踩坑记录**：A/B 必须等 `currentGroup==clip` 后再计时，否则“原版还没起播”会伪装成动作更慢。默认 Override 若无画面收益应回退；原版本身的黑屏/出画镜头不能当 bug。结论翻盘时旧文档就地标注，不静默改写。资产更新台重导会覆盖手工原版，交接必须写明。
+- **涉及文件**：`Output/Live2D/gezi_2/motion/`（18 条，产物不入库）、`Output/_OLD_bak/l2d_gezi_ref_20261030/manifest.json`、`gallery_src/index.html`、`docs/TROUBLESHOOTING.md` §195。
+
 #### WF-16 追加四（2026-10-30）：单模型恢复官方环境层与色差取证
 
 - **判据**：环境层策略要做成三态：未设 `__ambMask` 取模型默认值，显式 true/false 才能双向 A/B；专项模型改官方 Override 后，须同时断言它 mask=true、对照模型 mask=false，再复跑互动链与真实部位点击。gezi_2 本轮：`l2d_ambient_probe.py gezi_2,benningdun_2,mingji_2 --control biaoqiang`、`l2d_stay_chain_probe.py --full-loop`、`hit_verify.py --only gezi_2`。
