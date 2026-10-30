@@ -1604,15 +1604,15 @@ async function renderLive2D(s, sk){
     const paramSets=Object.create(null);
     const curveId=(c)=>{ const i=c&&c.Id; return typeof i==='string'? i : (i&&i.string)||null; };
     /* motion3.json 段格式（以正本 scripts/extract_motions.py 的自述为准）：首点 (t0,v0)，
-       其后每段 **type 在前**：线性 3 值 [0,t1,v1]、贝塞尔 7 值 [type,c1x,c1y,c2x,c2y,t1,v1]
-       （终点在最后），总长恒为 2+3·(段数-1)（贝塞尔再 +4）。type 不是"每三元组的第三个"——
+       其后每段 **type 在前**：线性/瞬切/反瞬切 3 值 [type,t1,v1]、贝塞尔 7 值
+       [1,c1x,c1y,c2x,c2y,t1,v1]（终点在最后）。type 不是"每三元组的第三个"——
        把这个步长想当然已经让本项目犯过三次，故解析一律走这里，别处不再手写。 */
     const motionSegs=(s)=>{ const out=[]; let t0=s[0], v0=s[1], i=2;
       while(i<s.length){ const ty=s[i];
-        if(ty===0){ if(i+3>s.length) return null;
-          out.push({t0,v0,t1:s[i+1],v1:s[i+2]}); t0=s[i+1]; v0=s[i+2]; i+=3; }
-        else if(ty===1||ty===2||ty===3){ if(i+7>s.length) return null;
-          out.push({t0,v0,t1:s[i+5],v1:s[i+6],c1x:s[i+1],c1y:s[i+2],c2x:s[i+3],c2y:s[i+4]});
+        if(ty===0||ty===2||ty===3){ if(i+3>s.length) return null;
+          out.push({t0,v0,t1:s[i+1],v1:s[i+2],ty}); t0=s[i+1]; v0=s[i+2]; i+=3; }
+        else if(ty===1){ if(i+7>s.length) return null;
+          out.push({t0,v0,t1:s[i+5],v1:s[i+6],ty,c1x:s[i+1],c1y:s[i+2],c2x:s[i+3],c2y:s[i+4]});
           t0=s[i+5]; v0=s[i+6]; i+=7; }
         else return null; }
       return out.length? out:null; };
@@ -1768,6 +1768,7 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
     const ambIdx=new Set();
     const cubic=(a,b,c,d,u)=>{ const m=1-u; return m*m*m*a+3*m*m*u*b+3*m*u*u*c+u*u*u*d; };
     const segValue=(x,t)=>{ if(t<=x.t0) return x.v0; if(t>=x.t1) return x.v1;
+      if(x.ty===2) return x.v0; if(x.ty===3) return x.v1;
       if(x.c1x===undefined){ const d=x.t1-x.t0; return d<=0? x.v1 : x.v0+(x.v1-x.v0)*(t-x.t0)/d; }
       let lo=0, hi=1;                       // 控制点 x 落在段内 ⇒ 单调，二分必收敛
       for(let k=0;k<26;k++){ const mid=(lo+hi)/2;
@@ -1793,6 +1794,7 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
       amb=list; ambDur=dur; ambT0=performance.now();
       window.__ambDbg=()=>({ loaded:amb.length, dur:ambDur,
         held:amb.filter(c=>!poseDriven.has(c.id)).length,
+        yieldCount:amb.filter(c=>poseDriven.has(c.id)).length,
         yieldToPose:amb.filter(c=>poseDriven.has(c.id)).map(c=>c.id).slice(0,20) });
       im.on('afterMotionUpdate',()=>{ if(!amb||window.__ambOff) return;
         const t=((performance.now()-ambT0)/1000)%ambDur;

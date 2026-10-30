@@ -12101,3 +12101,26 @@ hover title 和队列头出现 ⇒ 用户读成「只有三种、没有循环」
 **涉及**：`gallery_src/bgm.html`、`gallery_src/bgm_chart.css`、`gallery_src/bgm_chart_bg.webp`、
 `gallery_src/water_bg.js`、`scripts/diag/bgm_page_probe.py`、`scripts/diag/water_bg_check.py`、
 `.gitignore`、`docs/WORKFLOWS.md` WF-60。
+
+## §192 Live2D 默认态部件不动：Stepped 已正确导出，网页却按 Bezier 的 7 字段步长二次解析（2026-10-30）
+
+**现象**：本宁顿 `benningdun_2` 默认态部分组件不动、部分动作异常。官方 AnimatorController
+证实默认是 Base Layer 的 `idle`（4.983s）与 Background 的 `effect`（15.983s、权重 1）同时 Loop，
+不是 `home/main_*` 轮播；源包与已导出的 motion3 均含完整曲线。
+
+**根因**：导出层已正确写出 Stepped，但页面 `motionSegs` 把 type 2/3 与 Bezier 一样按 7 字段前进，
+段边界从此错位，后续曲线被丢弃；环境层求值也没有 Stepped/InverseStepped 语义。
+本宁顿 idle 的真实运动参数只识别 23/45，effect 只装载 24/33。
+
+**修法**：线性/瞬切/反瞬切统一按 3 字段 `[type,t1,v1]`，只有 Bezier 按 7 字段；
+段对象保留 `ty`，环境层在段内分别取起点值（type 2）与终点值（type 3）。不改动作数据、
+默认编排和 pose 让位策略。探针共用正确段解析，并给页面 URL 加 cache-buster，防固定
+Chrome profile 用旧 HTML 造成假阴性。
+
+**判据**：`l2d_ambient_probe.py benningdun_2,gezi_2 --control biaoqiang` PASS；
+本宁顿恢复 idle 45/45、effect 33/33（held 22 / yield 11），gezi_2 62/62，无 effect 对照正常。
+全库只读扫描 2,724,508 条 Parameter 曲线解析失败 0（type 0 段 15,025,563 / type 2 段 3,899,437）。
+开/关是两次独立播放，不能用逐点轨迹差断言“环境层抢写”（相位差曾假报 54.5048）；
+应读同一页面 `__ambDbg` 的 loaded/held/yieldCount 与盘上官方式曲线集合对表。
+
+**涉及**：`gallery_src/index.html`、`scripts/diag/l2d_ambient_probe.py`。

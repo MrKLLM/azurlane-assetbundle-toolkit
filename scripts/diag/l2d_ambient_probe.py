@@ -37,6 +37,25 @@ SAMPLES = 8
 STEP_MS = 260
 
 
+def curve_points(s):
+    pts = [s[1]] if len(s) > 1 else []
+    kinds = []
+    i = 2
+    while i < len(s):
+        ty = s[i]
+        if ty in (0, 2, 3):
+            if i + 3 > len(s):
+                return [], []
+            pts.append(s[i + 2]); kinds.append(("L" if ty == 0 else "S", s[i + 1], s[i + 2])); i += 3
+        elif ty == 1:
+            if i + 7 > len(s):
+                return [], []
+            pts.append(s[i + 6]); kinds.append(("B", s[i + 5], s[i + 6])); i += 7
+        else:
+            return [], []
+    return pts, kinds
+
+
 def ambient_params(key):
     """从产物本身算出「环境层会写哪些参数」——判据落在载荷上，不靠前端自述。
     另返回每条曲线的**段结构**：单段线性的（漂移类，如 Paramfh 0→2000/90s）可以拿
@@ -51,16 +70,7 @@ def ambient_params(key):
         if c.get("Target") != "Parameter":
             continue
         s = c.get("Segments") or []
-        pts = [s[1]] if len(s) > 1 else []
-        kinds = []
-        i = 2
-        while i < len(s):
-            if s[i] == 0:
-                pts.append(s[i + 2]); kinds.append(("L", s[i + 1], s[i + 2])); i += 3
-            elif s[i] == 1:
-                pts.append(s[i + 6]); kinds.append(("B", s[i + 5], s[i + 6])); i += 7
-            else:
-                pts = []; break
+        pts, kinds = curve_points(s)
         if len(pts) > 1 and max(pts) - min(pts) > 1e-6:
             cid = c.get("Id")
             pid = cid if isinstance(cid, str) else (cid or {}).get("string")
@@ -85,16 +95,7 @@ def idle_params(key, group="idle"):
     for c in j.get("Curves", []):
         if c.get("Target") != "Parameter":
             continue
-        s = c.get("Segments") or []
-        pts = [s[1]] if len(s) > 1 else []
-        i = 2
-        while i < len(s):
-            if s[i] == 0:
-                pts.append(s[i + 2]); i += 3
-            elif s[i] == 1:
-                pts.append(s[i + 6]); i += 7
-            else:
-                pts = []; break
+        pts, _ = curve_points(c.get("Segments") or [])
         if len(pts) > 1 and max(pts) - min(pts) > 1e-6:
             cid = c.get("Id")
             out.append(cid if isinstance(cid, str) else (cid or {}).get("string"))
@@ -123,7 +124,7 @@ def main():
          "-d", os.path.join(ROOT, "Output")],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     kill_stale_chrome(DEBUG_DIR)
-    url = "http://127.0.0.1:%d/gallery_v2/index.html" % SRV_PORT
+    url = "http://127.0.0.1:%d/gallery_v2/index.html?v=%d" % (SRV_PORT, time.time_ns())
     for _ in range(40):
         try:
             if urllib.request.urlopen(url, timeout=2).status == 200:
@@ -327,25 +328,16 @@ def main():
             ir = sample(idle_ids, True)
             print("  ③ 零回退：idle 自驱动的 %d 个参数 开=%d 动 / 关=%d 动"
                   % (len(idle_ids), len(ip.get("moved") or []), len(ir.get("moved") or [])))
-            # P2 的语义就是环境层盖住 pose 层，"开 ≤ 关"是设计如此。两个数都受 2 秒采样窗
-            # 影响（斜率过零点的参数会在某一侧漏判），所以只断言"关掉后仍该动"这一侧。
             if len(ir.get("moved") or []) < len(idle_ids) // 2:
                 print("  [FAIL] 关掉环境层后 idle 参数几乎不动 ⇒ 此前是环境层在替 pose 层驱动"); ok = False
-            # ⑤ 环境层**不许改变 pose 轨迹**：同一批参数开/关逐点比，最大偏离必须≈0。
-            #    上一版没有这条，环境层逐帧硬写 52 个与 idle 重叠的参数 ⇒ 换 clip 瞬间被拽到
-            #    越量程极值，用户看到的"抽搐 + 僵硬"就是它。
-            sa, sb = ip.get("series") or [], ir.get("series") or []
-            worst = 0.0; worst_id = ""
-            for i, idn in enumerate(idle_ids):
-                if i >= len(sa) or i >= len(sb):
-                    continue
-                for x, y in zip(sa[i], sb[i]):
-                    if isinstance(x, (int, float)) and isinstance(y, (int, float)) \
-                            and abs(x - y) > worst:
-                        worst, worst_id = abs(x - y), idn
-            print("  ⑤ pose 轨迹不被改动：开/关逐点最大偏离 %.4f（%s，要求 <0.01）" % (worst, worst_id or "-"))
-            if worst >= 0.01:
-                print("  [FAIL] 环境层在抢 pose 参数"); ok = False
+            # 开/关是两次独立播放，相位差不能当成环境层抢写；让位判据读同一页面的真实装载状态。
+            shared = [p for p in ids if p in set(idle_params(key))]
+            dbg = ev("(window.__ambDbg ? window.__ambDbg() : null)")
+            print("  ⑤ 环境层装载/让位：%s；期望 loaded=%d held=%d yield=%d"
+                  % (dbg, len(ids), len(only), len(shared)))
+            if not isinstance(dbg, dict) or dbg.get("loaded") != len(ids) \
+                    or dbg.get("held") != len(only) or dbg.get("yieldCount") != len(shared):
+                print("  [FAIL] 环境层曲线漏装载或 pose 让位集合不对"); ok = False
         for tag, flag in (("on", False), ("off", True)):
             sample(ids[:1], flag)
             r = cmd("Page.captureScreenshot", {"format": "png"})
