@@ -5,7 +5,7 @@ name_zh: Live2D 动作提取完整性与保真审计
 description: Integrity and fidelity audit for re-exporting Live2D motions from Unity AssetBundles (AnimationClip to motion3.json). Covers enumerating all three clip containers (m_StreamedClip / m_DenseClip / m_ConstantClip) with a binding-count assertion, constant-curve emission checks against moc3 defaults with audio-driven exemptions, unfalsifiable-anchor tests for key field layout, diffing against an external authoritative motion3.json baseline with ceiling-calibrated thresholds, and an env-switch plus byte-identical control-group protocol for removing legacy guardrails. Use when extracting or re-exporting Live2D motion data, when curves go missing, or when users report parts moving independently, unnatural transitions, jittering limbs, wrong easing. Trigger words include motion3.json audit, ConstantClip, genericBindings, bezier control point, tangent field layout, guardrail removal. Not for browser runtime playback (live2d-web-runtime-integration) or static painting restoration (unity-assetbundle-painting-restore).
 description_en: Integrity and fidelity audit for re-exporting Live2D motions from Unity AssetBundles (AnimationClip to motion3.json), covering three-container curve enumeration, constant-curve decisions, field-layout anchor tests, authoritative baseline diffing, and byte-identical control-group guardrail removal.
 description_zh: 从 Unity AssetBundle 重导 Live2D 动作（AnimationClip → motion3.json）时的完整性与保真审计流程。覆盖三容器曲线枚举（m_StreamedClip / m_DenseClip / m_ConstantClip，只读 streamed 会丢 60%+ 绑定）+ 绑定数求和断言、定值曲线可否补入（逐条比 moc3 默认值，音频驱动参数一律豁免）、键记录字段布局的不可钻空子锚点自证（附两个已被推翻的无效判据）、外部权威 motion3.json 基准比对与天花板校准阈值、以及拆历史护栏的 env 开关 + 逐字节对照组协议。当需要重导/校验 Live2D 动作数据、或用户反馈"部件各动各的/过渡像刚学建模的/小臂乱摆/动作太快/曲线少了/像抽一帧"时使用。触发词：Live2D 动作重导、motion3.json 审计、AnimationClip 丢曲线、ConstantClip、DenseClip、genericBindings、贝塞尔控制点、切线字段、参考版比对、拆护栏、A/B 逐字节、空壳动作。不适用：网页侧运行时播放集成（live2d-web-runtime-integration）、静态立绘/Spine 还原（unity-assetbundle-painting-restore）、通用管线安全落地方法论（safe-pipeline-fix-targeted-rerun，本技能第 5 步是它在动作数据场景的特化）。
-version: 1.0.3
+version: 1.0.4
 argument-hint: Point at the model/motion output directory and the clips to audit
 argument-hint-en: Point at the model/motion output directory and the clips to audit
 argument-hint-zh: 给出模型/动作产物目录与要审计的 clip 名
@@ -128,6 +128,10 @@ StreamedClip 的每条键记录是 `index(int32) + 4×float`。**谁是值、谁
 A/B 必须等 `currentGroup==clip` 后才计时，否则“参考版尚未起播”会被误判成“原版更慢”。
 原版本身的黑屏、出画和快速镜头不属于解析 bug；但明显错位不是“官方镜头”，不得用这句掩护。
 手工原版会被下一次 Unity 重导覆盖，交接必须写明恢复方式或正式接入同版本参考源。
+
+若 `l2d_motion_audit` 已证明源/盘绑定与时长一致，且环境层、snap 钉值、硬切、可推前置状态链
+逐层关闭都不改变异常姿态，本地证据已耗尽。此时不要再提出新的本地根因，也不要拿 closest
+参考文件硬比；向用户要**游戏内同动作、同时段**录屏/截图作为外部基准，再决定是否继续。
 
 ## 第 5 步：拆历史护栏——env 开关 + 逐字节对照组
 
