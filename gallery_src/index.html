@@ -1767,11 +1767,8 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
        （层权重 1.0、Override、Loop=true；判据与全库普查见 §117，本轮又逐状态核过 m_Speed 全为 1.0）。
        画廊只播 pose 层的动作 ⇒ 只有环境层会动的参数全停在初始位——用户圈的"钉在底画上的 5 片花瓣"
        就是这一类：`Paramfh`（量程 [0,10]）只在 effect 里是 0→2000 的单调斜坡，idle/home/main 全是常量 0。
-       ⚠️ 写谁：**effect 里非常值、且任何 pose clip 都不动**的参数（`poseDriven` 之外）。
-         上一版这里默认"照源包语义盖住 pose 层"，实测虽然运动量更接近游戏（47.7‰ vs 35.6‰，
-         游戏角色区 125.8‰），但会把 pose 正在动的参数逐帧硬写到环境层的值上——用户报的
-         "有的组件蠢蠢欲动/突然消失一下"正是这个形状，所以这次**默认让位**，
-         要复现盖住行为用 `window.__ambMask=true`（反向 A/B 开关，量运动量时用）。
+       ⚠️ 写谁：默认只写 `poseDriven` 之外的非常值参数；`gezi_2` 经三模型对照与专项复查后
+         改为按源包 Override 写全部非常值参数。`window.__ambMask` 可显式覆盖该默认值做反向 A/B。
          常量曲线一律不写：它会把 pose 正在动的参数钉死（实测 15 个模型受影响，mingji_2 达 70 个）。
        写在 afterMotionUpdate（库在 motionManager.update 之后、coreModel.update 之前 emit），
        并且**不进队列管理器**：进了队列，播一次 touch_* 就把环境层挤到末位，回落时反过来盖住它。
@@ -1804,13 +1801,15 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
       if(!list.length) return;
       amb=list; ambDur=dur; ambT0=performance.now();
       window.__ambDbg=()=>({ loaded:amb.length, dur:ambDur,
+        mask:window.__ambMask===undefined?sk.key==='gezi_2':!!window.__ambMask,
         held:amb.filter(c=>!poseDriven.has(c.id)).length,
         yieldCount:amb.filter(c=>poseDriven.has(c.id)).length,
         yieldToPose:amb.filter(c=>poseDriven.has(c.id)).map(c=>c.id).slice(0,20) });
       im.on('afterMotionUpdate',()=>{ if(!amb||window.__ambOff) return;
         const t=((performance.now()-ambT0)/1000)%ambDur;
+        const mask=window.__ambMask===undefined?sk.key==='gezi_2':!!window.__ambMask;
         for(const c of amb){
-          if(!window.__ambMask&&poseDriven.has(c.id)) continue;   // 默认让位给 pose 层
+          if(!mask&&poseDriven.has(c.id)) continue;
           const sg=c.sg; let v=sg[0].v0;
           for(const x of sg){ if(t<=x.t1){ v=segValue(x,t); break; } v=x.v1; }
           try{ cm.setParameterValueByIndex(c.idx,v); }catch(e){} } });

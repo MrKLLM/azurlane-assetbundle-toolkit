@@ -816,6 +816,12 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 
 ### WF-16: Live2D 画廊前端交互改动与回归验证（改哪里 → 怎么验证才算过）
 
+#### WF-16 追加四（2026-10-30）：单模型恢复官方环境层与色差取证
+
+- **判据**：环境层策略要做成三态：未设 `__ambMask` 取模型默认值，显式 true/false 才能双向 A/B；专项模型改官方 Override 后，须同时断言它 mask=true、对照模型 mask=false，再复跑互动链与真实部位点击。gezi_2 本轮：`l2d_ambient_probe.py gezi_2,benningdun_2,mingji_2 --control biaoqiang`、`l2d_stay_chain_probe.py --full-loop`、`hit_verify.py --only gezi_2`。
+- **踩坑记录**：色差先查 PartOpacity、`CubismPartColorsEditor`、材质颜色与同姿态环境层 A/B，再做 drawable 逐点命中、逐片隐藏和 UV 原图核对；官方贴图本身的颜色不能当网页调色 bug。无头慢帧下模型 `elapsedTime` 由 capped delta 累积，会落后墙钟，不能用“墙钟超过 Duration”判动作被截断。
+- **涉及文件**：`gallery_src/index.html`、`docs/TROUBLESHOOTING.md` §194；诊断图 `.diag/gezi_hand_mesh/`（临时产物，不入库）。
+
 #### WF-16 追加三（2026-10-30）：多阶段互动按完整状态链接收
 
 - **判据**：`touch_idle* → idle*` 不停留在“目标组出现过”，而要依次证明：进入动作完成后未先回基础 idle；目标 `_isLoop=true` 且越过完整 `Duration` 仍保持；停留态真实点击当前可用 HitArea 能起下一动作；主动选基础 idle 能退出；无规则对照模型仍回基础 idle。工具 `py -3 scripts/diag/l2d_stay_chain_probe.py --full-loop`。

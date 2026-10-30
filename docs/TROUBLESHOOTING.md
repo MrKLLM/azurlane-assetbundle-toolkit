@@ -12147,3 +12147,27 @@ idle 请求之前发出，此时读 `currentGroup` 起播目标；用 `chainPend
 `touch_idle2`，再选基础 idle 均成功；`benningdun_2/touch_head` 对照仍回基础 idle。
 WF-16 除全库 hit_verify 外七项全过。探针自身修过三个假判据：停留态不能只试核心三框；
 点击结果须排除当前停留组；等待回 idle 前必须先确认进入动作真的起播，不能拿初始 idle 当通过。
+
+## §194 gezi_2 默认与 touch 异常分型：环境层恢复官方覆盖，色差不得凭观感调色（2026-10-30）
+
+**现象**：默认胸部/尾巴与游戏不同；部分 touch 抽动或像没做完；手部/手臂有明显色差。
+三类症状不能用同一个开关结案。
+
+**环境层修法**：官方 `effect` 是权重 1.0、Override、Loop 的独立层；此前默认让 62 条非常值曲线中的
+52 条让位给 pose。仅 `gezi_2` 改为默认写全部非常值环境曲线，其他模型保持让位。
+`window.__ambMask===undefined` 时取模型默认值，显式 true/false 仍可双向 A/B；`__ambDbg` 增加 mask。
+常量 Parameter 与 PartOpacity 仍不写：gezi 的 idle/effect/touch 样本中 51 条 PartOpacity 全为常量且值相同，
+不存在需要补写的部件显隐差异。
+
+**验证**：`l2d_ambient_probe.py gezi_2,benningdun_2,mingji_2 --control biaoqiang` PASS，
+gezi mask=true、另两模型 false；两条停留链 `--full-loop` 再全过；`hit_verify --only gezi_2`
+29/29 可点中、WIRING 0；WF-16 除全库 hit_verify 外七项全过。touch 结束后接错状态是另一类问题：
+touch_idle6 末帧仅 12.4% 的默认运动曲线能接基础 idle，核心 touch_head/body/special 也只有约 20–27%，
+不能宣称已随环境层修复；后续仍按互动证据逐条处理。
+
+**色差否证与定位**：gezi 全部 195 个 `CubismPartColorsEditor` 非默认颜色项为 0，9 个材质的颜色
+也均为官方默认；环境层 yield/mask 同姿态不会消除色差。逐点 drawable 命中与逐片隐藏定位到
+`ArtMesh154/155/156` 手臂层，官方 UV 贴图里的 `ArtMesh155` 皮肤本来就是浅色。
+因此本轮不做无依据调色、不删片；若要继续，必须拿游戏同帧证明运行时透明度/混合时序不同。
+无头截图还需注意模型 `elapsedTime` 由 capped delta 累积，慢帧下会落后墙钟，不能拿墙钟超过
+Duration 就断言动作被提前截断。
