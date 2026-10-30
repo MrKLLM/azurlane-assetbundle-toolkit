@@ -1646,6 +1646,7 @@ async function renderLive2D(s, sk){
         const mn=core.getParameterMinimumValue(ix), mx=core.getParameterMaximumValue(ix);
         if(!(mx>mn)) continue;
         const rg=curveRange(sg);
+        if(rg[1]-rg[0]<=1e-6) continue;                         // 常量越界只钳位，不能当循环相位整体回绕
         if(!(rg[1]>mx+1e-6||rg[0]<mn-1e-6)) continue;             // 没越界就与白名单无关
         const vs=[sg[0].v0]; for(const x of sg) vs.push(x.v1);
         let up=true, down=true;
