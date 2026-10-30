@@ -1,7 +1,7 @@
 ---
 name: live2d-web-runtime-integration
 description: 在网页里集成 Live2D Cubism Web 运行时做模型渲染与动作播放（pixi 6.5.2 + live2dcubismcore 5.1.0 + pixi-live2d-display 0.4.0 组合），覆盖 model3.json 加载、动作触发（startMotion 传参陷阱）、按部位点击触发（HitAreas 命中判定）、模型尺寸与 fit 基准、交互层反模式、内存销毁与无头 CDP 验证判据，**以及"点模型说话 + 台词字幕"层（§9：语音被下一条动作 dispose、首播竞态、按皮肤序号取词、正文与音频同源、字幕要在全屏目标内、开关验收要反向证据、"这一格没声"要先分清是没接上还是上游没下发）**。当需要让 .moc3/.model3 模型在浏览器里"真的动起来"、或反馈"模型不动/乱抖/点不出动作/显示不全"、或要在国内网络下载 Live2D 运行时库时使用。触发词：Live2D 网页播放、Cubism 运行时、pixi-live2d-display、Live2DModel 动作、模型点不动、idle 不播、HitAreas 点击、播完动作就卡死、判定区全丢、参数残留复位、模型画面是碎片堆、部件乱叠在一起、贴图错绑、Textures 顺序、加载成功但画面错乱、话没说完就被掐、一点声音都没有、台词字幕、点立绘出声、全屏没字幕、有声没字幕、audio 播放器看不见、花瓣掉到一半停住、动作后半段冻住、游戏里连续动我们这里不动、曲线超出量程、repeat 回绕标志、setParameterValueByIndex 硬钳、选某个动作时手会消失、部件在任何动作里都不动、切动作时某个部件闪一下、部件消失一下但 part 组读数恒定、同参数两次读出不同的显隐、扫出来的阈值表复现不了、把 34 片并成一个开关家族可疑、部件门那类否证报「0 个异常」但其实是键名读不到、手会淡到看不见而两拍差分报全0、按颜色认片把发光点判成金饰、同一会话跑两遍对照参数恒为默认值、动作中途的暗窗与换动作的淡化死区要分清、Live2D 当网站背景会不会卡、背景层限帧、fps 打满但实际耗多少主线程、swiftshader 量出来的 fps 能不能信、headless 拿不到 GPU。不适用于 Live2D 模型文件的 AssetBundle 逆向还原（那是 unity-assetbundle-painting-restore）与纯截图导出（headless-chrome-cdp-batch-export）。
-version: 1.7.47
+version: 1.7.48
 ---
 
 # Live2D 网页运行时集成
@@ -180,6 +180,36 @@ app.ticker.add(restTick);   // REST_DELAY=400, REST_MS=700
 或组名恰为库默认的 `Idle` 时必踩。本项目组名是小写 `idle` 而 `mm.groups.idle` 要到 §3.3 的补丁里才被改成小写，
 默认路径不预加载、侥幸躲过——但**判据必须显式断言 `paramSets[idleGroup]?.size > 0`**。
 兜底做法：另 fetch 一次 idle 各条 json 登记参数集，顺带补 `Meta.Loop`（同一份 json，别开第二条管线）。
+
+### 3.9 多阶段互动不能只靠“播完回 idle”：进入动作与停留循环要显式接续
+
+游戏常见的互动结构是 `touch_idle*`（不循环的进入动作）→ `idle*`（循环停留并开放下一批 HitAreas），
+但 **目标编号不一定相同**，Animator 也可能完全没有出边过渡，调度在游戏代码里。只能登记有证据的链：
+优先取游戏配置/实录；次级证据是逐曲线比较进入动作末帧与停留动作首帧（只看停留循环中真正运动的曲线）。
+不能把相同编号或名称相似直接当成调度表。
+
+pixi-live2d-display 的 `motionFinish` 在 `state.complete()` 和自动 idle 请求**之前**发出，此时仍能读到
+刚完成的 `currentGroup`。接续要在这段窗口内完成，并用 pending 压住这一次基础 idle 请求；
+目标起播 Promise 完成后放行，用户主动选动作则清 pending。目标停留组也要走 §3.3 的
+`setIsLoop(true)+setIsLoopFadeIn(false)`，否则它播完仍会掉回基础 idle。
+
+```js
+const shouldRequestIdle = mm.state.shouldRequestIdleMotion.bind(mm.state);
+mm.state.shouldRequestIdleMotion = () => !chainPending && shouldRequestIdle();
+mm.on('motionFinish', () => {
+  const next = verifiedChains[mm.state.currentGroup];
+  if (!next || chainPending) return;
+  chainPending = next;
+  mm.startMotion(next, 0, MP.FORCE)
+    .then(() => { if (chainPending === next) chainPending = null; });
+});
+```
+
+验收必须包含完整状态链，而非只看 `currentGroup` 出现过：① 进入动作完成后**没有经过基础 idle**；
+② 目标 `_isLoop=true`，并越过一次完整 `Duration` 仍保持；③ 在停留态真实点击当前可用 HitArea 能起下一动作；
+④ 主动选基础 idle 能退出；⑤ 无规则模型仍回原 idle。三个探针假判据要防：停留态核心三框可能不可点，
+应找当前真正可用的框；点击结果要排除当前停留组；等待“回 idle”前必须先确认进入动作已起播，
+否则初始 idle 会造成恒绿灯。本项目工具：`scripts/diag/l2d_stay_chain_probe.py --full-loop`。
 
 ## 4. 按部位点击触发（HitAreas）
 

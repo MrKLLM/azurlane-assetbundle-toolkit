@@ -816,6 +816,12 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 
 ### WF-16: Live2D 画廊前端交互改动与回归验证（改哪里 → 怎么验证才算过）
 
+#### WF-16 追加三（2026-10-30）：多阶段互动按完整状态链接收
+
+- **判据**：`touch_idle* → idle*` 不停留在“目标组出现过”，而要依次证明：进入动作完成后未先回基础 idle；目标 `_isLoop=true` 且越过完整 `Duration` 仍保持；停留态真实点击当前可用 HitArea 能起下一动作；主动选基础 idle 能退出；无规则对照模型仍回基础 idle。工具 `py -3 scripts/diag/l2d_stay_chain_probe.py --full-loop`。
+- **踩坑记录**：接续可用 `motionFinish`（先于 `state.complete()` 与自动 idle 请求）+ pending 抑制一次默认回落，目标组也要采纳 `Meta.Loop`，不能用前端计时器。目标链只能来自游戏配置/实录或逐曲线末帧/首帧证据，编号相同不是依据。探针有三个易造假点：核心三框在停留态可能不可点、当前停留组不能算下一次点击结果、等待回 idle 前必须确认进入动作已起播。
+- **涉及文件**：`gallery_src/index.html`、`scripts/diag/l2d_stay_chain_probe.py`、`docs/TROUBLESHOOTING.md` §193。
+
 #### WF-16 追加二（2026-10-14 晚）：钉值范围必须收窄到「有因果证据的那个参数」
 
 - **触发**：上一轮把 snapswitch 全表匹配到的 19 个开关参数一律 nearest-key 阶梯化，用户拿游戏实录对比发现**手势切换时刻不对、身上/手臂高光切换不对**。

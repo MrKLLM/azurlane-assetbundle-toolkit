@@ -12124,3 +12124,26 @@ Chrome profile 用旧 HTML 造成假阴性。
 应读同一页面 `__ambDbg` 的 loaded/held/yieldCount 与盘上官方式曲线集合对表。
 
 **涉及**：`gallery_src/index.html`、`scripts/diag/l2d_ambient_probe.py`。
+
+## §193 Live2D 点击动作能播完但不连贯：缺「进入动作 → 循环停留」接续（2026-10-30）
+
+**现象**：`gezi_2` 的部分互动在游戏里会保持后续姿态并等待下一次点击；画廊只能逐条选择动作，
+进入动作播完便统一回基础 `idle`，因此后续判定区与互动链不会出现。胸部/尾巴默认态是否自然
+不归本条单独解释，环境层策略也未随本轮改变。
+
+**依据与边界**：源包 57 条实际 clip 已全部导出；23 条 `touch_idle*` 不循环，16 条 `idle*` 循环。
+Animator 没有这些状态之间的出边过渡，`Live2dChar` 也没有互动链配置，完整调度规则不在本地模型包。
+只能登记末帧/首帧已逐曲线核对的样本，不能按相同编号批量猜：
+`touch_idle12→idle12`（145/145 条停留运动曲线一致）、`touch_idle1→idle7`（108/108）；
+另有 `touch_idle9→idle6`、`touch_idle14→idle11` 等强候选，本轮未登记。
+
+**修法**：仅 `gezi_2` 显式白名单登记上述两条。运行时 `motionFinish` 在 `state.complete()` 与自动
+idle 请求之前发出，此时读 `currentGroup` 起播目标；用 `chainPending` 暂时压住这一次基础 idle 请求，
+目标起播 Promise 完成后放行。目标组与基础 idle 一样采纳 `Meta.Loop` 并关闭循环淡入，不用前端计时器。
+用户主动选动作会清掉 pending；目标加载失败则下一帧仍可回基础 idle。
+
+**验证**：`scripts/diag/l2d_stay_chain_probe.py --full-loop` 全过：
+`idle12` 越过完整周期保持 23.0s，`idle7` 保持 5.3s；停留态真实点击分别进入 `touch_idle6`、
+`touch_idle2`，再选基础 idle 均成功；`benningdun_2/touch_head` 对照仍回基础 idle。
+WF-16 除全库 hit_verify 外七项全过。探针自身修过三个假判据：停留态不能只试核心三框；
+点击结果须排除当前停留组；等待回 idle 前必须先确认进入动作真的起播，不能拿初始 idle 当通过。

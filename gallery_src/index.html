@@ -1577,6 +1577,10 @@ async function renderLive2D(s, sk){
     const mm=mdl.internalModel.motionManager;
     const MP=(PIXI.live2d&&PIXI.live2d.MotionPriority)||{IDLE:1,NORMAL:2,FORCE:3};
     const idleGroup=['idle','main','home'].find(g=>groups.includes(g))||groups[0]||null;
+    // 只登记末帧/首帧已逐曲线核对的样本链，其他编号不猜。
+    const stayChains=sk.key==='gezi_2'?{touch_idle12:'idle12',touch_idle1:'idle7'}:Object.create(null);
+    const stayLoops=new Set(Object.values(stayChains));
+    let chainPending=null;
     /* ---------- 动作语音 ----------
        ⚠️ 不要走库的 `definitions[g][0].Sound`：那条通道由 SoundManager 托管，
        下一条动作一 startMotion 就把上一条 dispose 掉。而 idle 播完会自动回落 idle，
@@ -1650,7 +1654,7 @@ async function renderLive2D(s, sk){
       } };
     const origCreateMotion=mm.createMotion.bind(mm);
     mm.createMotion=(json,group,def)=>{ const m=origCreateMotion(json,group,def);
-      if(group===idleGroup&&json&&json.Meta&&json.Meta.Loop&&m.setIsLoop){
+      if((group===idleGroup||stayLoops.has(group))&&json&&json.Meta&&json.Meta.Loop&&m.setIsLoop){
         m.setIsLoop(true); if(m.setIsLoopFadeIn) m.setIsLoopFadeIn(false); }
       try{ if(json&&json.Curves){ const s=paramSets[group]||(paramSets[group]=new Set());
           for(const c of json.Curves) if(c.Target==='Parameter'){ const id=curveId(c); if(id){ s.add(id);
@@ -1658,6 +1662,12 @@ async function renderLive2D(s, sk){
         markPhase(json); }catch(e){}
       return m; };
     mm.groups.idle=idleGroup;
+    const shouldRequestIdle=mm.state.shouldRequestIdleMotion.bind(mm.state);
+    mm.state.shouldRequestIdleMotion=()=>!chainPending&&shouldRequestIdle();
+    mm.on('motionFinish',()=>{ const next=stayChains[mm.state.currentGroup];
+      if(!next||chainPending) return;
+      chainPending=next;
+      mm.startMotion(next,0,MP.FORCE).then(()=>{ if(chainPending===next) chainPending=null; }); });
 mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }catch(e){}
       /* 真正的起播点：库的 startMotion 是 async，reserve() 拒绝（同 group+index 正在播、或优先级
          不足）时根本走不到这里。sng 勿在 startMotion 包装器里无条件置位 —— 播放中连点同一部位
@@ -1711,6 +1721,7 @@ mm._startMotion=(m,onFinished)=>{ try{ m.setFinishedMotionHandler(onFinished); }
     const played=new Set();
     const play=g=>{ if(!g) return false;
       if(l2Paused) l2SetPaused(false);         // 用户重新挑动作=明确要放开冻结（运行时自己回落 idle 不走这里）
+      chainPending=null;
       try{ playVoice(g);
         mm.startMotion(g,0,MP.FORCE);
         if(g!==idleGroup) played.add(g); return true; }catch(e){ return false; } };
