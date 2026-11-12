@@ -768,6 +768,46 @@ def t_promote_staged():
     tmp_work(body)
 
 
+def t_panel_newround_clears_round_artifacts():
+    """开新一轮必须把「这次新增了什么 / 对照表」也归档，不能留着上一轮的 36 个文件。"""
+    print('\n[18] 面板新一轮：阶段结论 + 新增清单 + 对照表一起归档')
+    import pipeline_panel as pp
+    d = tempfile.mkdtemp(prefix='panel_round_')
+    work = os.path.join(d, 'work'); panel = os.path.join(d, 'panel')
+    arch = os.path.join(panel, 'archive')
+    os.makedirs(work); os.makedirs(panel)
+    old = {k: getattr(pp, k) for k in ('ROOT', 'WORK', 'PANEL', 'ARCHIVE', 'STATE', 'RUNS')}
+    old_cache = dict(pp._CACHE)
+    try:
+        pp.ROOT, pp.WORK, pp.PANEL, pp.ARCHIVE = d, work, panel, arch
+        pp.STATE = os.path.join(work, 'pipeline_state.json')
+        pp.RUNS = os.path.join(panel, 'runs.json')
+        with open(pp.STATE, 'w', encoding='utf-8') as f:
+            json.dump({'fingerprint': 'bundles=1 deps=x cfg=y', 'done': {}, 'verdict': {}}, f)
+        with open(pp.RUNS, 'w', encoding='utf-8') as f:
+            json.dump([{'id': '1', 'state': 'done'}], f)
+        with open(os.path.join(work, 'new_paintings.txt'), 'w', encoding='utf-8') as f:
+            f.write('old_skin\n')
+        with open(os.path.join(work, 'sheet_paintings.png'), 'wb') as f:
+            f.write(b'png')
+        pp._CACHE['news'] = [{'rows': [{'stem': 'old_skin'}]}, 9999999999.0]
+        j = pp.new_round()
+        ck('新一轮返回 ok', bool(j.get('ok')), str(j))
+        ck('new_paintings.txt 已归档不在 WORK', not os.path.isfile(os.path.join(work, 'new_paintings.txt')))
+        ck('sheet_paintings.png 已归档不在 WORK', not os.path.isfile(os.path.join(work, 'sheet_paintings.png')))
+        ck('归档目录里能找到新增清单与对照表',
+           any('new_paintings_' in x for x in os.listdir(arch)) and
+           any('sheet_paintings_' in x for x in os.listdir(arch)), str(os.listdir(arch)))
+        ck('news 缓存被清空', pp._CACHE.get('news', [None])[0] is None)
+        news = pp.newsafe()
+        ck('新一轮后「这次新增了什么」为空', not (news or {}).get('rows'), str(news)[:80])
+    finally:
+        for k, v in old.items():
+            setattr(pp, k, v)
+        pp._CACHE.clear(); pp._CACHE.update(old_cache)
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     t_stems()
     t_no_scope()
@@ -787,6 +827,7 @@ def main():
     t_audio_fatal_rc()
     t_derive_words()
     t_promote_staged()
+    t_panel_newround_clears_round_artifacts()
     print('\n' + ('[FAIL] ' + '；'.join(FAIL) if FAIL else '[PASS] 签字门与增量范围闸门全绿'))
     return 1 if FAIL else 0
 

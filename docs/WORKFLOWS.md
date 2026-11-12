@@ -5520,3 +5520,36 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 
 **涉及文件**：`gallery_src/bgm.html`、`gallery_src/bgm_chart.css`、`scripts/deploy_gallery.py`、
 `scripts/diag/bgm_page_probe.py`、`docs/TROUBLESHOOTING.md §188`。
+
+---
+
+### WF-61: 控制台引导锚点 / 新一轮清场 / 航行进度条（2026-11-12）
+
+**判据（先量再改）**
+- 「待办」只能有一个锚：`currentStep / firstGapStep / nextWorkStep / allStagesPass /
+  notYet / 右栏计数` 必须共用同一套 `activeStages(n)`。只读预检（preflight）在 pull 已有结论
+  或后面步骤已跑过时是**可选复核**，不占缺口、不占右栏分母；否则第 1 步说去第 2 步、
+  第 2 步说待办第 1 步，来回指。
+- 右栏「1/2」这类分母按**可交付阶段**算，不是按该步全部阶段算；可选预检在细节里仍可单独跑。
+- 「新一轮」必须把**细节抽屉会读到的本轮产物**一起归档：`new_paintings.txt`、`sheet_*.png`，
+  并清 `news/scope/units/scopetag` 缓存。只归档 state/runs 会留下上一轮的「这次新增了什么」。
+- 主页跑任何任务都要有航行条：本阶段自己的水道 + 小船 + 浪花 + 小字动作提示
+  （`voyageHint`）。阶段切换 ⇒ 骨架重建 ⇒ 水道置空重新填；没有 a/b 的阶段只起伏不假推进。
+  静止时整块 `display:none`，`document.getAnimations()` 必须回到 0。
+
+**步骤**
+1. 改 `pipeline_panel.py` 的引导函数与 `new_round()`；进度台骨架在 `gaugeSet()`，
+   数字/宽度在 `gaugeTick()`，小字在 `voyageHint()`。
+2. `panel_paper_probe.py` 用 fetch 覆盖从真入口 `__probe.api()` 灌合成 state/gauge：
+   验死循环回归（待办 2 / 右栏 1/1 / 无卡点 / 第 2 步不写待办 1）与航行条（40% → 换阶段 0 → 收工隐藏）。
+3. `test_pipeline_gating.py [18]` 在临时目录验 `new_round()` 归档新增清单/对照表并清 news。
+4. 重启控制台（无任务在跑时）让新代码生效；旧标签页靠 build 戳自刷新。
+
+**踩坑**
+- 别在 `askOf(1)` 里把「preflight 没跑」摆成挡路卡点：pull 已绿时它只是可选复核，
+  主按钮仍去下一步；否则用户被锁在第 1 步。
+- 航行条的 `GKEY` 必须含 `stage`，否则换阶段不重建骨架，水道会沿用上一阶段的百分比。
+- 浪花/小船动画只在 `.gauge.on` 时存在；`prefers-reduced-motion` 下全部停，静止帧判据才不破。
+
+**涉及文件**：`scripts/pipeline_panel.py`、`scripts/diag/panel_paper_probe.py`、
+`scripts/diag/test_pipeline_gating.py`、`docs/TROUBLESHOOTING.md §200`。

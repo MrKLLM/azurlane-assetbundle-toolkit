@@ -12266,3 +12266,37 @@ closest 参考动作不适配，已整批回退。
 **待办口径**：本条转入长期未闭环，不再在缺乏独立游戏运行时基准时继续猜参数或改动作。
 后续需要更强的运行时对照能力（例如官方 Cubism 运行时/Unity 侧同模型同状态逐帧）或更完整模型能力；
 用户网页录屏只能定位症状，不能当基准。恢复工作时先从 §197–§199 的否证清单开始，避免重跑。
+
+## §200 控制台引导死循环 / 新一轮残留 / 航行进度条（2026-11-12）
+
+**现象**：第 1 步说「去第 2 步」，第 2 步说「待办是第 1 步」，来回指；第 1 步明明拉包已完成，
+右栏却写 1/2；开了「新一轮」，细节抽屉仍显示上一轮的 36 个新增文件；主页跑任务时没有
+像游戏更新那样「正在干嘛」的加载条。
+
+**根因**：
+- `currentStep()` 把第 1 步里 **idle 的只读 preflight** 当成缺口；而 `askOf(1)` 在 pull 已绿时
+  又用 `nextWorkStep(1)` 指向第 2 步。两个入口各算各的 ⇒ 死循环。preflight 是可选复核，
+  不是第 1 步的交付物。
+- `new_round()` 只归档 `pipeline_state.json` / `runs.json`；细节抽屉的「这次新增了什么 /
+  对照表」读的是 `WORK/new_paintings.txt` 与 `sheet_*.png`，它们没被归档，news 缓存也没清。
+- 旧进度台只有阶段级总条，没有「本阶段自己的水道」，也没有小船/浪花/小字动作提示。
+
+**修法**：
+- 新增 `optionalIdle(s)` / `activeStages(n)`：pull 已有结论（或后面步骤已跑过）时，
+  preflight idle 不计入待办/缺口/右栏分母；`currentStep / firstGapStep / nextWorkStep /
+  allStagesPass / notYet / 右栏计数` 全部共用。第 1 步 pull 绿时右栏显示 1/1，
+  主按钮去第 2 步，预检降级为「可选」链接，不再摆成卡点。
+- `new_round()` 一并归档 `new_paintings.txt` / `sheet_*.png`，并清 `news/scope/units/scopetag`
+  缓存；新一轮后「这次新增了什么」为空。
+- 进度台改成**航行条**：本阶段一条水道（`#vFill`）+ 小船（`#vBoat`）+ 两层浪花 +
+  小字提示（`voyageHint`：合成静态立绘 · 40/100 这类）。阶段一换 `GKEY` 变 → 骨架重建 →
+  水道置空重新填满；没有 a/b 的阶段只让浪/船起伏，不拿旧值假装在动。总进度仍保留
+  `#gFill` 分段条；静止时整块 `display:none`，动画一个不剩。
+
+**判据**：`panel_paper_probe.py` 新增「引导死循环回归」（preflight 未跑 + pull 已绿 ⇒
+待办 2、右栏 1/1、第 1 步无卡点、第 2 步不写待办 1）与「航行进度条」（小船/浪花/提示在、
+本阶段 40%、换阶段置 0、收工收干净）；`test_pipeline_gating.py` 新增 `[18]` 新一轮归档
+新增清单/对照表并清 news。两套全绿。
+
+**涉及**：`scripts/pipeline_panel.py`、`scripts/diag/panel_paper_probe.py`、
+`scripts/diag/test_pipeline_gating.py`、`docs/WORKFLOWS.md` WF-61。

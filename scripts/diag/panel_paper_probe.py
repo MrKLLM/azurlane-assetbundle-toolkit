@@ -415,6 +415,82 @@ def main():
             chk('回执不再把「⇒ 跑 cfg…」塞进括号', '⇒' not in rc, rc[:90])
             pg.shot('gate_receipt.png')
 
+        # 引导死循环回归：preflight 没跑、pull 已绿时，待办必须去第 2 步，
+        # 第 1 步右栏按「可交付阶段」计 1/1，第 2 步不再写「待办是第 1 步」。
+        print('\n── 引导死循环回归（preflight 未跑 + pull 已绿）──')
+        def aev(expr):
+            r = pg.cmd('Runtime.evaluate', {'expression': expr, 'returnByValue': True,
+                                            'awaitPromise': True})
+            return r.get('result', {}).get('value')
+        def drive_state(mut):
+            return aev("""(async()=>{
+              const _f=window.fetch;
+              window.fetch=async(u,o)=>{ if(String(u).includes('/api/state')){
+                  const r=await _f(u,o); const j=await r.json(); %s;
+                  return {json:async()=>j}; } return _f(u,o); };
+              try{ await __probe.api(); } finally{ window.fetch=_f; }
+              return {work:__probe.work(),
+                      rail:[...document.querySelectorAll('.snode')].map(n=>({
+                        step:n.dataset.step, done:n.dataset.done, total:n.dataset.total,
+                        cnt:(n.querySelector('.cnt')||{}).textContent}))};
+            })()""" % mut)
+        loop = drive_state("j.state={pull:{ok:true,detail:'只读到 diff（新增 1/变更 0）'}};"
+                           "j.running=null;j.gauge=null;")
+        chk('preflight 未跑但 pull 已绿时，待办指向第 2 步', (loop or {}).get('work') == 2,
+            str(loop))
+        r1 = next((x for x in (loop or {}).get('rail', []) if x.get('step') == '1'), {})
+        chk('第 1 步右栏按可交付阶段计 1/1（预检可选不占分母）',
+            r1.get('done') == '1' and r1.get('total') == '1' and r1.get('cnt') == '1/1',
+            str(r1))
+        pg.ev("__probe.go(1)")
+        a1 = pg.ev("__probe.ask()") or {}
+        chk('第 1 步主按钮去第 2 步，不再摆「还没查过前置条件」卡点',
+            any(x.startswith('goto|2|') for x in a1.get('acts', [])) and not a1.get('gate'),
+            str(a1)[:140])
+        pg.ev("__probe.go(2)")
+        vn2 = pg.ev("document.getElementById('viewnoteTx').textContent") or ''
+        chk('第 2 步不再写「待办是第 1 步」', '待办是第 1 步' not in vn2, vn2[:90])
+        aev("__probe.api()")
+        pg.ev("__probe.go(1)")
+
+        # 航行进度条：本阶段自己的水道 + 小船 + 小字提示；阶段一换就置空重新填。
+        print('\n── 航行进度条（小船 / 浪花 / 本阶段重置）──')
+        def drive_gauge(gjs, runjs='null'):
+            return aev("""(async()=>{
+              const _f=window.fetch;
+              window.fetch=async(u,o)=>{ if(String(u).includes('/api/state')){
+                  const r=await _f(u,o); const j=await r.json();
+                  j.gauge=%s; j.running=%s; return {json:async()=>j}; }
+                return _f(u,o); };
+              try{ await __probe.api(); } finally{ window.fetch=_f; }
+              const g=document.querySelector('#gauge');
+              return {on:g.classList.contains('on'),
+                      hint:(g.querySelector('#vHint')||{}).textContent||'',
+                      fill:(g.querySelector('#vFill')||{}).style?g.querySelector('#vFill').style.width:null,
+                      boat:!!g.querySelector('#vBoat'),
+                      waves:!!g.querySelector('.v-waves'),
+                      rl:(document.querySelector('#runline')||{}).textContent||'',
+                      gun:(g.querySelector('#gUn')||{}).textContent||''};
+            })()""" % (gjs, runjs))
+        v1 = drive_gauge("{t0:Date.now()/1000-30,mem_mb:512,stage:'paintings',"
+                         "stage_title:'静态立绘合成 → 临时区',done:1,total:7,skipped:0,"
+                         "eta:120,eta_missing:0,eta_n:3,unit_done:40,unit_total:100}",
+                         "{id:'probe',step:3,label:'probe'}")
+        chk('在跑时出现航行条：小船 / 浪花 / 小字提示都在',
+            bool(v1 and v1.get('on') and v1.get('boat') and v1.get('waves')
+                 and '40/100' in (v1.get('hint') or '')), str(v1))
+        chk('本阶段水道按 a/b 落宽（40/100 = 40%）',
+            bool(v1 and v1.get('fill') and abs(float(str(v1['fill']).rstrip('%')) - 40) < 1),
+            str((v1 or {}).get('fill')))
+        v2 = drive_gauge("{t0:Date.now()/1000-5,mem_mb:512,stage:'spine',"
+                         "stage_title:'Spine 提取',done:2,total:7,skipped:0,"
+                         "eta:90,eta_missing:0,eta_n:3,unit_done:0,unit_total:10}",
+                         "{id:'probe',step:3,label:'probe'}")
+        chk('换到下一阶段后水道置空重新填（不沿用上一阶段 40%）',
+            bool(v2 and v2.get('fill') in ('0%', '0.0%')), str((v2 or {}).get('fill')))
+        v3 = drive_gauge('null', 'null')
+        chk('收工后航行条收干净（静止帧不占位）', bool(v3 and not v3.get('on')), str(v3))
+
         pg.ev("document.getElementById('bDetail').click()")
         time.sleep(0.9)
         chk('细节抽屉能打开', bool(pg.ev("document.getElementById('detail').classList.contains('on')")))

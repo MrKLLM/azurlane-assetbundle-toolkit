@@ -138,14 +138,29 @@ def new_round():
     os.makedirs(ARCHIVE, exist_ok=True)
     stamp = time.strftime('%Y%m%d-%H%M%S')
     moved = []
+
+    def _archive(src, name):
+        dst = os.path.join(ARCHIVE, '%s_%s%s' % (name, stamp, os.path.splitext(src)[1]))
+        os.replace(src, dst)
+        try:
+            moved.append(os.path.relpath(dst, ROOT).replace('\\', '/'))
+        except ValueError:              # 测试把归档目录挪到别的盘符时也能报出来
+            moved.append(dst.replace('\\', '/'))
+
     for src, name in ((STATE, 'pipeline_state'), (RUNS, 'runs')):
         if os.path.isfile(src):
-            dst = os.path.join(ARCHIVE, '%s_%s.json' % (name, stamp))
-            os.replace(src, dst)
-            try:
-                moved.append(os.path.relpath(dst, ROOT).replace('\\', '/'))
-            except ValueError:          # 测试把归档目录挪到别的盘符时也能报出来
-                moved.append(dst.replace('\\', '/'))
+            _archive(src, name)
+    # 新一轮不是只清阶段结论：细节抽屉的「这次新增了什么 / 对照表」读的是
+    # new_paintings.txt 与 sheet_*.png。它们留在 WORK 里，开新一轮后仍会显示上一轮
+    # 的 36 个文件（2026-11-12 用户截图）。一并归档，并清掉 news 缓存。
+    import glob as _glob
+    round_files = [os.path.join(WORK, 'new_paintings.txt')]
+    round_files += _glob.glob(os.path.join(WORK, 'sheet_*.png'))
+    for src in round_files:
+        if os.path.isfile(src):
+            _archive(src, os.path.splitext(os.path.basename(src))[0])
+    for slot in ('news', 'scope', 'units', 'scopetag'):
+        _CACHE[slot] = [None, 0.0]
     save_runs([])
     return {'ok': True, 'stamp': stamp, 'archived': moved}
 
@@ -2288,6 +2303,45 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
 .gauge .gbar i{background:var(--run)!important;border-radius:0!important}
 .gauge .gbar u s{border-right:1px solid var(--paper-3)!important}
 
+/* ── 航行条：本阶段一条自己的水道，小船向前进 ─────────────────────────
+   阶段一换骨架就重建（GKEY 含 stage），水道置空重新填满；没有 a/b 的阶段
+   只让浪与船起伏，不拿上一阶段的旧值假装在动。静止（没在跑）时整块 display:none，
+   动画一个都不剩。 */
+.gauge .voyage{display:flex;flex-direction:column;gap:7px}
+.gauge .v-track{position:relative;height:40px;border:1px solid var(--rule)!important;
+  background:var(--paper)!important;overflow:hidden}
+.gauge .v-fill{position:absolute;left:0;top:0;bottom:0;width:0;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--run) 14%,transparent),
+    color-mix(in srgb,var(--run) 34%,transparent));
+  transition:width .45s var(--ez)}
+.gauge .v-waves{position:absolute;left:0;right:0;bottom:0;height:18px;pointer-events:none}
+.gauge .v-waves i{position:absolute;left:-64px;right:-64px;bottom:0;height:14px;
+  background:radial-gradient(circle at 10px 15px,transparent 6px,
+    color-mix(in srgb,var(--run) 55%,transparent) 6.5px 7.5px,transparent 8.5px) repeat-x;
+  background-size:26px 14px;opacity:.5;animation:vwave 3.4s linear infinite}
+.gauge .v-waves i:nth-child(2){bottom:4px;height:12px;background-size:34px 12px;
+  opacity:.28;animation-duration:5.1s;animation-direction:reverse}
+@keyframes vwave{from{transform:translateX(0)}to{transform:translateX(26px)}}
+.gauge .v-boat{position:absolute;bottom:9px;left:0;width:36px;height:28px;color:var(--ink);
+  transition:left .45s var(--ez);animation:vbob 2.6s ease-in-out infinite;pointer-events:none}
+.gauge .v-boat svg{width:100%;height:100%;overflow:visible;display:block}
+.gauge .v-boat .hull{fill:var(--ink)}
+.gauge .v-boat .mast{stroke:var(--ink);stroke-width:2;fill:none}
+.gauge .v-boat .sail{fill:var(--ochre)}
+.gauge .v-boat .flag{fill:var(--run)}
+@keyframes vbob{0%,100%{transform:translateY(0) rotate(-1.2deg)}
+  50%{transform:translateY(-2.5px) rotate(1.6deg)}}
+.gauge .v-hint{display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+  font:400 10px/1.5 var(--font-mono)!important;color:var(--ink-3)!important}
+.gauge .v-hint b{color:var(--ink)!important;font-weight:600!important;letter-spacing:.04em}
+.gauge .v-overall{align-items:center;gap:10px}
+.gauge .v-olabel{font:500 8px/1 var(--font-mono)!important;letter-spacing:.22em;
+  color:var(--ink-3)!important;flex:0 0 auto}
+@media (prefers-reduced-motion:reduce){
+  .gauge .v-waves i,.gauge .v-boat{animation:none!important}
+  .gauge .v-fill,.gauge .v-boat{transition:none!important}
+}
+
 /* ── 右栏：五步索引 ──────────────────────────────────────────────── */
 .steps{
   display:flex!important;flex-direction:column!important;
@@ -3897,6 +3951,15 @@ async function apiState(force){
   }
 }
 function stagesOf(n){ return (S.stages||[]).filter(s=>(s.step||0)===n); }
+/* preflight 是只读预检，不是第 1 步的交付物。pull 已经有结论（或后面步骤已经跑过）时，
+   preflight 还没跑不该把待办锁回第 1 步 —— 否则第 1 步说「去第 2 步」、第 2 步说
+   「待办是第 1 步」，来回指（2026-11-12 用户截图）。它仍可在细节里单独跑。 */
+function optionalIdle(s){
+  if(!s || s.key!=='preflight' || statusOf(s.key)!=='idle') return false;
+  const pl=statusOf('pull');
+  return pl==='pass' || pl==='await' || hasProgressAfter(stepOfKey('preflight')||1);
+}
+function activeStages(n){ return stagesOf(n).filter(s=>!optionalIdle(s)); }
 /* 后面的步骤已经有结论/在跑 ⇒ 前面"全 idle"的步骤只可能是上一轮做过、这一轮没复核
    （典型：deps 换表后 preflight/pull/cfg.* 的章失效）。把它当待办会把人指回去重做；
    2026-10-23 用户跑 cg 时被指回第 1 步"接模拟器"就是这么来的。 */
@@ -3927,7 +3990,7 @@ function currentStep(){
   /* 表漂移同理：修复动作（重新发布）在第 2 步，别让"待办"停在已经全绿的第 5 步。 */
   if(skinGapPending()) return stepNo('cfg.publish',2);
   for(const n of order){
-    const list=stagesOf(n);
+    const list=activeStages(n);
     if(!list.length) continue;
     const sts=list.map(s=>statusOf(s.key));
     if(sts.some(x=>x==='fail'||x==='run'||x==='await'||x==='idle')){
@@ -3969,6 +4032,22 @@ function gaugeSrc(g){
      —— 这句措辞是界面判据在守的，别一丢了。 */
   return bits.length?bits.join(' · '):(g.eta_n?'按 '+g.eta_n+' 段历史均值':'估算');
 }
+/* 小字提示：像游戏更新条那样说清「正在干嘛」。有 a/b 就带上项数，没有就只说动作。 */
+const VOYAGE_HINT={
+  preflight:'检查权威输入与画廊 vendor', pull:'读取模拟器差异 / 拉取新包',
+  'cfg.decrypt':'解密 scripts 配置容器', 'cfg.lua':'导出 lua 配置表',
+  'cfg.disk':'解析 sharecfgdata 表', 'cfg.publish':'发布配置表到 inputs',
+  deps:'重建官方依赖表', meta:'重建舰船元数据', bg:'导出背景图',
+  paintings:'合成静态立绘', spine:'提取 Spine 动态立绘', live2d:'还原 Live2D 模型与动作',
+  audio:'解码 CV 语音包', bgm:'补导 BGM 曲库', cg:'导出全屏 CG',
+  review:'生成改前 / 改后对照表', 'swap-in':'备份并换入正式区',
+  derive:'重建索引与台词表', labels:'重建背景 / 音乐标签', regress:'跑回归验收'
+};
+function voyageHint(g){
+  const base=VOYAGE_HINT[g.stage]||g.stage_title||g.stage||'准备中';
+  if(g.unit_total>0 && g.unit_done!=null) return base+' · '+g.unit_done+'/'+g.unit_total;
+  return base+'中';
+}
 function gaugeTick(){
   if(!G||!G.t0) return;
   const now=Date.now()/1000, e=$('#gEl'), m=$('#gMem'), t=$('#gEta'),
@@ -3984,6 +4063,16 @@ function gaugeTick(){
   if(u) u.textContent = has ? ('本阶段 '+G.unit_done+' / '+G.unit_total)
                             : (G.stage ? '本阶段无项级进度（该脚本不打 a/b）' : '');
   if(f) f.style.width = (G.total ? Math.min(100, (G.done+frac)/G.total*100) : 0).toFixed(1)+'%';
+  /* 航行条只画**本阶段**：有 a/b 才推进，没有就置空让浪/船起伏。
+     阶段切换时 gaugeSet 重建骨架，这里自然从 0 重新填满。 */
+  const vf=$('#vFill'), vb=$('#vBoat'), vh=$('#vHint');
+  const vpct = has ? Math.min(100, Math.max(0, G.unit_done/G.unit_total*100)) : 0;
+  if(vf) vf.style.width = vpct.toFixed(1)+'%';
+  if(vb){
+    vb.style.left='clamp(0px, calc('+vpct.toFixed(1)+'% - 16px), calc(100% - 36px))';
+    vb.classList.toggle('idle', !has);
+  }
+  if(vh) vh.textContent=voyageHint(G);
   /* 五步主页那条**每一步自己的进度条**：跑起来才推进（含本阶段内比例），
      没在跑时整行 display:none —— 静止帧逐像素相同的判据不受影响。 */
   const rl=$('#runline');
@@ -4036,8 +4125,22 @@ function gaugeSet(g){
         '<span>剩余 <b id="gEta">—</b></span>'+
         (g.eta_n?'<span class="gnote" id="gSrc">'+gaugeSrc(g)+'</span>':'')+
       '</div>'+
-      '<div class="grow"><span class="gbar"><i id="gFill"></i><u>'+ticks+'</u></span>'+
-        '<span class="gun" id="gUn">—</span></div>';
+      /* 航行条：本阶段自己的水道。阶段一换，GKEY 变 → 骨架重建 → 水道置空重新填满；
+         小船跟着本阶段 a/b 往前走，没有 a/b 时只在浪里起伏，不拿旧值假装在动。 */
+      '<div class="voyage">'+
+        '<div class="v-track">'+
+          '<span class="v-waves"><i></i><i></i></span>'+
+          '<i class="v-fill" id="vFill"></i>'+
+          '<span class="v-boat" id="vBoat" aria-hidden="true">'+
+            '<svg viewBox="0 0 48 36"><path class="hull" d="M6 24 L42 24 L36 32 L12 32 Z"/>'+
+            '<path class="mast" d="M24 24 L24 5"/><path class="sail" d="M24 6 L38 20 L24 20 Z"/>'+
+            '<path class="flag" d="M24 5 L31 8 L24 11 Z"/></svg>'+
+          '</span>'+
+        '</div>'+
+        '<div class="v-hint"><b id="vHint">—</b><span class="gun" id="gUn">—</span></div>'+
+      '</div>'+
+      '<div class="grow v-overall"><span class="v-olabel">本轮</span>'+
+        '<span class="gbar"><i id="gFill"></i><u>'+ticks+'</u></span></div>';
   }
   el.classList.add('on');
   gaugeTick();
@@ -4150,7 +4253,7 @@ function nextWorkStep(n){
     if(k<=n) continue;
     /* 表漂移算第 2 步的活：阶段结论全绿，但发布出去的表缺行（§155）。 */
     if(k===nCfg && skinGapPending()) return k;
-    const sts=stagesOf(k).map(s=>statusOf(s.key));
+    const sts=activeStages(k).map(s=>statusOf(s.key));
     if(sts.some(x=>x!=='pass')){
       if(sts.every(x=>x==='idle') && hasProgressAfter(k)) continue;
       return k;
@@ -4161,7 +4264,7 @@ function nextWorkStep(n){
 /* 这一步会动什么，从阶段表当场算（档位数），不手抄 —— 手抄的那句在步骤
    已经跑完之后就会说谎（"要你签字才写正式区"其实早就签完了）。 */
 function stepHint(n){
-  const list=stagesOf(n);
+  const list=activeStages(n);
   if(!list.length) return '';
   const c=(t)=>list.filter(s=>s.tier===t).length;
   const parts=[];
@@ -4172,7 +4275,8 @@ function stepHint(n){
 }
 function allStagesPass(){
   const a=(S&&S.stages)||[];
-  return a.length>0 && a.every(s=>statusOf(s.key)==='pass'||stepSkipped(s.step)) && !skinGapPending();
+  return a.length>0 && a.every(s=>optionalIdle(s)||statusOf(s.key)==='pass'||stepSkipped(s.step))
+    && !skinGapPending();
 }
 /* 「去下一步」按钮 + 配套那句正文：同一个 nw 算出来，杜绝"正文说第 3 步、按钮去第 5 步"。 */
 function nextStepAct(n){
@@ -4196,7 +4300,7 @@ function firstGapStep(){
      不能当成"第一个缺口"（2026-10-23 第 5 步因此把用户指回第 1 步）。 */
   const order=Object.keys((S&&S.steps)||{}).map(Number).sort((a,b)=>a-b);
   for(const n of order){
-    const list=stagesOf(n);
+    const list=activeStages(n);
     if(!list.length) continue;
     const sts=list.map(s=>statusOf(s.key));
     if(sts.some(x=>x==='fail'||x==='run'||x==='await'||x==='idle')){
@@ -4237,7 +4341,7 @@ function askOf(n){
           {a:'detail',t:'看差在哪',k:'link2'}]
   }:null;
   /* 卡点只描述"跨步的前置条件"，不顶替本步的按钮。 */
-  const gate=(pf&&!pf.ok)?{
+  let gate=(pf&&!pf.ok)?{
     t: stale?'导出前置检查没过 · 配置表过期':'导出前置检查没过',
     b: stale
       ? ('盘上的配置源是 '+dsrc+'，inputs/gamecfg 里发布的是 '+dpub+'。'+
@@ -4251,6 +4355,8 @@ function askOf(n){
     b:'inputs/azdata、inputs/gamecfg 与画廊 vendor 是重导的唯一起点。先只读地查一遍，不写任何东西。',
     acts:[{a:'recheck',t:'▶ 先查一遍',k:'pact mag'},{a:'detail',t:'看检查项',k:'link2'}]
   }:null);
+  /* pull 已有结论时，预检没跑只是「可选复核」，不该再摆成挡路的卡点。 */
+  if(!pf && (stn('pull')==='pass' || stn('pull')==='await')) gate=null;
 
   /* 全部判绿时，第 1/2 步常常是"上一轮已做、这一轮没复核"（右栏显示 —）。
      以前主屏仍写"先确认权威输入还在位 / 从源包重解配置表"，会让人白跑一遍；
@@ -4297,16 +4403,17 @@ function askOf(n){
     }
     const unreach=/设备不可达/.test(pl.detail||'');
     const nx1=nextStepAct(1);
+    const opt=(!pf && !stale)?[{a:'recheck',t:'预检（可选）',k:'link2'}]:[];
     return {eb, gate,
       ask: unreach?'设备没连上，先用本地已有的包':'包已经在本地了',
       why: unreach?(pl.detail||'')+
         (stale?' 配置表也还没对齐：导出前先去第 '+nCfg+' 步。':'')
         : (stale?'但导出还开不了：配置表比源包旧，先去第 '+nCfg+' 步对齐。'
-                :nx1.why),
+                :nx1.why+(!pf?' 预检还没跑（只读，可选），不挡下一步。':'')),
       acts: stale
         ? [{a:'goto',to:nCfg,t:'▶ 去第 '+nCfg+' 步同步配置表',k:'pact mag'},
            {a:'detail',t:'看这 '+list.length+' 个阶段',k:'link2'}]
-        : [nx1.act,{a:'pullcheck',t:'再算一遍差异',k:'link2'}]};
+        : [nx1.act,{a:'pullcheck',t:'再算一遍差异',k:'link2'},...opt]};
   }
 
   if(n===nCfg){
@@ -4412,7 +4519,7 @@ function askOf(n){
      2026-10-01 实测的假绿灯：用户只跑了 swap-in/derive/regress，第 2 步的立绘一张没重导，
      主屏却大字写「这次更新已经换完了」。 */
   const allSt=S.stages||[];
-  const notYet=allSt.filter(s=>stn(s.key)==='idle' && !stepSkipped(s.step));
+  const notYet=allSt.filter(s=>stn(s.key)==='idle' && !optionalIdle(s) && !stepSkipped(s.step));
   const upIdle=[...new Set(allSt.filter(s=>stn(s.key)==='idle' && s.step<n &&
       stepSkipped(s.step)).map(s=>s.step))];
   const whereNot=notYet.map(s=>'第 '+s.step+' 步 '+s.key).join('、');
@@ -4508,7 +4615,7 @@ function render(){
     String(cur).padStart(2,'0');
   bar.querySelectorAll('.snode').forEach(e=>e.remove());
   Object.keys(steps).sort().forEach(k=>{
-    const n=+k, list=stagesOf(n);
+    const n=+k, list=activeStages(n);
     const worst=list.map(s=>statusOf(s.key))
       .reduce((a,b)=>['fail','run','await','pass','idle'].indexOf(a)<=['fail','run','await','pass','idle'].indexOf(b)?a:b,'idle');
     const doneN=list.filter(s=>statusOf(s.key)==='pass').length;
