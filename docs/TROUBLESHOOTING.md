@@ -12331,3 +12331,29 @@ closest 参考动作不适配，已整批回退。
 
 **涉及**：`scripts/update_pipeline.py`（`st_pull`）、`scripts/diag/test_pipeline_gating.py`、
 `docs/WORKFLOWS.md` WF-61。
+
+## §202 有任务在跑却看不到进度条 / 模拟器从哪一步起可以关（2026-11-13）
+
+**现象**：第 3 步顶部黄条写「已经有一个任务在跑 pid=26668」，主屏却仍摆「开始重导」，
+看不到航行进度条；用户问「进度条在哪？从哪一步开始不用我开着游戏了」。
+
+**根因**：
+- 点「开始」撞「重活只允许一次一个」时，`post()` 只写回执/黄条，**不立刻拉真状态**；
+  `S.running` 要等下一轮 8 秒轮询才进来，于是这段时间主屏没有「正在跑」也没有航行条。
+- 主屏 `askOf(step)` 不感知 `S.running`，在跑时仍显示该步的「开始」按钮，诱导再点再撞。
+- 「模拟器何时可关」没有写在界面上，用户只能猜。
+
+**修法**：
+- `post()` 收到「已经有一个任务在跑」错误后立刻 `apiState(true)` 并 `tail(running.id)`，
+  航行条/正在跑马上出现。
+- `render()` 在 `S.running` 时把主屏改成「正在跑 · 任务名」，主按钮只留「看实时日志」，
+  不再摆开始/签字按钮；foot 写明 pid 与「重活一次只跑一个」。
+- 第 1 步 pull 绿后与第 2~5 步主屏都写明：**第 1 步拉包完成后即可关闭模拟器；
+  第 2~5 步只读本地源包，不需要游戏开着**。
+
+**判据**：`panel_paper_probe.py` 航行条 section 新增「在跑时主屏改成正在跑 + 看日志，
+不再摆开始按钮」；实测重启面板（不杀导出子进程）后 8788 页面 `#gauge.on=true`、
+`#vBoat` 在、`#vHint=导出背景图中`、主按钮仅 `detail`、foot 带 pid。
+
+**涉及**：`scripts/pipeline_panel.py`（`post` / `render` / `askOf`）、
+`scripts/diag/panel_paper_probe.py`、`docs/WORKFLOWS.md` WF-61。

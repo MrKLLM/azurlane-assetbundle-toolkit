@@ -470,7 +470,9 @@ def main():
                       boat:!!g.querySelector('#vBoat'),
                       waves:!!g.querySelector('.v-waves'),
                       rl:(document.querySelector('#runline')||{}).textContent||'',
-                      gun:(g.querySelector('#gUn')||{}).textContent||''};
+                      gun:(g.querySelector('#gUn')||{}).textContent||'',
+                      ask:(document.querySelector('#ask')||{}).textContent||'',
+                      cta:[...document.querySelectorAll('#cta button')].map(b=>b.dataset.a)};
             })()""" % (gjs, runjs))
         v1 = drive_gauge("{t0:Date.now()/1000-30,mem_mb:512,stage:'paintings',"
                          "stage_title:'静态立绘合成 → 临时区',done:1,total:7,skipped:0,"
@@ -482,6 +484,10 @@ def main():
         chk('本阶段水道按 a/b 落宽（40/100 = 40%）',
             bool(v1 and v1.get('fill') and abs(float(str(v1['fill']).rstrip('%')) - 40) < 1),
             str((v1 or {}).get('fill')))
+        chk('在跑时主屏改成「正在跑」+ 看日志，不再摆开始按钮',
+            bool(v1 and '正在跑' in (v1.get('ask') or '')
+                 and 'detail' in (v1.get('cta') or [])
+                 and 'export' not in (v1.get('cta') or [])), str(v1)[:160])
         v2 = drive_gauge("{t0:Date.now()/1000-5,mem_mb:512,stage:'spine',"
                          "stage_title:'Spine 提取',done:2,total:7,skipped:0,"
                          "eta:90,eta_missing:0,eta_n:3,unit_done:0,unit_total:10}",

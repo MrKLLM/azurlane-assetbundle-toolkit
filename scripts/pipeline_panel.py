@@ -4409,7 +4409,8 @@ function askOf(n){
       why: unreach?(pl.detail||'')+
         (stale?' 配置表也还没对齐：导出前先去第 '+nCfg+' 步。':'')
         : (stale?'但导出还开不了：配置表比源包旧，先去第 '+nCfg+' 步对齐。'
-                :nx1.why+(!pf?' 预检还没跑（只读，可选），不挡下一步。':'')),
+                :nx1.why+(!pf?' 预检还没跑（只读，可选），不挡下一步。':'')+
+                 ' 拉包已完成，现在可以关闭模拟器；第 2~5 步只读本地源包。'),
       acts: stale
         ? [{a:'goto',to:nCfg,t:'▶ 去第 '+nCfg+' 步同步配置表',k:'pact mag'},
            {a:'detail',t:'看这 '+list.length+' 个阶段',k:'link2'}]
@@ -4671,6 +4672,18 @@ function render(){
 
   /* ── 主屏 ─────────────────────────────────────────────────────────── */
   const A=askOf(step);
+  /* 真在跑时主屏不再摆「开始重导」——那会撞「重活只允许一次一个」。
+     进度就在上方航行条；主按钮改成看日志，并说清模拟器从哪一步起可以关。 */
+  if(S.running){
+    A.red=0; A.gate=null;
+    A.ask='正在跑 · '+esc(S.running.label||'');
+    A.why='上方航行条就是进度：本阶段水道 + 小船 + 小字提示，跑完自动刷新。'+
+          '要看实时日志点「细节」。第 1 步拉包完成后即可关闭模拟器；第 2~5 步只读本地源包。';
+    A.acts=[{a:'detail',t:'看实时日志',k:'pact mag'}];
+    A.foot='任务 pid='+(S.running.pid||'')+' · 重活一次只跑一个；再点「开始」会被拒绝。';
+  }else if(step>=2){
+    A.foot=(A.foot?A.foot+' ':'')+'模拟器可关：第 1 步拉包完成后，第 2~5 步都只读本地源包。';
+  }
   /* 跨步的红不许被"本步挺好"盖掉：一次只暴露下一步是对的，但"另有 N 步判红"必须说一句 ——
      2026-10-01 用户就是在这里迷路的：regress 红着（真因是画廊服务器没起），
      大字却写「重导好了 7/7 项」，看起来像一切就绪。 */
@@ -5042,7 +5055,11 @@ async function post(b, opt){
     }
     PENDING=null;
     showReceipt((opt.label||'任务')+' 没起来：'+j.error,'bad');
-    $('#warn').textContent=j.error; $('#warn').classList.add('on'); return;
+    $('#warn').textContent=j.error; $('#warn').classList.add('on');
+    /* 撞「已有任务在跑」时立刻拉一次真状态：让航行条/正在跑马上出现，
+       而不是等下一轮 8 秒轮询（2026-11-13 用户截图：有任务在跑却看不到进度条）。 */
+    apiState(true).then(()=>{ if(S&&S.running&&!curJob) tail(S.running.id); });
+    return;
   }
   $('#warn').classList.remove('on'); tail(j.id);
 }
