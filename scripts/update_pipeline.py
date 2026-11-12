@@ -631,20 +631,29 @@ def st_pull(approved):
     rc, so, se = run([PY, 'scripts/mumu_sync.py', 'diff', '--list-out', lst],
                      timeout=1800, echo=['新增', '大小不一致', '本地独有', '合计', '写出'])
     if rc != 0:
-        txt0 = (so + se).strip()
-        why = txt0.splitlines()[-1][:120] if txt0 else f'rc={rc}'
-        dev = any(k in txt0 for k in ('连不上模拟器', 'ls 顶层失败', 'adb', 'offline', 'device'))
-        # 设备不可达 ≠ 这轮不能跑：包已经在本地、范围清单还有效时，硬卡在第 1 步
-        # 只会让人以为整条线坏了（2026-10-01 实测：用户同步完之后关掉了模拟器）。
+        # 失败原因优先取 stderr 的最后一行（traceback 的真正错误在那里），
+        # 别拿 stdout 的进度行「读取模拟器文件列表…」当原因。
+        err_lines = [x.strip() for x in se.splitlines() if x.strip()]
+        out_lines = [x.strip() for x in so.splitlines() if x.strip()]
+        why = (err_lines[-1] if err_lines else (out_lines[-1] if out_lines else f'rc={rc}'))[:160]
+        txt0 = so + se
+        dev = any(k in txt0 for k in ('连不上模拟器', 'ls 顶层失败', 'adb', 'offline', 'device',
+                                      'no devices', 'emulator', 'cannot connect', 'connection refused',
+                                      '读取模拟器文件列表', 'remote_files'))
         mode, payload = scope_state(False)
-        if dev and mode == 'ok':
+        n_scope = len(payload or [])
+        # 关网页/重启控制台后最常见的红是「模拟器没连上」，但包与范围清单都还在本地。
+        # 这时不该把整条线钉死在第 1 步，更不该把整份旧清单刷进错误详情
+        # （2026-11-12 用户截图：一屏 AssetBundles/... 看着像大失败）。
+        if mode == 'ok':
             n_stem = len(affected_stems(False) or [])
-            return verdict('pull', True, f'设备不可达（{why}）· 但源包已在本地、范围清单仍有效'
-                                         f'（{len(payload)} 个源包 → {n_stem} 个皮肤 stem）'
-                                         f' ⇒ 沿用清单继续，本轮不需要拉包')
+            head = '设备不可达' if dev else 'diff 没跑成'
+            return verdict('pull', True, f'{head}（{why}）· 但源包已在本地、范围清单仍有效'
+                                         f'（{n_scope} 个源包 → {n_stem} 个皮肤 stem）'
+                                         f' ⇒ 沿用清单继续；要拉新包请先开模拟器再点「再算一遍差异」')
         return verdict('pull', False, f'mumu_sync diff 失败：{why}'
-                                      f' ⇒ 要拉新包就得先开模拟器；源包若已在本地，'
-                                      f'这份范围清单不可用（{payload}），需要一次能连上设备的 diff')
+                                      f' ⇒ 先确认模拟器已开且 adb 可连，再点「再试一次」；'
+                                      f'本地范围清单也不可用（{n_scope} 个源包），需要一次能连上设备的 diff')
     txt = so + se
     m_new = re.search(r'新增[^\d]*(\d+)', txt)
     m_dir = re.search(r'大小不一致[^\d]*(\d+)', txt)

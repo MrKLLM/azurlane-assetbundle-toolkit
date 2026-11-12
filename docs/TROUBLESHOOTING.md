@@ -12300,3 +12300,34 @@ closest 参考动作不适配，已整批回退。
 
 **涉及**：`scripts/pipeline_panel.py`、`scripts/diag/panel_paper_probe.py`、
 `scripts/diag/test_pipeline_gating.py`、`docs/WORKFLOWS.md` WF-61。
+
+## §201 关网页/重启控制台后 pull 红成一屏路径：diff 失败要能续跑（2026-11-12）
+
+**现象**：中途关了网页再启动，第 1 步写「拉包没成功」，详情是
+`mumu_sync diff 失败：读取模拟器文件列表…` 后面跟**整份旧范围清单**（几百个
+`AssetBundles/...`），看着像大失败；用户问「以后总不能都这样吧」。
+
+**根因**：
+- `st_pull` 在 diff 非零退出时，把 stdout 的最后一行进度（`读取模拟器文件列表…`）当原因，
+  真正的错误在 stderr/traceback 里没被优先取到。
+- 设备不可达的关键词表太窄，`remote_files` 抛错时没命中 `dev`，于是走不到
+  「本地清单有效就沿用」的续跑分支。
+- 失败详情把 `payload` 整份 list 格式化进去 ⇒ 一屏路径，既看不清原因也吓人。
+
+**修法**：
+- 原因优先取 **stderr 最后一行**，没有才取 stdout 最后一行；长度截断 160。
+- 设备不可达关键词扩到 `no devices / emulator / cannot connect / connection refused /
+  读取模拟器文件列表 / remote_files` 等。
+- **只要本地范围清单仍有效（`scope_state=='ok'`），diff 失败也判绿沿用**：
+  `设备不可达（原因）· 但源包已在本地、范围清单仍有效（N 个源包 → M 个皮肤 stem）
+  ⇒ 沿用清单继续；要拉新包请先开模拟器再点「再算一遍差异」`。
+  清单也不可用时才判红，且详情只报数量与下一步动作，不再贴整份清单。
+- 这样关网页/重启后最常见的「模拟器没连上」不会把整条线钉死在第 1 步；
+  模拟器恢复后点「再算一遍差异」即可重新对齐设备。
+
+**判据**：`test_pipeline_gating.py [19]`：mock diff rc=1 + stderr `device offline`，
+清单有效 ⇒ 判绿、详情含原因与 `3 个源包`、不含整份 list；清单无效 ⇒ 判红、详情只报 `0 个源包`。
+实测重跑 `--only pull` 后控制台第 1 步恢复绿（设备与本地一致 / 沿用清单）。
+
+**涉及**：`scripts/update_pipeline.py`（`st_pull`）、`scripts/diag/test_pipeline_gating.py`、
+`docs/WORKFLOWS.md` WF-61。

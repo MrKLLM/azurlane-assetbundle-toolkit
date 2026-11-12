@@ -768,6 +768,34 @@ def t_promote_staged():
     tmp_work(body)
 
 
+def t_pull_diff_failure_resume():
+    """关网页/重启后 diff 连不上设备：本地清单有效就沿用继续，且错误详情不刷整份清单。"""
+    print('\n[19] pull diff 失败后的续跑：清单有效则沿用，详情只报数量')
+    def body(d):
+        old_run, old_scope, old_stems = up.run, up.scope_state, up.affected_stems
+        try:
+            up.run = lambda *a, **k: (1, '读取模拟器文件列表...\n',
+                                      'RuntimeError: ls 顶层失败: device offline\n')
+            up.scope_state = lambda full: ('ok', ['AssetBundles/a', 'AssetBundles/b', 'AssetBundles/c'])
+            up.affected_stems = lambda full: ['skin_a', 'skin_b']
+            up.st_pull(set())
+            v = up.RESULTS['pull']
+            ck('设备不可达但本地清单有效 ⇒ 判绿沿用', v.get('ok') is True, str(v)[:120])
+            ck('详情写明原因与清单数量', '设备不可达' in v.get('detail', '')
+               and '3 个源包' in v.get('detail', ''), v.get('detail', '')[:120])
+            ck('详情不再整段贴旧清单', "['AssetBundles/a'" not in v.get('detail', ''),
+               v.get('detail', '')[:80])
+            up.scope_state = lambda full: ('stale', [])
+            up.st_pull(set())
+            v2 = up.RESULTS['pull']
+            ck('清单也不可用时才判红', v2.get('ok') is False, str(v2)[:120])
+            ck('红详情也只报数量不刷清单', '0 个源包' in v2.get('detail', '')
+               and 'AssetBundles/a' not in v2.get('detail', ''), v2.get('detail', '')[:120])
+        finally:
+            up.run, up.scope_state, up.affected_stems = old_run, old_scope, old_stems
+    tmp_work(body)
+
+
 def t_panel_newround_clears_round_artifacts():
     """开新一轮必须把「这次新增了什么 / 对照表」也归档，不能留着上一轮的 36 个文件。"""
     print('\n[18] 面板新一轮：阶段结论 + 新增清单 + 对照表一起归档')
@@ -827,6 +855,7 @@ def main():
     t_audio_fatal_rc()
     t_derive_words()
     t_promote_staged()
+    t_pull_diff_failure_resume()
     t_panel_newround_clears_round_artifacts()
     print('\n' + ('[FAIL] ' + '；'.join(FAIL) if FAIL else '[PASS] 签字门与增量范围闸门全绿'))
     return 1 if FAIL else 0
