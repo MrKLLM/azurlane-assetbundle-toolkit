@@ -29,6 +29,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -233,6 +234,30 @@ def main():
         nfx = pg.ev("getComputedStyle(document.getElementById('fxbeam')).display")
         chk('星野层退役', nbg == 'none', nbg)
         chk('指针光效层退役', nfx == 'none', nfx)
+
+        # ── 复核台自动弹出：先接住再关 ─────────────────────────────────
+        # 有待判背景时复核台会自己弹出（2026-10-21 功能）。它的 veil 盖住全屏，
+        # 会拦掉后面所有**可信鼠标**事件 ⇒ 擦除/:hover 一片假红（2026-11-13 实测 6 连红，
+        # JS .click() 的判据却全绿——正是"遮罩 intercept"的签名）。
+        # 这里等首查落地（BGBADGE_ONCE 排程 +1s 启动，BGBUSY true→false 即完成），
+        # 把"自动弹出"本身变成判据，再用真实关闭按钮关掉，后面才量鼠标效果。
+        t_once = None
+        for _ in range(100):
+            if pg.ev("document.getElementById('bglabelmodal').classList.contains('on')"):
+                break
+            if pg.ev("BGBADGE_ONCE"):
+                if t_once is None:
+                    t_once = time.time()
+                elif time.time() - t_once > 1.3 and not pg.ev("BGBUSY"):
+                    break
+            time.sleep(0.25)
+        time.sleep(1.0)   # maybeAutoOpenBg 还有 700ms 的 setTimeout
+        if pg.ev("document.getElementById('bglabelmodal').classList.contains('on')"):
+            chk('有待判背景时复核台自动弹出（不用自己找按钮）', True, 'auto-open')
+            pg.ev("document.querySelector('#bglabelmodal [data-glclose]').click()")
+            time.sleep(0.4)
+            chk('复核台能用真实关闭按钮关掉（ veil 不再 intercept 鼠标）',
+                not pg.ev("anyModalOpen()"))
 
         # ── 背景与悬停擦除（2026-10-21）────────────────────────────────
         # 判据全部落在**像素**上：遮罩画布自身的 alpha（240≈纸面 .94，0=全擦开）。
@@ -472,6 +497,8 @@ def main():
                       rl:(document.querySelector('#runline')||{}).textContent||'',
                       gun:(g.querySelector('#gUn')||{}).textContent||'',
                       ask:(document.querySelector('#ask')||{}).textContent||'',
+                      askFont:getComputedStyle(document.querySelector('#ask')).fontSize,
+                      tail:(g.querySelector('#vTail')||{}).textContent||'',
                       cta:[...document.querySelectorAll('#cta button')].map(b=>b.dataset.a)};
             })()""" % (gjs, runjs))
         v1 = drive_gauge("{t0:Date.now()/1000-30,mem_mb:512,stage:'paintings',"
@@ -488,12 +515,28 @@ def main():
             bool(v1 and '正在跑' in (v1.get('ask') or '')
                  and 'detail' in (v1.get('cta') or [])
                  and 'export' not in (v1.get('cta') or [])), str(v1)[:160])
+        chk('运行中大字收敛（不再六行 argv 大字）',
+            bool(v1 and v1.get('askFont') and float(str(v1['askFont']).rstrip('px')) < 40),
+            str((v1 or {}).get('askFont')))
         v2 = drive_gauge("{t0:Date.now()/1000-5,mem_mb:512,stage:'spine',"
                          "stage_title:'Spine 提取',done:2,total:7,skipped:0,"
                          "eta:90,eta_missing:0,eta_n:3,unit_done:0,unit_total:10}",
                          "{id:'probe',step:3,label:'probe'}")
         chk('换到下一阶段后水道置空重新填（不沿用上一阶段 40%）',
             bool(v2 and v2.get('fill') in ('0%', '0.0%')), str((v2 or {}).get('fill')))
+        v2b = drive_gauge("{t0:Date.now()/1000-20,mem_mb:512,stage:'bg',"
+                          "stage_title:'背景图重导出',done:2,total:9,eta:600,eta_n:3,"
+                          "unit_done:null,unit_total:null,stage_lines:90,"
+                          "last_line:'导出 bg_star_level_bg_196 完成',last_age:0.3}",
+                          "{id:'probe',step:3,label:'probe'}")
+        try:
+            v2b_pct = float(str((v2b or {}).get('fill') or '0').rstrip('%'))
+        except ValueError:
+            v2b_pct = 0.0
+        chk('没有 a/b 时按终端输出行数推进（水道 >0 且渐近封顶）',
+            bool(v2b and 0 < v2b_pct < 96), str((v2b or {}).get('fill')))
+        chk('航行条摆出终端最后一行日志', 'bg_star_level_bg_196' in ((v2b or {}).get('tail') or ''),
+            str((v2b or {}).get('tail')))
         v3 = drive_gauge('null', 'null')
         chk('收工后航行条收干净（静止帧不占位）', bool(v3 and not v3.get('on')), str(v3))
 
@@ -620,7 +663,10 @@ def main():
         has_export = any(x[0] == 'export' for x in acts3)
         if has_export:
             cta3 = pg.ev("document.querySelector('#cta .pact').textContent") or ''
-            chk('第 3 步主按钮写明签字或重导', ('签字' in cta3 or '重导' in cta3), cta3)
+            # 「再跑一次」是这一步跑过之后的合法重导标签（askOf(3) 的 export 分支），
+            # 点它同样先弹签字单——下面那条判据才是硬约束，文案三者都接受。
+            chk('第 3 步主按钮写明签字或重导',
+                ('签字' in cta3 or '重导' in cta3 or '再跑一次' in cta3), cta3)
             pg.shot('export.png')
             pg.ev("document.querySelector('#cta .pact').click()")
             time.sleep(0.5)
@@ -961,6 +1007,104 @@ def main():
             abs((pg.ev("__probe.bgAlpha(800,420)") or 0) - pa0) <= 1,
             str(pg.ev("__probe.bgAlpha(800,420)")))
         pg.cmd('Emulation.setEmulatedMedia', {'features': []})
+
+        # ── 背景标注选中态（用户：点「无角色」也要亮蓝，不然怎么知道选没选中）──────
+        # 根因是纸本全局 `button{background:transparent!important}` 压掉了组件 .on，
+        # class 挂上了但颜色没变 ⇒ 判据必须读 **computed style**，不能只数 class。
+        # 走真实入口：顶栏「背景标注」按钮 → 扫描/渲染 → glBody 委托点击。
+        print('\n── 背景标注选中态（无角色 / 有角色都亮蓝）────────')
+
+        def rgb_hex(tok):
+            tok = (tok or '').strip().lstrip('#')
+            return tuple(int(tok[i:i + 2], 16) for i in (0, 2, 4))
+
+        def css_rgb(s):
+            return tuple(float(x) for x in re.findall(r'[\d.]+', s or '')[:3])
+
+        def near(a, b, tol=2):
+            return len(a) == len(b) and all(abs(x - y) <= tol for x, y in zip(a, b))
+
+        def alpha_of(s):
+            nums = re.findall(r'[\d.]+', s or '')
+            return float(nums[3]) if len(nums) >= 4 else (1.0 if nums else 0.0)
+
+        pg.ev("document.getElementById('bBgLabel').click()")
+        chk('顶栏「背景标注」能打开弹层',
+            bool(pg.ev("document.getElementById('bglabelmodal').classList.contains('on')")))
+        cards, glerr = 0, ''
+        for _ in range(90):
+            cards = pg.ev("document.querySelectorAll('#glBody .glcard').length") or 0
+            glerr = pg.ev("(document.querySelector('#glBody .glok')||{}).textContent||''") or ''
+            if cards or '扫描失败' in glerr or '全部判过' in glerr:
+                break
+            time.sleep(0.5)
+        if not cards and '扫描失败' not in glerr:
+            # 场景全判过时没有真卡片：用合成清单走同一个渲染入口（openBgLabel(pre)
+            # 就是自动弹出那条路径），保证判据不随标注进度时有时无。
+            pg.ev("openBgLabel({scene_total:2,labeled:0,pending:2,unlabeled:["
+                  "{key:'probe/bg_a',cn:[{cn:'探针甲'}],root:'probe',series:''},"
+                  "{key:'probe/bg_b',cn:[{cn:'探针乙'}],root:'probe',series:''}],"
+                  "unnamed_roots:[],manual_roots:[]})")
+            cards = pg.ev("document.querySelectorAll('#glBody .glcard').length") or 0
+        chk('清单渲染出卡片（真实扫描或合成入口）', cards >= 1, f'cards={cards} {glerr[:60]}')
+
+        def sel_facts(gv):
+            return pg.ev("""(()=>{const card=document.querySelector('#glBody .glcard');
+              const b=card.querySelector('[data-gv="%s"]');
+              const o=card.querySelector('[data-gv="%s"]');
+              const cs=getComputedStyle(b), os=getComputedStyle(o);
+              const m=getComputedStyle(document.getElementById('bglabelmodal'));
+              return {on:b.classList.contains('on'), bg:cs.backgroundColor,
+                      bd:cs.borderColor, col:cs.color, fw:cs.fontWeight,
+                      mark:getComputedStyle(b,'::before').content,
+                      obg:os.backgroundColor, obd:os.borderColor,
+                      pick0:card.classList.contains('pick0'),
+                      pick1:card.classList.contains('pick1'),
+                      cardBd:getComputedStyle(card).borderColor,
+                      sel:m.getPropertyValue('--gl-sel').trim(),
+                      seld:m.getPropertyValue('--gl-sel-d').trim()};})()"""
+                         % (gv, 1 - gv))
+
+        if cards >= 1:
+            pg.ev("document.querySelector('#glBody .glcard [data-gv=\"0\"]').click()")
+            time.sleep(0.2)
+            f0 = sel_facts(0) or {}
+            want = rgb_hex(f0.get('sel'))
+            chk('点「无角色」后真的亮蓝（底色/边框=--gl-sel，不是透明）',
+                bool(f0.get('on')) and near(css_rgb(f0.get('bd')), want)
+                and css_rgb(f0.get('bg')) != (0, 0, 0)
+                and alpha_of(f0.get('bg')) > 0.05,
+                str(f0)[:160])
+            chk('「无角色」选中带 ✓ 与加粗（不只靠颜色传达）',
+                '✓' in (f0.get('mark') or '') and f0.get('fw') in ('600', '700'),
+                f"mark={f0.get('mark')} fw={f0.get('fw')}")
+            chk('整张卡也描蓝边（pick0），未选中的「有角色」保持透明',
+                f0.get('pick0') is True and near(css_rgb(f0.get('cardBd')), want)
+                and alpha_of(f0.get('obg')) < 0.05,
+                f"cardBd={f0.get('cardBd')} obg={f0.get('obg')}")
+            pg.shot('bglabel_sel0.png')
+            pg.ev("document.querySelector('#glBody .glcard [data-gv=\"1\"]').click()")
+            time.sleep(0.2)
+            f1 = sel_facts(1) or {}
+            chk('改点「有角色」后蓝色跟过去，「无角色」退回透明（单选互斥）',
+                bool(f1.get('on')) and near(css_rgb(f1.get('bd')), rgb_hex(f1.get('sel')))
+                and f1.get('pick1') is True and f1.get('pick0') is False
+                and alpha_of(f1.get('obg')) < 0.05,
+                str(f1)[:160])
+            # 夜读下也要看得见（暗色 token 是另一组值，别只验亮色）
+            pg.ev("document.getElementById('bSea').click()")
+            time.sleep(0.35)
+            fd = sel_facts(1) or {}
+            chk('夜读模式下选中态仍是蓝（暗色 token 真的换了一组，不是被墨底吞掉）',
+                bool(fd.get('on')) and pg.ev("document.body.classList.contains('night')")
+                and fd.get('sel') != f1.get('sel')
+                and near(css_rgb(fd.get('bd')), rgb_hex(fd.get('sel')))
+                and css_rgb(fd.get('col')) != (0, 0, 0),
+                f"sel={fd.get('sel')} bd={fd.get('bd')} col={fd.get('col')}")
+            pg.shot('bglabel_sel_dark.png')
+            pg.ev("document.getElementById('bSea').click()")
+            time.sleep(0.3)
+            pg.ev("closeBgLabel()")
 
         chk('全程无 JS 异常', not pg.exc, '; '.join(pg.exc[:3]))
         print('\n截图: ' + os.path.relpath(OUT, ROOT))

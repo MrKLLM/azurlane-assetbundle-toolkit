@@ -5534,8 +5534,16 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 - 「新一轮」必须把**细节抽屉会读到的本轮产物**一起归档：`new_paintings.txt`、`sheet_*.png`，
   并清 `news/scope/units/scopetag` 缓存。只归档 state/runs 会留下上一轮的「这次新增了什么」。
 - 主页跑任何任务都要有航行条：本阶段自己的水道 + 小船 + 浪花 + 小字动作提示
-  （`voyageHint`）。阶段切换 ⇒ 骨架重建 ⇒ 水道置空重新填；没有 a/b 的阶段只起伏不假推进。
-  静止时整块 `display:none`，`document.getAnimations()` 必须回到 0。
+  （`voyageHint`）。阶段切换 ⇒ 骨架重建 ⇒ 水道置空重新填；**没有 a/b 的阶段按终端真实
+  输出行数推进**（`_terminal_pulse`：`1-exp(-stage_lines/45)` 渐近封顶 96，单调增），
+  并摆出最后一行日志 + 输出心跳（`#vTail/#vAge`）——推进感来自子进程真在写日志，
+  不是拿阶段计数糊（§203）。静止时整块 `display:none`，`document.getAnimations()` 必须回到 0。
+- 运行中主屏大字只写「正在跑 · 当前阶段」，`.ask.run` ≤30px，别把 argv 标签糊成六行（§203）。
+- 组件选中态（背景标注有/无角色）必须**亮得出来**：独立蓝 token + `!important` 扛住全局
+  `button{background:transparent!important}` 重置；判据读 computed style 与 token 数值比对，
+  亮/暗两主题各量一次，且断言暗色 token 真的换了一组（§204）。
+- 鼠标类判据（擦除 / :hover）之前必须先接住**自动弹出**的复核台并用真实按钮关掉：
+  veil 会 intercept 全部可信鼠标，「JS .click() 全绿 + 鼠标全红/None」就是它的签名（§205）。
 
 **步骤**
 1. 改 `pipeline_panel.py` 的引导函数与 `new_round()`；进度台骨架在 `gaugeSet()`，
@@ -5558,6 +5566,8 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
   「拉包完成后即可关闭模拟器；第 2~5 步只读本地源包」。只有第 1 步 diff/pull 需要设备。
 - 航行条的 `GKEY` 必须含 `stage`，否则换阶段不重建骨架，水道会沿用上一阶段的百分比。
 - 浪花/小船动画只在 `.gauge.on` 时存在；`prefers-reduced-motion` 下全部停，静止帧判据才不破。
+- 右栏圆点的 `title` 是给人看的（可选阶段带后缀），机器查找一律走 `data-key`：
+  交叉高亮曾按 `.dot[title="<key>"]` 找点，title 一加后缀 preflight 就永远点不亮（§205）。
 
 **涉及文件**：`scripts/pipeline_panel.py`、`scripts/diag/panel_paper_probe.py`、
-`scripts/diag/test_pipeline_gating.py`、`docs/TROUBLESHOOTING.md §200`。
+`scripts/diag/test_pipeline_gating.py`、`docs/TROUBLESHOOTING.md §200、§203~205`。

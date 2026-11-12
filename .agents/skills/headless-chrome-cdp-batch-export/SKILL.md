@@ -1,7 +1,7 @@
 ---
 name: headless-chrome-cdp-batch-export
-description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。触发词（验收向）：点击没落地、开关无效还是探针没点到、画面改变判据全红而可逆判据全绿、取样哨兵值 None 参与比较、ES module 整块不初始化、vendor import 闭包、滑鼠标卡顿归因、帧时拆解、背景动效是不是罪魁、交替配对测量、顺序 A/B 的差不能当收益、property tree 节点数、静止不带 transform、判据放宽成恒真、绿着崩、首屏长列表分批渲染、分页探针、长任务按 bootDone 前后拆。
-version: 1.8.26
+description: 无头 Chrome + CDP 批量驱动本地网页完成渲染/截图/资产导出。当任务需要用浏览器前端运行时（如 Spine/WebGL/Canvas/JS 库）批量产出图片或数据文件时使用——触发词：无头浏览器批量导出、CDP 驱动网页、headless chrome 批量截图、浏览器渲染落盘、autostart 参数自动化。不适用于单次网页截图和 QwenWork 内置媒体生成工具。触发词（验收向）：点击没落地、开关无效还是探针没点到、画面改变判据全红而可逆判据全绿、取样哨兵值 None 参与比较、ES module 整块不初始化、vendor import 闭包、滑鼠标卡顿归因、帧时拆解、背景动效是不是罪魁、交替配对测量、顺序 A/B 的差不能当收益、property tree 节点数、静止不带 transform、判据放宽成恒真、绿着崩、首屏长列表分批渲染、分页探针、长任务按 bootDone 前后拆、选中态不亮、全局!important压组件、自动弹层veil拦鼠标、JS点击全绿鼠标全红。
+version: 1.8.27
 ---
 
 # 无头 Chrome + CDP 批量导出
@@ -576,6 +576,21 @@ version: 1.8.26
     - **同一套视觉装置搬到第二个元素上之前要重测，不要按"形状相同"外推**：一条挂在 A 上判死的带子，
       换成"因为 B 的底更透所以应该读得出来"的说法在 B 上保留，仍会被用户实机判死。⇒ 要么在 B 上
       拿到独立证据（含最暗背景那一档），要么一起撤。
+    - **组件选中态要量 computed style，且要扛得住全局 reset**（2026-11-13 控制台背景标注）。
+      纸本控制台有全局 `button{background:transparent!important;…}`，组件 `.on{background:…}`
+      不带 `!important` 就被压掉 ⇒ class 挂上了、委托 handler 全对、屏幕却一点不亮，用户问
+      "怎么知道选没选中"。⇒ 修法两层：组件 `.on` 带 `!important` + 独立色 token（亮/暗各一组）；
+      判据从 `classList.contains('on')` 改成读 `getComputedStyle` 的 border/background 与 token
+      **数值比对**，并顺手量第二主题。⚠️ 暗色选择器别凭想象写：本项目夜读是 `body.night`，
+      写成 `html[data-theme=dark]` 永不匹配，而"bd==sel"这种自比判据会恒绿假通过——必须断言
+      **token 真的换了一组**（暗 sel ≠ 亮 sel）且主题类真的在身上。
+    - **"JS .click() 判据全绿 + 可信鼠标判据全红/None"是全屏遮罩的签名**（2026-11-13 六连红）。
+      复核台在有 pending 时**自动弹出**，veil 盖住全屏 ⇒ `Input.dispatchMouseEvent` 全被 intercept：
+      `:hover` 不成立（querySelector(':hover') 返回 null ⇒ getComputedStyle(null) 抛错读成 None）、
+      擦除 handler 不跑（alpha 恒 240、lastMs=0）。JS .click() 不受遮罩影响，于是骨架/弹窗判据全绿，
+      极易误读成"hover 效果回归"。⇒ 鼠标类 section 之前探针必须先**接住**自动弹层（等首查落地信号，
+      把"自动弹出"本身变成判据），再用真实关闭按钮关掉；诊断这类红先量 `anyModalOpen()`，
+      别急着改产品 CSS。自动弹层一般只弹一次（sessionStorage sig），后续 reload 不再弹。
 
 ### 画廊 UI / CSS 改动轮的验证探针清单（2026-10-13 玻璃化一轮攒下的）
 

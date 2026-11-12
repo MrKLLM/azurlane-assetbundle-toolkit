@@ -12357,3 +12357,84 @@ closest 参考动作不适配，已整批回退。
 
 **涉及**：`scripts/pipeline_panel.py`（`post` / `render` / `askOf`）、
 `scripts/diag/panel_paper_probe.py`、`docs/WORKFLOWS.md` WF-61。
+
+## §203 航行条要按「终端真实输出」推进，不是按阶段计数；运行中大字收敛（2026-11-13）
+
+**现象**：用户两连反馈——「字太大了」「不是让你根据阶段决定，而是根据现在进行中的
+终端任务来决定进度条的推进……进度条主要是让用户知道还在推进，不是卡死，而且有推进感」。
+不打 a/b 的阶段（背景导出、语音解码…）阶段级 2/9 半天不动，水道置空只起伏，看着像卡死；
+主屏「正在跑」把整串 argv 标签糊成六行大字。
+
+**根因**：
+- 水道只读 `unit_done/unit_total`，没有 a/b 就 `vpct=0`——阶段内部明明在逐行输出，
+  界面上却没有任何单调推进的量。
+- `A.ask` 直接拼 `S.running.label`（含全部阶段名），没有运行态字号约束。
+
+**修法**：
+- 服务端 `_terminal_pulse(log, cur_t)`：读子进程真实日志，返回 `log_lines / stage_lines
+  （本阶段时间戳之后的行数）/ last_line（去时间戳、截 140 字）/ last_age（距上次输出秒数）/
+  log_bytes`，并进 `gauge_safe()`。
+- 前端 `gaugeTick()`：有 a/b 按 a/b；没有就 `1-exp(-stage_lines/45)` 渐近推进、封顶 96%
+  （单调增、不假装到 100）。`#vTail/#vAge` 摆出终端最后一行 + 「刚刚输出 / Ns 前输出 ·
+  本阶段 N 行」心跳；`.v-fill::after` 一道流光（reduced-motion 停）。
+- `.ask.run` 收敛到 `clamp(18px,2.6vw,30px)`，文案只写「正在跑 · 当前阶段名」。
+
+**判据**：`panel_paper_probe.py` 合成 gauge（`stage_lines:90`、无 a/b）⇒ 水道 86.5%
+（0< x <96）、tail 含最后一行原文；运行中 `askFont=30px`（<40）；换阶段水道置 0。
+
+**涉及**：`scripts/pipeline_panel.py`（`_terminal_pulse` / `gauge_safe` / `gaugeTick` /
+`gaugeSet` / `render`）、`scripts/diag/panel_paper_probe.py`、`docs/WORKFLOWS.md` WF-61。
+
+## §204 背景标注「无角色」点了不亮：全局 button !important 压掉组件选中态（2026-11-13）
+
+**现象**：用户截图——「点击无角色时应该也要亮起蓝色啊，不然怎么知道选没选中」。
+点「无角色」后 class `on` 挂上了、`GL.picks` 也写了，屏幕上却毫无变化。
+
+**根因**：纸本全局重置 `button{background:transparent!important;border:1px solid
+var(--rule)!important;…}` 优先级压过组件 `.glcard .b button.on{…}`（不带 !important）
+⇒ 选中态计算出来仍是透明底、灰边框。且旧版「无角色」选中只描灰边（pick0），
+就算没被压掉也不够醒目。
+
+**修法**：
+- `#bglabelmodal` 独立航海蓝 token：亮 `--gl-sel:#2f6fa8`、暗 `body.night` 下
+  `#8fc1ee`（各带浅底/深字两档）。
+- `.glcard .b button.on` 全套 `!important`（边框/浅底/深字/加粗 + inset 1px 蓝描边），
+  `::before{content:'✓ '}` 不只靠颜色传达；hover 同蓝；`pick0/pick1` 卡片都描蓝边浅蓝底。
+- ⚠️ 暗色选择器是 `body.night`（本项目夜读实现），不是想当然的 `html[data-theme=dark]`。
+
+**判据**：`panel_paper_probe.py` 新增「背景标注选中态」section，走真入口（顶栏按钮 →
+渲染 → 委托点击），读 **computed style** 与 token 数值比对：无角色亮蓝 + ✓ + 加粗、
+卡片描蓝、改点有角色蓝色跟过去且互斥退回透明、夜读下 token 真的换了一组
+（暗 sel ≠ 亮 sel，防"自比恒绿"）。实测亮 `rgb(47,111,168)` / 暗 `rgb(143,193,238)`。
+
+**涉及**：`scripts/pipeline_panel.py`（`#bglabelmodal` CSS）、
+`scripts/diag/panel_paper_probe.py`、技能 `headless-chrome-cdp-batch-export` v1.8.27。
+
+## §205 探针六连红真因：复核台自动弹出的 veil 拦掉全部可信鼠标（2026-11-13）
+
+**现象**：`panel_paper_probe.py` 擦除 alpha 恒 240、五步下划线读空、阶段卡/对照表
+hover 四条读 None——而所有 JS `.click()` 驱动的判据全绿。上一轮就有 7 条红，
+容易被误读成「hover 效果回归」。
+
+**根因**：背景标注复核台在 `pending>0` 时**自动弹出**（`maybeAutoOpenBg`，首查后
+~1.7s）。本轮恰好有 2 张待判（`bg_2.5ds_cg1`、`star_level_bg_196`），veil 盖住全屏：
+`Input.dispatchMouseEvent` 全被 intercept ⇒ `:hover` 不成立（`querySelector(':hover')`
+返回 null，`getComputedStyle(null)` 抛错读成 None）、擦除 handler 不跑（lastMs=0）。
+JS `.click()` 不受遮罩影响 ⇒ 绿红分裂正是「全屏 overlay」的签名。
+
+**修法**：探针在鼠标类 section 之前先**接住**自动弹层：等首查落地信号
+（`BGBADGE_ONCE` 排程 +1.3s 后 `BGBUSY` 回 false，或弹层已 `.on`），把「有待判时
+自动弹出」本身变成判据，再用真实关闭按钮 `[data-glclose]` 关掉并断言 `anyModalOpen()`
+为 false。自动弹层只弹一次（sessionStorage sig），后续 reload 不再弹。
+另：第 3 步主按钮「▶ 再跑一次」是跑过之后的合法重导标签，判据接受 签字/重导/再跑一次
+三者（硬约束是下一条「点了先弹签字单」）。
+- 同轮还抓出一条**自己引入的回归**：右栏圆点改用 `allList` 渲染后，给可选阶段的
+  `title` 加了「（可选复核，不占本步分母）」后缀，而阶段卡交叉高亮按
+  `.dot[title="<key>"]` 找点 ⇒ hover `preflight` 卡永远点不亮右栏（hot=0）。
+  修法：圆点加 `data-key`，查找改 `.dot[data-key="…"]`——**给人看的 title 不当机器键**。
+
+**判据**：修后实测擦除 alpha=1（<90）、下划线 `100% 1px`；hover `deps` 与 `preflight`
+两种卡 hot 都=1；全量探针复跑。
+
+**涉及**：`scripts/diag/panel_paper_probe.py`、技能 `headless-chrome-cdp-batch-export`
+v1.8.27（「JS 全绿 + 鼠标全红 = 遮罩签名」）。

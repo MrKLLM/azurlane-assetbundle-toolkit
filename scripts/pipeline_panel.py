@@ -740,6 +740,43 @@ def _last_run():
     return None
 
 
+def _terminal_pulse(path, cur_t):
+    """终端任务的「还在推进」信号：输出行数 / 本阶段行数 / 最后一行 / 距上次输出秒数。
+
+    很多阶段不打 a/b（背景导出、语音解码…），阶段级 2/9 会半天不动，看着像卡死。
+    这里改拿**子进程真实写出的日志**当推进源：行数单调增，前端用它驱动水道，
+    并把最后一行原文摆出来，让用户看见终端在动。"""
+    lines = stage_lines = 0
+    last = ''
+    last_t = None
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for ln in f:
+                s = ln.strip()
+                if not s:
+                    continue
+                lines += 1
+                m = _TS.match(ln)
+                if m:
+                    t = _secs(*m.groups())
+                    if last_t is not None and t < last_t:
+                        t += 86400
+                    last_t = t
+                    if cur_t is None or t >= cur_t:
+                        stage_lines += 1
+                last = s
+    except OSError:
+        pass
+    try:
+        age = round(max(0.0, time.time() - os.path.getmtime(path)), 1)
+        size = os.path.getsize(path)
+    except OSError:
+        age, size = None, 0
+    disp = re.sub(r'^\[\d\d:\d\d:\d\d\]\s*', '', last)[:140]
+    return {'log_lines': lines, 'stage_lines': stage_lines, 'last_line': disp,
+            'last_age': age, 'log_bytes': size}
+
+
 def gauge_safe(run, stages, fp=None):
     """在跑 → 进度台的数据；刚跑完 → 一条**静态收尾条**；没跑过 → None。"""
     if not run:
@@ -811,7 +848,9 @@ def gauge_safe(run, stages, fp=None):
             'done_keys': sorted(done), 'skipped_keys': sorted(skipped),
             # 本轮用时：跑完之后进度台按契约收起（静止帧判据在守），
             # 所以"这轮跑了多久"改由主屏那句话带出来，数据源是同一条日志的首末时间戳。
-            'secs': _log_secs(log)}
+            'secs': _log_secs(log),
+            # 终端推进信号：没有 a/b 的阶段靠它让水道继续走，并摆出最后一行日志。
+            **_terminal_pulse(log, cur_t)}
 
 
 
@@ -2337,8 +2376,18 @@ header .kbd b{color:var(--ink-2)!important;font-weight:600}
 .gauge .v-overall{align-items:center;gap:10px}
 .gauge .v-olabel{font:500 8px/1 var(--font-mono)!important;letter-spacing:.22em;
   color:var(--ink-3)!important;flex:0 0 auto}
+/* 运行中大字收敛：只写「正在跑 · 当前阶段」，别把 argv 标签糊成六行。 */
+.ask.run{font-size:clamp(18px,2.6vw,30px)!important;line-height:1.3!important;letter-spacing:.02em}
+.gauge .v-tail{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  font:400 9.5px/1.5 var(--font-mono)!important;color:var(--ink-3)!important;min-height:1.5em}
+.gauge .v-tail #vTail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:72%}
+.gauge .v-fill{overflow:hidden}
+.gauge .v-fill::after{content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--paper) 38%,transparent),transparent);
+  transform:translateX(-100%);animation:vshine 2.6s linear infinite}
+@keyframes vshine{to{transform:translateX(100%)}}
 @media (prefers-reduced-motion:reduce){
-  .gauge .v-waves i,.gauge .v-boat{animation:none!important}
+  .gauge .v-waves i,.gauge .v-boat,.gauge .v-fill::after{animation:none!important}
   .gauge .v-fill,.gauge .v-boat{transition:none!important}
 }
 
@@ -2710,11 +2759,20 @@ pre .bad{color:#E08A69!important}
 .glcard .b button{flex:1;font:400 10px/1.4 var(--font-ui)!important;cursor:pointer;
   padding:5px 6px;border:1px solid var(--rule);background:var(--paper-3);
   color:var(--ink-2);border-radius:0}
-.glcard .b button:hover{border-color:var(--accent);color:var(--accent-d)}
-.glcard .b button.on{border-color:var(--accent);background:var(--accent-l);color:var(--accent-d);
-  font-weight:600}
-.glcard.pick1{border-color:var(--accent);background:var(--accent-l)}
-.glcard.pick0{border-color:var(--ink-3);background:var(--paper-3)}
+/* 选中态必须压过纸本全局 `button{background:transparent!important}`，
+   否则点了「无角色」也不亮，用户不知道选没选中（2026-11-13 用户截图）。
+   有/无角色都用同一枚航海蓝亮起，未选才是灰底。 */
+#bglabelmodal{--gl-sel:#2f6fa8;--gl-sel-l:rgba(47,111,168,.16);--gl-sel-d:#1d4f7c}
+body.night #bglabelmodal{--gl-sel:#8fc1ee;--gl-sel-l:rgba(143,193,238,.18);--gl-sel-d:#bcd9f5}
+.glcard .b button:hover{border-color:var(--gl-sel)!important;color:var(--gl-sel-d)!important;
+  background:var(--paper-2)!important}
+.glcard .b button.on{border-color:var(--gl-sel)!important;background:var(--gl-sel-l)!important;
+  color:var(--gl-sel-d)!important;font-weight:600!important;
+  box-shadow:inset 0 0 0 1px var(--gl-sel)!important}
+.glcard .b button.on::before{content:'✓ '}
+.glcard .b button.on:hover{background:var(--gl-sel-l)!important;border-color:var(--gl-sel)!important;
+  color:var(--gl-sel-d)!important}
+.glcard.pick1,.glcard.pick0{border-color:var(--gl-sel)!important;background:var(--gl-sel-l)!important}
 .glroot{margin-top:14px;padding:10px 12px;border:1px solid var(--rule);
   background:var(--paper-2);font:400 10.5px/1.7 var(--font-ui)!important;color:var(--ink-2)!important}
 .glroot b{display:block;margin-bottom:4px;color:var(--ink)!important}
@@ -4066,13 +4124,21 @@ function gaugeTick(){
   /* 航行条只画**本阶段**：有 a/b 才推进，没有就置空让浪/船起伏。
      阶段切换时 gaugeSet 重建骨架，这里自然从 0 重新填满。 */
   const vf=$('#vFill'), vb=$('#vBoat'), vh=$('#vHint');
-  const vpct = has ? Math.min(100, Math.max(0, G.unit_done/G.unit_total*100)) : 0;
+  /* 有 a/b 按 a/b；没有就按**终端真实输出行数**推进（单调增、渐近封顶），
+     让不打 a/b 的阶段也有推进感，而不是阶段级 2/9 半天不动像卡死。 */
+  const act = (G.stage_lines>0) ? (1-Math.exp(-G.stage_lines/45)) : 0;
+  const vpct = has ? Math.min(100, Math.max(0, G.unit_done/G.unit_total*100))
+                   : Math.min(96, act*100);
   if(vf) vf.style.width = vpct.toFixed(1)+'%';
   if(vb){
     vb.style.left='clamp(0px, calc('+vpct.toFixed(1)+'% - 16px), calc(100% - 36px))';
-    vb.classList.toggle('idle', !has);
+    vb.classList.toggle('idle', !has && vpct<1);
   }
   if(vh) vh.textContent=voyageHint(G);
+  const vt=$('#vTail'), va=$('#vAge');
+  if(vt) vt.textContent=G.last_line||'';
+  if(va) va.textContent=(G.last_age==null?'':(G.last_age<2?'刚刚输出':G.last_age+'s 前输出'))+
+    (G.stage_lines?' · 本阶段 '+G.stage_lines+' 行':'');
   /* 五步主页那条**每一步自己的进度条**：跑起来才推进（含本阶段内比例），
      没在跑时整行 display:none —— 静止帧逐像素相同的判据不受影响。 */
   const rl=$('#runline');
@@ -4138,6 +4204,7 @@ function gaugeSet(g){
           '</span>'+
         '</div>'+
         '<div class="v-hint"><b id="vHint">—</b><span class="gun" id="gUn">—</span></div>'+
+        '<div class="v-tail"><span id="vTail"></span><span id="vAge"></span></div>'+
       '</div>'+
       '<div class="grow v-overall"><span class="v-olabel">本轮</span>'+
         '<span class="gbar"><i id="gFill"></i><u>'+ticks+'</u></span></div>';
@@ -4616,7 +4683,7 @@ function render(){
     String(cur).padStart(2,'0');
   bar.querySelectorAll('.snode').forEach(e=>e.remove());
   Object.keys(steps).sort().forEach(k=>{
-    const n=+k, list=activeStages(n);
+    const n=+k, list=activeStages(n), allList=stagesOf(n);
     const worst=list.map(s=>statusOf(s.key))
       .reduce((a,b)=>['fail','run','await','pass','idle'].indexOf(a)<=['fail','run','await','pass','idle'].indexOf(b)?a:b,'idle');
     const doneN=list.filter(s=>statusOf(s.key)==='pass').length;
@@ -4636,7 +4703,8 @@ function render(){
     b.dataset.step=n; b.dataset.done=doneN; b.dataset.total=list.length;
     if(skipped) b.dataset.skipped='1';
     b.innerHTML='<span class="bead"></span><label>'+esc(steps[k][0])+'</label>'+
-      '<span class="sdots">'+list.map(s=>'<i class="dot '+statusOf(s.key)+'" title="'+esc(s.key)+'"></i>').join('')+'</span>'+
+      '<span class="sdots">'+allList.map(s=>'<i class="dot '+statusOf(s.key)+(optionalIdle(s)?' opt':'')+
+        '" data-key="'+esc(s.key)+'" title="'+esc(s.key)+(optionalIdle(s)?'（可选复核，不占本步分母）':'')+'"></i>').join('')+'</span>'+
       '<span class="cnt">'+(skipped?'—':doneN+'/'+list.length)+'</span>'+
       '<span class="sfill"><i style="width:'+(list.length?Math.round(doneN/list.length*100):0)+'%"></i></span>';
     b.onclick=()=>{ step=n; render(); };
@@ -4676,9 +4744,10 @@ function render(){
      进度就在上方航行条；主按钮改成看日志，并说清模拟器从哪一步起可以关。 */
   if(S.running){
     A.red=0; A.gate=null;
-    A.ask='正在跑 · '+esc(S.running.label||'');
-    A.why='上方航行条就是进度：本阶段水道 + 小船 + 小字提示，跑完自动刷新。'+
-          '要看实时日志点「细节」。第 1 步拉包完成后即可关闭模拟器；第 2~5 步只读本地源包。';
+    /* 大字只写「正在跑 · 当前阶段」，别把整串 argv 标签糊成六行大字。 */
+    A.ask='正在跑 · '+esc((G&&G.stage_title)||(S.running.label||'').replace(/^单阶段：/,'').split(' + ')[0]||'');
+    A.why='航行条按终端真实输出推进：水道 + 小船 + 最后一行日志；跑完自动刷新。'+
+          '要看完整日志点「细节」。第 1 步拉包完成后即可关闭模拟器；第 2~5 步只读本地源包。';
     A.acts=[{a:'detail',t:'看实时日志',k:'pact mag'}];
     A.foot='任务 pid='+(S.running.pid||'')+' · 重活一次只跑一个；再点「开始」会被拒绝。';
   }else if(step>=2){
@@ -4704,6 +4773,7 @@ function render(){
     ask.innerHTML=A.ask; rollNums(ask);
     if(RENDERED&&!CALM){ ask.classList.remove('swap'); void ask.offsetWidth; ask.classList.add('swap'); }
   }
+  ask.classList.toggle('run', !!S.running);
   why.textContent=A.why;
   /* 卡点：跨步前置条件（配置表过期挡导出）。它有自己的动作，但不顶替本步按钮。 */
   const gateEl=$('#gate');
@@ -4827,7 +4897,7 @@ function render(){
   });
   $$('#cards .stage').forEach(el=>{
     el.addEventListener('mouseenter',()=>{ const k=el.querySelector('.skey').textContent;
-      const d=document.querySelector('.snode .dot[title="'+k+'"]'); if(d) d.classList.add('hot'); });
+      const d=document.querySelector('.snode .dot[data-key="'+k+'"]'); if(d) d.classList.add('hot'); });
     el.addEventListener('mouseleave',()=>{ [...document.querySelectorAll('.dot.hot')]
       .forEach(d=>d.classList.remove('hot')); });
   });
