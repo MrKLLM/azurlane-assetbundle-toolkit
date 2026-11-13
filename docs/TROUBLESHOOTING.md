@@ -12642,3 +12642,21 @@ WaterBg 不在时返回 undefined，`typeof` 守卫仍成立）。**渲染路径
 
 **涉及**：`gallery_src/{theme.css,index.html,backgrounds.html,room3d.html,bgm.html,bgm_chart.css,water_bg.js}`、
 `scripts/diag/{gallery_page_shots.py,gallery_fold_probe.py,gallery_motion_probe.py}`、WF-16 追加。
+
+## §214 音乐库「活动回忆」下拉字看不清：原生 select 弹窗底色不跟 color-scheme（2026-11-13）
+
+**现象**：夜里打开 `#fEvent`（活动回忆）下拉，选项文字浅灰一片看不清；弹窗底是浅色，
+与深色页面不符。
+
+**根因**：`#fEvent` 是原生 `<select>`，选项没显式配色，文字继承 `--ch-ink-2`（中间调），
+而原生弹窗底色**不一定跟 `color-scheme` 走**（实测夜里弹窗仍浅底）⇒ 中间调字落浅底，对比不足。
+
+**修法**：给 option 显式「纸面底 + 墨色字」，两套主题各自成立（昼=墨字米底 10.43:1、
+夜=米字墨底 11.71:1），并让 select 的 `color-scheme` 跟主题使弹窗框色一致：
+`body.chart #fEvent option{color:var(--ch-ink);background:var(--ch-paper)}` +
+`html[data-theme=dark] body.chart #fEvent{color-scheme:dark}`。全部走 token。
+
+**判据**：原生弹窗是 OS 渲染、**截不到图**，所以可读性判据落在 option 的**计算 color/background**
+按 WCAG 算对比度 ≥4.5:1，不是截图。`scripts/diag/bgm_option_contrast.py` 两套主题各读一次，全过。
+
+**涉及**：`gallery_src/bgm_chart.css`、`scripts/diag/bgm_option_contrast.py`。

@@ -607,3 +607,12 @@ html{scrollbar-color:var(--ch-rule-2) transparent}
 ::-webkit-scrollbar-thumb{background:var(--ch-rule-2)}
 ::-webkit-scrollbar-thumb:hover{background:var(--ch-brass)}
 
+/* 活动回忆下拉选项可读性（用户 2026-11-13 实机报「字看不清」）：原生弹窗底色不一定跟
+   color-scheme 走，选项文字继承 --ch-ink-2（中间调）落在浅底上对比不足。显式给 option
+   纸面底 + 墨色字（昼=墨字米底、夜=米字墨底，两套各自成立），并让 select 的 color-scheme
+   跟主题，弹窗框色一致。全部走 token，不写字面色。 */
+body.chart #fEvent{color-scheme:light}
+html[data-theme=dark] body.chart #fEvent{color-scheme:dark}
+body.chart #fEvent option{color:var(--ch-ink);background:var(--ch-paper)}
+body.chart #fEvent option:checked{color:var(--ch-red);background:var(--ch-paper-2)}
+

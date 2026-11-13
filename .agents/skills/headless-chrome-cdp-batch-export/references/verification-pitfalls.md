@@ -732,4 +732,9 @@
   document-start 注入惰性 getter 把 `window.BG` 接上去（访问发生在加载后，`typeof` 守卫仍成立）。
 - **「点筛选后 DOM 卡片数必须变」在分批渲染下恒假**：首屏恒一页（120），全部/子类都是 120。
   改读「共 N 项」计数文本的总数（1031→881 真变）才是兼容分批的筛选判据。
+- **原生 `<select>` 弹窗截不到图，可读性判据落 option 计算色**：弹窗是 OS 渲染，
+  `Page.captureScreenshot` 拍不到展开的选项列表；且弹窗底色**不一定跟 `color-scheme` 走**
+  （夜里可能仍浅底），选项文字继承中间调会看不清。修法给 `option{color;background}` 显式配色；
+  验证读 option 的**计算 color/background** 按 WCAG 算对比度 ≥4.5:1，别赌截图。
+  本项目 `bgm_option_contrast.py` 即此（昼 10.43 / 夜 11.71）。
 
