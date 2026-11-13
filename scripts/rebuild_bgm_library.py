@@ -35,6 +35,8 @@ import subprocess
 import sys
 import time
 
+import stage_run  # 子脚本编排唯一实现（与 rebuild_labels 共用）
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
@@ -55,21 +57,9 @@ def rel(p):
 
 
 def run_stage(name, argv, timeout=7200, verbose=False):
-    """跑一个子脚本，回显关键行。返回 (rc, output)。"""
-    print('\n▶ %s' % name)
-    t0 = time.time()
-    p = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
-                       encoding='utf-8', errors='replace', timeout=timeout,
-                       env=dict(os.environ, PYTHONIOENCODING='utf-8'))
-    out = (p.stdout or '') + (p.stderr or '')
-    if verbose:
-        print(out)
-    else:
-        for line in out.splitlines():
-            if KEY_LINE.search(line):
-                print('   ' + line.rstrip())
-    print('   ↳ rc=%d / %.1fs' % (p.returncode, time.time() - t0))
-    return p.returncode, out
+    """跑一个子脚本，回显关键行。返回 (rc, output)。超时不兜底（原行为：直接抛）。"""
+    return stage_run.run_stage(name, argv, key_line=KEY_LINE, root=ROOT,
+                               timeout=timeout, verbose=verbose)
 
 
 def main():

@@ -19,7 +19,11 @@
   Output/Audio/L2D/<皮肤>/<cue>.ogg
   Output/gallery_v2/l2d_voice.json   {皮肤: {动作组: [相对音频路径...]}}
 """
-import os, sys, re, json, glob, shutil, zipfile, subprocess, tempfile, collections
+import os, sys, re, json, glob, tempfile, collections
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
+import audio_common  # ACB 解码 / ogg 转码唯一实现（与 extract_cv_voice 共用）
 
 sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -30,9 +34,7 @@ OUT_MAP = os.path.join(ROOT, 'Output', 'gallery_v2', 'l2d_voice.json')
 DIAG = os.path.join(ROOT, '.diag')
 AZDATA = os.path.join(ROOT, 'inputs', 'azdata')   # 权威快照，台账 inputs/azdata/MANIFEST.json
 
-VGMSTREAM = r'C:\Users\KLLM\AppData\Local\vgmstream\vgmstream-cli.exe'
-FFMPEG = shutil.which('ffmpeg') or r'C:\Users\KLLM\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe'
-OPUS_BITRATE = '48k'
+VGMSTREAM = P.VGMSTREAM
 
 # 动作组 → ACB cue 名别名。以前只有猜的两条（注释里自承"需人工试听确认"）；
 # 现在从游戏自己的 `character_voice` 表生成：l2d_action → resource_key，touch_body→touch_1、
@@ -105,25 +107,12 @@ def acb_path_for(key, by_painting):
 
 def decode_all(acb, tmp):
     """一次调用把 ACB 里全部 cue 解成 <cue名>.wav。返回 {cue名: wav路径}。"""
-    src = os.path.join(tmp, 'in.acb')
-    out = os.path.join(tmp, 'wav')
-    os.makedirs(out, exist_ok=True)
-    shutil.copy2(acb, src)
-    r = subprocess.run([VGMSTREAM, '-i', '-S', '0', '-o', os.path.join(out, '?n.wav'), src],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
-    files = glob.glob(os.path.join(out, '*.wav'))
-    if not files:
-        raise RuntimeError('vgmstream 未解出任何流 (rc=%s) %s' % (r.returncode, (r.stderr or '')[:200]))
-    return {os.path.splitext(os.path.basename(f))[0]: f for f in files}
+    return audio_common.decode_acb(acb, tmp, timeout=600,
+                                   empty_msg='vgmstream 未解出任何流', detail=200)
 
 
 def to_ogg(wav, dst):
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    r = subprocess.run([FFMPEG, '-hide_banner', '-loglevel', 'error', '-y', '-i', wav,
-                        '-c:a', 'libopus', '-b:a', OPUS_BITRATE, dst],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
-    if not os.path.exists(dst) or os.path.getsize(dst) < 1024:
-        raise RuntimeError('ffmpeg 转码失败 %s: %s' % (wav, (r.stderr or '')[:200]))
+    audio_common.to_ogg(wav, dst, detail=200)
 
 
 def plan_for(key, cues, groups):

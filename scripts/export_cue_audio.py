@@ -10,12 +10,15 @@ import subprocess
 import shutil
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
+
 # 配置
-VGMSTREAM_CLI = r"C:\Users\KLLM\AppData\Local\vgmstream\vgmstream-cli.exe"
-FFMPEG = r"C:\Users\KLLM\AppData\Local\ffmpeg\ffmpeg.exe"
-INPUT_DIR = r"D:\Azur Lane Assets\files\AssetBundles\cue"
-OUTPUT_DIR = r"D:\Azur Lane Assets\Output\Audio"
-TEMP_DIR = r"D:\Azur Lane Assets\Output\_audio_temp"
+VGMSTREAM_CLI = P.VGMSTREAM
+FFMPEG = P.FFMPEG
+INPUT_DIR = os.path.join(P.AB, 'cue')
+OUTPUT_DIR = os.path.join(P.OUT, 'Audio')
+TEMP_DIR = os.path.join(P.OUT, '_audio_temp')
 
 # 分类前缀映射
 CATEGORY_MAP = {

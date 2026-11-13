@@ -22,12 +22,13 @@ cue 名切分必须走「最长已知类别前缀」，不能直接剥尾部数�
   Output/Audio/CV2/cv-<语音包号>/<cue>.ogg
   Output/gallery_v2/skin_voice.json  {皮肤: {cv, idx, src, l2d:{动作组:[路径]}, tap:{}, lines:[]}}
 """
-import os, sys, re, json, glob, shutil, tempfile, argparse, subprocess, collections
+import os, sys, re, json, tempfile, argparse, collections
 from concurrent.futures import ThreadPoolExecutor
 import sys as _p_sys, os as _p_os
 _p_sys.path.insert(0, _p_os.path.dirname(_p_os.path.abspath(__file__)))
 import paths as P  # 仓库根与外部工具位置：见 scripts/paths.py（AL_ASSETS_ROOT 可覆盖）
 import skin_table  # 皮肤表唯一读取口：azdata 快照 + 设备侧权威表逐字段合并（见 scripts/skin_table.py）
+import audio_common  # ACB 解码 / ogg 转码唯一实现（与 extract_live2d_voice 共用）
 
 sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -56,8 +57,6 @@ except Exception:
           file=sys.stderr)
 
 VGMSTREAM = P.VGMSTREAM
-FFMPEG = P.FFMPEG
-OPUS_BITRATE = '48k'
 
 # 皮肤目录名里的「后处理变体」：同一皮肤的另一张画法，语音与皮肤序号都不受影响。
 # ⚠️ 不含 _g/_meta/_asmr —— 它们是独立皮肤（guying_g 在皮肤表里有自己的行、idx=9），剥掉会串到基础皮肤。
@@ -437,25 +436,11 @@ def assign_pending_idx(res, cue_sets):
 
 def decode_bank(acb, tmp):
     """一个语音包 → {cue 名: wav 路径}（一次 vgmstream 调用取全部流）。"""
-    src = os.path.join(tmp, 'in.acb')
-    out = os.path.join(tmp, 'wav')
-    os.makedirs(out, exist_ok=True)
-    shutil.copy2(acb, src)
-    r = subprocess.run([VGMSTREAM, '-i', '-S', '0', '-o', os.path.join(out, '?n.wav'), src],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=900)
-    files = glob.glob(os.path.join(out, '*.wav'))
-    if not files:
-        raise RuntimeError('vgmstream 未解出流 (rc=%s) %s' % (r.returncode, (r.stderr or '')[:160]))
-    return {os.path.splitext(os.path.basename(f))[0]: f for f in files}
+    return audio_common.decode_acb(acb, tmp)
 
 
 def to_ogg(wav, dst):
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    r = subprocess.run([FFMPEG, '-hide_banner', '-loglevel', 'error', '-y', '-i', wav,
-                        '-c:a', 'libopus', '-b:a', OPUS_BITRATE, dst],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
-    if not os.path.exists(dst) or os.path.getsize(dst) < 1024:
-        raise RuntimeError('ffmpeg 转码失败 %s: %s' % (wav, (r.stderr or '')[:160]))
+    audio_common.to_ogg(wav, dst)
 
 
 def pick_for(names):

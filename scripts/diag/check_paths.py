@@ -41,7 +41,9 @@ SOFT_DIRS = ('diag/',)
 SOFT_FILES = {'export_assets.py', 'scan_assets.py', 'organize.py', 'probe_matching.py',
               'generate_audio_doc.py', 'gen_face_mapping.py', 'extract_paintingface.py',
               'export_painting_layout.py', 'export_cue_audio.py', 'extract_cpk.py',
-              'extract_live2d_voice.py', 'scrape_wiki_fast.py', 'mumu_adb.py'}
+              'scrape_wiki_fast.py', 'mumu_adb.py'}
+# extract_live2d_voice.py 已于 2026-11-13 迁到 paths：它是 L2D 语音缺口的官方重跑入口
+# （l2d_voice_inventory 指着它），不是一次性脚本 ⇒ 移出软档，再写死盘符直接判红。
 
 
 def tier_of(rel):

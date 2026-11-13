@@ -24,11 +24,12 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 
 def extract(panel_py):
-    s = io.open(panel_py, encoding='utf-8').read()
-    m = re.search(r"PAGE = r'''(.*?)'''", s, re.S)
-    if not m:
+    # 2026-11-13 起页面正本拆在 panel_page.html（原内联 PAGE 原样迁出）
+    page = os.path.join(os.path.dirname(panel_py), 'panel_page.html')
+    if not os.path.isfile(page):
         return None
-    return '\n;\n'.join(re.findall(r'<script>(.*?)</script>', m.group(1), re.S))
+    s = io.open(page, encoding='utf-8').read()
+    return '\n;\n'.join(re.findall(r'<script>(.*?)</script>', s, re.S))
 
 
 def main():

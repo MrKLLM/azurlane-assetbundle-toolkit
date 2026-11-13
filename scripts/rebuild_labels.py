@@ -53,6 +53,8 @@ import subprocess
 import sys
 import time
 
+import stage_run  # 子脚本编排唯一实现（与 rebuild_bgm_library 共用）
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
@@ -90,7 +92,7 @@ def now():
 
 
 def run_stage(name, argv, timeout=3600, verbose=False):
-    """跑一个子脚本并回显关键行。
+    """跑一个子脚本并回显关键行。超时兜底返回 (124, '')（原行为）。
 
     参数表
     ------
@@ -103,25 +105,8 @@ def run_stage(name, argv, timeout=3600, verbose=False):
     ----
     (returncode, 合并后的输出文本)
     """
-    print('\n▶ %s' % name)
-    t0 = time.time()
-    env = dict(os.environ, PYTHONIOENCODING='utf-8')
-    try:
-        p = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
-                           encoding='utf-8', errors='replace',
-                           timeout=timeout, env=env)
-    except subprocess.TimeoutExpired:
-        print('   ↳ 超时（%ds）' % timeout)
-        return 124, ''
-    out = (p.stdout or '') + (p.stderr or '')
-    if verbose:
-        print(out)
-    else:
-        for line in out.splitlines():
-            if KEY_LINE.search(line):
-                print('   ' + line.rstrip())
-    print('   ↳ rc=%d / %.1fs' % (p.returncode, time.time() - t0))
-    return p.returncode, out
+    return stage_run.run_stage(name, argv, key_line=KEY_LINE, root=ROOT,
+                               timeout=timeout, verbose=verbose, catch_timeout=True)
 
 
 def load_json(path):

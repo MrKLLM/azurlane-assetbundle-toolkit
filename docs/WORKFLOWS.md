@@ -5598,3 +5598,40 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 **涉及文件**：`scripts/extract_cv_voice.py`（`_counts_no_row` / `degradation_report`）、
 `scripts/diag/check_degradation.py`（`--selftest`）、`ledger/degradation.json`、
 `docs/TROUBLESHOOTING.md §206`。
+
+### WF-63: 纯等价重构（屎山清理）的安全落地——对照判据按产物类型选（2026-11-13）
+
+**适用**：去重 / 路径收口 / 结构拆分这类**没有行为意图变更**的代码清理。
+目标不是"产物变好"，而是"产物逐字或内容级不变"。与权威源切换（WF-15 分支 B）的区别：
+这里连"预期的语义变化"都没有，任何差异都要当回退查。
+
+**流程**：
+1. 只读审计定位：AST 量函数长度 + 归一化行窗口跨文件查重 + grep 消费方。
+   大文件先分清"逻辑大"还是"内联数据大"（本项目 pipeline_panel.py 6303 行里 ~4770 行是页面）。
+2. 对照组 = `git show HEAD:<脚本>` 旧版 exec 加载：`__file__` 指真实路径（让 sys.path bootstrap
+   生效）、`__name__` 设非 `__main__`（跳过入口），与新模块同进程对照。不改工作区、不建临时副本。
+3. **判据按产物类型选，且先跑旧vs旧证明判据有效**：
+   | 产物 | 判据 | 陷阱 |
+   |---|---|---|
+   | wav / 确定性二进制 | 逐字节 md5 | — |
+   | ogg 等容器 | 解码后 PCM md5 + 文件长度 | 容器头随机 serialno，旧vs旧也不同（§207） |
+   | 编排函数 | rc + 返回输出 + 打印文本（计时行归一化）+ 超时分支 | 打印含耗时，直接比必红 |
+   | 内联页面拆分 | PAGE 逐字相等 + BUILD 哈希不变 + 起服务 GET / 字节比对 | 探针可能用正则抽源码（见第 4 步） |
+4. 结构拆分（内联大字符串 → 独立文件）：拆分前 grep **全部**消费方——不只 import 的，
+   还有用正则从 .py 源码抽字符串的探针（check_page_js.py 就是 `PAGE = r'''(.*?)'''`，
+   拆分后必须同步改它读新文件）。写盘用**字节拼接**保住其余行的 CRLF（整文件文本写回
+   会因行尾归一炸出上千行噪声 diff）；新文件内容须与旧字面量逐字相等（读回时 universal
+   newlines 归一，与 Python 词法对 CRLF 源码的归一一致）。
+5. 真实 CLI 样本（走 argparse 入口，不只调库函数）+ 起服务实测；样本输出落 .diag 临时区，
+   零生产写。共享工作树：提交只 add 本轮文件（git status 里别会话的脏文件一律不碰）。
+
+**踩坑记录**：
+- ogg 逐字节全红差点误判"转码改坏"——旧vs旧对照证明是容器非确定性（§207）。
+- 软档分类把活脚本当一次性 ⇒ 写死路径恒绿漏网（§208）；迁移顺手修分类。
+- 验证脚本打印 ✓ 在 GBK 控制台炸 UnicodeEncodeError——开头 sys.stdout.reconfigure(encoding='utf-8')。
+- 删"看似没用"的模块常量/导入前，grep 全部 import 方（extract_cv_voice 被 10+ 脚本 import）。
+
+**涉及文件**：`scripts/audio_common.py`、`scripts/stage_run.py`、`scripts/panel_page.html`（新）、
+`scripts/extract_cv_voice.py`、`scripts/extract_live2d_voice.py`、`scripts/export_cue_audio.py`、
+`scripts/rebuild_bgm_library.py`、`scripts/rebuild_labels.py`、`scripts/pipeline_panel.py`、
+`scripts/diag/check_page_js.py`、`scripts/diag/check_paths.py`、`docs/TROUBLESHOOTING.md §207~208`。

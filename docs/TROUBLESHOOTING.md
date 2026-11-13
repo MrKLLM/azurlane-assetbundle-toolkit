@@ -12469,3 +12469,42 @@ v1.8.27（「JS 全绿 + 鼠标全红 = 遮罩签名」）。
 
 **涉及**：`scripts/extract_cv_voice.py`、`scripts/diag/check_degradation.py`、
 `scripts/update_pipeline.py`、`ledger/degradation.json`、`docs/WORKFLOWS.md` WF-62。
+
+## §207 等价重构后 ogg 逐字节比对全红 ≠ 转码被改坏（ffmpeg Ogg 容器非确定性）（2026-11-13）
+
+**现象**：屎山清理把 `to_ogg` / ACB 解码抽进 `scripts/audio_common.py`，用 `git show HEAD:` 旧版
+做对照组逐字节比对：wav 全一致，但 ogg 8/8 全红——看起来像"转码被改坏了"。
+
+**根因**：ffmpeg 的 Ogg 封装器每次运行生成**随机 bitstream serialno**，写在每页页头
+（实测差异 24 字节，集中在偏移 14-17 / 22-25 / 61-64 等 serialno 字段），音频载荷完全相同。
+**对照实验证明判据本身无效**：旧代码自己跑两次，字节也不同（旧vs旧=False），
+而四份产物（旧×2 / 新CV / 新L2D）解码后 PCM md5 全等、文件长度全等。
+
+**修法**：容器类产物的等价判据改为「解码后 PCM md5 + 文件长度」，不用容器字节。
+通用规则：**报"新旧不一致"之前，先跑一次旧vs旧**——旧vs旧也红 ⇒ 判据失效，不是产品回退。
+
+**已排除的假设**：「新代码改了转码参数 / 工具路径」——PCM 逐字一致 + 路径解析比对
+（P.FFMPEG 与旧写死值指向同一 exe）双重证伪。
+
+**涉及**：`scripts/audio_common.py`、`scripts/extract_cv_voice.py`、`scripts/extract_live2d_voice.py`、
+`docs/WORKFLOWS.md` WF-63。
+
+## §208 写死路径闸门恒绿漏网：软档把「活的重跑入口」当成一次性脚本（2026-11-13）
+
+**现象**：`check_paths.py` 一直 PASS，但 `extract_live2d_voice.py:33-34` 与
+`export_cue_audio.py:14-18` 仍写死 `C:\Users\KLLM\...` / `D:\Azur Lane Assets`。
+
+**根因**：闸门分硬/软两档（软档只报数不判红，防"永远红的检查当天被绕过"），
+`extract_live2d_voice.py` 被列进 SOFT_FILES——但它其实是 L2D 语音缺口的**官方重跑入口**
+（`l2d_voice_inventory.py` 的提示行指着它），不是一次性脚本。分类错 ⇒ 写死路径恒绿漏网。
+另：`export_cue_audio.py` 写死的 ffmpeg 路径在本机**根本不存在**（旧脚本的 ffmpeg 兜底早已失效，
+迁到 paths.py 后反而修好）。
+
+**修法**：两脚本接 `paths.py`（VGMSTREAM / FFMPEG / 目录常量）；`extract_live2d_voice.py`
+移出 SOFT_FILES（再写死盘符直接判红）；`export_cue_audio.py` 属真 legacy，留在软档。
+迁移验证：本机解析结果与旧写死值逐一比对（工具路径必须指向同一 exe）。
+
+**判据**：`check_paths.py` PASS 且软档待迁 81→79；`--strict --verbose` 下这两文件 0 命中。
+
+**涉及**：`scripts/extract_live2d_voice.py`、`scripts/export_cue_audio.py`、
+`scripts/diag/check_paths.py`、`docs/WORKFLOWS.md` WF-63。
