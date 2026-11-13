@@ -816,6 +816,21 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 
 ### WF-16: Live2D 画廊前端交互改动与回归验证（改哪里 → 怎么验证才算过）
 
+#### WF-16 追加七（2026-11-13）：控制区折叠 / 密度档 / 信息退场改动怎么验
+
+- **判据**：① 折叠默认收起、开合与刷新后状态都写 `localStorage`（`gallery.fold.<页>`）；② 收起来的
+  筛选仍生效 ⇒ 生效数上徽标（清筛选徽标消失），背景库 `gHint`「正藏着 N 张」**常驻不折叠**；
+  ③ 诊断面板只折叠不删 DOM（验收脚本仍读 `#hud` 文本）；④ 密度档量行高真下降（舒适 88→紧凑 53px）
+  且记住；⑤ 站背景压色层只在 `html.has-sitebg` 启用，`.chartlayer` 计算背景随之变化。
+  全部走真实入口（按钮 `.click()` / select dispatch change / `SiteBg.set`），见 `gallery_fold_probe.py`（28 条）。
+- **踩坑记录**：对照截图**不用 `--virtual-time-budget`**（会把 IO 交错进场拍成半透明假缺陷），走真实墙钟等待
+  （`gallery_page_shots.py`）。动效探针本轮修了三处过期：裸读全局 `BG`/`BG_FS`（IIFE 词法绑定，接
+  `WaterBg.stats/params/shader` 钩子）；2b 用 DOM 卡片数判筛选在分批渲染下恒假（改读「共 N 项」总数）；
+  折叠后控件 `display:none` 量不到几何（量 §11/§12 前先展开）。⚠️ **展开次区这一步必须放在水面判据
+  5b/5c/6 之后**——提前展开会扰动 5c 起浪白沫的测量上下文（264→58 假红）。详见 §213。
+- **涉及文件**：`gallery_src/{theme.css,index.html,backgrounds.html,room3d.html,bgm.html,bgm_chart.css,water_bg.js}`、
+  `scripts/diag/{gallery_page_shots.py,gallery_fold_probe.py,gallery_motion_probe.py}`、`docs/TROUBLESHOOTING.md` §213。
+
 #### WF-16 追加六（2026-10-30）：循环相位登记必须排除常量越界
 
 - **判据**：回绕日志里若出现“常量参数略越界后被改成一整圈另一端”，就是误判。相位登记必须同时满足 `max-min>1e-6` 与越界；常量只钳位。gezi_2 用 `man_XZ=-10.62`（量程 ±10）复现，修复后回绕日志 0 次、touch_idle15 姿态恢复。

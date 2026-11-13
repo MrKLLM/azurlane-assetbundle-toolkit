@@ -34,6 +34,10 @@ header .sub{font-size:11px;color:var(--dim)}
   padding:3px 5px;border-radius:7px;background:transparent;text-shadow:0 1px 3px color-mix(in srgb,var(--panel) 72%,transparent)}
 /* 顶栏筛选行名用纯字形 + 品牌色与晕影，避免在透明玻璃上再叠一块小贴纸；
    可点项则保留各自半透胶囊面，层级靠形状与材质区分。 */
+/* 折叠次区：整行宽、必须是 header 最后一个子节点（开合动画的临时层叠上下文
+   排最后才盖不住兄弟；共享件 .foldable/.foldbtn 在 theme.css）。 */
+.t-more{flex-basis:100%;display:flex;flex-wrap:wrap;gap:12px;align-items:center;
+  padding-top:9px;border-top:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
 
 /* ── 自绘下拉 ──────────────────────────────────────────────────────────
    原生 <select> 展开的那层是**操作系统画的**，CSS 一行都碰不到 ⇒ 想要"落下来"
@@ -172,15 +176,27 @@ main{flex:1;overflow:auto;padding:16px 16px 22px}
    玻璃拟态本来就是这么做的——**内容区有色调，装饰区透明**。 */
 .card .body{padding:8px 10px 10px;background:linear-gradient(180deg,transparent,var(--body-tint) 42%)}
 .card .nm{font-size:13px;font-weight:800;color:var(--txt);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .py{font-size:10px;color:var(--dim);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .py{font-size:10px;color:var(--dim);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transition:color .16s var(--ease-ios)}
+.card:hover .py,.card:focus-visible .py{color:var(--txt2)}
 .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .tag{font-size:9px;padding:2px 7px;border-radius:var(--r-chip);background:var(--rar-bg);
   background:color-mix(in srgb,var(--txt2) 8%,var(--panel));color:var(--txt2);border:1px solid var(--line);font-weight:700}
 .tag.f{color:var(--brand-d)}.tag.s{color:var(--pop-d)}
 .rar-海上传奇{color:var(--r0)}.rar-超稀有{color:var(--r1)}.rar-精锐{color:var(--r2)}.rar-稀有{color:var(--r3)}.rar-普通{color:var(--r4)}
-.badge{position:absolute;top:7px;right:7px;display:flex;flex-direction:column;gap:4px;align-items:flex-end}
-.badge span{font-size:9px;padding:2px 7px;border-radius:var(--r-chip);font-weight:800;
-  background:var(--panel);box-shadow:var(--sh1);border:1px solid var(--line)}
+/* 稀有度强编码：淡底 + 细描边 + 前置色点，全部从 currentColor 派生（r0–r4 token 不动）；
+   只作用于卡片 .tag，弹窗 meta 里的裸 .rar-* 不受影响。阵营/舰种 chip 保持素面拉开层级。 */
+.tag.rar-海上传奇,.tag.rar-超稀有,.tag.rar-精锐,.tag.rar-稀有,.tag.rar-普通{
+  background:color-mix(in srgb,currentColor 11%,var(--rar-bg));
+  border-color:color-mix(in srgb,currentColor 32%,transparent)}
+.tag.rar-海上传奇::before,.tag.rar-超稀有::before,.tag.rar-精锐::before,.tag.rar-稀有::before,.tag.rar-普通::before{
+  content:'';display:inline-block;width:5px;height:5px;border-radius:50%;
+  background:currentColor;margin-right:4px;vertical-align:1px}
+/* 徽章横排单行：SPINE / L2D / 语音数不再竖着堆三颗抢画面 */
+.badge{position:absolute;top:7px;right:7px;display:flex;flex-direction:row;gap:3px;align-items:center}
+.badge span{font-size:8px;padding:1px 6px;border-radius:var(--r-chip);font-weight:800;
+  background:color-mix(in srgb,var(--panel) 82%,transparent);box-shadow:var(--sh1);
+  border:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
 .b-spine{color:var(--ok-d)}.b-l2d{color:var(--pop-d)}.b-voice{color:var(--brand-d)}
 .empty{color:var(--dim);text-align:center;padding:44px;font-size:14px;font-weight:600}
 /* 分批渲染的页脚：安静的一行状态 + 一个兜底按钮（IntersectionObserver 不可用时仍能加载） */
@@ -358,12 +374,7 @@ audio{height:32px;width:100%;flex:none}
 .note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:30px;
   text-align:center;color:var(--dim);font-size:13px;line-height:1.7;font-weight:600}
 .note b{color:var(--brand-d)}
-::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:#b6cde8;border-radius:var(--r-chip);border:2px solid transparent;background-clip:content-box}
-::-webkit-scrollbar-thumb:hover{background:#8fb6de;background-clip:content-box}
-::-webkit-scrollbar-track{background:transparent}
-[data-theme=dark] ::-webkit-scrollbar-thumb{background:#333a56;background-clip:content-box}
-[data-theme=dark] ::-webkit-scrollbar-thumb:hover{background:#465074;background-clip:content-box}
+/* 滚动条规则已收进 theme.css（token 化，四页共用），此处不再写字面色。 */
 /* ══ 背景层：干净柔色底 + 三团大色块（2026-09-28 拆掉整屏噪声着色器）══════
    上一版是 WebGL2 的 fbm 域扭曲（光柱/海面亮带/焦散/颗粒/暗角全在着色器里）。
    用户判"很丑"，取证后确认**不是参数没调好，是手法本身的问题**：整屏低频噪声 +
@@ -504,32 +515,41 @@ setTimeout(function(){var b=document.getElementById('bootveil');if(b&&!b.classLi
 <div id="bgfx" aria-hidden="true"><div class="bfield"><i class="glow g1"></i><i class="glow g2"></i><i class="glow g3"></i></div></div>
 <header class="main-toolbar">
   <h1>碧蓝航线资产浏览器</h1>
+  <div class="infowrap">
+    <button class="infobtn" id="infoBtn" aria-expanded="false" title="数据来源与运行状态">i</button>
+    <div class="infopop" id="infoPop">
+      <div class="hint" id="modehint"></div>
+      <span class="infoline">索引由 scripts/build_gallery_index.py 生成；立绘 / Spine / Live2D / 语音均为本地解包产物。</span>
+    </div>
+  </div>
   <div class="ctl"><input type="text" id="search" placeholder="搜索 中文名 / 拼音ID"></div>
   <div class="ctl"><label>类别</label><div class="seg" id="fCat">
     <button data-c="" class="on">全部</button><button data-c="ship">舰船</button><button data-c="story">剧情角色</button><button data-c="other">其他</button>
   </div></div>
-  <div class="ctl"><label>阵营</label><select id="fFaction"><option value="">全部</option></select></div>
-  <div class="ctl"><label>舰种</label><select id="fType"><option value="">全部</option></select></div>
-  <div class="ctl"><label>稀有度</label><select id="fRarity"><option value="">全部</option></select></div>
   <div class="ctl"><label>排序</label><select id="fSort">
     <option value="cn">按名称</option><option value="faction">按阵营</option><option value="type">按舰种</option><option value="rarity">按稀有度</option>
   </select></div>
-  <div class="ctl"><label>内容</label><select id="fHas">
-    <option value="">全部</option><option value="spine">含Spine</option><option value="live2d">含Live2D</option><option value="voice">含语音</option><option value="cn">有中文名</option><option value="fav">已收藏</option>
-  </select></div>
   <div class="grow"></div>
-  <div class="ctl"><label>全局</label><div class="opt" id="gOpt">
-    <button data-k="voice" title="点击立绘 / Live2D 部位时是否播放语音">点击出声</button>
-    <button data-k="lines" title="播放台词时是否在画面下方显示中文正文">显示台词</button>
-    <button data-k="remember" title="记住每个皮肤上次的缩放与位置，下次打开直接回到那里">记住视角</button>
-  </div></div>
+  <div class="hint" id="count"></div>
+  <button class="foldbtn" id="foldBtn" aria-expanded="false" title="展开 / 收起筛选与全局设置（状态会记住）">筛选<b class="n" id="foldN" hidden>0</b><i class="arw">▾</i></button>
   <div class="ctl"><label>配色</label><div class="opt" id="gTheme" title="昼 / 夜配色（状态会记住）">
     <button data-t="light">昼</button><button data-t="dark">夜</button>
   </div></div>
   <div class="ctl"><label>页面</label><div class="opt"><button onclick="location.href='bgm.html'" title="游戏原声 BGM（opus，536 首）在线试听">音乐库</button><button onclick="location.href='backgrounds.html'" title="场景/界面背景图 1897 张，带配置表来的中文命名">背景库</button></div></div>
-  <div class="ctl"><label>背景</label><div class="opt"><button id="clearBg" title="取消站用背景图，回到水面背景（等于在背景库里取消选中的那张）">去掉背景图</button></div></div>
-  <div class="hint" id="count"></div>
-  <div class="hint" id="modehint"></div>
+  <div class="t-more foldable" id="tMore" hidden>
+    <div class="ctl"><label>阵营</label><select id="fFaction"><option value="">全部</option></select></div>
+    <div class="ctl"><label>舰种</label><select id="fType"><option value="">全部</option></select></div>
+    <div class="ctl"><label>稀有度</label><select id="fRarity"><option value="">全部</option></select></div>
+    <div class="ctl"><label>内容</label><select id="fHas">
+      <option value="">全部</option><option value="spine">含Spine</option><option value="live2d">含Live2D</option><option value="voice">含语音</option><option value="cn">有中文名</option><option value="fav">已收藏</option>
+    </select></div>
+    <div class="ctl"><label>全局</label><div class="opt" id="gOpt">
+      <button data-k="voice" title="点击立绘 / Live2D 部位时是否播放语音">点击出声</button>
+      <button data-k="lines" title="播放台词时是否在画面下方显示中文正文">显示台词</button>
+      <button data-k="remember" title="记住每个皮肤上次的缩放与位置，下次打开直接回到那里">记住视角</button>
+    </div></div>
+    <div class="ctl"><label>背景</label><div class="opt"><button id="clearBg" title="取消站用背景图，回到水面背景（等于在背景库里取消选中的那张）">去掉背景图</button></div></div>
+  </div>
 </header>
 <main id="main"></main>
 
@@ -768,9 +788,8 @@ function renderGrid(){
   if(!built.total){ pageState=null; mainEl.innerHTML='<div class="empty">该类别下没有匹配项</div>'; cntEl.textContent='共 0 项'; return; }
   pageState={units:built.units,per:built.per,total:built.total,
              cursor:0,shown:0,grid:null,more:null,observer:null};
-  cntEl.textContent = catFilter===''
-    ? `共 ${built.total} 项 · 舰船 ${built.per.ship||0} / 剧情 ${built.per.story||0} / 其他 ${built.per.other||0}`
-    : `共 ${built.total} 项`;
+  /* 分类计数已在类别 seg 上，这里只留总数，不重复一遍 */
+  cntEl.textContent = `共 ${built.total} 项`;
   appendPage();
 }
 function makeCard(s){
@@ -992,6 +1011,7 @@ function apply(){
   else if(sk==='type')view.sort((a,b)=>a.type.localeCompare(b.type,'zh')||a.name.localeCompare(b.name,'zh'));
   else view.sort((a,b)=>a.name.localeCompare(b.name,'zh'));
   renderGrid();
+  if(window.foldBadge)foldBadge();
 }
 ['search'].forEach(id=>document.getElementById(id).addEventListener('input',debounce(apply,180)));
 ['fFaction','fType','fRarity','fHas','fSort'].forEach(id=>document.getElementById(id).addEventListener('change',apply));
@@ -1037,6 +1057,30 @@ function enhanceSelect(sel){
   build(); sync();
 }
 ['fFaction','fType','fRarity','fHas','fSort'].forEach(id=>enhanceSelect(document.getElementById(id)));
+
+/* ---------- 控制区折叠 + ⓘ 信息弹层 ----------
+   次区默认收起、状态记住；收起来的筛选仍在生效 ⇒ 生效数上徽标，不许静默。
+   .t-more 是 header 最后一个子节点：开合动画的临时层叠上下文盖不住兄弟。 */
+(function(){
+  const btn=document.getElementById('foldBtn'), more=document.getElementById('tMore'), n=document.getElementById('foldN');
+  const KEY='gallery.fold.index';
+  const set=(open,animate)=>{ more.hidden=!open; btn.setAttribute('aria-expanded',String(open));
+    more.classList.toggle('open',!!(open&&animate));
+    try{localStorage.setItem(KEY,open?'1':'0')}catch(e){} };
+  let init=false; try{init=localStorage.getItem(KEY)==='1'}catch(e){}
+  set(init,false);
+  btn.onclick=()=>set(more.hidden,true);
+  window.foldBadge=()=>{ const c=['fFaction','fType','fRarity','fHas'].filter(id=>document.getElementById(id).value).length;
+    n.hidden=!c; n.textContent=c; };
+  foldBadge();
+})();
+(function(){
+  const b=document.getElementById('infoBtn'), p=document.getElementById('infoPop');
+  const set=on=>{ p.classList.toggle('on',on); b.setAttribute('aria-expanded',String(on)); };
+  b.onclick=e=>{ e.stopPropagation(); set(!p.classList.contains('on')); };
+  document.addEventListener('click',e=>{ if(!e.target.closest('.infowrap')) set(false); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape') set(false); });
+})();
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
 
 /* ---------- 详情弹层 ---------- */

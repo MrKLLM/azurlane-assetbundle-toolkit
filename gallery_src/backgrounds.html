@@ -48,7 +48,7 @@ header .sp{flex:1}
 .opt button.on{background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
 
 .wrap{max-width:1560px;margin:0 auto;padding:18px 22px 56px}
-.tools{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:12px;align-items:center;margin-bottom:14px}
+.tools{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;gap:12px;align-items:center;margin-bottom:14px}
 /* 搜索框和收藏开关并排；输入框可收缩，不把筛选区挤成一条。 */
 .q{width:100%;min-width:0;font:inherit;font-size:14px;color:var(--txt);
   background:color-mix(in srgb,var(--panel) 66%,transparent);
@@ -87,7 +87,7 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
 @media(max-width:720px){
   .wrap{padding:14px 12px 40px}
   .tools{grid-template-columns:1fr;gap:8px}
-  .tools #cFav{justify-self:start}
+  .tools #cFav,.tools .foldbtn{justify-self:start}
   .grp{grid-template-columns:1fr;gap:5px}
   #gSub .sel{grid-column:1}
 }
@@ -264,8 +264,8 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
 </header>
 
 <div class="wrap">
-  <div class="tools"><span class="chip" id="cFav" title="只看已收藏的背景图" style="align-self:center">★ 只看收藏<b id="favN">0</b></span><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"></div>
-  <div class="fbar">
+  <div class="tools"><span class="chip" id="cFav" title="只看已收藏的背景图" style="align-self:center">★ 只看收藏<b id="favN">0</b></span><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"><button class="foldbtn" id="foldBtn" aria-expanded="false" title="展开 / 收起命名档·画面·类目筛选（状态会记住）">筛选<b class="n" id="foldN" hidden>0</b><i class="arw">▾</i></button></div>
+  <div class="fbar foldable" id="fMore" hidden>
     <div class="grp" id="gTier"><span>命名档</span><div class="chipset"></div></div>
     <div class="grp" id="gChar" hidden><span>画面</span><div class="chipset"></div></div>
     <div class="grp" id="gGroup"><span>类目</span><div class="chipset"></div></div>
@@ -413,6 +413,7 @@ function apply(){
   $('sub').textContent=view.length+' / '+ALL.length+' 张 · '
     +['exact','baked','inferred','none'].map(t=>TIER[t]+' '+(META.counts[t]||0)).join(' · ');
   paintHint();
+  if(window.foldBadge)foldBadge();
 }
 function paintHint(){
   const h=$('gHint'), hid=META.char?charHidden():0;
@@ -719,6 +720,23 @@ addEventListener('keydown',e=>{
 });
 if(!REDUCE){/* 动效本身已由 token 收在 0.2~0.34s，这里只是给"减少动效"偏好留一个钩子 */}
 boot();
+
+/* ---------- 筛选区折叠：默认收起、状态记住；生效筛选数上徽标 ----------
+   「画面」默认档是 shown（隐藏无角色），它不算"额外生效"；gHint 那行常驻不折叠，
+   收起来也能看见正藏着多少张（人工标注流程的状态出口，不许静默）。 */
+(function(){
+  const btn=document.getElementById('foldBtn'), more=document.getElementById('fMore'), n=document.getElementById('foldN');
+  const KEY='gallery.fold.backgrounds';
+  const set=(open,animate)=>{ more.hidden=!open; btn.setAttribute('aria-expanded',String(open));
+    more.classList.toggle('open',!!(open&&animate));
+    try{localStorage.setItem(KEY,open?'1':'0')}catch(e){} };
+  let init=false; try{init=localStorage.getItem(KEY)==='1'}catch(e){}
+  set(init,false);
+  btn.onclick=()=>set(more.hidden,true);
+  window.foldBadge=()=>{ const c=(fTier?1:0)+(fChar&&fChar!=='shown'?1:0)+(fGroup?1:0)+(fSub?1:0);
+    n.hidden=!c; n.textContent=c; };
+  foldBadge();
+})();
 
 /* 材质说明（2026-10-13）：搜索框自带一层 CSS blur(20px) saturate(1.6)（"湿玻璃"），
    但本页**不挂任何折射盒**——2026-10-11 用户实机：页头那条带子"和首页一样是一条杠"。

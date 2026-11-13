@@ -664,7 +664,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;
     <div class="legend-head">
       <b>航海图例</b>
     </div>
-    <div class="tools"><input class="q" id="q" placeholder="搜曲名 / 中文 / 标识符 / 舰名   （/ 聚焦）" autocomplete="off"></div>
+    <div class="tools"><input class="q" id="q" placeholder="搜曲名 / 中文 / 标识符 / 舰名   （/ 聚焦）" autocomplete="off"><div class="opt" id="gDensity" title="曲目行密度（状态会记住）：舒适=全信息，紧凑=单行标识、一屏更多首"><button data-d="cozy" class="on">舒适</button><button data-d="compact">紧凑</button></div></div>
     <div class="grp" id="gUsage"><span>用途</span></div>
     <div class="grp" id="gScene"><span>出处</span></div>
     <div class="grp" id="gEvent"><span>活动回忆</span>
@@ -795,6 +795,17 @@ const MODES=['seq','loop','one','shuffle'];
 const MODE_NAMES={seq:'顺序播放',loop:'列表循环',one:'单曲循环',shuffle:'随机播放'};
 let MODE='seq';
 try{ const m=localStorage.getItem('gallery.bgmMode'); if(MODES.includes(m)) MODE=m; }catch(e){}
+/* 行密度：舒适（默认）/ 紧凑，状态记住。紧凑档只压排版不删信息（slug 与曲名同行、tags 缩小）。 */
+(function(){
+  const KEY='gallery.bgmDensity'; let d='cozy';
+  try{ if(localStorage.getItem(KEY)==='compact') d='compact'; }catch(e){}
+  const paint=()=>{ document.body.classList.toggle('compact',d==='compact');
+    document.querySelectorAll('#gDensity button').forEach(b=>b.classList.toggle('on',b.dataset.d===d)); };
+  document.getElementById('gDensity').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b||b.dataset.d===d) return;
+    d=b.dataset.d; try{localStorage.setItem(KEY,d)}catch(e){} paint(); });
+  paint();
+})();
 const A=new Audio(); A.volume=+(localStorage.getItem('gallery.vol')??0.8);
 /* 缓冲状态说人话：只在真的等数据时显示一枚小胶囊，不拿"转圈"装饰正常播放。 */
 function setBuf(on){ const b=$('buf'); if(b) b.hidden=!on; }

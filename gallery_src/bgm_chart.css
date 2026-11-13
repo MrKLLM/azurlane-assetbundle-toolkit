@@ -580,3 +580,30 @@ html.has-sitebg body.chart header{
 html.has-sitebg body.chart :is(.sub,.en,.mt,.dim){color:var(--ch-ink-3)!important;opacity:1!important}
 html.has-sitebg body.chart .hint{text-shadow:none!important}
 
+/* 站用照片与海图纸本气质不合（奶油纸 + 灰云）：不新增层，直接把既有 .chartlayer
+   的薄雾换成更密的纸色 veil（z-index:2 本就在照片之上、内容之下），照片往纸色压。 */
+html.has-sitebg body.chart .chartlayer{
+  background:
+    radial-gradient(120% 88% at 50% -10%,
+      color-mix(in srgb,var(--ch-paper) 42%,transparent),transparent 64%),
+    linear-gradient(180deg,
+      color-mix(in srgb,var(--ch-paper) 60%,transparent),
+      color-mix(in srgb,var(--ch-paper) 52%,transparent) 52%,
+      color-mix(in srgb,var(--ch-paper) 60%,transparent))}
+
+/* ── 紧凑档：只压排版不删信息（slug 与曲名同行、tags/体积缩小），577 首一屏更多 ── */
+body.chart.compact .row{padding:7px 16px}
+body.chart.compact .row.playing{padding-left:13px}
+body.chart.compact .row .nm{font-size:13.5px}
+body.chart.compact .row .en{display:inline;margin-top:0;margin-left:8px;font-size:9px}
+body.chart.compact .row .tags{margin-top:2px}
+body.chart.compact .row .tag{font-size:9.5px}
+body.chart.compact .row .mt{font-size:10.5px}
+body.chart.compact .row .mt i{display:inline;margin-top:0;margin-left:6px}
+body.chart.compact .row .no::after{top:-7px;bottom:-7px}
+
+/* 主窗口滚动条跟纸本色（theme.css 的 token 版是蓝灰系，本页覆盖；.legend 自有更细规则不动） */
+html{scrollbar-color:var(--ch-rule-2) transparent}
+::-webkit-scrollbar-thumb{background:var(--ch-rule-2)}
+::-webkit-scrollbar-thumb:hover{background:var(--ch-brass)}
+

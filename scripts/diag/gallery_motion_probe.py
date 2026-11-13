@@ -247,7 +247,14 @@ def main():
     t = Tab(pg)
     pg.cmd('Page.addScriptToEvaluateOnNewDocument', {'source':
         "window.__errs=[];addEventListener('error',e=>window.__errs.push(String(e.message).slice(0,140)));"
-        "addEventListener('unhandledrejection',e=>window.__errs.push('rej '+String(e.reason).slice(0,140)));"})
+        "addEventListener('unhandledrejection',e=>window.__errs.push('rej '+String(e.reason).slice(0,140)));"
+        # water_bg.js 早已包进 IIFE，BG/BG_FS 是词法绑定不是全局；本探针多处裸读 BG.*。
+        # 用惰性 getter 把它们接到真实暴露的调试钩子 window.WaterBg（document-start 注入，
+        # 访问发生在加载之后）。WaterBg 不在时返回 undefined，typeof 守卫仍成立。
+        "Object.defineProperty(window,'BG',{configurable:true,get(){var W=window.WaterBg;if(!W)return;"
+        "var s=W.stats(),p=W.params();return {mode:s.mode,err:s.err,sw:s.sw,sh:s.sh,peak:s.peak,"
+        "frames:s.frames,strokes:s.strokes,raf:s.raf,P:p};}});"
+        "Object.defineProperty(window,'BG_FS',{configurable:true,get(){return window.WaterBg?window.WaterBg.shader():'';}});"})
     pg.cmd('Emulation.setDeviceMetricsOverride',
            {'width': win[0], 'height': win[1], 'deviceScaleFactor': 1, 'mobile': False})
     # 无头实例没有真窗口焦点：document.activeElement 会设上，但 :focus 不匹配，
@@ -505,18 +512,19 @@ def main():
       const num=v=>+String(v).slice(0,-2);
       const o0=seg.querySelector('button.on');
       const v0=[num(sl.style.getPropertyValue('--x')),num(sl.style.getPropertyValue('--w'))];
-      const n0=document.querySelectorAll('.card').length;
+      const cnt=()=>parseInt((document.getElementById('count').textContent.match(/\\d+/)||['0'])[0]);
+      const n0=cnt();
       seg.querySelectorAll('button')[1].click();
       const o1=seg.querySelector('button.on');
       return JSON.stringify({v0, w0:[o0.offsetLeft,o0.offsetWidth],
         v1:[num(sl.style.getPropertyValue('--x')),num(sl.style.getPropertyValue('--w'))],
-        w1:[o1.offsetLeft,o1.offsetWidth], n0, n1:document.querySelectorAll('.card').length,
+        w1:[o1.offsetLeft,o1.offsetWidth], n0, n1:cnt(),
         onbg:getComputedStyle(o1).backgroundImage, label:o1.textContent});""")
     if seg.get('err'):
         fails.append('2b 类别胶囊：#fCat 里没有 .segslide 节点')
     else:
         print(f'2b 类别  落位 {seg["v0"]}→{seg["v1"]}（应为 {seg["w0"]}→{seg["w1"]}）'
-              f' 卡片 {seg["n0"]}→{seg["n1"]} 选中「{seg["label"]}」')
+              f' 总数 {seg["n0"]}→{seg["n1"]} 选中「{seg["label"]}」')
         for k in range(2):
             if abs(seg['v0'][k] - seg['w0'][k]) > 1.5:
                 fails.append(f'2b 类别：初始落位偏差 >1.5px（{seg["v0"]} vs {seg["w0"]}）')
@@ -525,7 +533,7 @@ def main():
         if abs(seg['v1'][0] - seg['v0'][0]) < 20:
             fails.append(f'2b 类别：胶囊位移只有 {seg["v1"][0]-seg["v0"][0]}px，这条断言是空的')
         if seg['n1'] == seg['n0']:
-            fails.append(f'2b 类别：点「{seg["label"]}」后卡片数没变（{seg["n0"]}）——筛选被改坏了')
+            fails.append(f'2b 类别：点「{seg["label"]}」后总数没变（{seg["n0"]}）——筛选被改坏了')
         if seg['onbg'] != 'none':
             fails.append(f'2b 类别：选中那颗自己还留着背景 {seg["onbg"][:40]}')
         t.raw("document.querySelector('#fCat button').click()")
@@ -905,6 +913,12 @@ def main():
     if silky['nOver']:
         fails.append(f'11 丝滑：样式表里又出现 {silky["nOver"]} 条带回弹的 cubic-bezier '
                      f'{silky["over"][:2]} —— 用户明确否掉了"弹一下"')
+    # 控制区折叠（2026-11-13）：全局开关收进 .t-more（display:none）。§11 按压 / §12 悬停
+    # 要量真实几何与 :active/:hover，量之前展开次区（真实用户也是展开才用）。
+    # 水面判据 5b/5c/6 已在此之前按默认首视图（收起）量完，测量上下文不被这一步扰动。
+    t.raw("var fb=document.getElementById('foldBtn'),tm=document.getElementById('tMore');"
+          "if(fb&&tm&&tm.hidden)fb.click();")
+    time.sleep(0.4)
     # 按下/悬停必须**看不出形变**：悬停不许放大，按下只许轻压
     g = t.j("""const b=document.querySelector('#gOpt button[data-k=voice]'), r=b.getBoundingClientRect();
       return JSON.stringify([r.left+r.width/2, r.top+r.height/2]);""")

@@ -302,5 +302,9 @@ new MutationObserver(()=>{ if(BG.cv) bgColors(); })
 window.WaterBg={ sync:bgSync, colors:bgColors,
   stats:()=>({mode:BG.mode, err:BG.err, hasCanvas:!!BG.cv, raf:!!BG.raf,
     frames:BG.frames, strokes:BG.strokes, peak:+BG.peak.toFixed(5), energy:+BG.energy.toFixed(6),
-    sw:BG.sw, sh:BG.sh, siteBg:siteBgOn(), reduced:RM.matches, host:!!document.getElementById('bgfx')}) };
+    sw:BG.sw, sh:BG.sh, siteBg:siteBgOn(), reduced:RM.matches, host:!!document.getElementById('bgfx')}),
+  /* 水面参数与片元着色器源码也走钩子暴露：BG/BG_FS 是 IIFE 内词法绑定，不是全局，
+     探针裸读 BG.* 会 ReferenceError（2026-11-13 修 gallery_motion_probe 过期读取）。 */
+  params:()=>({foam:BG.P&&BG.P.foam, gain:BG.P&&BG.P.gain, foamT:BG.P&&BG.P.foamT}),
+  shader:()=>BG_FS };
 })();

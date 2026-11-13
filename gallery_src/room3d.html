@@ -50,6 +50,10 @@ header .sp{flex:1}
 .sw i{font-style:normal;font-size:10px;padding:1px 6px;border-radius:var(--r-chip);
   background:color-mix(in srgb,var(--pop) 22%,transparent);color:var(--pop-d)}
 .grp{display:inline-flex;align-items:center;gap:8px;padding:0 10px;border-left:1px solid var(--line)}
+/* 折叠次区：整行宽、排在 .bar 最后（共享件 .foldable/.foldbtn 在 theme.css） */
+.bar-more{flex-basis:100%;display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+  padding-top:8px;border-top:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+.bar-more .grp:first-child{border-left:0;padding-left:0}
 .grp>span{font-size:11.5px;color:var(--dim)}
 .rng{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--txt2)}
 .rng input[type=range]{width:100px;accent-color:var(--brand)}
@@ -58,9 +62,10 @@ header .sp{flex:1}
 
 #stage{flex:1 1 auto;position:relative;min-height:0}
 canvas{display:block}
-#hud{position:absolute;left:14px;bottom:12px;font-size:11.5px;color:var(--txt2);background:var(--bar);
+#hud{position:absolute;left:14px;bottom:44px;font-size:11.5px;color:var(--txt2);background:var(--bar);
   border:1px solid var(--line);border-radius:var(--r-in);padding:8px 11px;line-height:1.65;
   max-width:min(560px,62vw);pointer-events:none;font-variant-numeric:tabular-nums}
+#hud[hidden]{display:none}
 #hud .warn{color:var(--pop-d)}
 #hud b{color:var(--on-txt);font-weight:600}
 #load{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -77,7 +82,6 @@ canvas{display:block}
 <header>
   <a class="back" href="index.html">← 返回</a>
   <h1>3D 宿舍 · 天狼星旅馆</h1>
-  <span class="sub">room.glb 由场景包直接装配：网格 / 贴图 / 烘焙 lightmap / 灯 都是包内数据</span>
   <span class="sp"></span>
   <div class="opt" id="gTheme" title="昼 / 夜配色（状态会记住）">
     <button data-t="light">昼</button><button data-t="dark">夜</button>
@@ -85,23 +89,6 @@ canvas{display:block}
 </header>
 
 <div class="bar">
-  <div class="grp"><span>包内</span>
-    <button class="sw on" data-k="lm" title="Unity 烘焙的 lightmap（5 页 ASTC），走第二套 UV">烘焙光照 lightmap</button>
-  </div>
-  <div class="grp"><span>推断 · 非包内</span>
-    <button class="sw" data-k="sky" title="场景包 m_SkyboxMaterial 是空引用，海面/天空几何不在这个包；几何与摆位是我给的，颜色取自游戏内截图">窗外天海<i>推断</i></button>
-    <button class="sw" data-k="cloudw" title="云层贴图的 RGB 是分通道数据（高 alpha 处是品红），自定义云着色器读不到；按白天白云参照图改成纯白+alpha 当密度">白云<i>推断</i></button>
-    <button class="sw" data-k="leafw" title="树叶贴图 B 通道恒 241-255 且这三张材质没有 _BaseColor，蓝色不是颜色；把 B 当数据压掉">绿叶<i>推断</i></button>
-  </div>
-  <div class="grp"><span>角色 · 包内</span>
-    <button class="sw on" data-k="char" title="她不在房间场景包里，在 dorm3d/character/ 另一套包；坐标取自 _base_scene 的 Player / PlayerPoint。默认开着">天狼星</button>
-    <button class="sw" data-k="approach" title="把相机挪到她面前 2.2 米、看着她胸口高度——默认机位离得远，她只有一小条">走近看她</button>
-    <span id="spots"></span>
-  </div>
-  <div class="grp"><span>渲染</span>
-    <span class="rng"><label for="rBloom">泛光</label><input id="rBloom" type="range" min="0" max="1.2" step="0.05" value="0.60"><b id="vBloom">0.60</b></span>
-    <span class="rng"><label for="rExp">曝光</label><input id="rExp" type="range" min="0.6" max="2.2" step="0.05" value="1.20"><b id="vExp">1.20</b></span>
-  </div>
   <div class="grp" id="views"><span>机位</span></div>
   <div class="grp"><span>操作</span>
     <div class="opt" id="mOpt" title="环绕=绕中心转；行走=进屋里走（WASD 移动、按住左键转向、QE 升降、Shift 加速）">
@@ -109,13 +96,34 @@ canvas{display:block}
     </div>
   </div>
   <button class="sw" data-k="reset" title="回到当前机位的初始位置">复位视角</button>
+  <button class="foldbtn" id="foldBtn" aria-expanded="false" title="展开 / 收起光照·推断·角色·渲染设置（状态会记住）">更多<i class="arw">▾</i></button>
   <span class="hint" style="flex:1"></span>
   <span class="hint" id="opHint">拖拽旋转 · 滚轮缩放 · 右键平移</span>
+  <div class="bar-more foldable" id="bMore" hidden>
+    <div class="grp"><span>包内</span>
+      <button class="sw on" data-k="lm" title="Unity 烘焙的 lightmap（5 页 ASTC），走第二套 UV">烘焙光照 lightmap</button>
+    </div>
+    <div class="grp"><span>推断 · 非包内</span>
+      <button class="sw" data-k="sky" title="场景包 m_SkyboxMaterial 是空引用，海面/天空几何不在这个包；几何与摆位是我给的，颜色取自游戏内截图">窗外天海<i>推断</i></button>
+      <button class="sw" data-k="cloudw" title="云层贴图的 RGB 是分通道数据（高 alpha 处是品红），自定义云着色器读不到；按白天白云参照图改成纯白+alpha 当密度">白云<i>推断</i></button>
+      <button class="sw" data-k="leafw" title="树叶贴图 B 通道恒 241-255 且这三张材质没有 _BaseColor，蓝色不是颜色；把 B 当数据压掉">绿叶<i>推断</i></button>
+    </div>
+    <div class="grp"><span>角色 · 包内</span>
+      <button class="sw on" data-k="char" title="她不在房间场景包里，在 dorm3d/character/ 另一套包；坐标取自 _base_scene 的 Player / PlayerPoint。默认开着">天狼星</button>
+      <button class="sw" data-k="approach" title="把相机挪到她面前 2.2 米、看着她胸口高度——默认机位离得远，她只有一小条">走近看她</button>
+      <span id="spots"></span>
+    </div>
+    <div class="grp"><span>渲染</span>
+      <span class="rng"><label for="rBloom">泛光</label><input id="rBloom" type="range" min="0" max="1.2" step="0.05" value="0.60"><b id="vBloom">0.60</b></span>
+      <span class="rng"><label for="rExp">曝光</label><input id="rExp" type="range" min="0.6" max="2.2" step="0.05" value="1.20"><b id="vExp">1.20</b></span>
+    </div>
+  </div>
 </div>
 
 <div id="stage">
   <div id="load"><div class="track"><div class="fill" id="ldFill"></div></div><div class="txt" id="ldTxt">准备载入…</div></div>
-  <div id="hud"></div>
+  <button class="hudpill" id="hudToggle" aria-expanded="false" title="展开 / 收起装配诊断（网格·顶点·lightmap·机位台账）">诊断</button>
+  <div id="hud" hidden></div>
 </div>
 
 <script type="module">
@@ -138,6 +146,28 @@ window.__ROOM3D = S;
 
 const stage=document.getElementById('stage'), ldEl=document.getElementById('load');
 const ldFill=document.getElementById('ldFill'), ldTxt=document.getElementById('ldTxt'), hud=document.getElementById('hud');
+
+/* ---------- 控制条折叠 + 诊断小丸：默认收起、状态记住 ----------
+   次区是 .bar 最后一个子节点；hud 只折叠不删 DOM（验收脚本仍读它的文本）。 */
+(function(){
+  const btn=document.getElementById('foldBtn'), more=document.getElementById('bMore');
+  const KEY='gallery.fold.room3d';
+  const set=(open,animate)=>{ more.hidden=!open; btn.setAttribute('aria-expanded',String(open));
+    more.classList.toggle('open',!!(open&&animate));
+    try{localStorage.setItem(KEY,open?'1':'0')}catch(e){} };
+  let init=false; try{init=localStorage.getItem(KEY)==='1'}catch(e){}
+  set(init,false);
+  btn.onclick=()=>set(more.hidden,true);
+})();
+(function(){
+  const b=document.getElementById('hudToggle');
+  const KEY='gallery.hud.room3d';
+  const set=open=>{ hud.hidden=!open; b.setAttribute('aria-expanded',String(open));
+    try{localStorage.setItem(KEY,open?'1':'0')}catch(e){} };
+  let init=false; try{init=localStorage.getItem(KEY)==='1'}catch(e){}
+  set(init);
+  b.onclick=()=>set(hud.hidden);
+})();
 const prog=(f,m)=>{ ldFill.style.width=Math.round(Math.min(1,Math.max(0,f))*100)+'%'; if(m) ldTxt.textContent=m; };
 function fail(m){ S.err=String(m&&m.message||m).slice(0,300); S.done=true;
   ldEl.classList.add('err'); ldEl.classList.remove('hide'); ldTxt.textContent='载入失败：'+S.err; }
@@ -449,6 +479,7 @@ async function boot(){
 function hudUpdate(){
   const d=S.declared||{};
   hud.innerHTML =
+    '<span style="color:var(--dim)">room.glb 由场景包直接装配：网格 / 贴图 / 烘焙 lightmap / 灯 都是包内数据</span><br>'+
     '网格对象 <b>'+S.meshObjects+'</b> / 台账 '+(d.prim||0)+' · 顶点 <b>'+S.posTotal+'</b> / 台账 '+(d.pos||0)+
     ' · 灯 <b>'+S.lights+'</b> 盏（包内强度）'+
     '<br>lightmap 槽位 <b>'+S.lmSlots+'</b> · 页 <b>'+S.lmPages+'</b> · UV 通道校验 <b>'+S.chanOk+'</b> 通过 / <b>'+S.chanBad+'</b> 失败'+

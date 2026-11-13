@@ -12598,3 +12598,42 @@ clip 名 `idle/home/effect`，复核后项目技能真·绝对路径=0。**报�
 `.diag/skill_split_backup_20261113/`。
 
 **涉及**：`.agents/skills/{safe-pipeline-fix-targeted-rerun,live2d-web-runtime-integration,headless-chrome-cdp-batch-export,spine-web-runtime-integration}/`（SKILL.md + references/）。
+
+## §213 画廊 UI 折叠轮：截图假半透明 + 动效探针三处过期 + 折叠次区的层叠上下文（2026-11-13）
+
+**背景**：把 index/backgrounds/room3d 的次级控制收进默认折叠区（状态记住、生效筛选上徽标），
+开发信息退场（ⓘ 弹层 / 诊断小丸），卡片徽章横排 + 稀有度色点，音乐库加紧凑档 + 站背景纸色压色，
+滚动条收进 theme.css token。改完跑验证时撞出四类「看着像产品坏了、其实是量具/拍法坏了」。
+
+**问题 1 → 截图假半透明**：`chrome --headless --screenshot --virtual-time-budget=N` 拍音乐库，
+整列曲目行像蒙了灰（对比度极差）。**根因**：曲目行进场是 IntersectionObserver + `setTimeout(k*28)`
+交错加 `.in`（opacity 0→1），virtual-time 把这段拍成半透明中间态。**修法**：对照截图一律走
+**真实墙钟等待**（CDP navigate 后 sleep 到 `.row.in` 真挂上），不用 virtual-time-budget。
+判据落在「`.row.in` 计数 >0」而非「页面没报错」。`scripts/diag/gallery_page_shots.py` 即此原则。
+
+**问题 2 → 探针裸读全局 BG 报 ReferenceError**：`gallery_motion_probe.py` 多处 `BG.raf` / `BG_FS`。
+**根因**：`water_bg.js` 早已包进 IIFE，`BG`/`BG_FS` 是词法绑定**不是全局**，只暴露 `window.WaterBg`。
+**修法**：① 调试钩子补 `WaterBg.params()`（foam/gain/foamT）与 `WaterBg.shader()`（BG_FS）；
+② 探针 document-start 注入惰性 getter，把 `window.BG`/`window.BG_FS` 接到钩子（访问发生在加载后，
+WaterBg 不在时返回 undefined，`typeof` 守卫仍成立）。**渲染路径零改动**（git diff 仅钩子三行）。
+
+**问题 3 → 「点筛选后卡片数必须变」恒假**：2b 类别判据数 DOM `.card`。
+**根因**：网格 2026-10-22 起分批渲染，首屏恒 `PAGE_WIDE=120` 张，全部/舰船都是 120 ⇒ 永远「没变」。
+**修法**：改读「共 N 项」计数文本的总数（1031→881 真变），才是与分批渲染兼容的筛选判据。
+
+**问题 4 → 折叠后控件量不到几何 / 水面判据被扰动**：§11 按压 §12 悬停量 `#gOpt` 开关，
+收进 `display:none` 次区后 `getBoundingClientRect` 全 0、`:active/:hover` 不命中 ⇒ 假红。
+**修法**：量这两节前先展开次区（真实用户也是展开才用）。⚠️ **展开时机有讲究**：一开始在探针
+开头就展开，水面判据 5c「起浪白沫像素」从 264 掉到 58/59 连红——展开改变了测量上下文。
+把展开挪到水面判据（5b/5c/6）**之后**、§11 之前，水面段恢复默认首视图（收起）上下文，5c 回绿。
+教训：**改测量上下文的那一步，必须放在不依赖该上下文的判据之后**。
+
+**问题 5 → 折叠次区必须是栏的最后一个子节点**：开合动画的 transform/opacity 会**临时生成层叠上下文**，
+若次区排在兄弟前面，展开瞬间自绘下拉（z-index:40）会被关进次区、被后面的兄弟盖住
+（index 顶栏「混在一起了」同款教训）。共享件 `.foldable` 在 theme.css，各页次区都排最后。
+
+**已排除的假设**：音乐库「对比度缺陷」不是产品问题（真实等待后纸面清晰）；5c 红不是水面渲染回退
+（water_bg.js 渲染 diff 为 0，纯测量上下文）；2b 红不是筛选被改坏（fold_probe 实测阵营筛选 1031→120 生效）。
+
+**涉及**：`gallery_src/{theme.css,index.html,backgrounds.html,room3d.html,bgm.html,bgm_chart.css,water_bg.js}`、
+`scripts/diag/{gallery_page_shots.py,gallery_fold_probe.py,gallery_motion_probe.py}`、WF-16 追加。

@@ -120,3 +120,59 @@
   --on-txt:#d5e7ff;
   --r0:#c9a24b; --r1:#ff5c8a; --r2:#b07bff; --r3:#5aa2ff; --r4:#37c26e;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   控制区折叠 / 信息弹层 / 诊断小丸 / 滚动条 —— 各页共用。
+   折叠次区（.foldable）必须是所在栏的**最后一个子节点**：开合动画的
+   transform/opacity 会临时生成层叠上下文，排最后才盖不住兄弟节点
+   （index 自绘下拉 z-index:40 被关进 .ctl 的教训，见 index.html 顶栏注释）。
+   ══════════════════════════════════════════════════════════════════════ */
+.foldbtn{display:inline-flex;align-items:center;gap:7px;
+  background:color-mix(in srgb,var(--panel) 56%,transparent);color:var(--txt2);
+  border:1px solid color-mix(in srgb,var(--glass-line) 78%,transparent);
+  padding:6px 12px;border-radius:var(--r-chip);font-size:12.5px;font-weight:600;cursor:pointer;
+  box-shadow:inset 0 1px 0 var(--rim-hi),var(--sh1);
+  transition:border-color .16s var(--ease-ios),background .16s,color .16s}
+.foldbtn:hover{border-color:var(--brand);color:var(--brand-d)}
+.foldbtn:active{transform:scale(.97)}
+.foldbtn[aria-expanded=true]{background:var(--on-bg);color:var(--on-txt);border-color:var(--on-ring)}
+.foldbtn .n{font-size:10px;font-weight:800;min-width:16px;height:16px;padding:0 4px;
+  border-radius:var(--r-chip);display:inline-flex;align-items:center;justify-content:center;
+  background:var(--on-bg);color:var(--on-txt);box-shadow:inset 0 0 0 1px var(--on-ring)}
+.foldbtn .n[hidden]{display:none}
+.foldbtn .arw{font-style:normal;font-size:9px;color:var(--dim);transition:transform .24s var(--ease-ios)}
+.foldbtn[aria-expanded=true] .arw{transform:rotate(180deg)}
+.foldable[hidden]{display:none}
+.foldable.open{animation:foldin .26s var(--ease-ios)}
+@keyframes foldin{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.foldable.open{animation:none}}
+
+.infowrap{position:relative;display:inline-flex}
+.infobtn{width:24px;height:24px;border-radius:50%;
+  border:1px solid color-mix(in srgb,var(--glass-line) 78%,transparent);
+  background:color-mix(in srgb,var(--panel) 56%,transparent);color:var(--dim);
+  font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  transition:color .16s var(--ease-ios),border-color .16s var(--ease-ios)}
+.infobtn:hover{color:var(--brand-d);border-color:var(--brand)}
+.infopop{position:absolute;top:calc(100% + 8px);left:0;z-index:60;width:max-content;
+  max-width:min(360px,80vw);background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;box-shadow:var(--sh3);padding:12px 14px;font-size:12px;color:var(--txt2);
+  display:none;line-height:1.7}
+.infopop.on{display:block;animation:foldin .22s var(--ease-ios)}
+.infopop .infoline{display:block;margin-top:6px;color:var(--dim)}
+
+.hudpill{position:absolute;left:14px;bottom:12px;z-index:4;
+  display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--r-chip);
+  background:var(--bar);border:1px solid var(--line);color:var(--txt2);
+  font-size:11.5px;font-weight:600;cursor:pointer;box-shadow:var(--sh1);
+  transition:color .16s var(--ease-ios),border-color .16s var(--ease-ios)}
+.hudpill:hover{color:var(--on-txt);border-color:var(--on-ring)}
+.hudpill[aria-expanded=true]{background:var(--on-bg);color:var(--on-txt);border-color:var(--on-ring)}
+
+/* 滚动条跟主题走（原 index 本地写字面色，收编成 token；bgm 纸本色在 bgm_chart.css 覆盖） */
+html{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--dim) 55%,transparent) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--dim) 55%,transparent);
+  border-radius:var(--r-chip);border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--txt2) 70%,transparent);background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
