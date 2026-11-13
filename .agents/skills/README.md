@@ -9,7 +9,7 @@
   已被取代的技能移入 `docs/archive/legacy-agents-skills/`（本目录 `_archive/` 现为空，保留作约定目录）——离开技能扫描路径，agent 不会误加载。
 - **说明**：本目录是**留存副本**，不是运行时目录。千问办公只认用户级 `~/.qwenworkcn/skills/`，读不到这里；其他 agent 若要启用，需将其纳入各自的技能加载路径（如 WorkBuddy 的项目级 `.workbuddy-ai/skills/`，或建符号链接指向本目录）。
 
-## 活跃技能（15 个，本目录顶层）
+## 活跃技能（10 个，本目录顶层）
 
 | 技能 | 说明 |
 |---|---|
@@ -19,29 +19,32 @@
 | `live2d-web-runtime-integration` | 网页集成 Live2D Cubism 运行时（pixi 组合）、动作/按部位点击/台词字幕层与无头 CDP 验收 |
 | `live2d-motion-extraction-audit` | Live2D 动作从 AssetBundle 重导出的完整性/保真审计（三类 clip 容器枚举、常量曲线对表 moc3 默认值） |
 | `spine-web-runtime-integration` | 网页集成 Spine 3.8 运行时做动态立绘渲染与批量出图（setSkin、引擎绘制序、取景陷阱） |
-| `binary-container-vs-crypto` | 判定未知二进制是「加密」还是「自定义/压缩格式」的判死流程（每条假设配零假设/阴性对照） |
-| `cn-blocked-resource-mirror-fetch` | 受限网络下被墙资源的探测-换源-取回管线（GitHub raw/API、npm 国内镜像） |
 | `decision-brief` | 技术汇报后附「人话版」现状与决策说明（已定/未定分离、≤3 选项、翻盘留痕） |
-| `enforce-project-rule-as-git-hook` | 把口头规则落成真正拦得住的 git 提交闸门（按检查对象选 hook 位、装完自测拦截分支） |
-| `project-doc-governance` | 文档治理与状态文档瘦身四步管线 + 决议落地审计。2026-09-16 已执行（提交 `d889ee9`），规则常驻 `AGENTS.md` |
 | `shared-worktree-takeover-commit` | 多会话共用同一工作树时，核验并接管他人遗留改动的六步流水线 |
 | `windows-hardlink-dedup-verify` | Windows/NTFS 硬链接去重安全流程（证「按文件名引用的消费方」零破坏；正本↔副本硬链防改完忘部署） |
-| `windows-local-server-launcher` | Windows 双击启动本地 http.server 的启动器生成器（含 GBK/CRLF、TIME_WAIT 等坑） |
 | `windows-long-running-batch-detach` | Windows 用完全脱离宿主的分离进程跑长时批处理，并三分法判定真跑完/崩了/被截断 |
 
-## 已归档技能（3 个，`docs/archive/legacy-agents-skills/`）
+## 已归档技能（8 个，`docs/archive/legacy-agents-skills/`）
 
-> 2026 年归档搬迁（提交 `167b91c`）：这三个技能已从本目录 `_archive/` 移入 `docs/archive/legacy-agents-skills/`，本目录 `_archive/` 现为空（保留作约定目录）。下表「归档件」均指新位置。
+> 归档件**冻结不改**，保持历史原貌；离开技能扫描路径，agent 不会自动加载。需要时 `git mv` 回本目录即可恢复。
 
-这些技能的功能**已被本项目现有文档取代**，本项目内不再需要，故归档留作跨项目复用参考。
-
-> 归档件**冻结不改**，保持历史原貌。其内容按当时语境书写，路径与章节引用未必仍与本项目一致；跨项目复用时应按新项目重写路径。
+**第一批（3 个，功能已被现有文档取代）**：2026 年归档搬迁（提交 `167b91c`）从 `_archive/` 移入（本目录 `_archive/` 现为空，保留作约定目录）。
 
 | 技能 | 状态 | 功能现归属 | 归档件独有、未被别处覆盖的内容 |
 |---|---|---|---|
 | `progress-tracker` | 已被吸收 | `AGENTS.md` §进度文档维护 + §格式规范 | 状态更新规则表、扩展更新规则、`[待确认]` 标记约定、`templates/status_format.md`（新项目模板） |
 | `workflow-recorder` | 已被吸收 | `AGENTS.md` 写入路由 + `docs/WORKFLOWS.md` 既有格式 | 去重检查逻辑、条目模板、序号递增规则、触发词 |
 | `troubleshooting-logger` | 已停用 | `PROJECT_STATUS.md` §9.3 五个系统性根因修复 | 5 字段条目格式（症状/根因/方案/文件/范围）、触发词 |
+
+**第二批（5 个，2026-11-13 低频/冗余归档）**：经 skill-creator 全局盘点，触发频率极低或与模型原生能力/AGENTS.md 高度重叠。**不是被取代**——知识仍在归档件里，相关任务重启时取回即可。
+
+| 技能 | 归档理由 | 知识现归属 / 取回条件 |
+|---|---|---|
+| `binary-container-vs-crypto` | 对应 §6 待办 7「逆向 sharecfgdata」悬置中，不重启不触发；核心是通用零假设对照纪律 | 重启逆向时取回；密码取证专门判据（IC/many-time-pad）仍在归档件 |
+| `enforce-project-rule-as-git-hook` | git hook 机械属模型原生；项目闸门规则 AGENTS.md 已有 13 处 | 规则常驻 `AGENTS.md` §提交闸门；装 hook 的详细自测流程在归档件 |
+| `cn-blocked-resource-mirror-fetch` | 仅下载被墙资源时用，09-20 后未触发；镜像 URL 会过期 | 需要时取回；模型亦能自行找镜像 |
+| `windows-local-server-launcher` | 启动器已建好极少重建；GBK/TIME_WAIT 坑已沉淀 | 坑见 `docs/TROUBLESHOOTING.md`；启动器生成流程在归档件 |
+| `project-doc-governance` | 路由表已在 AGENTS.md；文档膨胀才用 | 规则常驻 `AGENTS.md` 写入路由；瘦身四步管线在归档件 |
 
 **`troubleshooting-logger` 的停用原因值得记一笔**：`AGENTS.md` 路由表规定「踩坑 → `docs/TROUBLESHOOTING.md`」，但实际排查结果一直写进 `PROJECT_STATUS.md`——该文档最后条目停在 #11（2026-06-20），而 9 月两个系统性大 bug（`p_local` 多减、`mRawSpriteSize` 误用画框）都记在 `PROJECT_STATUS.md`。即**规范与实际做法脱节**，这正是 `project-doc-governance` 要治的问题类型。
 
