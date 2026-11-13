@@ -12438,3 +12438,34 @@ JS `.click()` 不受遮罩影响 ⇒ 绿红分裂正是「全屏 overlay」的�
 
 **涉及**：`scripts/diag/panel_paper_probe.py`、技能 `headless-chrome-cdp-batch-export`
 v1.8.27（「JS 全绿 + 鼠标全红 = 遮罩签名」）。
+
+## §206 audio 红：降级闸把「900xxx 独立实体正确形态」误报成 no-row（2026-11-13）
+
+**现象**：用户两连问——「怎么还要我手动？」（CG 导出页空闲，以为要手动导出）与
+「这个怎么过不去 / 整这么长也没给解决方法」（audio 红，详情是开发者口吻长文 +
+原样显示的 `**` 星号）。闸门点名 2 条新增降级：`changshehao_hei`、`nichao_hei`。
+
+**根因**：
+- 这两条**表里有行**（900563/900564，900xxx 独立实体号段，tier=None 是该号段正确形态）；
+  游戏永久不给该号段发语音包（实测盘上 cv-900xxx = 0）。基线里 169 条存量同形态。
+- 误判链：resolve 按「黑化独立实体宁缺勿错派」裁定不派语音 → 进 miss → no-row 类
+  照单全收 miss，标签「权威表里查无对应行」对它们不成立（有行）。unknown-offset 类
+  早已排除 900xxx，no-row 漏了同一条口径——**同一领域事实两类闸门口径不一致**。
+- CG「手动」是误会：st_cg 本就无头自动导出；本轮串行链停在 audio 红，bgm/cg 没跑
+  （cg verdict=null）。用户打开的是手动备用入口，空闲时大块空白是日志区。
+
+**修法**：
+- `extract_cv_voice.degradation_report` 加 `_counts_no_row`：no-row 只计「真无行」或
+  「有正常行但缺包」；有行但全为 900xxx 独立实体行的排除（与 unknown-offset 同口径）。
+  **resolve 的语音派发一字不动**（宁缺勿错派保留）。
+- `check_degradation` FAIL 消息改人话、去 `**`（控制台原样显示）；新增 `--selftest`
+  合成三对照（900xxx 不报 / 真无行报 / 缺包报）。`st_audio` 详情去 `**`。
+- 确认新增 0 后 `--write` 收紧基线：no-row 366→197、borrow-pack 8→4（4 条借包本轮消除）。
+
+**判据**：`--selftest` 5/5 绿；只读比对新增 0 / 消除 169+4；`--only audio` 未签字
+只读分支复跑 verdict ok=true（Output/Audio 未动）。影响面：171 键重分类（169 存量 +
+2 新增）；此后「新增 900xxx 实体」不再报警——该号段永久无包、无语音可派、不构成降级；
+真无行 / 缺包仍逐条点名（自测对照兜底）。
+
+**涉及**：`scripts/extract_cv_voice.py`、`scripts/diag/check_degradation.py`、
+`scripts/update_pipeline.py`、`ledger/degradation.json`、`docs/WORKFLOWS.md` WF-62。

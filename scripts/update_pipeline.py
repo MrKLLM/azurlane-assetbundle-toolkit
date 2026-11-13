@@ -1109,7 +1109,7 @@ def st_audio(approved):
     # 抽查的台词磁盘缺文件），或者自己崩了。2026-10-21 复现：rc=2 时上一版只把它写在文案里，
     # 阶段照样判绿。
     return verdict('audio', rc == 0 and rc3 == 0 and rcg == 0 and rc2 == 0,
-                   f'cv_voice rc={rc}（单包失败不反映到退出码；**非 0 = 致命前置/崩溃，不是单包失败**）；'
+                   f'cv_voice rc={rc}（单包失败不反映到退出码；非 0 = 致命前置/崩溃，不是单包失败）；'
                    f'voice_gap_audit rc={rc2}（恒 exit 0，非 0 = 它自己崩了）；'
                    f'l2d_voice_inventory（可信）rc={rc3}；{deg_line}'
                    + ('' if rc == 0 else ' · ❌ cv_voice 非零退出：这一轮没解完，别把旧音频当新结果'))

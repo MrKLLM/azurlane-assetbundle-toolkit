@@ -276,6 +276,18 @@ def row_id_for(kl, rows, prefer_cv=None):
     return None
 
 
+def _counts_no_row(k, rows):
+    """no-row 类只计「真无行」或「有正常行但缺包/缺档」。
+
+    有行但**全为 900xxx 独立实体行**（tier=None）的不算：那是该号段的正确形态
+    （与下面 unknown-offset 的排除同口径），且游戏永久不给这个号段发语音包
+    （实测盘上 cv-900xxx 为 0），无语音可派 ⇒ 不构成降级。解析器对 `_hei`
+    「宁缺勿错派」照旧（resolve 不动），只是这里不再把正确形态报成新增
+    （2026-11-13 changshehao_hei / nichao_hei 误判，§206）。"""
+    r = rows.get(k.lower()) or []
+    return not r or not all(t[1] is None and t[2] >= 900000 for t in r)
+
+
 def degradation_report(res, miss, keys, rows):
     """把「静默降级」点名成清单——供 `scripts/diag/check_degradation.py` 与台账比对。
 
@@ -287,7 +299,7 @@ def degradation_report(res, miss, keys, rows):
     kinds = {
         'borrow-pack': sorted(k for k, e in res.items() if e['src'] == 'sibling-base'),
         'tier-allocated': sorted(k for k, e in res.items() if e['src'] == 'sibling-tier'),
-        'no-row': sorted(miss),
+        'no-row': sorted(k for k in miss if _counts_no_row(k, rows)),
     }
     # 号段偏移不认识：只算"磁盘上真有这张皮肤、表里也有它的行、但档位推不出来"的那些。
     # ⚠️ 900xxx 剧情/独立实体行**不算降级**——它们的 `ship_group` 存的是组首 id（如 900001 的组是 900001

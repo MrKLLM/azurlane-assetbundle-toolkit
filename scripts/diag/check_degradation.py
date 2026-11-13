@@ -49,11 +49,43 @@ def current():
     return E.degradation_report(res, miss, keys, rows)
 
 
+def selftest():
+    """口径自测（合成表 + 合成键，走真实 resolve / degradation_report）。
+
+    三条对照：900xxx 独立实体行（正确形态，no-row 不许报）、真无行（必须报）、
+    有正常行但缺包（必须报）。缺任何一条 = 口径放太宽或收太紧（§206）。"""
+    rows = {'x_hei': [(900999, None, 900999)],
+            'normal': [(12345, 0, 123450)]}
+    keys = ['x_hei', 'ghost', 'normal']
+    res, miss = E.resolve(keys, rows, set())
+    kinds = E.degradation_report(res, miss, keys, rows)
+    ok = True
+
+    def chk(name, cond, detail=''):
+        nonlocal ok
+        print(('  PASS  ' if cond else '  FAIL  ') + name + ((' — ' + detail) if detail else ''))
+        ok = ok and bool(cond)
+
+    chk('900xxx 独立实体：解析器仍宁缺勿错派（进 miss）', 'x_hei' in miss, str(miss))
+    chk('900xxx 独立实体：no-row 不报（正确形态不是降级）',
+        'x_hei' not in kinds['no-row'], str(kinds['no-row']))
+    chk('真无行：no-row 照报', 'ghost' in kinds['no-row'], str(kinds['no-row']))
+    chk('有正常行但缺包：no-row 照报（真缺口不许吞）',
+        'normal' in kinds['no-row'], str(kinds['no-row']))
+    chk('900xxx 也不进 unknown-offset', 'x_hei' not in kinds['unknown-offset'],
+        str(kinds['unknown-offset']))
+    print('[PASS] 降级口径自测全绿' if ok else '[FAIL] 降级口径自测有红')
+    return 0 if ok else 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--write', action='store_true', help='把当前清单写成基线（确认存量正常后才用）')
     ap.add_argument('--baseline', default=BASELINE, help='基线路径（红路径自测时指到临时副本）')
+    ap.add_argument('--selftest', action='store_true', help='合成对照自测口径（不读盘上基线）')
     a = ap.parse_args()
+    if a.selftest:
+        return selftest()
     try:
         cur = current()
     except Exception as ex:
@@ -90,7 +122,8 @@ def main():
         if gone:
             print('      ✓ 消除 %d 条（可以 `--write` 收紧基线，否则它们下次"复活"就不会再报）' % len(gone))
     if bad:
-        print('\n[FAIL] %d 处新增降级：见上。修法是补权威判据，**不是**把它们写进基线。' % bad)
+        print('\n[FAIL] %d 处新增降级（名字见上）：游戏数据形状变了，语音归属判据要补，不是缺文件。'
+              '把名字交给 AI 核语义；确认无需配音后才用 --write 收紧基线。' % bad)
         return 1
     print('\n[OK] 无新增降级：例行拉取-还原可以无人值守')
     return 0

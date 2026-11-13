@@ -5571,3 +5571,30 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 
 **涉及文件**：`scripts/pipeline_panel.py`、`scripts/diag/panel_paper_probe.py`、
 `scripts/diag/test_pipeline_gating.py`、`docs/TROUBLESHOOTING.md §200、§203~205`。
+
+### WF-62: 台账闸门口径变更（误判修复）流程（2026-11-13）
+
+**判据**
+- 同一领域事实必须在**所有闸门类别**同口径：一类把某形态排除为「正确形态」
+  （如 900xxx 独立实体行 tier=None），消费同一事实的另一类（no-row 消费 resolve 的
+  miss）必须同步排除，否则正确形态被报成新增降级、整阶段红（§206）。
+- 口径变更必配合成对照：正确形态不报 / 真缺口报 / 缺包报，三对照缺一即口径过宽或过紧。
+- 基线收紧（`--write`）只允许在「新增=0 且消除清单逐条核过」之后；
+  把新增条目直接写进基线灭闸 = 掩盖，禁止。
+
+**步骤**
+1. 只读跑闸门拿点名新增；逐条核：表里有没有行、什么号段、包在不在盘上、与基线存量是否同形态。
+2. 只读模拟新口径影响面（存量重分类几条 / 新增剩几条），数字交用户确认再动手。
+3. 改分类函数（**只改分类，不改派发/生产逻辑**）+ `--selftest` 合成对照。
+4. 只读比对新增=0 → `--write` 收紧 → 受影响阶段走**只读分支**复跑验绿（不碰正式区）。
+5. 正式区覆写留给用户签字（控制台「再跑一次」+ 签字），不代签。
+
+**踩坑**
+- 闸门消息别写开发者口吻 + markdown 符号：控制台原样显示，用户看到长文却没有解法
+  ⇒ 消息要人话 + 可执行下一步（「名字交给 AI 核语义」），不写 `**`（§206）。
+- 「用户打开了手动备用入口页」≠「流程要手动」：先查该阶段 verdict 是 null（没跑到）
+  还是 failed；串行链停在红阶段是常见真因（§206 的 CG 误会）。
+
+**涉及文件**：`scripts/extract_cv_voice.py`（`_counts_no_row` / `degradation_report`）、
+`scripts/diag/check_degradation.py`（`--selftest`）、`ledger/degradation.json`、
+`docs/TROUBLESHOOTING.md §206`。
