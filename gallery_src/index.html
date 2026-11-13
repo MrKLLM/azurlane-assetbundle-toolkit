@@ -531,12 +531,12 @@ setTimeout(function(){var b=document.getElementById('bootveil');if(b&&!b.classLi
   </select></div>
   <div class="grow"></div>
   <div class="hint" id="count"></div>
-  <button class="foldbtn" id="foldBtn" aria-expanded="false" title="展开 / 收起筛选与全局设置（状态会记住）">筛选<b class="n" id="foldN" hidden>0</b><i class="arw">▾</i></button>
+  <button class="foldbtn" id="foldBtn" aria-expanded="true" title="展开 / 收起筛选与全局设置（仅本次页面）">筛选<b class="n" id="foldN" hidden>0</b><i class="arw">▾</i></button>
   <div class="ctl"><label>配色</label><div class="opt" id="gTheme" title="昼 / 夜配色（状态会记住）">
     <button data-t="light">昼</button><button data-t="dark">夜</button>
   </div></div>
   <div class="ctl"><label>页面</label><div class="opt"><button onclick="location.href='bgm.html'" title="游戏原声 BGM（opus，536 首）在线试听">音乐库</button><button onclick="location.href='backgrounds.html'" title="场景/界面背景图 1897 张，带配置表来的中文命名">背景库</button></div></div>
-  <div class="t-more foldable" id="tMore" hidden>
+  <div class="t-more foldable" id="tMore">
     <div class="ctl"><label>阵营</label><select id="fFaction"><option value="">全部</option></select></div>
     <div class="ctl"><label>舰种</label><select id="fType"><option value="">全部</option></select></div>
     <div class="ctl"><label>稀有度</label><select id="fRarity"><option value="">全部</option></select></div>
@@ -1058,19 +1058,12 @@ function enhanceSelect(sel){
 }
 ['fFaction','fType','fRarity','fHas','fSort'].forEach(id=>enhanceSelect(document.getElementById(id)));
 
-/* ---------- 控制区折叠 + ⓘ 信息弹层 ----------
-   次区默认收起、状态记住；收起来的筛选仍在生效 ⇒ 生效数上徽标，不许静默。
-   .t-more 是 header 最后一个子节点：开合动画的临时层叠上下文盖不住兄弟。 */
+// 高频控制区每次打开都展开，旧版自动写入的折叠记录不代表用户选择。
 (function(){
   const btn=document.getElementById('foldBtn'), more=document.getElementById('tMore'), n=document.getElementById('foldN');
-  const KEY='gallery.fold.index';
   const set=(open,animate)=>{ more.hidden=!open; btn.setAttribute('aria-expanded',String(open));
-    more.classList.toggle('open',!!(open&&animate));
-    try{localStorage.setItem(KEY,open?'1':'0')}catch(e){} };
-  /* 默认展开：阵营/舰种/全局开关都是高频操作，不该多一步（用户 2026-11-13 裁定的大厂原则）。
-     折叠按钮留给想清爽的人，开合选择记住；只有显式存过 '0' 才默认收。 */
-  let init=true; try{init=localStorage.getItem(KEY)!=='0'}catch(e){}
-  set(init,false);
+    more.classList.toggle('open',!!(open&&animate)); };
+  set(true,false);
   btn.onclick=()=>set(more.hidden,true);
   window.foldBadge=()=>{ const c=['fFaction','fType','fRarity','fHas'].filter(id=>document.getElementById(id).value).length;
     n.hidden=!c; n.textContent=c; };

@@ -96,10 +96,10 @@ canvas{display:block}
     </div>
   </div>
   <button class="sw" data-k="reset" title="回到当前机位的初始位置">复位视角</button>
-  <button class="foldbtn" id="foldBtn" aria-expanded="false" title="展开 / 收起光照·推断·角色·渲染设置（状态会记住）">更多<i class="arw">▾</i></button>
+  <button class="foldbtn" id="foldBtn" aria-expanded="true" title="展开 / 收起光照·推断·角色·渲染设置（仅本次页面）">更多<i class="arw">▾</i></button>
   <span class="hint" style="flex:1"></span>
   <span class="hint" id="opHint">拖拽旋转 · 滚轮缩放 · 右键平移</span>
-  <div class="bar-more foldable" id="bMore" hidden>
+  <div class="bar-more foldable" id="bMore">
     <div class="grp"><span>包内</span>
       <button class="sw on" data-k="lm" title="Unity 烘焙的 lightmap（5 页 ASTC），走第二套 UV">烘焙光照 lightmap</button>
     </div>
@@ -147,17 +147,11 @@ window.__ROOM3D = S;
 const stage=document.getElementById('stage'), ldEl=document.getElementById('load');
 const ldFill=document.getElementById('ldFill'), ldTxt=document.getElementById('ldTxt'), hud=document.getElementById('hud');
 
-/* ---------- 控制条折叠 + 诊断小丸：默认收起、状态记住 ----------
-   次区是 .bar 最后一个子节点；hud 只折叠不删 DOM（验收脚本仍读它的文本）。 */
 (function(){
   const btn=document.getElementById('foldBtn'), more=document.getElementById('bMore');
-  const KEY='gallery.fold.room3d';
   const set=(open,animate)=>{ more.hidden=!open; btn.setAttribute('aria-expanded',String(open));
-    more.classList.toggle('open',!!(open&&animate));
-    try{localStorage.setItem(KEY,open?'1':'0')}catch(e){} };
-  /* 默认展开：光照/推断/角色/渲染滑条是这页的主操作，常驻可见（可 steer 的对象不藏控件）。 */
-  let init=true; try{init=localStorage.getItem(KEY)!=='0'}catch(e){}
-  set(init,false);
+    more.classList.toggle('open',!!(open&&animate)); };
+  set(true,false);
   btn.onclick=()=>set(more.hidden,true);
 })();
 (function(){

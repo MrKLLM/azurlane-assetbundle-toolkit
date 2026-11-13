@@ -264,8 +264,8 @@ html.has-sitebg .q{-webkit-backdrop-filter:blur(24px) saturate(1.6)!important;
 </header>
 
 <div class="wrap">
-  <div class="tools"><span class="chip" id="cFav" title="只看已收藏的背景图" style="align-self:center">★ 只看收藏<b id="favN">0</b></span><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"><button class="foldbtn" id="foldBtn" aria-expanded="false" title="展开 / 收起命名档·画面·类目筛选（状态会记住）">筛选<b class="n" id="foldN" hidden>0</b><i class="arw">▾</i></button></div>
-  <div class="fbar foldable" id="fMore" hidden>
+  <div class="tools"><span class="chip" id="cFav" title="只看已收藏的背景图" style="align-self:center">★ 只看收藏<b id="favN">0</b></span><input class="q" id="q" placeholder="搜中文名 / 英文资源名 / 系列名   （/ 聚焦）" autocomplete="off"><button class="foldbtn" id="foldBtn" aria-expanded="true" title="展开 / 收起命名档·画面·类目筛选（仅本次页面）">筛选<b class="n" id="foldN" hidden>0</b><i class="arw">▾</i></button></div>
+  <div class="fbar foldable" id="fMore">
     <div class="grp" id="gTier"><span>命名档</span><div class="chipset"></div></div>
     <div class="grp" id="gChar" hidden><span>画面</span><div class="chipset"></div></div>
     <div class="grp" id="gGroup"><span>类目</span><div class="chipset"></div></div>
@@ -721,18 +721,12 @@ addEventListener('keydown',e=>{
 if(!REDUCE){/* 动效本身已由 token 收在 0.2~0.34s，这里只是给"减少动效"偏好留一个钩子 */}
 boot();
 
-/* ---------- 筛选区折叠：默认收起、状态记住；生效筛选数上徽标 ----------
-   「画面」默认档是 shown（隐藏无角色），它不算"额外生效"；gHint 那行常驻不折叠，
-   收起来也能看见正藏着多少张（人工标注流程的状态出口，不许静默）。 */
+// shown 是默认筛选，不计额外生效数；gHint 始终留在折叠区外。
 (function(){
   const btn=document.getElementById('foldBtn'), more=document.getElementById('fMore'), n=document.getElementById('foldN');
-  const KEY='gallery.fold.backgrounds';
   const set=(open,animate)=>{ more.hidden=!open; btn.setAttribute('aria-expanded',String(open));
-    more.classList.toggle('open',!!(open&&animate));
-    try{localStorage.setItem(KEY,open?'1':'0')}catch(e){} };
-  /* 默认展开：命名档/画面/类目是高频筛选，不该多一步；只有显式存过 '0' 才默认收。 */
-  let init=true; try{init=localStorage.getItem(KEY)!=='0'}catch(e){}
-  set(init,false);
+    more.classList.toggle('open',!!(open&&animate)); };
+  set(true,false);
   btn.onclick=()=>set(more.hidden,true);
   window.foldBadge=()=>{ const c=(fTier?1:0)+(fChar&&fChar!=='shown'?1:0)+(fGroup?1:0)+(fSub?1:0);
     n.hidden=!c; n.textContent=c; };

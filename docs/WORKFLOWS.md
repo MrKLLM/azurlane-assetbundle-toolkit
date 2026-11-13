@@ -818,12 +818,13 @@ py -3 scripts/diag/painting_staleness_scan.py --stamp 20260927 --resume   # 中�
 
 #### WF-16 追加七（2026-11-13）：控制区折叠 / 密度档 / 信息退场改动怎么验
 
-- **判据**：① 次区**默认展开**（高频控件一步可达，用户裁定的大厂原则）、开合与刷新后状态都写
-  `localStorage`（`gallery.fold.<页>`，只有显式存过 `'0'` 才默认收）；低频的诊断小丸默认收；② 收起来的
-  筛选仍生效 ⇒ 生效数上徽标（清筛选徽标消失），背景库 `gHint`「正藏着 N 张」**常驻不折叠**；
-  ③ 诊断面板只折叠不删 DOM（验收脚本仍读 `#hud` 文本）；④ 密度档量行高真下降（舒适 88→紧凑 53px）
-  且记住；⑤ 站背景压色层只在 `html.has-sitebg` 启用，`.chartlayer` 计算背景随之变化。
-  全部走真实入口（按钮 `.click()` / select dispatch change / `SiteBg.set`），见 `gallery_fold_probe.py`（28 条）。
+- **判据**：① 高频控制区每次打开/刷新都展开，HTML 初始也可见；手动收起仅当前页有效，
+  不读写 `gallery.fold.<页>`。干净 profile 与旧键 `'0'` 都须通过，旧版自动写入的 `'0'` 不是主动选择。
+  低频诊断默认收起并保留其独立记忆；② 收起来的筛选仍生效 ⇒ 生效数上徽标（清筛选徽标消失），
+  背景库 `gHint`「正藏着 N 张」**常驻不折叠**；③ 诊断面板只折叠不删 DOM；
+  ④ 密度档量行高真下降（舒适 88→紧凑 53px）且记住；⑤ 站背景压色层只在 `html.has-sitebg` 启用。
+  `gallery_fold_probe.py` 走按钮/select/`SiteBg.set` 入口；可见性同时查 hidden、计算样式、几何与 aria，
+  并验 390px 无横向溢出。每页临时 profile，退出 Chrome 后清理；异常字符串/None 不得判通过。
 - **踩坑记录**：对照截图**不用 `--virtual-time-budget`**（会把 IO 交错进场拍成半透明假缺陷），走真实墙钟等待
   （`gallery_page_shots.py`）。动效探针本轮修了三处过期：裸读全局 `BG`/`BG_FS`（IIFE 词法绑定，接
   `WaterBg.stats/params/shader` 钩子）；2b 用 DOM 卡片数判筛选在分批渲染下恒假（改读「共 N 项」总数）；

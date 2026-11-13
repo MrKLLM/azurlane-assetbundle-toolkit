@@ -12660,3 +12660,28 @@ WaterBg 不在时返回 undefined，`typeof` 守卫仍成立）。**渲染路径
 按 WCAG 算对比度 ≥4.5:1，不是截图。`scripts/diag/bgm_option_contrast.py` 两套主题各读一次，全过。
 
 **涉及**：`gallery_src/bgm_chart.css`、`scripts/diag/bgm_option_contrast.py`。
+
+## §215 高频控件仍被收起：旧版自动保存默认值，不是用户主动折叠（2026-11-13）
+
+**现象与复现**：主页、背景库、宿舍虽已改为默认展开，带旧记录的浏览器仍隐藏高频控件。
+三页各种入 `gallery.fold.<页>='0'` 后刷新，均实测 `hidden=true / display=none / aria-expanded=false`；
+截图 `.diag/fold_default_20261113/before_{index,backgrounds,room3d}.png`。
+
+**根因**：`e3f13e3` 的 `set(init,false)` 初始化就写入 `'0'`；`4339be7` 只改无记录时的默认值，
+仍读取旧键，因此把程序自动保存的默认状态错当用户主动选择。上一轮“只有显式存过 0 才收起”不成立。
+
+**修法**：三页 HTML 初始去掉控制区 hidden、按钮 aria-expanded=true；JS 每次加载展开，
+不再读写高频控制区的折叠键。保留当前页手动开合，刷新恢复展开；诊断 HUD、配色、音乐密度记忆不变。
+不清用户存储，不改音乐资产。
+
+**判据**：`gallery_fold_probe.py` 四页通过：干净默认、手动往返、折叠后刷新、旧键0刷新、
+真实筛选徽标、低频诊断记忆、390px 控件可见且无横向溢出、音乐密度88→53及站背景。
+可见性同时查 hidden、计算样式、非零几何和 aria；每页临时 profile，异常字符串/None 不算通过。
+旧键0截图 `.diag/ui_fold/probe_*_legacy0*.png`；源码/运行目录实际内容同步后才测试。
+`wf16_regression.py --skip hit_verify` 182秒完成，其余7项退出码全0、总汇总通过、进程已退；
+日志 `.diag/fold_default_20261113/wf16.log`。本轮未改动作数据，未重跑全库逐模型点击。
+
+**已排除**：不是用户一定主动收起；改前部署检查15/15硬链且漂移0，因此不是运行目录仍留旧源码。
+只测干净 profile 无法发现此故障，不能据此要求用户清缓存。
+
+**涉及**：`gallery_src/{index,backgrounds,room3d}.html`、`scripts/diag/gallery_fold_probe.py`、WF-16 追加七。
