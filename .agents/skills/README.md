@@ -5,6 +5,7 @@
 - **性质**：知识资产，与 `docs/` 同级看待，纳入 git 跟踪。
 - **来源**：开发本项目时由各 agent 逐步生成。其中 5 个由千问办公生成，3 个由早期其他 agent 生成。
 - **布局**：扁平结构 `.agents/skills/<技能名>/SKILL.md`，便于 agent 直接发现。
+  正文超 500 行的技能按 skill-creator 拆成「主文件（骨架+索引）+ `references/*.md`（按需加载）」，内容只搬位置不改一字。
   已被取代的技能移入 `docs/archive/legacy-agents-skills/`（本目录 `_archive/` 现为空，保留作约定目录）——离开技能扫描路径，agent 不会误加载。
 - **说明**：本目录是**留存副本**，不是运行时目录。千问办公只认用户级 `~/.qwenworkcn/skills/`，读不到这里；其他 agent 若要启用，需将其纳入各自的技能加载路径（如 WorkBuddy 的项目级 `.workbuddy-ai/skills/`，或建符号链接指向本目录）。
 

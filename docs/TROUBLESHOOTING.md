@@ -12578,3 +12578,23 @@ clip 名 `idle/home/effect`，复核后项目技能真·绝对路径=0。**报�
 拆 references 非最小修改，留单独决策。
 
 **涉及**：`.agents/skills/{unity-assetbundle-painting-restore,safe-pipeline-fix-targeted-rerun,live2d-web-runtime-integration}/SKILL.md`、`.agents/skills/README.md`。
+
+## §212 技能正文超 500 行的拆分：连续块原样搬 + 按文件取行集合核零丢失（2026-11-13）
+
+**现象**：skill-creator 规则要求 SKILL.md 正文 <500 行；项目 4 个技能超标
+（safe-pipeline 1279 / live2d-web 1305 / headless 787 / spine 522）。
+
+**修法**：主文件只留触发后必读的骨架（工作流/横切原则/核心节）+ 一张「深入参考」索引表；
+把深层分支/取证/速查表按**连续行块原样**搬进 `references/*.md`（每块加一行来源注释），
+主文件索引给出 grep 提示。四个分别拆成 309/453/82/316 行主文件 + 9/5/1/1 个参考件。
+
+**判据（零丢失）**：原文每一非空行都必须出现在「新主文件 ∪ 各参考件」里。
+⚠️ 核对要**按文件分别取行集合再并**，不能把主文件与参考件字符串直接拼接——
+主文件末行若无尾换行，拼接会与参考件首行黏成一行，造成「缺 1 行」的**假缺失**
+（本轮 headless 末行 `碧蓝航线项目实例` 实际在主文件里，grep 证实，是拼接假报）。
+另核：名片（frontmatter）逐字未动、主文件 <500 行。
+
+**边界**：只搬位置不改一字；参考件按需加载，主文件索引负责路由。备份在
+`.diag/skill_split_backup_20261113/`。
+
+**涉及**：`.agents/skills/{safe-pipeline-fix-targeted-rerun,live2d-web-runtime-integration,headless-chrome-cdp-batch-export,spine-web-runtime-integration}/`（SKILL.md + references/）。
