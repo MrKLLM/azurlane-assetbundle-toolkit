@@ -1,7 +1,7 @@
 ---
-name: unity-assetbundle-painting-restore 触发词（3D 侧）：跨包 PPtr、assets_file 带下划线、ObjectReader.assetsfile 为 None、.sharedAssets、resS 不是 SerializedFile、externals 下标 ±1、pptr.deref、CAB 索引现扫、unity default resources 内置外链、激活态过滤、m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
-description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、跨包解析、SerializedFile 多个、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。
-version: 1.13.10
+name: unity-assetbundle-painting-restore
+description: Unity AssetBundle 立绘数据驱动还原流程（以碧蓝航线项目为蓝本）。当需要从 Unity 游戏的 AssetBundle 中还原静态立绘（多层 UI 合成）、提取 Spine 动态立绘、解析 PPtr 依赖关系定位 Mesh/Sprite，或排查还原结果"颠倒/比例错/层错位/黑洞/脸部白块/头部发黑/贴遮挡条"类系统性坐标、画框与图层问题时使用。触发词：立绘还原、立绘合成、AssetBundle 立绘、Spine 提取、PPtr、externals、CAB、跨包解析、SerializedFile 多个、图层错位、比例不对、颠倒、黑洞、画框、脸部白块、白脸洞、face 槽、paintingface、mRawSpriteSize、m_IsActive、关闭图层、激活位、头部发黑、遮挡条、NOT ABLE TO DISPLAY、覆盖率扫描、重跑、影响面扫描。触发词（3D 侧）：跨包 PPtr、assets_file 带下划线、ObjectReader.assetsfile 为 None、.sharedAssets、resS 不是 SerializedFile、externals 下标 ±1、pptr.deref、CAB 索引现扫、unity default resources 内置外链、激活态过滤、m_TexEnvs、材质外链 PPtr、externals 内层 CAB、submesh、glTF 装配、GLB 回读断言、变异红路径、恒 0 假读数、蒙皮权重、BlendWeight、BlendIndices、m_VertexData、m_DataSize 是 bytes、m_Streams 恒空、m_Skin 字段不存在、compressedMesh 假信号、m_BindPose、反解顶点布局、三重自证、权重和等于1、每顶点骨数、glTF 装配前置。
+version: 1.13.11
 ---
 
 # Unity AssetBundle 立绘数据驱动还原

@@ -5,20 +5,32 @@
 - **性质**：知识资产，与 `docs/` 同级看待，纳入 git 跟踪。
 - **来源**：开发本项目时由各 agent 逐步生成。其中 5 个由千问办公生成，3 个由早期其他 agent 生成。
 - **布局**：扁平结构 `.agents/skills/<技能名>/SKILL.md`，便于 agent 直接发现。
-  已被取代的技能移入 `_archive/` 子目录——下划线前缀 + 多一层深度，agent 扫描时不会误加载。
+  已被取代的技能移入 `docs/archive/legacy-agents-skills/`（本目录 `_archive/` 现为空，保留作约定目录）——离开技能扫描路径，agent 不会误加载。
 - **说明**：本目录是**留存副本**，不是运行时目录。千问办公只认用户级 `~/.qwenworkcn/skills/`，读不到这里；其他 agent 若要启用，需将其纳入各自的技能加载路径（如 WorkBuddy 的项目级 `.workbuddy-ai/skills/`，或建符号链接指向本目录）。
 
-## 活跃技能（5 个，本目录顶层）
+## 活跃技能（15 个，本目录顶层）
 
 | 技能 | 说明 |
 |---|---|
-| `unity-assetbundle-painting-restore` | 立绘/Spine 数据驱动还原管线核心知识（PPtr/externals 解析、布局四步语义、画框红线、系统性坑速查表）。项目主线工作的主要依据 |
-| `headless-chrome-cdp-batch-export` | 无头 Chrome + CDP 批量驱动网页导出，对应 `docs/WORKFLOWS.md` WF-14 |
-| `safe-pipeline-fix-targeted-rerun` | 管线修复后「定位受影响子集 → 零回退验证 → 小范围重跑 → 换入」的标准流程 |
+| `unity-assetbundle-painting-restore` | 立绘/Spine 数据驱动还原管线核心知识（PPtr/externals 解析、布局四步语义、画框红线、3D 宿舍 glTF 装配）。项目主线工作的主要依据 |
+| `safe-pipeline-fix-targeted-rerun` | 管线修复 / 权威源切换 / 纯等价重构的安全落地：定位受影响子集 → 零回退验证 → 小范围重跑 → 换入（分支 B~J） |
+| `headless-chrome-cdp-batch-export` | 无头 Chrome + CDP 批量驱动网页渲染/截图/导出，对应 `docs/WORKFLOWS.md` WF-14 |
+| `live2d-web-runtime-integration` | 网页集成 Live2D Cubism 运行时（pixi 组合）、动作/按部位点击/台词字幕层与无头 CDP 验收 |
+| `live2d-motion-extraction-audit` | Live2D 动作从 AssetBundle 重导出的完整性/保真审计（三类 clip 容器枚举、常量曲线对表 moc3 默认值） |
+| `spine-web-runtime-integration` | 网页集成 Spine 3.8 运行时做动态立绘渲染与批量出图（setSkin、引擎绘制序、取景陷阱） |
+| `binary-container-vs-crypto` | 判定未知二进制是「加密」还是「自定义/压缩格式」的判死流程（每条假设配零假设/阴性对照） |
+| `cn-blocked-resource-mirror-fetch` | 受限网络下被墙资源的探测-换源-取回管线（GitHub raw/API、npm 国内镜像） |
+| `decision-brief` | 技术汇报后附「人话版」现状与决策说明（已定/未定分离、≤3 选项、翻盘留痕） |
+| `enforce-project-rule-as-git-hook` | 把口头规则落成真正拦得住的 git 提交闸门（按检查对象选 hook 位、装完自测拦截分支） |
+| `project-doc-governance` | 文档治理与状态文档瘦身四步管线 + 决议落地审计。2026-09-16 已执行（提交 `d889ee9`），规则常驻 `AGENTS.md` |
+| `shared-worktree-takeover-commit` | 多会话共用同一工作树时，核验并接管他人遗留改动的六步流水线 |
+| `windows-hardlink-dedup-verify` | Windows/NTFS 硬链接去重安全流程（证「按文件名引用的消费方」零破坏；正本↔副本硬链防改完忘部署） |
 | `windows-local-server-launcher` | Windows 双击启动本地 http.server 的启动器生成器（含 GBK/CRLF、TIME_WAIT 等坑） |
-| `project-doc-governance` | 文档治理四步管线。2026-09-16 已执行完毕（提交 `d889ee9`），规则常驻 `AGENTS.md`；文档再次膨胀时可重跑 |
+| `windows-long-running-batch-detach` | Windows 用完全脱离宿主的分离进程跑长时批处理，并三分法判定真跑完/崩了/被截断 |
 
-## 已归档技能（3 个，`_archive/`）
+## 已归档技能（3 个，`docs/archive/legacy-agents-skills/`）
+
+> 2026 年归档搬迁（提交 `167b91c`）：这三个技能已从本目录 `_archive/` 移入 `docs/archive/legacy-agents-skills/`，本目录 `_archive/` 现为空（保留作约定目录）。下表「归档件」均指新位置。
 
 这些技能的功能**已被本项目现有文档取代**，本项目内不再需要，故归档留作跨项目复用参考。
 
@@ -47,4 +59,4 @@
 
 - 本目录为留存性质，**不随日常任务改动**；技能内容若在实践中发现错误或过时，可直接就地修订。
 - **引用项目章节号前，务必先 `grep` 目标文档确认编号仍存在**——`PROJECT_STATUS.md` 曾于 2026-09-16 瘦身时把 `§12` 重编号为 `§9`，导致技能内多处引用失效。
-- 新增技能请沿用 `<技能名>/SKILL.md` 结构，并在此表补一行；被取代的技能移入 `_archive/` 而非删除。
+- 新增技能请沿用 `<技能名>/SKILL.md` 结构，并在此表补一行；被取代的技能移入 `docs/archive/legacy-agents-skills/` 而非删除。

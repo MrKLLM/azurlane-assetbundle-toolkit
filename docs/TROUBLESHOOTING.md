@@ -12549,3 +12549,32 @@ cur=paintings 仍返回 (100,100)；bg 自己打 a/b 后返回 bg 的值。
 断言（第5步缺口→换入 / 上游缺口→回跳）不受影响，全绿。
 
 **涉及**：`scripts/panel_page.html`（`firstGapStep` / render 判红提示）。
+
+## §211 技能全局盘点：name 字段被触发词污染 / description 超 1024 被截断 / README 与目录脱节（2026-11-13）
+
+**现象**：用 skill-creator 规则纯文本盘点 75 个 SKILL.md（项目 15 + 用户级 1 + QwenWork 镜像 + 插件），
+可改范围揪出 4 类问题。
+
+**根因与修法**：
+- `unity-assetbundle-painting-restore` 的 `name:` 行拖着一整段"触发词（3D 侧）…"——
+  触发词卡在 name 里不进 description，**一直没生效**；name 也不符合 hyphen-case。
+  修：name 还原纯名，触发词并入 description（389→792 字符）。
+- `safe-pipeline-fix-targeted-rerun` description 2433 字符（限 1024 的 2.4 倍），
+  加载器截断后尾部触发词失效；且 body 有分支 B/F/I 但 desc 无触发词。
+  修：压缩到 677 字符，补齐 B~J 全部分支触发。`live2d-web` 1064→1006（删 3 条极 niche 触发词）。
+- README 声称"活跃 5 个"实际 15、"已归档 3 个在 `_archive/`"但 `_archive/` 已空——
+  归档件早在提交 `167b91c` 搬去 `docs/archive/legacy-agents-skills/`，README 没跟。
+  修：补全 15 行表、归档指向真实位置。
+
+**判据**：改后复扫 name/desc 硬违规 0；三个被改技能**正文逐字未动**（只动 frontmatter，
+备份在 `.diag/skill_backup_20261113/`）；desc 单行≤1024、name==folder；
+safe-pipeline desc 分支覆盖==body（B~J）；README 表==目录==15。
+
+**已排除的假设（假阳性）**：初版盘点报"live2d 写死路径 2 处"——正则 `/home/[a-z]` 匹配到
+clip 名 `idle/home/effect`，复核后项目技能真·绝对路径=0。**报路径命中前先看命中行原文**。
+
+**边界（不动）**：QwenWork `~/.qwenworkcn/skills/` 13 个重名技能是只读镜像（自管，非冲突）；
+`~/.qoder/plugins/` 第三方插件（pptx name=office 等）不归本项目改。body>500 的 4 个属结构债，
+拆 references 非最小修改，留单独决策。
+
+**涉及**：`.agents/skills/{unity-assetbundle-painting-restore,safe-pipeline-fix-targeted-rerun,live2d-web-runtime-integration}/SKILL.md`、`.agents/skills/README.md`。
