@@ -12508,3 +12508,44 @@ v1.8.27（「JS 全绿 + 鼠标全红 = 遮罩签名」）。
 
 **涉及**：`scripts/extract_live2d_voice.py`、`scripts/export_cue_audio.py`、
 `scripts/diag/check_paths.py`、`docs/WORKFLOWS.md` WF-63。
+
+## §209 航行条小船"按终端推进"在后半程失效：a/b 进度整份日志取最后一条，跨阶段串味（2026-11-13）
+
+**现象**：引导审计发现——paintings 打完 `4488/4488` 后，后面任何不打 a/b 的阶段
+（bg/audio/review/swap-in…）水道一直顶着上一阶段的比例（常是 100%），
+`panel_page.html` 里"没有 a/b 就按终端真实输出行数推进"的渐近线根本不启用；
+本轮总条 `(done+frac)/total` 同时领先真实进度最多一整步。
+
+**根因**：`_unit_progress` 扫**整份日志**取最后一条含「进度」的 a/b 行，不按当前阶段过滤。
+前端 `has = unit_total>0 && unit_done!=null` 于是恒真（旧阶段的值还在），
+`gaugeSet` 的 GKEY 虽随阶段切换重建骨架，但喂进来的仍是旧值——与前端注释
+"绝不拿上一次的值假装在动"直接矛盾。
+
+**修法**：`_unit_progress(path, cur)` 只认 `== {cur}` 开始行**之后**的 a/b；
+cur=None（没有阶段在跑）返回 None。`gauge_safe` 传入当前阶段 key。
+用阶段开始行定位而非时间戳，避开跨零点修正口径不一致。
+
+**判据**：假日志对照——旧版 cur=bg 返回 (100,100)（串味），新版返回 None（回退终端推进）；
+cur=paintings 仍返回 (100,100)；bg 自己打 a/b 后返回 bg 的值。
+`panel_paper_probe.py --port 8790` 全绿（含航行条 a/b 落宽与无 a/b 回退两条注入判据）。
+
+**涉及**：`scripts/pipeline_panel.py`（`_unit_progress` / `gauge_safe`）、
+`scripts/panel_page.html`、`docs/WORKFLOWS.md` WF-63。
+
+## §210 引导两处小洞：firstGapStep 无缺口返回最后一步（注释说 0）／判红提示计数与列表不一致（2026-11-13）
+
+**现象与根因**：
+- `firstGapStep` 注释写"没有则 0"，代码却 `return order[last]`。当前唯一实害调用点
+  在第 5 步（`gap<n` 两种取值都 false → 换入按钮），暂无实害，但与 `nextWorkStep`
+  （正确返回 0）口径不一致，是复用陷阱。
+- 主屏"另有 N 步判红（第 … 步）"：N 数的是 `redAll.length`（全部判红阶段，含被抑制的
+  stale preflight），括号里列的 `outSteps` 已过滤 → 计数与列表对不上；且同一步多个阶段
+  判红会被数成多"步"。
+
+**修法**：无缺口返回 0；计数改用 `outSteps.length`（与列表同一集合，单位是步）。
+
+**判据**：node 抽函数+mock 四态（全绿→0 / 第3步idle→3 / 第5步await→5 / 全idle→1）全过；
+计数表达式 node 对照（旧数 3、新数 1 且与列表一致）；`panel_paper_probe` 的 `gap()`
+断言（第5步缺口→换入 / 上游缺口→回跳）不受影响，全绿。
+
+**涉及**：`scripts/panel_page.html`（`firstGapStep` / render 判红提示）。

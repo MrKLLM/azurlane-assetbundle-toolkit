@@ -708,18 +708,30 @@ def _log_secs(path):
     return max(0, last - first) if first is not None and last is not None else None
 
 
-def _unit_progress(path):
-    """日志里**最后一条**「a/b」形态的阶段内进度 → (done, total, 原文)。
+def _unit_progress(path, cur=None):
+    """**当前阶段内**最后一条「a/b」形态的阶段内进度 → (done, total, 原文)。
 
     流水线侧统一打了这几种：`批次进度 25/269`、`live2d 进度 3/4`、`进度 12/40 成功=…`、
     被调脚本自己的 `处理 1200/4488`。没有命中就返回 None ⇒ 界面只报阶段级进度，
     **不拿"上一次的值"假装还在动**。
+
+    ⚠️ 只认 `== {cur}` 开始行**之后**的 a/b：整份日志取最后一条会把上一阶段的
+    旧比例串给当前阶段——不打 a/b 的阶段于是顶着旧值（常是 100%），终端行数
+    推进失效、总条 (done+frac)/total 领先真实进度最多一整步。cur=None（没有
+    阶段在跑）⇒ 不认任何旧值。
     """
+    if not cur:
+        return None
     hit = None
+    in_stage = False
     try:
         with open(path, encoding='utf-8', errors='replace') as f:
             for ln in f:
-                if '进度' not in ln:
+                sm = _STAGE_START.match(ln)
+                if sm:
+                    in_stage = (sm.group(1) == cur)
+                    continue
+                if not in_stage or '进度' not in ln:
                     continue
                 m = re.search(r'(\d+)\s*/\s*(\d+)', ln)
                 if m and int(m.group(2)) > 0:
@@ -835,7 +847,7 @@ def gauge_safe(run, stages, fp=None):
             eta = total_s
 
     title = next((s['title'] for s in stages if s['key'] == cur), '')
-    up_ = _unit_progress(log) if log else None
+    up_ = _unit_progress(log, cur) if log else None
     return {'t0': t0, 'elapsed': elapsed, 'mem_mb': round(mem_mb, 1), 'nproc': nproc,
             'stage': cur, 'stage_title': title, 'done': len(done | skipped),
             'total': len(scope), 'skipped': len(skipped),

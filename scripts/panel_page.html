@@ -2917,7 +2917,7 @@ function firstGapStep(){
       return n;
     }
   }
-  return order.length?order[order.length-1]:0;
+  return 0;
 }
 function askOf(n){
   const all=(S&&S.stages)||[], st=(S&&S.state)||{}, stn=statusOf;
@@ -3305,8 +3305,10 @@ function render(){
                    /配置表过期/.test(S.state.preflight.detail||''));
   const outSteps=[...new Set(redAll.map(s=>s.step))]
     .filter(n=>n!==step && !(stalePf&&n===stepNo('preflight',1)&&step<=stepNo('paintings',3)));
-  if(redAll.length && outSteps.length)
-    A.why += ' 另有 '+redAll.length+' 步判红（第 '+outSteps.join('、')+' 步），「细节」里能看到原因。';
+  /* 计数必须与括号里列的步一致：被抑制的 stale preflight 不算进来，
+     同一步多个阶段判红也只算一步（原文案数的是阶段数，会出现"2 步判红（第 5 步）"）。 */
+  if(outSteps.length)
+    A.why += ' 另有 '+outSteps.length+' 步判红（第 '+outSteps.join('、')+' 步），「细节」里能看到原因。';
   const eb=$('#eyebrowTx'), ask=$('#ask'), why=$('#why'), foot=$('#scopeNote');
   eb.textContent = S.running ? ('正在跑 · '+S.running.label) : A.eb;
   $('#eyebrow').classList.toggle('red', !!A.red);
