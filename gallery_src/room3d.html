@@ -155,7 +155,8 @@ const ldFill=document.getElementById('ldFill'), ldTxt=document.getElementById('l
   const set=(open,animate)=>{ more.hidden=!open; btn.setAttribute('aria-expanded',String(open));
     more.classList.toggle('open',!!(open&&animate));
     try{localStorage.setItem(KEY,open?'1':'0')}catch(e){} };
-  let init=false; try{init=localStorage.getItem(KEY)==='1'}catch(e){}
+  /* 默认展开：光照/推断/角色/渲染滑条是这页的主操作，常驻可见（可 steer 的对象不藏控件）。 */
+  let init=true; try{init=localStorage.getItem(KEY)!=='0'}catch(e){}
   set(init,false);
   btn.onclick=()=>set(more.hidden,true);
 })();

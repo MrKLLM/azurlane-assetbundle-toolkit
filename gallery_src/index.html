@@ -1067,7 +1067,9 @@ function enhanceSelect(sel){
   const set=(open,animate)=>{ more.hidden=!open; btn.setAttribute('aria-expanded',String(open));
     more.classList.toggle('open',!!(open&&animate));
     try{localStorage.setItem(KEY,open?'1':'0')}catch(e){} };
-  let init=false; try{init=localStorage.getItem(KEY)==='1'}catch(e){}
+  /* 默认展开：阵营/舰种/全局开关都是高频操作，不该多一步（用户 2026-11-13 裁定的大厂原则）。
+     折叠按钮留给想清爽的人，开合选择记住；只有显式存过 '0' 才默认收。 */
+  let init=true; try{init=localStorage.getItem(KEY)!=='0'}catch(e){}
   set(init,false);
   btn.onclick=()=>set(more.hidden,true);
   window.foldBadge=()=>{ const c=['fFaction','fType','fRarity','fHas'].filter(id=>document.getElementById(id).value).length;
