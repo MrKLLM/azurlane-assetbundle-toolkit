@@ -13,14 +13,26 @@ button:hover{background:#2e3d5c}
 button.primary{background:#2b6cb0;border-color:#3b82c4}
 .stat{font-size:13px;color:#9fb0c8}
 .stat b{color:#7bd88f}
-#log{background:#11151f;border:1px solid #232a3a;border-radius:8px;padding:10px 12px;height:60vh;overflow:auto;font:12px/1.5 Conslas,Consolas,monospace;white-space:pre-wrap}
+#log{background:#11151f;border:1px solid #232a3a;border-radius:8px;padding:10px 12px;height:22vh;overflow:auto;font:12px/1.5 Consolas,Consolas,monospace;white-space:pre-wrap}
+#sum{font-size:12.5px;color:#9fb0c8;margin:10px 0 6px}
+#sum b{color:#dbe2ee}
+#tblwrap{max-height:46vh;overflow:auto;border:1px solid #232a3a;border-radius:8px;background:#11151f}
+table{border-collapse:collapse;width:100%;font:12px/1.5 Consolas,"Microsoft YaHei",monospace}
+th,td{padding:5px 8px;border-bottom:1px solid #1d2432;text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:#151b27;color:#8b96ad;font-weight:600;z-index:1}
+td.n{color:#6d7890;text-align:right}
+td.d{color:#9fb0c8;font-variant-numeric:tabular-nums}
+td.m{white-space:normal;color:#9fb0c8;max-width:460px}
+tr.now td{background:#16233a}
+td.st{font-weight:600}
+.st-wait{color:#6d7890}.st-done{color:#7bd88f}.st-skip{color:#8b96ad}.st-fail{color:#ff7b7b}.st-now{color:#8ab4ff}
 .ok{color:#7bd88f}.fail{color:#ff7b7b}.skip{color:#8b96ad}.warn{color:#ffb27b}
 canvas{position:fixed;left:-99999px;top:0}
 </style>
 </head>
 <body>
 <h1>Spine 全屏 CG 批量导出 <span class="stat" id="head"></span></h1>
-<div class="note">渲染每个 Spine 皮肤全部件 setup pose（游戏皮肤详情全屏同款构图）→ PNG 落盘 <b>Output/CG_v2/&lt;皮肤&gt;.png</b>。需要先运行本地服务器（启动资产浏览器.bat --export 或 _gallery_server.py）。</div>
+<div class="note">渲染每个 Spine 皮肤全部件 setup pose（游戏皮肤详情全屏同款构图）→ PNG 落盘 <b>Output/CG_v2/&lt;皮肤&gt;.png</b>。本地服务器 8777 由控制台重导自动拉起；手动排查时用 <b>_gallery_server.py --export --no-browser</b> 起服务，再自己打开本页。日常重导由无头 Chrome 自动跑，无需在此点「开始导出」。</div>
 <div class="bar">
   <button id="btnStart" class="primary">开始导出</button>
   <button id="btnStop">停止</button>
@@ -28,6 +40,11 @@ canvas{position:fixed;left:-99999px;top:0}
   <label>长边 <select id="selSize"><option>1600</option><option selected>2400</option><option>3200</option></select> px</label>
   <span class="stat" id="prog"></span>
 </div>
+<div id="sum"></div>
+<div id="tblwrap"><table>
+  <thead><tr><th>#</th><th>皮肤目录</th><th>名称</th><th>状态</th><th>输出尺寸</th><th>场景框</th><th>覆盖率</th><th>耗时</th><th>说明</th></tr></thead>
+  <tbody id="tbody"></tbody>
+</table></div>
 <div id="log"></div>
 <canvas id="cv"></canvas>
 <script src="./index.js"></script>
@@ -72,6 +89,40 @@ log(`发现 ${jobs.length} 个 Spine 皮肤目录`);
        jobs.push({folder:sp.folder, parts:(sp.parts&&sp.parts.length)?sp.parts:[sp.folder], name:s.name||sp.folder});}}
  const sz=q.get('size'); if(sz){const o=document.createElement('option');o.textContent=sz;o.selected=true;$('#selSize').appendChild(o);}
  if(q.get('redo')==='1')$('#chkRedo').checked=true;
+}
+
+/* ── 结果表：给人看的视图 ──────────────────────────────────────────────
+   日志（#log）仍是**唯一真源**：run_cg_export.py 轮询 `#log div:last` 的文本判
+   「全部结束 / 已停止」。下面这张表只是同一批结果的另一个视图，
+   不得改变日志行的内容、顺序或收尾时机。
+   列含义：输出尺寸 = 落盘 PNG 的 W×H；场景框 = 顶点包围盒（未像素二次构图前）；
+   覆盖率 = 不透明像素占画布比例（<0.5 会在日志里标 warn）。 */
+const tbody=$('#tbody'), rows=[];
+for(let i=0;i<jobs.length;i++){
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td class="n">${i+1}</td><td>${jobs[i].folder}</td><td>${jobs[i].name||''}</td>`
+    +'<td class="st st-wait">等待</td><td class="d">—</td><td class="d">—</td>'
+    +'<td class="d">—</td><td class="d">—</td><td class="m"></td>';
+  tbody.appendChild(tr); rows.push(tr);
+}
+const fmtMs=ms=>ms<1000?ms+'ms':(ms/1000).toFixed(1)+'s';
+let nowRow=null;
+function setSum(done=0,skip=0,fail=0){
+  $('#sum').innerHTML=`共 <b>${jobs.length}</b> 个 · 完成 <b>${done}</b> · 跳过 <b>${skip}</b>`
+    +` · 失败 <b>${fail}</b> · 等待 <b>${jobs.length-done-skip-fail}</b>`;
+}
+setSum();
+function setRow(i,st,cls,d={}){
+  const tr=rows[i]; if(!tr)return;
+  const stc=tr.children[3];
+  stc.textContent=st; stc.className='st '+cls;
+  for(const [k,j] of [['size',4],['scene',5],['frac',6],['ms',7]]){
+    if(d[k]!=null)tr.children[j].textContent=d[k];
+  }
+  if(d.note!=null){const td=tr.children[8];td.textContent=d.note;td.title=d.note;}
+  if(nowRow&&nowRow!==tr)nowRow.classList.remove('now');
+  nowRow=(cls==='st-now')?tr:null;
+  if(nowRow){tr.classList.add('now');try{tr.scrollIntoView({block:'nearest'})}catch(e){}}
 }
 
 const cv=$('#cv');
@@ -352,19 +403,31 @@ $('#btnStart').onclick=async()=>{
   const longSide=parseInt($('#selSize').value,10);
   const redo=$('#chkRedo').checked;
   let done=0,skip=0,fail=0;
+  for(let i=0;i<jobs.length;i++)setRow(i,'等待','st-wait',{size:'—',scene:'—',frac:'—',ms:'—',note:''});
+  setSum();
   for(let i=0;i<jobs.length;i++){
     if(stopFlag)break;
     const job=jobs[i];
     if(!redo){const e=await (await fetch('/cg_exists?name='+encodeURIComponent(job.folder))).text();
-      if(e==='1'){skip++;$('#prog').textContent=`${i+1}/${jobs.length} 跳过${skip} 完成${done} 失败${fail}`;continue;}}
+      if(e==='1'){skip++;setRow(i,'跳过','st-skip',{note:'已存在（勾「重做已存在的」才覆盖）'});
+        $('#prog').textContent=`${i+1}/${jobs.length} 跳过${skip} 完成${done} 失败${fail}`;
+        setSum(done,skip,fail);continue;}}
+    setRow(i,'导出中','st-now',{note:''});
+    const t0=performance.now();
     try{
       const r=await exportOne(job,longSide);
       done++;
+      setRow(i,'完成','st-done',{size:`${r.W}x${r.H}`,scene:`${r.bw}x${r.bh}`,frac:String(r.frac),
+        ms:fmtMs(Math.round(performance.now()-t0)),note:r.errs.length?'⚠ '+r.errs.join('；'):''});
       log(`✓ [${i+1}/${jobs.length}] ${job.folder} (${job.name}) ${r.W}x${r.H} 场景${r.bw}x${r.bh} 覆盖${r.frac}${r.errs.length?'  ⚠ '+r.errs.join('; '):''}`, r.errs.length||r.frac<0.5?'warn':'ok');
-    }catch(e){fail++;log(`✗ [${i+1}/${jobs.length}] ${job.folder}: ${e.message||e}`,'fail');}
+    }catch(e){fail++;
+      setRow(i,'失败','st-fail',{ms:fmtMs(Math.round(performance.now()-t0)),note:e.message||String(e)});
+      log(`✗ [${i+1}/${jobs.length}] ${job.folder}: ${e.message||e}`,'fail');}
     $('#prog').textContent=`${i+1}/${jobs.length} 跳过${skip} 完成${done} 失败${fail}`;
+    setSum(done,skip,fail);
     await sleep(50);
   }
+  setSum(done,skip,fail);
   log(stopFlag?`已停止：完成${done} 跳过${skip} 失败${fail}`:`全部结束：完成${done} 跳过${skip} 失败${fail}`,'warn');
   running=false;
 };

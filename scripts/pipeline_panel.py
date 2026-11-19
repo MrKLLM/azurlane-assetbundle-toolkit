@@ -430,7 +430,10 @@ def ensure_gallery(timeout=10.0):
     - 已可达 → 直接过；
     - 端口被占但页面不对（旧的无根启动器/别的服务）→ 不盲目起第二个：
       新进程会走 port_in_use 复用旧进程，等于继续打开 404；让用户关掉那个窗口；
-    - 端口空 → detached 启动 Output/gallery_v2/_gallery_server.py --export，轮询到可达。
+    - 端口空 → detached 启动 Output/gallery_v2/_gallery_server.py --export --no-browser，
+      轮询到可达。**必须带 --no-browser**：这里要的是后台服务，真正干活的是
+      run_cg_export.py 自己起的无头 Chrome；服务器再把 cg_export.html 弹到人面前，
+      只会让人以为要手动点「开始导出」（2026-11-20 用户反馈）。
     失败才回退到手动提示（并给出日志路径）。
     """
     if gallery_ok():
@@ -446,7 +449,7 @@ def ensure_gallery(timeout=10.0):
     log = os.path.join(PANEL, 'gallery_server.log')
     lf = open(log, 'w', encoding='utf-8', errors='replace')
     try:
-        p = subprocess.Popen([PY, srv, '--export'], cwd=os.path.dirname(srv),
+        p = subprocess.Popen([PY, srv, '--export', '--no-browser'], cwd=os.path.dirname(srv),
                              stdout=lf, stderr=subprocess.STDOUT, env=ENV,
                              creationflags=0x00000008 if os.name == 'nt' else 0)
     finally:

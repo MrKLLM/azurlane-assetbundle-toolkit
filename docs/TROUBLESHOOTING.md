@@ -12685,3 +12685,63 @@ WaterBg 不在时返回 undefined，`typeof` 守卫仍成立）。**渲染路径
 只测干净 profile 无法发现此故障，不能据此要求用户清缓存。
 
 **涉及**：`gallery_src/{index,backgrounds,room3d}.html`、`scripts/diag/gallery_fold_probe.py`、WF-16 追加七。
+
+## §216 音乐「缺0」只证明本地导出齐，不证明最新版游戏全集齐（2026-11-14）
+
+**问题与根因**：`rebuild_bgm_library.py --check` 的「577包、577份FLAC、缺0」只比较本地文件主名；
+索引也是577条、旧文档记569首，均不能替代来源全集证明。不能把本地mtime或旁边旧版号绑定为当前版本。
+
+**本轮核对**：只读音乐资产、索引、台账、清单与配置，不连接模拟器、不访问远程、不下载、不解码、不补导。
+委派对账唯一新增产物为 `.diag/fold_default_20261113/bgm_audit.json`；主会话随后同步本文与进度/流程文档。
+- 源包、FLAC、索引唯一主名、台账记录各577；集合差、重复主名/路径/URL均0。
+- 索引URL逐条解析到真实文件；大小相符、时长为有限正数。577份FLAC重算MD5均与台账相符；
+  ffprobe全部识别为双声道16bit FLAC，总7,798,819,729字节、73,010.414142秒（20.28小时），
+  索引与实测时长最大差0.005秒，台账与实测最大差0.0005秒。未重新整条解码或验证源WAV回环。
+- `files/hashes.csv` 登记569个BGM，源包逐个大小/MD5匹配；清单外8包与 `.diag/apk_cue/` 历史留存MD5相同。
+  两集合并集恰为577；但未找到可复验的完整APK、版本/哈希绑定或完整基础层音乐目录，不能证明基础层只有8首。
+- 12张配置表真实音乐字段共3,083次引用、403个不同名称，399匹配，4个名称（5次引用）未匹配：
+
+| 名称 | 配置位置（`.diag/sharecfg_re/lua_json/`） |
+|---|---|
+| `SailAwayJustice` | `voice_bgm.json:2723-2724`，`#59.bgm/default_bgm` |
+| `storys-commander-up` | `activity_sp_story.json:3445`，`412.change_bgm` |
+| `story-5` | `memory_storyline.json:221`，`24.bgm` |
+| `stoy-6` | `memory_storyline.json:417`，`38.bgm` |
+
+**未定与禁用推断**：4个值均不在本地BGM或当前本地热更清单中；是否旧表拼写、运行时别名或基础层遗漏未验。
+`bgm-sailawayjustice-inst` / `bgm-story-commander-up` 只是相近名称，不能直接当同曲；也不能断言应补导4包。
+`version.txt=9.7.216` 等旧凭据与11月清单不绑定；配置发布台账自报的版本也不是当期清单或APK的证明。
+台账顶层旧标签为libopus，但577条记录与ffprobe都为FLAC；只记录不改台账。未把数字音乐字段或语音资源当缺失BGM。
+
+**结论与待办**：本地已收集577首链路对齐；配置引用未全解决、最新游戏全集未证实。
+后续若获授权，取当期热更版本绑定和安装包完整音乐清单，再核4个名称的运行时解析；不要凭近名补映射。
+**管线边界**：默认计划含独立`bgm`阶段；未批准只检查，`--approve audio`只管角色语音，
+真正补导需`--approve bgm`；安装包基础层仍需另取。此轮未运行更新管线。
+**证据稳定性**：审计前后及主会话复核，索引、台账、热更清单SHA256未变；4个引用原值/行号仍在。
+**涉及**：`scripts/rebuild_bgm_library.py:79-90`、`scripts/build_bgm_index.py:96-104`、
+`scripts/update_pipeline.py:1191-1218`；判据边界见WF-50补充。
+
+---
+
+## §217 控制台每次重导都弹一个「Spine 全屏 CG 批量导出」标签页（2026-11-20）
+
+**现象**：资产更新控制台点「开始重导」后，浏览器多出一个 `cg_export.html` 标签；页面只有
+「开始导出/停止」，看着像在等人确认。CG 阶段其实已由无头 Chrome 跑完（日志里「全部结束」）。
+
+**根因**：`pipeline_panel.ensure_gallery()` 为拉起 8777 复用了**给人双击的**启动器
+`_gallery_server.py --export`，而该脚本 `main()` 无条件 `threading.Timer(1.5, open_browser)`。
+真正干活的是 `run_cg_export.py` 自己起的无头 Chrome（`?autostart=1`），弹出的标签无人使用；
+点它还会与无头实例同时写 `Output/CG_v2/`。
+
+**修法**：`_gallery_server.py` 增 `--no-browser`（双击 bat 的默认行为不变），
+`ensure_gallery()` 的启动参数改为 `--export --no-browser`。
+
+**判据**：8777 未起时从控制台点重导 → `.diag/pipeline/panel/gallery_server.log` 出现
+「（--no-browser：未自动打开浏览器…）」且不再弹标签；CG 阶段收尾仍为「完成N 跳过N 失败N」。
+
+**同时**：导出页补了逐皮肤结果表（状态/输出尺寸/场景框/覆盖率/耗时/说明，当前行高亮）。
+⚠️ 表只是视图：`run_cg_export.py` 轮询 `#prog` 与 `#log div:last`，日志行文本与
+「全部结束/已停止」收尾行**一个字都不能改**。
+
+**涉及文件**：`gallery_src/_gallery_server.py`、`gallery_src/cg_export.html`、
+`scripts/pipeline_panel.py`。相关：WF-14 追加（2026-11-20）。

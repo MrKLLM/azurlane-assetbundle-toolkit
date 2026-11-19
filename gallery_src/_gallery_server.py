@@ -5,6 +5,8 @@
   1. 在 8777 起一个本地 HTTP 服务器（根目录 = Output/，页面在 /gallery_v2/index.html），
      供 Spine 实时播放（file:// 下 fetch 会被 CORS 拦，必须走 http）。
   2. 自动用默认浏览器打开页面。传 --export 则打开 cg_export.html（Spine 全屏 CG 批量导出）。
+     传 --no-browser 则只起服务、不开浏览器——控制台重导时用它（无头 Chrome 自己加载导出页，
+     再弹一个标签页只会让人以为要手动点「开始导出」）。
   3. 提供 POST /save_cg 与 GET /cg_exists，供 cg_export.html 落盘 PNG 到 Output/CG_v2/。
   4. 提供 POST /l2d_freeze，供 Live2D 页的「暂停」把冻住那一帧的姿态向量落盘到 .diag/l2d_freeze/
      （临时取证区，不入库）。暂停本身是纯前端行为，这个接口只是把坏帧交出来的通道。
@@ -51,6 +53,8 @@ CG_DIR = os.path.join(ROOT, "CG_v2")         # Spine setup-pose CG 导出目录
 FREEZE_SUB = os.path.join(".diag", "l2d_freeze")
 _NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,80}$")
 EXPORT = "--export" in sys.argv
+# 后台服务启动方式：控制台要的是"把 8777 起起来"，不是"给人开一个页面"。
+NO_BROWSER = "--no-browser" in sys.argv
 URL = (f"http://127.0.0.1:{PORT}/gallery_v2/cg_export.html" if EXPORT
        else f"http://127.0.0.1:{PORT}/gallery_v2/index.html")
 
@@ -62,6 +66,10 @@ def port_in_use():
 
 
 def open_browser():
+    if NO_BROWSER:
+        # 不开窗但必须把地址说出来：控制台日志里要能确认"服务在哪"。
+        print("（--no-browser：未自动打开浏览器；地址见上方）")
+        return
     try:
         webbrowser.open(URL)
     except Exception:
@@ -309,7 +317,8 @@ def main():
 
     # 端口已被占用：多半是上一次没关掉的服务器还在跑 —— 直接复用，不再重复启动
     if port_in_use():
-        print("\n检测到 8777 端口已有服务在运行，直接为你打开浏览器。")
+        print("\n检测到 8777 端口已有服务在运行。"
+              + ("未自动打开浏览器。" if NO_BROWSER else "直接为你打开浏览器。"))
         print("若想重启服务器，请先关闭那个正在运行的窗口。")
         open_browser()
         input("\n按回车关闭本提示窗口（后台服务器继续运行）。")

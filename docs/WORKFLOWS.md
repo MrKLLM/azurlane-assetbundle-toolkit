@@ -664,6 +664,19 @@
 `scripts/build_gallery_index.py`、`gallery_src/index.html`、`gallery_src/cg_export.html`、
 `scripts/diag/{spine_parts_prefab_diff,spine_parts_wiring,make_pair_sheet,gallery_index_diff_check}.py`。
 
+#### WF-14 追加（2026-11-20）：导出页是「后台渲染载体」，不是等人确认的界面
+
+- **日常由无头驱动，页面不该弹**：`run_cg_export.py` 用 `?autostart=1` 自己跑；控制台为起 8777
+  自动启动服务器时必须带 `--no-browser`，否则每个 CG 任务都弹一个只能点「开始导出」的标签
+  （现象/根因见 `docs/TROUBLESHOOTING.md` §217）。
+- **UI 可以加，驱动契约不能动**：驱动轮询 `#prog` 文本与 `#log div:last` 判完成
+  （「全部结束」/「已停止」）。给页面加表格、统计只能旁挂；日志行的内容、顺序、收尾时机不变。
+- **验收（单皮肤样本）**：`py -3 scripts/diag/run_cg_export.py --only <folder> --size 1600 --redo
+  --extra 'tag=uicheck'`，要求 ① 收尾行正常；② 结果表状态走「等待→导出中→完成」且
+  尺寸/耗时非空；③ 产物名带 `_uicheck`、不覆盖正式 CG，验完删除。
+- **涉及文件**：`gallery_src/cg_export.html`、`gallery_src/_gallery_server.py`、
+  `scripts/pipeline_panel.py`、`scripts/diag/run_cg_export.py`。
+
 ---
 
 ### WF-15: 游戏版本更新后的增量重跑（资产同步 → 定位受影响子集 → 定向重建 → 证零回退）
@@ -4922,8 +4935,9 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
    - 全盘按**去扩展名的主名**精确搜（`bgm-main` 这类裸名，不要搜子串，否则
      `bgm-main-seaandsun` 会冒充命中）；
    - 再查下载清单（本项目 `files/hashes.csv`）是否登记过。
-   **两种结论要分开**：「清单里有、盘上没有」= 没下载/没解包；「清单里也没有」= 在基础层。
-2. **连模拟器**：MuMu 的 adb 在 `nx_main\adb.exe`，端口是动态的（本项目实测 16384）。
+   **两种结论要分开**：「清单里有、盘上没有」= 本地缺口；「清单里也没有」= 来源未定，需查基础层或运行时映射。
+   **更正（2026-11-14，§216）**：原句「清单里也没有 = 在基础层」证据不足；缺失检索不能证明存放位置。
+2. **连模拟器（需用户授权并配合开启）**：MuMu 的 adb 在 `nx_main\adb.exe`，端口是动态的（本项目实测 16384）。
    每次脚本内**先 `adb connect` 再操作**——adb daemon 一重启，连接就掉。
 3. **定位安装包**：`pm path <包名>` → `base.apk`（碧蓝国服实测 **1.73 GB**）。
 4. **不要 pull 整包**：设备自带 `/system/bin/unzip`，先 `unzip -o <apk> <条目...> -d /sdcard/<tmp>`，
@@ -4955,6 +4969,20 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
 `scripts/transcode_bgm.py`、`scripts/build_bgm_index.py`。
 本轮为一次性 Python 调用，未固化成独立工具；若再遇到第二次，应落成
 `scripts/diag/extract_apk_layer.py`（参数：包名 / 条目 glob / 目标目录）。相关：**§158**、§154、WF-49。
+
+#### 只读完整性对账补充（2026-11-14，§216）
+
+- **判据**：分开报告本地链路、已持有的来源清单、配置引用、最新版本全集；本地数相等不能跨层放行。
+  源包/导出/索引/台账做集合差与重复检查，逐个核URL、大小、时长和导出文件MD5；
+  热更包再对清单大小/MD5。只读取ffprobe元数据不等于整条解码验证，台账源WAV的MD5也不是cue包MD5。
+  配置只取真实音乐字段，统一大小写/前缀后精确比较，未匹配值保留表名/键/字段，不拿近名替代。
+- **踩坑记录**：`--check`当前只核本地cue/FLAC，缺0不证明上游无遗漏；清单无某名字也不证明它在APK。
+  声称最新全集齐需要当期清单的版本绑定、完整安装包音乐枚举及来源凭据；本地mtime、旁边旧版号、
+  若干历史提取留存均不够。查不到全集证据就明确未证实，不自动转为连接设备、下载或补导。
+  Windows只读检查设`PYTHONIOENCODING=utf-8`、`PYTHONDONTWRITEBYTECODE=1`，避免GBK输出崩溃与字节码缓存。
+- **涉及文件**：`scripts/rebuild_bgm_library.py`、`scripts/build_bgm_index.py`、`scripts/update_pipeline.py`；
+  `files/hashes.csv`、`files/AssetBundles/cue/`、`Output/Audio/BGM/`、`Output/gallery_v2/bgm.json`、
+  `ledger/bgm_transcode_flac.json`。审计前后复核输入哈希，已有未提交台账不动。
 
 ---
 
