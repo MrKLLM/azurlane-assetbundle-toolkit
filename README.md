@@ -80,6 +80,32 @@ python scripts/compose_paintings_v2.py <皮肤名>   # 合成单张样本
 
 > 新皮肤的**名字和配音不用手工处理**——第 2 步发布表、第 3 步重导 `meta` + `audio` 时自动带上（2026-10-17 起，见 `docs/TROUBLESHOOTING.md` §155/§157）。哪步红了点「看细节」看原因；可删 / 不可删的目录见 `docs/WORKFLOWS.md` WF-15「承重文件白名单」。
 
+## 换电脑 / 别人接手（从 clone 到能跑）
+
+**能重新拉的**
+- 代码与文档：`git clone`（GitHub / Gitee 同一份提交）
+- 画廊第三方运行时：`py -3 scripts/fetch_gallery_vendor.py`（19 份，含已入库的 Spine 3.8 补丁版）
+
+**拉不到、必须从旧机器拷的**
+
+| 路径 | 为什么不能重新拉 |
+|---|---|
+| `files/AssetBundles/` | 游戏资产，仓库不收（版权 + ~29 GB）；只能拷，或开模拟器拉当前版本 |
+| `inputs/azdata/` | 社区快照，台账里取回渠道未记录，丢失不可复原 |
+| `inputs/gamecfg/` | 不用拷：有源包时第 2 步会重建 |
+| `tools/` | 第三方工具；只有 `sharecfg_re` 脚本入库 |
+| `Output/`（可选） | 可再生（数小时）；赶时间就直接拷 |
+
+**步骤**
+1. `git clone`；装 Python 3.13；`py -3 -m pip install UnityPy Pillow numpy requests pypinyin websocket-client pycryptodome`（OCR 背景标注另需 `rapidocr-onnxruntime`）
+2. 仓库不在默认路径时设 `AL_ASSETS_ROOT`；外部工具可用 `AL_CHROME / AL_ADB / AL_FFMPEG / AL_VGMSTREAM` 指定
+3. 拷上表里需要的数据
+4. 装 hooks：`cp scripts/git-hooks/* .git/hooks/`（Git Bash）
+5. 打开控制台点顶栏 **自检**，缺什么、怎么补会逐条列出
+6. 从第 1 步开始
+
+> GitHub / Gitee 上只有代码与文档，**没有游戏源包和 azdata 快照**；clone 不能替代拷数据。自检也可单独跑：`py -3 scripts/diag/check_inputs.py`、`py -3 scripts/fetch_gallery_vendor.py --check`、`py -3 scripts/diag/check_paths.py`。
+
 ## 文档导航（`docs/`）
 
 | 文档 | 内容 |

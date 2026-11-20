@@ -22,6 +22,7 @@
 import argparse
 import glob
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -979,6 +980,14 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {'ok': True,
                                         'url': 'http://127.0.0.1:8777/gallery_v2/index.html'})
             return self._send(200, {'ok': False, 'error': msg})
+        if u.path == '/api/selfcheck':
+            # 新机器接手体检：只读，每项带「缺了怎么办」。
+            try:
+                items = selfcheck()
+                return self._send(200, {'ok': all(i['ok'] for i in items), 'items': items})
+            except Exception as e:
+                return self._send(500, {'ok': False,
+                                        'error': f'{type(e).__name__}: {str(e)[:120]}'})
         if u.path == '/api/bgchars/status':
             jid = q.get('job')
             return self._send(200, bg_publish_status(int(jid) if jid and jid.isdigit() else None))
@@ -1127,6 +1136,121 @@ def _state_info():
         return {'done': len(s.get('done') or {}), 'verdict': len(s.get('verdict') or {})}
     except Exception:
         return None
+
+
+# ------------------------------------------------------------------ 环境自检
+def _hash_file(p):
+    h = hashlib.sha256()
+    with open(p, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _check_manifest(man_path, base=None):
+    """按台账核对齐全度与哈希。返回 (问题列表, 总份数)。"""
+    m = json.load(open(man_path, encoding='utf-8'))
+    files = m.get('files') or []
+    base = base or os.path.dirname(man_path)
+    bad = []
+    for e in files:
+        rel = e.get('path') or ''
+        p = rel if os.path.isabs(rel) else os.path.join(base, rel)
+        if not os.path.isfile(p):
+            bad.append(os.path.basename(rel) or rel)
+        elif e.get('sha256') and _hash_file(p) != e['sha256']:
+            bad.append(os.path.basename(rel) + '（哈希不符）')
+    return bad, len(files)
+
+
+def selfcheck():
+    """新机器接手时的只读体检。返回条目列表，全部带「缺了怎么办」。"""
+    items = []
+
+    def add(name, ok, detail, fix=''):
+        items.append({'name': name, 'ok': bool(ok), 'detail': detail,
+                      'fix': '' if ok else fix})
+
+    add('Python', sys.version_info >= (3, 10), f'{sys.version.split()[0]}（{PY}）',
+        '装 Python 3.13 并确保 py / python 在 PATH')
+
+    mods = [('UnityPy', 'UnityPy'), ('PIL', 'Pillow'), ('numpy', 'numpy'),
+            ('requests', 'requests'), ('pypinyin', 'pypinyin'),
+            ('websocket', 'websocket-client'), ('Crypto', 'pycryptodome')]
+    miss = [pkg for mod, pkg in mods if importlib.util.find_spec(mod) is None]
+    add('Python 依赖', not miss, '齐全' if not miss else '缺 ' + '、'.join(miss),
+        'py -3 -m pip install UnityPy Pillow numpy requests pypinyin websocket-client pycryptodome')
+
+    ab = os.path.join(ROOT, 'files', 'AssetBundles')
+    n = None
+    try:
+        n = (json.load(open(os.path.join(ROOT, 'asset_manifest.json'), encoding='utf-8'))
+             .get('summary') or {}).get('total_files')
+    except Exception:
+        pass
+    add('游戏源包', os.path.isdir(ab),
+        f'files/AssetBundles 存在（清单 {n:,} 个）' if os.path.isdir(ab) and n
+        else ('目录存在' if os.path.isdir(ab) else '缺 files/AssetBundles'),
+        '从旧机器拷 files/AssetBundles，或开模拟器用第 1 步拉取')
+
+    for label, rel in (('azdata 权威元数据', 'inputs/azdata'),
+                       ('配置表 gamecfg', 'inputs/gamecfg')):
+        mp = os.path.join(ROOT, rel, 'MANIFEST.json')
+        if not os.path.isfile(mp):
+            add(label, False, f'缺台账 {rel}/MANIFEST.json', '从旧机器拷 ' + rel)
+            continue
+        try:
+            bad, tot = _check_manifest(mp)
+        except Exception as e:
+            add(label, False, f'台账读不了：{type(e).__name__}', '从旧机器拷 ' + rel)
+            continue
+        add(label, not bad,
+            f'{tot} 份齐' if not bad else f'{len(bad)}/{tot} 份缺或漂移：' + '、'.join(bad[:4]),
+            '从旧机器拷 inputs/azdata（不可再生）' if rel.endswith('azdata')
+            else '跑控制台第 2 步重建')
+
+    vp = os.path.join(ROOT, 'gallery_src', 'vendor', 'MANIFEST.json')
+    try:
+        vm = json.load(open(vp, encoding='utf-8'))
+        files = vm.get('files') or []
+        missv = [os.path.basename(e['path']) for e in files
+                 if not os.path.isfile(os.path.join(ROOT, e['path']))]
+        add('画廊运行时库', not missv,
+            f'{len(files) - len(missv)}/{len(files)} 就位' if not missv
+            else f'缺 {len(missv)} 份：' + '、'.join(missv[:4]),
+            'py -3 scripts/fetch_gallery_vendor.py')
+    except Exception as e:
+        add('画廊运行时库', False, f'台账读不了：{type(e).__name__}',
+            'py -3 scripts/fetch_gallery_vendor.py')
+
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import paths
+        tools = [('Chrome', paths.CHROME), ('ADB', paths.MUMU_ADB),
+                 ('ffmpeg', paths.FFMPEG), ('vgmstream', paths.VGMSTREAM)]
+        misst = [n for n, p in tools if not p]
+        add('外部工具', not misst,
+            'Chrome / ADB / ffmpeg / vgmstream 均找到' if not misst
+            else '缺 ' + '、'.join(misst),
+            '设 AL_CHROME / AL_ADB / AL_FFMPEG / AL_VGMSTREAM，或装进 PATH')
+    except Exception as e:
+        add('外部工具', False, f'paths.py 读不了：{type(e).__name__}',
+            '检查 scripts/paths.py 与 AL_ASSETS_ROOT')
+
+    hooks = ['.git/hooks/pre-commit', '.git/hooks/commit-msg']
+    missh = [h for h in hooks if not os.path.isfile(os.path.join(ROOT, h))]
+    add('Git hooks', not missh, '已安装' if not missh else '缺 ' + '、'.join(missh),
+        'cp scripts/git-hooks/* .git/hooks/（Git Bash）或手动复制')
+
+    idx = os.path.join(ROOT, 'Output', 'gallery_v2', 'index.html')
+    add('画廊部署', os.path.isfile(idx),
+        'Output/gallery_v2/index.html 存在' if os.path.isfile(idx)
+        else '未部署（拷 Output 或重跑 derive）',
+        '跑控制台第 3 步 derive，或 py -3 scripts/deploy_gallery.py')
+
+    add('仓库根', True, ROOT + ('（AL_ASSETS_ROOT）' if os.environ.get('AL_ASSETS_ROOT') else '（默认位置）'))
+    return items
 
 
 def _disk_compute():

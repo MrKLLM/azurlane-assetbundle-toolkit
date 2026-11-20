@@ -56,13 +56,14 @@
       "bytes": 501857,
       "sha256": "dd2e84eb53696d226135916ff4d2b57c63898c2f099ae4f0efde1d6da43eb636",
       "localPatch": "2026-11-20 本地补丁（单处）：BinaryInput.readString 的首字节改为 `this.readByte() & 0xFF`。原实现 readByte 走 getInt8，非 ASCII 的 UTF-8 首字节变负（0xEF → -17），令 b >> 4 落到 default 并产出 U+FFEF 一类乱码，导致 banerwei_4 这类含全角区域名（'２' U+FF12）的 skel 在 atlas 里永远匹配失败。上游 4.x 已改为无符号读；这里只掩码、不改 readByte 本身（bendDirection 依赖 -1/1 有符号语义）。正本与部署副本已同哈希。",
-      "license": "文件内无许可头。上游 EsotericSoftware/spine-runtimes 3.8 受 Spine Runtimes License 约束——**不要凭这条推断可自由再分发**。",
+      "license": "文件内无许可头。上游 EsotericSoftware/spine-runtimes 3.8 受 Spine Runtimes License 约束——**不要凭这条推断可自由再分发**。2026-11-20 按用户决策 A 随仓库分发；若权利方提出要求，删除入库副本并退回「必须从旧机器拷」。",
       "sources": [
+        { "local": "gallery_src/vendor/spine/spine-all.js", "verified": true, "observed": "入库正本（2026-11-20 决策 A：501KB 补丁版提交进仓库，与部署副本同哈希）" },
         { "local": "tools/spine-viewer/spine-runtime/3.8_spine-all.js", "verified": true, "observed": "sha256 逐字节相同（本机两副本实测）" },
         { "url": "https://cdn.jsdelivr.net/gh/EsotericSoftware/spine-runtimes@3.8/spine-ts/build/spine-all.js", "verified": false, "observed": "HTTP200 但 499623B ≠ 501448B，是上游另一份构建，不是本机这份" },
         { "url": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/3.8/spine-ts/build/spine-all.js", "verified": false, "observed": "本机 HTTP000" }
       ],
-      "gap": "**四个里唯一没有可用下载源的**：本机这份来自第三方 spine-viewer 工具自带的运行时，与上游官方构建不同名同哈希。⚠️ tools/ 整目录也在 gitignore 里，所以这份文件在本机只有 2 个副本、git 里 0 份。若 tools/spine-viewer 被清且无外网对应哈希，Spine 标签会退化。彻底封掉这个缺口只有两条路：把 501KB 提交进仓库（需先确认 Spine Runtimes License 是否允许），或换成能按哈希校验的上游 3.8 构建并回归 Spine 播放。**未拍板，见 PROJECT_STATUS.md 的「运行时库台账」条。**"
+      "gap": "**缺口已封（2026-11-20 决策 A）**：补丁版 501KB 已提交到 `gallery_src/vendor/spine/spine-all.js`，新机器 clone 后跑 `fetch_gallery_vendor.py` 会优先从这份入库正本取，不再依赖 `tools/` 或外网。剩余风险只有许可（见 license 字段）：若权利方要求，删除入库副本并退回「从旧机器拷 tools/spine-viewer + Output/gallery_v2/vendor」。上游官方 3.8 构建哈希不同，**不要**用 CDN 版本顶替。"
     },
     {
       "path": "Output/gallery_v2/vendor/three/three.module.min.js",

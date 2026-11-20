@@ -786,6 +786,11 @@
 - 收尾必跑：`py -3 scripts/diag/check_paths.py`（调用链上不许再有写死的绝对路径）。
 - 只想拉某几类包：`py -3 scripts/mumu_sync.py diff --only painting,cue`（**带 `--only` 的比对不能生成范围清单**，
   与 `--list-out` 硬互斥——范围清单必须来自一次完整比对，否则"0 差异"会被下游读成"别处都没变"）。
+- **2026-11-20 补齐接手通道**：README 新增「换电脑 / 别人接手」清单；控制台顶栏加 **自检**
+  （`GET /api/selfcheck`），逐项查 Python / 依赖 / 源包 / azdata / gamecfg / 运行时 / 外部工具 /
+  hooks / 画廊部署，每项带补救命令。Spine 3.8 运行时（501KB 补丁版）按决策 A 入库到
+  `gallery_src/vendor/spine/spine-all.js`，`fetch_gallery_vendor.py` 优先从这份本地正本取；
+  台账 gap 已标注封口与许可风险。**azdata 不可从 GitHub/Gitee 重新拉**（渠道未记录，只能拷）。
 
 #### 关键决策
 - **增量而非全量**：全量重跑 4486 张立绘会打乱已人工确认正确的结果，且无法逐张复核。

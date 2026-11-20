@@ -1264,6 +1264,21 @@ pre .bad{color:#E08A69!important}
 #cleanmodal .shead p,#newmodal .shead p{
   margin:0 0 16px;font:400 11px/1.7 var(--font-mono)!important;
   color:var(--ink-3)!important}
+#selfmodal{position:fixed;inset:0;z-index:80;display:none}
+#selfmodal.on{display:flex;align-items:center;justify-content:center}
+#selfmodal .veil{position:absolute;inset:0;background:rgba(24,21,17,.58)}
+#selfmodal .sheet{position:relative;width:min(660px,92vw);max-height:86vh;overflow:auto;
+  background:var(--card);border:1px solid var(--rule);padding:22px 24px}
+#selfmodal .kicker{display:block;font:500 8px/1.4 var(--font-mono);letter-spacing:.26em;
+  color:var(--ink-3);text-transform:uppercase}
+#selfmodal h3{margin:10px 0 4px;font:500 24px/1.25 var(--font-display);letter-spacing:.05em;color:var(--ink)}
+#selfmodal .shead p{margin:0 0 14px;font:400 11px/1.7 var(--font-mono);color:var(--ink-3)}
+#selfmodal .srow{display:flex;gap:10px;padding:7px 0;border-bottom:1px dashed var(--rule);
+  font:400 12px/1.6 var(--font-mono)}
+#selfmodal .srow>div{flex:1;color:var(--ink)}
+#selfmodal .srow code{display:block;margin-top:3px;color:var(--accent);
+  font:400 11px/1.6 var(--font-mono)}
+#selfmodal .sact{display:flex;justify-content:flex-end;margin-top:16px}
 #cleanmodal .sact,#newmodal .sact{
   display:flex;justify-content:flex-end;gap:14px;margin-top:18px}
 #newmodal .snote{
@@ -1655,6 +1670,7 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
     <button id="bBg" class="ghost" title="B：背景（航路版画 / 海图 / 墨迹 / 素纸 / 自定义图片）" aria-expanded="false">背景</button>
     <button id="bBgLabel" class="ghost" title="新背景图人工标注：有角色 / 无角色（只列场景背景）">背景标注<b id="bgLabelN" class="bgdot" hidden></b></button>
     <button id="bNew" class="ghost" title="归档本轮阶段缓存与任务记录，回到第 1 步（不动 Output）">新一轮</button>
+    <button id="bSelf" class="ghost" title="这台机器能不能跑：依赖 / 源包 / 权威输入 / 运行时 / 外部工具">自检</button>
     <button id="bDetail" class="ghost" title="D：展开证据（全部阶段 / 日志 / 对照表 / 指纹）">细节</button>
     <button id="bGallery" class="ghost" title="打开资产画廊（8777）；没起会自动拉起">资产画廊</button>
     <button id="bSea" class="ghost" title="S：夜读模式 开/关（暖墨底，非旧版紫黑）">夜读 · 关</button>
@@ -1789,6 +1805,19 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
      而且它只能放一句纯文本，写不清「会写哪几个阶段、写到哪儿、有没有备份」。 -->
 <!-- 清理中心：能删什么、不能删什么，一次说清。禁止项故意写在弹窗里——
      「有了清单是不是源包就能删」这个问题已经被问过一次，别让下个人再猜。 -->
+<div id="selfmodal" aria-hidden="true">
+  <div class="veil" data-sclose></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="selfTitle">
+    <div class="shead">
+      <span class="kicker">ENV <i>·</i> 新机器</span>
+      <h3 id="selfTitle">环境自检</h3>
+      <p>只读检查这台机器能不能跑：依赖 / 源包 / 权威输入 / 运行时 / 外部工具。</p>
+    </div>
+    <div class="sbody" id="selfBody"><span style="color:var(--ink-3)">检查中…</span></div>
+    <div class="sact"><button class="mini ghost" data-sclose>关闭</button></div>
+  </div>
+</div>
+
 <div id="cleanmodal" aria-hidden="true">
   <div class="veil" data-cclose></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="cleanTitle">
@@ -4204,6 +4233,23 @@ function closeDetail(){ const d=$('#detail'), b=d.querySelector('.body');
   setTimeout(()=>{ d.classList.remove('on'); b.style.transform='translateX(100%)'; },260); }
 function toggleDetail(){ $('#detail').classList.contains('on')?closeDetail():openDetail(); }
 $('#bDetail').onclick=toggleDetail;
+/* 环境自检：新机器/换电脑先点这里，缺什么、怎么补都写在结果里。 */
+function selfModal(on){ const m=$('#selfmodal');
+  m.classList.toggle('on',on); m.setAttribute('aria-hidden',on?'false':'true'); }
+document.querySelectorAll('[data-sclose]').forEach(el=>el.onclick=()=>selfModal(false));
+addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#selfmodal').classList.contains('on')) selfModal(false); });
+$('#bSelf').onclick=async()=>{
+  selfModal(true);
+  const box=$('#selfBody');
+  box.innerHTML='<span style="color:var(--ink-3)">检查中…</span>';
+  try{
+    const r=await (await fetch('/api/selfcheck')).json();
+    const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    box.innerHTML=(r.items||[]).map(i=>
+      `<div class="srow"><b>${i.ok?'✅':'❌'} ${esc(i.name)}</b><div>${esc(i.detail)}`+
+      (i.fix?`<code>${esc(i.fix)}</code>`:'')+'</div></div>').join('');
+  }catch(e){ box.textContent='检查失败：'+e; }
+};
 /* 资产画廊：先同步开一个空白页（await 之后再 window.open 会被拦截），
    再问服务端「8777 起没起」——没起就由它拉起，最后把空白页导航过去。 */
 $('#bGallery').onclick=async()=>{
