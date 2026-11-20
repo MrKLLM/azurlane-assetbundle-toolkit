@@ -1,0 +1,2 @@
+# 第三方运行时按原字节保存：MANIFEST 用 sha256 校验，禁止行尾转换
+gallery_src/vendor/** -text -diff
