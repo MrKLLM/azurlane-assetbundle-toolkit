@@ -1656,6 +1656,7 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
     <button id="bBgLabel" class="ghost" title="新背景图人工标注：有角色 / 无角色（只列场景背景）">背景标注<b id="bgLabelN" class="bgdot" hidden></b></button>
     <button id="bNew" class="ghost" title="归档本轮阶段缓存与任务记录，回到第 1 步（不动 Output）">新一轮</button>
     <button id="bDetail" class="ghost" title="D：展开证据（全部阶段 / 日志 / 对照表 / 指纹）">细节</button>
+    <button id="bGallery" class="ghost" title="打开资产画廊（8777）；没起会自动拉起">资产画廊</button>
     <button id="bSea" class="ghost" title="S：夜读模式 开/关（暖墨底，非旧版紫黑）">夜读 · 关</button>
     <span class="kbd" title="1-5 切步骤 · R 跑当前这一步 · D 细节 · B 背景 · P 只看计划 · H 帮助 · Esc 关闭 · S 夜读 · M 动效从简">
       <b>1-5</b> 步骤 · <b>R</b> 跑 · <b>D</b> 细节 · <b>B</b> 背景</span>
@@ -1706,8 +1707,7 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
     <label class="upl">↑ 选一张本机图片<input id="bgFile" type="file" accept="image/*" hidden></label>
     <button type="button" id="bgClear" class="mini ghost">恢复默认</button>
   </div>
-  <p id="bgpnote">默认是给这个控制台画的「航路版画」：只用纸/墨/朱砂上色，夜读自动换色。
-    自定义图片只存在本机浏览器（localStorage），不上传、不写盘；先缩到 ≤1920px 再存。</p>
+  <p id="bgpnote">默认航路版画，夜读自动换色。自定义图只存本机浏览器（≤1920px），不上传、不写盘。</p>
 </div>
 
 <!-- 细节抽屉：证据全在这儿，且一律不透明 -->
@@ -1725,10 +1725,6 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
       <button class="mini ghost" data-dclose>关闭 ✕</button>
     </div>
     <div class="col">
-      <div class="pane">
-        <div class="ph">阶段 <span id="sCount" class="dim" style="font-size:11px"></span></div>
-        <div class="g" id="cards"></div>
-      </div>
       <div class="pane" id="newpane">
         <div class="ph">这次新增了什么 <span class="gnote" id="newsum"></span></div>
         <div id="newtbl"></div>
@@ -1736,6 +1732,10 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
       <div class="pane">
         <div class="ph">改前 | 改后 对照表</div>
         <div id="sheets" class="sheets"></div>
+      </div>
+      <div class="pane">
+        <div class="ph">阶段 <span id="sCount" class="dim" style="font-size:11px"></span></div>
+        <div class="g" id="cards"></div>
       </div>
       <div class="pane">
         <div class="ph">颜色是什么意思</div>
@@ -1756,7 +1756,7 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
       <div class="pane logpane">
         <div class="ph">运行日志
           <span style="display:flex;gap:6px;align-items:center">
-            <button id="bFollow" class="mini ghost">跟随最新</button>
+            <button id="bFollow" class="mini ghost">● 跟随中</button>
             <button id="bClear" class="mini ghost">清空显示</button></span></div>
         <div class="chips" id="chips">
           <button class="chip on" data-f="all">全部</button>
@@ -1769,13 +1769,12 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
           <span class="dim" id="jobinfo" style="font-size:11.5px">—</span></div>
       </div>
       <div class="pane">
-        <div class="ph">盘面与清单
+        <div class="ph">盘面与清单 <span class="dim" style="font-size:11px">盘面=目录占用 · 清单=源包索引</span>
           <span style="display:flex;gap:6px;align-items:center">
-            <button id="bClean" class="mini ghost" title="打开清理中心：能删什么、不能删什么，一次说清">盘面管理</button>
-            <button id="bDisk" class="mini ghost" title="重新算一遍四个目录的大小与文件数（约 1 分钟）">重新盘点</button>
-            <button id="bScan" class="mini ghost" title="重扫源包并重建 asset_manifest.json（约 1 分钟；阶段缓存不受影响）">重扫清单</button></span></div>
+            <button id="bClean" class="mini ghost" title="打开清理中心：能删什么、不能删什么">盘面管理</button>
+            <button id="bDisk" class="mini ghost" title="重新统计四个目录的大小与文件数（约 1 分钟）">重算盘面</button>
+            <button id="bScan" class="mini ghost" title="重跑 scan_assets.py 重建 asset_manifest.json（约 40 秒；不动阶段进度）">重建清单</button></span></div>
         <div id="disk" class="diskbox"><span class="dim">打开「细节」时自动盘点一次…</span></div>
-        <p class="dnote">源包 = 旧版本唯一副本（模拟器覆盖后就没了），<b>别删</b>；产物删了画廊对应内容就缺（立绘/背景/语音/CG 全部直读 Output），要再看就得重导；.diag 临时区画廊不用，<b>盘面管理</b>里可以清；inputs 承重不可删。删了源包也不用担心清单骗人——增量判定信当场实况，不信旧清单。</p>
       </div>
       <div class="pane">
         <div class="ph">最近任务</div>
@@ -1796,16 +1795,14 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
     <div class="shead">
       <span class="kicker">DISK <i>·</i> 盘面管理</span>
       <h3 id="cleanTitle">清理中心</h3>
-      <p id="cleanSub">只列**明确可再生**的东西；承重目录不在这张单子上，也不允许通过面板删。</p>
+      <p id="cleanSub">只列明确可再生、删了不心疼的东西。承重目录不在这张单子上。</p>
     </div>
     <div class="sbody">
       <div id="cleanList" class="cleanlist"><span class="inkwait"><i></i><i></i><i></i><em>盘点中…</em></span></div>
       <div class="blocked">
-        <div class="bk"><b>⛔ 面板不允许删（写了原因，不是懒得做按钮）</b></div>
-        <div class="bi"><b>源包 files/AssetBundles</b> —— 清单只是"目录"，不是"内容"。
-          删了源包：① 旧版本永久丢失（模拟器更新已把它们覆盖，设备上也没有）；
-          ② Output 丢了无法重导；③ 增量机制清零（bundles=0 ⇒ 全部 stale），
-          下次必须重接模拟器、且只能拉到当前版本。清单让你跳过重复劳动，源包让你还能再劳动。</div>
+        <div class="bk"><b>⛔ 面板不允许删 · 承重项</b></div>
+        <div class="bi"><b>源包 files/AssetBundles</b> —— 旧版本唯一副本：删了旧版本永久丢失
+          （模拟器已覆盖）、Output 无法重导、增量清零只能重接模拟器拉当前版本。</div>
         <div class="bi"><b>inputs/</b> —— 权威输入，社区快照滞后、sharecfgdata 自定义加密无法本机重取（WF-15 白名单）。</div>
         <div class="bi"><b>Output 产物</b> —— 画廊直读，删哪层缺哪层；要省空间请整目录挪冷存储，别在面板里点删。</div>
         <div class="bi"><b>.diag/sharecfg_re 与 pipeline_state.json</b> —— 前者是 cfg.publish 的解析源，后者是你的阶段进度；删了不丢数据但全部重跑。</div>
@@ -1899,12 +1896,9 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
     <span class="hmodenote" id="hnote"></span>
   </div>
   <h3 style="margin-top:0">这是什么</h3>
-  <p><b>资产更新控制台</b>把你游戏更新之后要做的那一串事，按五步排成一条主线。
-  它<b>不重新实现</b>任何导出逻辑：每个按钮都是去起
-  <code>scripts/update_pipeline.py</code> 这个命令行编排器，编排器再去起你仓库里原有的那些脚本
-  （<code>mumu_sync</code> / <code>compose_paintings_v2</code> / <code>extract_spine_v2</code> /
-  <code>reconstruct_live2d</code> / <code>build_gallery_index</code> …，全部原样调用）。
-  所以「界面上看到的」和「命令行跑的」永远是同一套代码，不存在两份逻辑各自漂移。</p>
+  <p>把游戏更新后的一串事按五步排成主线。每个按钮都是起
+  <code>scripts/update_pipeline.py</code>，再调用仓库原有脚本——
+  界面与命令行永远同一套逻辑。</p>
 
   <h3>颜色与档位怎么读</h3>
   <p>一个颜色只表示一件事，<b>颜色全部留给状态</b>：
@@ -1930,12 +1924,12 @@ body.boot .steps{animation:settle .6s var(--ez) .18s backwards}
     <li>画廊服务器要先活着或让它自己起；回归那件会去连它。</li>
   </ul>
 
-  <h3>运行边界（为什么敢让你点）</h3>
+  <h3>运行边界</h3>
   <ul>
-    <li><b>只读先行</b>：权威输入与源包清单逐份核对；预检不写盘，红了就停。</li>
-    <li><b>范围由指纹裁定</b>：<code>affected.txt</code> 必须配 <code>affected.meta</code>；
+    <li><b>只读先行</b>：预检不写盘，红了就停。</li>
+    <li><b>范围由指纹裁定</b>：<code>affected.txt</code> 配 <code>affected.meta</code>；
       过期判红，不退化成全量。</li>
-    <li><b>写正式区要留后路</b>：换入前整批备份；索引零回退、部署同 inode 两道闸门。</li>
+    <li><b>写正式区要留后路</b>：换入前整批备份；零回退 + 同 inode 两道闸门。</li>
   </ul>
 
   <h3>五步分别动什么</h3>
@@ -2978,8 +2972,8 @@ function askOf(n){
               {a:'detail',t:'看这 '+list.length+' 个阶段',k:'link2'});
     return {eb,
       ask:'第 '+n+' 步「'+nm+'」这一轮没重新检查',
-      why:'上一轮已经做过这一步；这一轮直接沿用了那批输入，阶段已全部判绿。'+
-          (n===nCfg?'不用再花约 7 分钟重解配置表。':''),
+      why:'这一轮沿用上一批输入，阶段已全部判绿。'+
+          (n===nCfg?'配置表不用再花约 7 分钟重解。':''),
       acts};
   }
 
@@ -2997,8 +2991,8 @@ function askOf(n){
     if(ps==='idle') return {eb, gate,
       ask: stale?'先接设备：看看多了什么':'看看模拟器上多了什么',
       why: stale
-        ? '配置表过期只拦导出，不拦这一步：这里只读设备、算差异，不下载；确认要拉，才会签字写 files/。'
-        : '只读地列一遍设备上的包、算出新增与变更，不下载。',
+        ? '只读设备、算差异，不下载；确认要拉才签字写 files/。'
+        : '只读设备、算差异，不下载。',
       acts:[{a:'pullcheck',t:'▶ 看设备上多了什么',k:'pact mag'},
             {a:'detail',t:'看这 '+list.length+' 个阶段',k:'link2'}]};
     if(ps==='await'){
@@ -3043,9 +3037,8 @@ function askOf(n){
             {a:'detail',t:'看差在哪',k:'link2'}]};
     if(idleN===cfg.length) return {eb,
       ask: stale?('把配置表对齐到 '+dsrc+' 的源包'):'从源包重解配置表',
-      why:'4 个阶段：解 scripts → 导出 lua → 解析 sharecfg → 发布 inputs/gamecfg。约 7 分钟'+
-          '（恒为强制重解，不用缓存）；前三步只写 .diag/，最后一步写正式区、要签字。'+
-          '修好之后第 1 步那道红会自动消。',
+      why:'4 个阶段约 7 分钟：解 scripts → 导出 lua → 解析 sharecfg → 发布 inputs/gamecfg。'+
+          '前三步只写 .diag/，最后一步写正式区、要签字；修好后第 1 步自动转绿。',
       acts:[{a:'cfgsync',t:'⚑ 同步配置表',k:'pact sign mag'},
             {a:'detail',t:'看这 4 步写到哪儿',k:'link2'}]};
     if(idleN) return {eb, ask:'配置表还剩 '+nEm(idleN)+' 个阶段没跑',
@@ -3156,15 +3149,14 @@ function askOf(n){
       acts:[goGap,{a:'detail',t:'看是哪几项',k:'link2'}]};
   if(fail && fail.key==='labels') return {eb, red:1,
     ask:'标签重建没过：先看有没有新背景图没判「有没有角色」',
-    why:'新场景图会卡住 has_char 闸门（场景背景必须逐张人工判过，不能拿文件名规则冒充）。'+
-        '点「打开背景标注」按缩略图逐张判；判完发布会自动重建 bg_meta 与缩略图。'+tail,
+    why:'新场景图会被 has_char 闸门拦住：必须逐张人工判过才能换入。'+
+        '判完发布会自动重建 bg_meta 与缩略图。'+tail,
     acts:[{a:'bglabel',t:'⚑ 打开背景标注',k:'pact mag'},
           {a:'detail',t:'看日志',k:'link2'}]};
   if(fail && fail.key==='derive') return {eb, red:1,
     ask:'derive 没过：索引闸门',
-    why:(detailOf('derive')||'')+' 换入已经完成；索引闸门若报「剪影清单两边都不认识」，'+
-        '是本批新增的 _hei 黑影被当成未知条目（已改为：新增剪影算增量，只有旧剪影丢失才拦）。'+
-        '点「再试一次换入」会重跑 swap-in+derive+labels+regress；swap-in 会多一份备份。',
+    why:(detailOf('derive')||'')+' 索引闸门报「剪影清单两边都不认识」，通常是本批新增的 _hei 黑影'+
+        '（已改为只拦旧剪影丢失）。点「再试一次换入」会重跑 swap-in+derive+labels+regress。',
     acts:[{a:'swap',t:'⚑ 再试一次换入',k:'pact sign mag'},
           {a:'detail',t:'看日志',k:'link2'}]};
   if(fail) return {eb, red:1, ask:fail.key+' 这一步没过',
@@ -3189,8 +3181,7 @@ function askOf(n){
       why:'没跑过的项不算完成。差在：'+where+'。'+staleWarn,
       acts:[goGap,{a:'detail',t:'看是哪几项',k:'link2'}]};
   }
-  return {eb, ask:'这次更新已经换完了', why:'画廊已部署、回归跑过。要再来一轮就点「开始新一轮」——'+
-      '会归档本轮阶段缓存与任务记录（不动 Output），回到第 1 步；旧记录仍留在 .diag/pipeline/panel/archive/。',
+  return {eb, ask:'这次更新已经换完了', why:'画廊已部署、回归通过。点「开始新一轮」会归档本轮进度并回到第 1 步（不动 Output）。',
     acts:[{a:'newround',t:'↺ 开始新一轮',k:'pact mag'},
           {a:'regress',t:'▶ 只跑回归',k:'link2'},{a:'detail',t:'看细节',k:'link2'}]};
 }
@@ -3737,11 +3728,20 @@ async function pump(){
        重扫前的「清单滞后」（2026-11-20 用户实测）。 */
     loadDisk(false); }
 }
-$('#bFollow').onclick=e=>{ follow=!follow; e.target.textContent=follow?'跟随最新':'暂停跟随'; };
+function followUI(){ const b=$('#bFollow'); if(!b) return;
+  b.textContent=follow?'● 跟随中':'○ 已暂停'; b.classList.toggle('on',follow); }
+function logBottom(){ const l=$('#log'); l.scrollTop=l.scrollHeight; }
+$('#bFollow').onclick=()=>{ follow=!follow; followUI();
+  /* 从「已暂停」点回来必须立刻到底：以前只改文字，要等下一行才滚，
+     日志停下来时看着像没反应（2026-11-20 用户反馈）。 */
+  if(follow) logBottom(); };
+$('#log').onscroll=()=>{ const l=$('#log');
+  if(follow && l.scrollHeight-l.scrollTop-l.clientHeight>24){ follow=false; followUI(); } };
+followUI();
 
 /* ── 盘面与清单：懒加载 + 轮询取后台计算结果 ───────────────────────────
    walk 18 万个文件约 1 分钟，所以服务端放后台线程；这里每 2 秒问一次。
-   「重扫清单」跑的是写死在服务端的 scan_assets.py（固定命令，前端传不了参数），
+   「重建清单」跑的是写死在服务端的 scan_assets.py（固定命令，前端传不了参数），
    它只重建 asset_manifest.json，**不动**阶段完成缓存（pipeline_state.json）——
    缓存的有效性由指纹（当场数源包）决定，重扫不清进度。 */
 let DISK_POLL=null;
@@ -4204,6 +4204,19 @@ function closeDetail(){ const d=$('#detail'), b=d.querySelector('.body');
   setTimeout(()=>{ d.classList.remove('on'); b.style.transform='translateX(100%)'; },260); }
 function toggleDetail(){ $('#detail').classList.contains('on')?closeDetail():openDetail(); }
 $('#bDetail').onclick=toggleDetail;
+/* 资产画廊：先同步开一个空白页（await 之后再 window.open 会被拦截），
+   再问服务端「8777 起没起」——没起就由它拉起，最后把空白页导航过去。 */
+$('#bGallery').onclick=async()=>{
+  const b=$('#bGallery'), t=b.textContent;
+  const w=window.open('about:blank','_blank');
+  b.disabled=true; b.textContent='打开中…';
+  try{
+    const r=await (await fetch('/api/gallery')).json();
+    if(r.ok && w){ w.location.replace(r.url); }
+    else { if(w) w.close(); alert(r.error||'画廊没起来'); }
+  }catch(e){ if(w) w.close(); alert('画廊没起来：'+e); }
+  finally{ b.disabled=false; b.textContent=t; }
+};
 $$('#detail [data-dclose]').forEach(el=>el.onclick=closeDetail);
 /* 键位：这类界面要反复切步骤、反复跑同一件事，摸熟键盘比找按钮快。
    输入框里打字时一律不劫持。 */

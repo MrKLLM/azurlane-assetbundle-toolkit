@@ -966,12 +966,19 @@ class H(BaseHTTPRequestHandler):
                 'gauge': gauge_safe(run, stages, fp),
             })
         if u.path == '/api/disk':
-            # 盘面盘点：后台算、前端轮询。fresh=1 绕过 15 分钟缓存（「重新盘点」按钮用）。
+            # 盘面盘点：后台算、前端轮询。fresh=1 绕过 15 分钟缓存（「重算盘面」按钮用）。
             return self._send(200, disk_report(q.get('fresh') == '1'))
         if u.path == '/api/cleanup':
             return self._send(200, cleanup_list())
         if u.path == '/api/bg_review':
             return self._send(200, bg_review(q.get('fresh') == '1'))
+        if u.path == '/api/gallery':
+            # 顶栏「资产画廊」：8777 没起就自己拉起（最多等 10 秒），再把 URL 交给前端。
+            ok, msg = ensure_gallery()
+            if ok:
+                return self._send(200, {'ok': True,
+                                        'url': 'http://127.0.0.1:8777/gallery_v2/index.html'})
+            return self._send(200, {'ok': False, 'error': msg})
         if u.path == '/api/bgchars/status':
             jid = q.get('job')
             return self._send(200, bg_publish_status(int(jid) if jid and jid.isdigit() else None))

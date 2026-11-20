@@ -4814,8 +4814,8 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
 临时区 .diag / 权威 inputs）的大小与文件数、源包清单新鲜度（记录数 vs 当场实况数）、
 阶段缓存计数。设计要点：
 - **后台算 + 轮询**：walk 18 万文件约 1 分钟，`/api/disk` 放 daemon 线程立即回 `computing`，
-  前端 2 秒一问；缓存 15 分钟，「重新盘点」按钮带 `?fresh=1` 绕过。
-- **重扫清单**按钮 → `/api/scan`，命令**写死在服务端**（`start_job` 泛化出 `script` 参数，
+  前端 2 秒一问；缓存 15 分钟，「重算盘面」按钮带 `?fresh=1` 绕过。
+- **重建清单**按钮 → `/api/scan`，命令**写死在服务端**（`start_job` 泛化出 `script` 参数，
   前端只发空 POST）——「能跑什么由白名单决定」的边界不因泛化而破。
   重扫只重建 `asset_manifest.json`，**不动** `pipeline_state.json`：阶段缓存的有效性
   由指纹（当场数源包）决定，重扫不清进度。
@@ -4826,6 +4826,21 @@ py -3 scripts/diag/verify_pipeline_e2e.py --update-baseline
 - **踩坑**：`start_job` 的 `&&` 链被编译错误短路时 `kill` 根本不执行（`P` 为空），
   旧服务还占着 8790，新服务起不来，curl 到的是旧代码——「重启了怎么没生效」先查
   旧进程真的死了没有（`netstat -ano` + GBK 解码），别信中间那行 echo。
+
+
+**追加（2026-11-20，细节抽屉 UI 整理）**：
+- 按钮改名消除歧义：**重算盘面**（walk 四目录，约 1 分钟）与 **重建清单**
+  （`scan_assets.py` 重建 `asset_manifest.json`，约 40 秒，不动阶段进度）；
+  卡片标题下常驻一行 `盘面=目录占用 · 清单=源包索引`，原来那段 100+ 字说明删除
+  （安全口径已由每行短标签与「盘面管理」弹窗承担）。
+- 左栏排序改为 **新增 → 对照表 → 阶段 → 颜色**：阶段卡是查证据用的，优先级低于前两块。
+- 「跟随最新」修的是真 bug：`#log` 有 `overflow:auto`，但旧 handler 只切文字
+  （`跟随最新`/`暂停跟随`），从暂停切回时不滚动，用户以为失效。现在按钮显示**状态**
+  （`● 跟随中` / `○ 已暂停`），切回时立即 `scrollTop=scrollHeight`，手动上滚自动暂停。
+- 顶栏新增 **资产画廊**：`GET /api/gallery` → `ensure_gallery()`（8777 没起就拉起）
+  → 返回 URL；前端先同步开空白页再导航，绕开 `await` 后的弹窗拦截。
+- 判据：`node` 解析内联脚本 0 报错；`ensure_gallery()` 实测 `(True, '8777 已就绪')`；
+  细节抽屉区块顺序按 `newpane → 对照表 → 阶段` 断言；无重复 `id`。
 
 
 **追加二（2026-10-18 13:30，用户问「怎么删？没看到按钮？有了清单源包就能删吗」）**：
@@ -5489,7 +5504,7 @@ DELETE 提示、弹窗 getBoundingClientRect 可见性）。
    pending 0 / picks 0 时底部按钮灰是正确状态。
 4. 第 5 步「签字换入」：新增图在正式区原本不存在 ⇒ `painting_swap_in` **不备份**；只有旧文件才 `copy2`。
    本次额外空间约 36 张 PNG ≈ 175MB，不是整库 17GB 的双份。`derive` 会再生 Live2D 换入与索引。
-5. 换入后 derive（缩略图/台词表/索引/部署）、labels、regress；`asset_manifest` 滞后另点「重扫清单」。
+5. 换入后 derive（缩略图/台词表/索引/部署）、labels、regress；`asset_manifest` 滞后另点「重建清单」。
 
 **踩坑**
 - **不要因为待办写「第 1 步」就回去接模拟器**：先看 `/api/state` 的 step 3 完成度与 `runs.json` 的 `step`。
