@@ -53,8 +53,9 @@
     {
       "path": "Output/gallery_v2/vendor/spine/spine-all.js",
       "version": "3.8.75（文件内仅有的版本串；旧文档里写的 3.8.99 与实测不符）",
-      "bytes": 501448,
-      "sha256": "4782fb5f6f016eda12bdc4a62155cf440dea471e9be36122e8bf6e97b1529d49",
+      "bytes": 501857,
+      "sha256": "dd2e84eb53696d226135916ff4d2b57c63898c2f099ae4f0efde1d6da43eb636",
+      "localPatch": "2026-11-20 本地补丁（单处）：BinaryInput.readString 的首字节改为 `this.readByte() & 0xFF`。原实现 readByte 走 getInt8，非 ASCII 的 UTF-8 首字节变负（0xEF → -17），令 b >> 4 落到 default 并产出 U+FFEF 一类乱码，导致 banerwei_4 这类含全角区域名（'２' U+FF12）的 skel 在 atlas 里永远匹配失败。上游 4.x 已改为无符号读；这里只掩码、不改 readByte 本身（bendDirection 依赖 -1/1 有符号语义）。正本与部署副本已同哈希。",
       "license": "文件内无许可头。上游 EsotericSoftware/spine-runtimes 3.8 受 Spine Runtimes License 约束——**不要凭这条推断可自由再分发**。",
       "sources": [
         { "local": "tools/spine-viewer/spine-runtime/3.8_spine-all.js", "verified": true, "observed": "sha256 逐字节相同（本机两副本实测）" },

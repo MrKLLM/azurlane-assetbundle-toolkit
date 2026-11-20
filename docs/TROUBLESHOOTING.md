@@ -12745,3 +12745,32 @@ WaterBg 不在时返回 undefined，`typeof` 守卫仍成立）。**渲染路径
 
 **涉及文件**：`gallery_src/_gallery_server.py`、`gallery_src/cg_export.html`、
 `scripts/pipeline_panel.py`。相关：WF-14 追加（2026-11-20）。
+
+---
+
+## §218 Spine 3.8 运行时把非 ASCII 区域名解码成乱码（banerwei_4 导出失败）（2026-11-20）
+
+**现象**：CG 导出 `banerwei_4` 报
+`Region not found in atlas: ￯ﾼﾒ (region attachment: ￯ﾼﾒ)`；可 atlas 里明明有 `２`（U+FF12）。
+
+**根因**：vendored spine 3.8 的 `BinaryInput.readByte()` 返回 `DataView.getInt8`（有符号）。
+`readString()` 里 `var b = this.readByte(); switch (b >> 4)` 遇到 UTF-8 首字节 0xEF 得到 -17，
+`b >> 4` 落到 `default`，`String.fromCharCode(-17)` = U+FFEF；后两字节 0xBC/0x92 同理
+（U+FFBC/U+FF92）⇒ `２` 解码成三字符乱码，与 atlas 的 U+FF12 永远匹配不上。
+**skel 里的名字本身是对的**：Python 逐条解析字符串表，索引 156–166 就是
+`２ ３ ４ ５ ５_eye ５_zui`。
+
+**修法**：运行时 `BinaryInput.readString` 的首字节改为 `this.readByte() & 0xFF`。
+只此一处；`readByte` 本身**不能**改 `getUint8`——`bendDirection` 等调用依赖 -1/1 有符号语义。
+正本 `tools/spine-viewer/spine-runtime/3.8_spine-all.js` 与部署副本
+`Output/gallery_v2/vendor/spine/spine-all.js` 同步，新哈希记在 `gallery_src/vendor/MANIFEST.json`
+（两处都在 gitignore 里，台账是唯一可复现记录）。
+
+**判据**：单皮肤 `--only banerwei_4 --size 2400 --redo --extra 'tag=uicheck'` →
+`完成1 跳过0 失败0`；产物 2400×1371、不透明占比 0.925。验完删除 `_uicheck` 文件。
+
+**已排除**：atlas 编码错误（页面 fetch 后区域名确为 U+FF12）、skel 字符串表损坏（逐条解析正常）、
+HTTP charset（响应是 `application/octet-stream`，二进制不经文本解码）。
+
+**涉及文件**：`tools/spine-viewer/spine-runtime/3.8_spine-all.js`（gitignore）、
+`Output/gallery_v2/vendor/spine/spine-all.js`（gitignore）、`gallery_src/vendor/MANIFEST.json`。

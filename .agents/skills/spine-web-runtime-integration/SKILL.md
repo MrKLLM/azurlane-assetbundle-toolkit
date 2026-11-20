@@ -1,7 +1,7 @@
 ---
 name: spine-web-runtime-integration
 description: 在网页里集成 Spine 3.8 (spine-webgl) 运行时做动态立绘渲染与批量出图，覆盖 .skel/.json 骨架分流、atlas 多页加载、必须 setSkin（否则命名 skin 独有部件整块不显示）、**多层之间的绘制序（层名后缀启发式必翻车，只能取引擎层级；含"某一层整块看不见"如何区分是没渲染还是被盖住）**、setup pose 与动画第 0 帧是两种语义、相机视口与 fit 包围盒陷阱（含"恒不渲染的巨幕遮罩撑爆取景"与"不透明纯色黑底撑爆取景"两类，以及判据必须落在取景那一刻）、readPixels 在实时 viewer 里不可用、0 秒占位动画过滤、TDZ 变量遮蔽、无头 CDP 验收判据，**以及把骨架当网站背景用（§14：七步绘制序列少一步就一帧不画、`camera.zoom` 存倒数、帧计数才是"在不在动"的唯一证据）**。当需要让 .skel/.atlas 模型在浏览器里动起来、反馈"模型缺胳膊少腿/比例怪/层加载失败/导出出来是中间一小块四周全黑/**少了个人/被另一块盖住**"、或要批量渲染 Spine 立绘成 PNG 时使用。触发词：Spine 网页播放、spine-webgl、spine-all.js、SkeletonBinary、SkeletonJson、atlas 图集页、setSkin、皮肤、SceneRenderer、比例怪、缺下半身、部件不显示、setup pose、CG 导出、层失败、动态立绘渲染、骨骼动画截图、取景、包围盒、画面太小、只占中间一小块、四周全黑、fit、层序、绘制序、遮挡、少了个人、谁压谁。不适用于 AssetBundle 侧的 Spine 资源还原与页纹理补齐（那是 unity-assetbundle-painting-restore），也不适用于 Live2D 网页集成（live2d-web-runtime-integration）。
-version: 1.1.11
+version: 1.1.12
 ---
 
 # Spine 网页运行时集成与批量出图
@@ -237,6 +237,11 @@ const anims = (data.animations || []).filter(a => a.duration > 0.01)
 - **后台起服务器别复用"给人看"的启动器**：给启动脚本加 `--no-browser` 并在自动拉起路径使用，
   否则每个任务都会弹一个只能点「开始」的空页面（真实事故：控制台每次重导弹 CG 导出页，
   见本项目 `docs/TROUBLESHOOTING.md` §217 / WF-14 追加）。
+- **`Region not found in atlas` 且名字是乱码时，先查运行时的有符号字节读**：spine 3.8 的
+  `BinaryInput.readByte()` 是 `getInt8`，UTF-8 首字节 ≥0x80 会变负，`readString` 的
+  `b >> 4` 落到 default，把 `２`(U+FF12) 解成 `U+FFEF U+FFBC U+FF92`。判据：atlas 里名字正确、
+  二进制 skel 逐条解析字符串表也正确，唯独运行时匹配失败。修法是 `readString` 首字节 `& 0xFF`，
+  **不要**把 `readByte` 全局改成无符号（`bendDirection` 依赖 -1/1）。本项目实例见 §218。
 
 ## 10. 落地检查清单
 
