@@ -1176,10 +1176,10 @@ def selfcheck():
 
     mods = [('UnityPy', 'UnityPy'), ('PIL', 'Pillow'), ('numpy', 'numpy'),
             ('requests', 'requests'), ('pypinyin', 'pypinyin'),
-            ('websocket', 'websocket-client'), ('Crypto', 'pycryptodome')]
+            ('websocket', 'websocket-client'), ('Crypto', 'pycryptodome'), ('lz4', 'lz4')]
     miss = [pkg for mod, pkg in mods if importlib.util.find_spec(mod) is None]
     add('Python 依赖', not miss, '齐全' if not miss else '缺 ' + '、'.join(miss),
-        'py -3 -m pip install UnityPy Pillow numpy requests pypinyin websocket-client pycryptodome')
+        'py -3 -m pip install UnityPy Pillow numpy requests pypinyin websocket-client pycryptodome lz4')
 
     ab = os.path.join(ROOT, 'files', 'AssetBundles')
     n = None

@@ -97,7 +97,7 @@ python scripts/compose_paintings_v2.py <皮肤名>   # 合成单张样本
 | `Output/`（可选） | 可再生（数小时）；赶时间就直接拷 |
 
 **步骤**
-1. `git clone`；装 Python 3.13；`py -3 -m pip install UnityPy Pillow numpy requests pypinyin websocket-client pycryptodome`（OCR 背景标注另需 `rapidocr-onnxruntime`）
+1. `git clone`；装 Python 3.13；`py -3 -m pip install UnityPy Pillow numpy requests pypinyin websocket-client pycryptodome lz4`（OCR 背景标注另需 `rapidocr-onnxruntime`）
 2. 仓库不在默认路径时设 `AL_ASSETS_ROOT`；外部工具可用 `AL_CHROME / AL_ADB / AL_FFMPEG / AL_VGMSTREAM` 指定
 3. 拷上表里需要的数据
 4. 装 hooks：`cp scripts/git-hooks/* .git/hooks/`（Git Bash）
