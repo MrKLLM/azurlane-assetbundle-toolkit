@@ -790,7 +790,9 @@
   （`GET /api/selfcheck`），逐项查 Python / 依赖 / 源包 / azdata / gamecfg / 运行时 / 外部工具 /
   hooks / 画廊部署，每项带补救命令。Spine 3.8 运行时（501KB 补丁版）按决策 A 入库到
   `gallery_src/vendor/spine/spine-all.js`，`fetch_gallery_vendor.py` 优先从这份本地正本取；
-  台账 gap 已标注封口与许可风险。**azdata 不可从 GitHub/Gitee 重新拉**（渠道未记录，只能拷）。
+  台账 gap 已标注封口与许可风险。**源包当前版本可由控制台第 1 步直接从 MuMu 拉**
+  （`mumu_sync` 只同步 `AssetBundles / hashes / version`，走 `/sdcard/Android/data/...`，无需 root）；
+  **azdata 不可从 GitHub/Gitee 重新拉**（渠道未记录，只能拷）；旧版本源包只能靠此前拷贝。
 
 #### 关键决策
 - **增量而非全量**：全量重跑 4486 张立绘会打乱已人工确认正确的结果，且无法逐张复核。

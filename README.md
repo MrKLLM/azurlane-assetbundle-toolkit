@@ -88,10 +88,10 @@ python scripts/compose_paintings_v2.py <皮肤名>   # 合成单张样本
 
 **拉不到、必须从旧机器拷的**
 
-| 路径 | 为什么不能重新拉 |
+| 路径 | 怎么办 |
 |---|---|
-| `files/AssetBundles/` | 游戏资产，仓库不收（版权 + ~29 GB）；只能拷，或开模拟器拉当前版本 |
-| `inputs/azdata/` | 社区快照，台账里取回渠道未记录，丢失不可复原 |
+| `files/AssetBundles/` | **当前版本**不用拷：开 MuMu、启动游戏，用控制台第 1 步直接拉（`mumu_sync` 走 `/sdcard/Android/data/...`，无需 root）。只有**旧版本**必须靠此前拷贝——设备上已被覆盖，无法重取。 |
+| `inputs/azdata/` | 只能拷：社区快照，台账里取回渠道未记录，丢失不可复原 |
 | `inputs/gamecfg/` | 不用拷：有源包时第 2 步会重建 |
 | `tools/` | 第三方工具；只有 `sharecfg_re` 脚本入库 |
 | `Output/`（可选） | 可再生（数小时）；赶时间就直接拷 |
@@ -101,10 +101,11 @@ python scripts/compose_paintings_v2.py <皮肤名>   # 合成单张样本
 2. 仓库不在默认路径时设 `AL_ASSETS_ROOT`；外部工具可用 `AL_CHROME / AL_ADB / AL_FFMPEG / AL_VGMSTREAM` 指定
 3. 拷上表里需要的数据
 4. 装 hooks：`cp scripts/git-hooks/* .git/hooks/`（Git Bash）
-5. 打开控制台点顶栏 **自检**，缺什么、怎么补会逐条列出
+5. 打开控制台点顶栏 **自检**，缺什么、怎么补会逐条列出（也可单独跑 `check_inputs.py` / `fetch_gallery_vendor.py --check` / `check_paths.py`）
 6. 从第 1 步开始
 
-> GitHub / Gitee 上只有代码与文档，**没有游戏源包和 azdata 快照**；clone 不能替代拷数据。自检也可单独跑：`py -3 scripts/diag/check_inputs.py`、`py -3 scripts/fetch_gallery_vendor.py --check`、`py -3 scripts/diag/check_paths.py`。
+> GitHub / Gitee 上只有代码与文档，**没有游戏源包和 azdata 快照**；clone 不能替代拷数据。
+> 第 1 步从模拟器只拉 `AssetBundles / hashes / version` 三类，`inputs/azdata` 不在游戏里，仍必须从旧机器拷。
 
 ## 文档导航（`docs/`）
 
