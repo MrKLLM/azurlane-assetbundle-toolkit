@@ -9,7 +9,7 @@
     "package_name": "com.bilibili.azurlane",
     "apk_version_code": 9710,
     "local_landed_at": "2026-09-19",
-    "retrieval_channel": "未记录（补上取回渠道，否则下个会话无从二次获取）",
+    "retrieval_channel": "2026-11-20 决策 A：4 份快照随仓库分发（.gitignore 已开 inputs/azdata/*.json 例外），新机器 git clone 即得；上游 dumper 渠道仍未记录，仓库副本即当前唯一可追溯来源。",
     "note": "游戏已更新到 385+，本快照仍是 381 → 新皮肤的名字/阵营会缺，按 PROJECT_STATUS §6 待办 7 的决策标「待补」，不得瞎猜。"
   },
   "files": [

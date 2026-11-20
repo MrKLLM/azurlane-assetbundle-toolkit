@@ -1206,7 +1206,7 @@ def selfcheck():
             continue
         add(label, not bad,
             f'{tot} 份齐' if not bad else f'{len(bad)}/{tot} 份缺或漂移：' + '、'.join(bad[:4]),
-            '从旧机器拷 inputs/azdata（不可再生）' if rel.endswith('azdata')
+            'git checkout -- inputs/azdata（随仓库分发，误删可恢复）' if rel.endswith('azdata')
             else '跑控制台第 2 步重建')
 
     vp = os.path.join(ROOT, 'gallery_src', 'vendor', 'MANIFEST.json')

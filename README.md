@@ -91,7 +91,7 @@ python scripts/compose_paintings_v2.py <皮肤名>   # 合成单张样本
 | 路径 | 怎么办 |
 |---|---|
 | `files/AssetBundles/` | **当前版本**不用拷：开 MuMu、启动游戏，用控制台第 1 步直接拉（`mumu_sync` 走 `/sdcard/Android/data/...`，无需 root）。只有**旧版本**必须靠此前拷贝——设备上已被覆盖，无法重取。 |
-| `inputs/azdata/` | 只能拷：社区快照，台账里取回渠道未记录，丢失不可复原 |
+| `inputs/azdata/` | **随仓库提供**，clone 即得；本地误删可 `git checkout -- inputs/azdata` 恢复。仓库里是快照，社区更新后需手动换 |
 | `inputs/gamecfg/` | 不用拷：有源包时第 2 步会重建 |
 | `tools/` | 第三方工具；只有 `sharecfg_re` 脚本入库 |
 | `Output/`（可选） | 可再生（数小时）；赶时间就直接拷 |

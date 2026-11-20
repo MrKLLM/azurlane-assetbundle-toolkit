@@ -792,7 +792,8 @@
   `gallery_src/vendor/spine/spine-all.js`，`fetch_gallery_vendor.py` 优先从这份本地正本取；
   台账 gap 已标注封口与许可风险。**源包当前版本可由控制台第 1 步直接从 MuMu 拉**
   （`mumu_sync` 只同步 `AssetBundles / hashes / version`，走 `/sdcard/Android/data/...`，无需 root）；
-  **azdata 不可从 GitHub/Gitee 重新拉**（渠道未记录，只能拷）；旧版本源包只能靠此前拷贝。
+  **azdata 快照 2026-11-20 起也随仓库分发**（`inputs/azdata/*.json` 解除忽略，台账仍校验哈希）；
+  旧版本源包只能靠此前拷贝。
 
 #### 关键决策
 - **增量而非全量**：全量重跑 4486 张立绘会打乱已人工确认正确的结果，且无法逐张复核。

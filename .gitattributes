@@ -1,2 +1,4 @@
 # 第三方运行时按原字节保存：MANIFEST 用 sha256 校验，禁止行尾转换
 gallery_src/vendor/** -text -diff
+# azdata 快照同样按原字节校验，禁止行尾转换
+inputs/azdata/*.json -text -diff
