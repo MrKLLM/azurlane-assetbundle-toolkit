@@ -3730,7 +3730,12 @@ async function pump(){
   $('#jobstat').innerHTML=j.state==='running'?'<span style="color:var(--run)">● 运行中</span>':'空闲';
   $('#jobinfo').textContent='任务 '+curJob+(j.state?(' · '+j.state):'');
   if(j.state!=='running'){ clearInterval(timer); timer=null; curJob=null;
-    await apiState(); finishReceipt(); }
+    await apiState(); finishReceipt();
+    /* 任务也可能是「重扫清单」：它只重建 asset_manifest.json，不改变阶段状态，
+       apiState() 不会碰盘面卡。服务端现在缓存命中时也会重读清单/阶段缓存
+       （不再触发 1 分钟 walk），所以这里补一次拉取就够——否则卡片会停在
+       重扫前的「清单滞后」（2026-11-20 用户实测）。 */
+    loadDisk(false); }
 }
 $('#bFollow').onclick=e=>{ follow=!follow; e.target.textContent=follow?'跟随最新':'暂停跟随'; };
 

@@ -12774,3 +12774,30 @@ HTTP charset（响应是 `application/octet-stream`，二进制不经文本解�
 
 **涉及文件**：`tools/spine-viewer/spine-runtime/3.8_spine-all.js`（gitignore）、
 `Output/gallery_v2/vendor/spine/spine-all.js`（gitignore）、`gallery_src/vendor/MANIFEST.json`。
+
+---
+
+## §219 控制台「重扫清单」跑完了，卡片仍显示「清单滞后 / 扫于 07:11」（2026-11-20）
+
+**现象**：点「重扫清单」，任务正常结束（`asset_manifest.json` 已是 75,555 / 扫于 08:30），
+盘面卡却一直写着「记 75,442 / 盘上 75,555，扫于 07:11」。
+
+**根因**（两处叠加）：
+1. `disk_report()` 把**整份报告**（含 `manifest` 与阶段缓存）缓存 15 分钟；重扫只改了
+   `asset_manifest.json`，缓存命中时不会重读 ⇒ 数据仍是重扫前的。
+2. 前端 `#bScan` 在**任务刚启动**时就 `loadDisk(false)`（那时扫描还没写完），
+   任务结束后 `pump()` 只调 `apiState()`，没有任何人再拉 `/api/disk`。
+
+**修法**：
+- 服务端 `disk_report()` 缓存命中时**每次重读**清单与 `pipeline_state.json`
+  （清单解析按 mtime 缓存，21 MB JSON 不会每 2 秒重解析；walk 结果仍用 15 分钟缓存）。
+- 前端 `pump()` 在任务结束时补一次 `loadDisk(false)`。
+
+**判据**：重扫结束 2 秒内卡片变为「清单 ✅ 与盘面一致 · 扫于 <新时间>」；
+不触发 1 分钟 walk（`age` 仍是旧 cache 的年龄，但 `manifest.fresh` 已为 true）。
+
+**复现/验证命令**：`disk_report` 冷却期内直接断言
+`manifest.total_files == 盘上文件数 and manifest.fresh is True`。
+
+**涉及文件**：`scripts/pipeline_panel.py`（`_manifest_info` / `_state_info` / `disk_report`）、
+`scripts/panel_page.html`（`pump()`）。

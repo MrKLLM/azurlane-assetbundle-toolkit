@@ -1088,6 +1088,38 @@ class H(BaseHTTPRequestHandler):
 # ------------------------------------------------------------------ 盘面与清单
 _DISK = {'state': 'idle', 'data': None, 'at': 0.0}
 _DISK_TTL = 900.0        # 15 分钟：walk 18 万个文件约 1 分钟，别让轮询反复触发
+# 清单解析结果按 mtime 缓存：21 MB JSON，缓存命中时每 2 秒重解析会拖垮轮询。
+_MAN = {'mtime': None, 'info': None}
+
+
+def _manifest_info(actual=None):
+    """asset_manifest.json 的新鲜度（记录数 vs 当场数）。清单可能在「重扫清单」后
+    单独变新，而 walk 结果还在 15 分钟缓存里 ⇒ 每次 /api/disk 都要重读这一项。"""
+    mf = os.path.join(ROOT, 'asset_manifest.json')
+    if not os.path.isfile(mf):
+        return None
+    try:
+        mt = os.path.getmtime(mf)
+        if _MAN['mtime'] != mt:
+            j = json.load(open(mf, encoding='utf-8'))
+            _MAN.update(mtime=mt, info={
+                'total_files': (j.get('summary') or {}).get('total_files'),
+                'scanned': time.strftime('%m-%d %H:%M', time.localtime(mt))})
+        man = dict(_MAN['info'] or {})
+    except Exception as e:
+        return {'error': f'{type(e).__name__}: {str(e)[:60]}'}
+    if actual is not None and man.get('total_files') is not None:
+        man['actual'] = actual
+        man['fresh'] = (man['total_files'] == actual)
+    return man
+
+
+def _state_info():
+    try:
+        s = json.load(open(os.path.join(WORK, 'pipeline_state.json'), encoding='utf-8'))
+        return {'done': len(s.get('done') or {}), 'verdict': len(s.get('verdict') or {})}
+    except Exception:
+        return None
 
 
 def _disk_compute():
@@ -1108,24 +1140,8 @@ def _disk_compute():
                         pass
         out[label] = {'files': n, 'bytes': b}
     # 源包清单的新鲜度：清单记录的文件数 vs 当场数出来的（§157 同一哲学：信实况）
-    man = None
-    mf = os.path.join(ROOT, 'asset_manifest.json')
-    if os.path.isfile(mf):
-        try:
-            j = json.load(open(mf, encoding='utf-8'))
-            man = {'total_files': (j.get('summary') or {}).get('total_files'),
-                   'scanned': time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(mf)))}
-        except Exception as e:
-            man = {'error': f'{type(e).__name__}: {str(e)[:60]}'}
-    if man and man.get('total_files') is not None:
-        man['actual'] = out['ab']['files']
-        man['fresh'] = (man['total_files'] == out['ab']['files'])
-    st = None
-    try:
-        s = json.load(open(os.path.join(WORK, 'pipeline_state.json'), encoding='utf-8'))
-        st = {'done': len(s.get('done') or {}), 'verdict': len(s.get('verdict') or {})}
-    except Exception:
-        pass
+    man = _manifest_info(out['ab']['files'])
+    st = _state_info()
     return {'dirs': out, 'manifest': man, 'state': st,
             'at': time.strftime('%m-%d %H:%M')}
 
@@ -1136,7 +1152,15 @@ def disk_report(fresh=False):
         if _DISK['state'] == 'computing':
             return {'status': 'computing'}
         if not fresh and _DISK['state'] == 'done' and time.time() - _DISK['at'] < _DISK_TTL:
-            return {'status': 'ok', 'data': _DISK['data'],
+            # walk 用缓存（1 分钟太贵），但清单/阶段缓存**每次重读**：它们会被
+            # 「重扫清单」和任务收尾单独改写，跟着 15 分钟缓存一起冻住就是
+            # 用户看到的「重扫完也没刷新」（2026-11-20）。
+            data = dict(_DISK['data'] or {})
+            ab = ((data.get('dirs') or {}).get('ab') or {})
+            if ab:
+                data['manifest'] = _manifest_info(ab.get('files'))
+            data['state'] = _state_info()
+            return {'status': 'ok', 'data': data,
                     'age': int(time.time() - _DISK['at'])}
         _DISK['state'] = 'computing'
 
